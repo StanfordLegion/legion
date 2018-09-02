@@ -6200,14 +6200,10 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
-          case SEND_VERSION_OWNER_REQUEST: 
+          case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
             {
-              runtime->handle_version_owner_request(derez,remote_address_space);
-              break;
-            }
-          case SEND_VERSION_OWNER_RESPONSE:
-            {
-              runtime->handle_version_owner_response(derez);
+              runtime->handle_compute_equivalence_sets_request(derez,
+                                               remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REQUEST:
@@ -6220,6 +6216,44 @@ namespace Legion {
             {
               runtime->handle_equivalence_set_response(derez,
                                                        remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_SUBSET_REQUEST:
+            {
+              runtime->handle_equivalence_set_subset_request(derez, 
+                                              remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_SUBSET_RESPONSE:
+            {
+              runtime->handle_equivalence_set_subset_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION:
+            {
+              runtime->handle_equivalence_set_subset_invalidation(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST:
+            {
+              runtime->handle_equivalence_set_ray_trace_request(derez,
+                                                remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_ray_trace_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST:
+            {
+              runtime->handle_equivalence_set_create_remote_request(derez,
+                                                      remote_address_space);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_create_remote_response(derez);
               break;
             }
           case SEND_VERSION_STATE_REQUEST:
@@ -6247,17 +6281,6 @@ namespace Legion {
             {
               runtime->handle_version_state_valid_notification(derez,
                                                  remote_address_space);
-              break;
-            }
-          case SEND_VERSION_MANAGER_REQUEST:
-            {
-              runtime->handle_version_manager_request(derez,
-                                                      remote_address_space);
-              break;
-            }
-          case SEND_VERSION_MANAGER_RESPONSE:
-            {
-              runtime->handle_version_manager_response(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -14142,21 +14165,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_request(AddressSpaceID target,
-                                             Serializer &rez)
+    void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
+                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_REQUEST,
-                            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_RESPONSE,
-            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+      find_messenger(target)->send_message(rez, 
+          SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14166,6 +14181,76 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_RESPONSE,
                     VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_REQUEST, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_RESPONSE, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_invalidation(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_create_remote_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
+          VERSION_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_create_remote_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
+          VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14206,28 +14291,6 @@ namespace Legion {
       find_messenger(target)->send_message(rez, 
                                 SEND_VERSION_STATE_VALID_NOTIFICATION,
                                 ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_request(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This goes on the analysis virtual channel so that it can 
-      // be ordered with respect to advances
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_REQUEST,
-                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_response(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This comes back on the version manager channel in case we need to page
-      // in any version managers from remote nodes
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
-             VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15243,18 +15306,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_request(Deserializer &derez,
-                                               AddressSpaceID source)
+    void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InnerContext::handle_version_owner_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::handle_version_owner_response(derez, this);
+      InnerContext::handle_compute_equivalence_sets_request(derez, this,source);
     }
 
     //--------------------------------------------------------------------------
@@ -15271,6 +15327,60 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_equivalence_set_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_request(Deserializer &derez,
+                                                          AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_invalidation(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_invalidation(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_create_remote_request(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_create_remote_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_create_remote_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_create_remote_response(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -15309,21 +15419,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       VersionState::process_version_state_valid_notification(derez,this,source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_request(Deserializer &derez,
-                                                 AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -19816,11 +19911,6 @@ namespace Legion {
             runtime->activate_context(dargs->parent_ctx);
             break;
           }
-        case LG_DEFER_VERSION_MANAGER_TASK_ID:
-          {
-            VersionManager::handle_deferred_request(args);
-            break;
-          }
         case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
           {
             VersionState::SendVersionStateArgs *vargs = 
@@ -20063,6 +20153,11 @@ namespace Legion {
         case LG_DELETE_TEMPLATE_ID:
           {
             PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
+        case LG_REFINEMENT_TASK_ID:
+          {
+            EquivalenceSet::handle_refinement(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

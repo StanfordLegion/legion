@@ -1933,7 +1933,6 @@ namespace Legion {
             it != must_premap.end(); it++)
       {
         VersionInfo &version_info = get_version_info(*it);
-        RestrictInfo &restrict_info = get_restrict_info(*it);
         InstanceSet &chosen_instances = early_mapped_regions[*it];
         std::map<unsigned,std::vector<MappingInstance> >::const_iterator 
           finder = output.premapped_instances.find(*it);
@@ -2062,15 +2061,14 @@ namespace Legion {
         // Passed all the error checking tests so register it
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
-        runtime->forest->physical_register_only(regions[*it], 
-                              version_info, restrict_info, this, *it,
-                              completion_event, true/*defer users*/, 
-                              true/*need read only reservations*/,
+        runtime->forest->physical_register_only(regions[*it], version_info, 
+                              this, *it, completion_event,
                               applied_conditions, chosen_instances, trace_info
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
                               );
+        version_info.finalize_mapping();
       }
     }
 
@@ -2313,6 +2311,7 @@ namespace Legion {
       physical_instances.clear();
       virtual_mapped.clear();
       no_access_regions.clear();
+      version_infos.clear();
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
@@ -2555,6 +2554,50 @@ namespace Legion {
         }
       }
     } 
+
+    //--------------------------------------------------------------------------
+    RtEvent SingleTask::perform_versioning_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+      if (is_replaying())
+        return RtEvent::NO_RT_EVENT;
+#ifdef DEBUG_LEGION
+      assert(regions.size() == version_infos.size());
+#endif
+      std::set<RtEvent> ready_events;
+      if (is_remote())
+      {
+        // If we're remote and origin mapped, then we are already done
+        if (is_origin_mapped())
+          return RtEvent::NO_RT_EVENT;
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+            continue;
+          VersionInfo &version_info = version_infos[idx];
+          if (version_info.has_version_info())
+            continue;
+          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                            version_info, ready_events, map_applied_conditions);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+        {
+          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+            continue;
+          VersionInfo &version_info = version_infos[idx];
+          if (version_info.has_version_info())
+            continue;
+          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+                           version_info, ready_events, map_applied_conditions);
+        }
+      }
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      return RtEvent::NO_RT_EVENT;
+    }
 
     //--------------------------------------------------------------------------
     void SingleTask::initialize_map_task_input(Mapper::MapTaskInput &input,
@@ -3446,53 +3489,38 @@ namespace Legion {
         // apply the results of the mapping to the tree
         runtime->forest->physical_register_only(regions[idx], 
                                     get_version_info(idx), 
-                                    get_restrict_info(idx),
                                     this, idx, local_termination_event, 
-                                    multiple_requirements/*defer add users*/,
-                                    !multiple_requirements/*read only locks*/,
                                     map_applied_conditions,
                                     physical_instances[idx],
-                                    trace_info
+                                    trace_info,
 #ifdef DEBUG_LEGION
-                                    , get_logging_name()
-                                    , unique_op_id
+                                    get_logging_name(),
+                                    unique_op_id,
 #endif
-                                    );
+                                    !multiple_requirements/*read only locks*/);
       }
-      // If we had more than one region requirement when now have to
-      // record our users because we skipped that during traversal
-      if (multiple_requirements)
+      // Release any read-only reservations that we're holding
+      if (!read_only_reservations.empty())
       {
-        // This is really ugly, I hate C++ and its const awfulness
-        runtime->forest->physical_register_users(this,
-            local_termination_event, regions, virtual_mapped, 
-            *const_cast<std::vector<VersionInfo>*>(get_version_infos()),
-            *const_cast<std::vector<RestrictInfo>*>(get_restrict_infos()), 
-            physical_instances, map_applied_conditions, trace_info);
-
-        // Release any read-only reservations that we're holding
-        if (!read_only_reservations.empty())
+        if (!map_applied_conditions.empty())
         {
-          if (!map_applied_conditions.empty())
-          {
-            // This is actually imprecise to do this, let's see if it
-            // comes back to haunt us at some point
-            RtEvent done_event = Runtime::merge_events(map_applied_conditions);
-            for (std::set<Reservation>::const_iterator it = 
-                  read_only_reservations.begin(); it != 
-                  read_only_reservations.end(); it++)
-              it->release(done_event);
-            // Can replace the applied conditions with the summary
-            map_applied_conditions.clear();
-            map_applied_conditions.insert(done_event);
-          }
-          else
-          {
-            for (std::set<Reservation>::const_iterator it = 
-                  read_only_reservations.begin(); it != 
-                  read_only_reservations.end(); it++)
-              it->release();
-          }
+          // This is actually imprecise to do this, let's see if it
+          // comes back to haunt us at some point
+          RtEvent done_event = Runtime::merge_events(map_applied_conditions);
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_reservations.begin(); it != 
+                read_only_reservations.end(); it++)
+            it->release(done_event);
+          // Can replace the applied conditions with the summary
+          map_applied_conditions.clear();
+          map_applied_conditions.insert(done_event);
+        }
+        else
+        {
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_reservations.begin(); it != 
+                read_only_reservations.end(); it++)
+            it->release();
         }
       }
       if (perform_postmap)
@@ -3660,24 +3688,24 @@ namespace Legion {
           runtime->forest->log_mapping_decision(unique_op_id, idx,
                                                 regions[idx], result,
                                                 true/*postmapping*/);
-        // No restrictions for postmappings
-        RestrictInfo empty_restrict_info;
         // TODO: Implement physical tracing for postmapped regions
         if (is_memoizing())
           assert(false);
         // Register this with a no-event so that the instance can
         // be used as soon as it is valid from the copy to it
+        // We also use read-only privileges to ensure that it doesn't
+        // invalidate the other valid instances
+        const PrivilegeMode mode = regions[idx].privilege;
+        regions[idx].privilege = READ_ONLY; 
         runtime->forest->physical_register_only(regions[idx], 
-                          get_version_info(idx), 
-                          empty_restrict_info, this, idx,
+                          get_version_info(idx), this, idx,
                           ApEvent::NO_AP_EVENT/*done immediately*/, 
-                          true/*defer add users*/, 
-                          true/*need read only locks*/,
                           map_applied_conditions, result, trace_info
 #ifdef DEBUG_LEGION
                           , get_logging_name(), unique_op_id
 #endif
                           );
+        regions[idx].privilege = mode; 
       }
     } 
 
@@ -4593,7 +4621,6 @@ namespace Legion {
       result = Future();
       predicate_false_future = Future();
       privilege_paths.clear();
-      version_infos.clear();
       restrict_infos.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
@@ -4838,54 +4865,7 @@ namespace Legion {
       }
       else
         enqueue_ready_task(true/*use target*/);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent IndividualTask::perform_versioning_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-      if (is_replaying())
-        return RtEvent::NO_RT_EVENT;
-
-#ifdef DEBUG_LEGION
-      assert(regions.size() == version_infos.size());
-#endif
-      std::set<RtEvent> ready_events;
-      // If we're remote we're going to have to recompute our privilege
-      // paths otherwise we can use our existing privilege paths
-      if (is_remote())
-      {
-        // If we're remote and origin mapped, then we are already done
-        if (is_origin_mapped())
-          return RtEvent::NO_RT_EVENT;
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-            continue;
-          VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_version_info())
-            continue;
-          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                            version_info, ready_events, map_applied_conditions);
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-            continue;
-          VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_version_info())
-            continue;
-          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                           version_info, ready_events, map_applied_conditions);
-        }
-      }
-      if (!ready_events.empty())
-        return Runtime::merge_events(ready_events);
-      return RtEvent::NO_RT_EVENT;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void IndividualTask::report_interfering_requirements(unsigned idx1, 
@@ -4994,15 +4974,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndividualTask::perform_must_epoch_version_analysis(
-                                                             MustEpochOp *owner)
-    //--------------------------------------------------------------------------
-    {
-      // No need to do anything here, we'll do it as part of perform_mapping
-      return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent IndividualTask::perform_mapping(
                                          MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -5018,10 +4989,14 @@ namespace Legion {
       map_all_regions(get_task_completion(), must_epoch_owner);
       // If we mapped, then we are no longer stealable
       stealable = false;
-#ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        if (!virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].finalize_mapping();
+#ifdef DEBUG_LEGION
         dump_physical_state(&regions[idx], idx);
 #endif
+      }
       // We can now apply any arrives or releases
       if (!arrive_barriers.empty() || !grants.empty())
       {
@@ -5240,12 +5215,6 @@ namespace Legion {
         Serializer rez;
         pack_remote_commit(rez);
         runtime->send_individual_remote_commit(orig_proc,rez);
-      }
-      // We can release our version infos now
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-            it != version_infos.end(); it++)
-      {
-        it->clear();
       }
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
@@ -5733,24 +5702,8 @@ namespace Legion {
         }
         remote_instances.clear();
       }
-      version_infos.clear();
       runtime->free_point_task(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::perform_versioning_analysis(std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      if (is_replaying())
-        return;
-#ifdef DEBUG_LEGION
-      assert(version_infos.empty());
-#endif
-      version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-        runtime->forest->perform_versioning_analysis(this, idx, regions[idx], 
-                    version_infos[idx], ready_events, map_applied_conditions);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void PointTask::trigger_dependence_analysis(void)
@@ -5832,14 +5785,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PointTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
-    //--------------------------------------------------------------------------
-    {
-      // See if we've done our slice version analysis yet
-      return slice_owner->perform_must_epoch_version_analysis(owner);
-    }
-
-    //--------------------------------------------------------------------------
     RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -5850,10 +5795,14 @@ namespace Legion {
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
       map_all_regions(point_termination, must_epoch_owner);
-#ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        if (!virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].finalize_mapping();
+#ifdef DEBUG_LEGION
         dump_physical_state(&regions[idx], idx);
 #endif
+      }
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf() && !has_virtual_instances()) 
@@ -6343,6 +6292,7 @@ namespace Legion {
       reduction_future = Future();
       map_applied_conditions.clear();
       completion_preconditions.clear();
+      version_infos.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
       assert(acquired_instances.empty());
@@ -6658,7 +6608,6 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
       restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -6971,12 +6920,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMMIT_CALL);
-      // We can release our version infos now
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-            it != version_infos.end(); it++)
-      {
-        it->clear();
-      }
       if (must_epoch != NULL)
         must_epoch->notify_subop_commit(this);
       // Mark that this operation is now committed
@@ -7099,6 +7042,13 @@ namespace Legion {
       }
       else
         fold_reduction_future(res, res_size, owned, true/*exclusive*/);
+    }
+
+    //--------------------------------------------------------------------------
+    VersionInfo& IndexTask::get_version_info(unsigned idx)
+    //--------------------------------------------------------------------------
+    {
+      return version_infos[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -7600,7 +7550,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_DEACTIVATE_CALL);
-      version_infos.clear();
       deactivate_multi();
       // Deactivate all our points 
       for (std::vector<PointTask*>::const_iterator it = points.begin();
@@ -7661,23 +7610,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Slices are already done with early mapping 
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent SliceTask::perform_must_epoch_version_analysis(MustEpochOp *owner)
-    //--------------------------------------------------------------------------
-    {
-      bool first = false;
-      RtUserEvent result = 
-        owner->find_slice_versioning_event(unique_op_id, first);
-      // If we're first, then we do the analysis
-      // and chain the events
-      if (first)
-      {
-        RtEvent versioning_done = perform_versioning_analysis();
-        Runtime::trigger_event(result, versioning_done);
-      }
-      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -7752,12 +7684,23 @@ namespace Legion {
       // See if we have to do our versioning computation first
       if (need_versioning_analysis)
       {
-        RtEvent version_ready_event = perform_versioning_analysis();
-        if (version_ready_event.exists() && 
-            !version_ready_event.has_triggered())
-          return defer_perform_mapping(version_ready_event, epoch_owner);
+        // After this we won't need to do it again
+        need_versioning_analysis = false;
+        std::set<RtEvent> version_events;
+        for (unsigned idx = 0; idx < points.size(); idx++)
+        {
+          RtEvent versions_ready = points[idx]->perform_versioning_analysis();
+          if (versions_ready.exists())
+            version_events.insert(versions_ready);
+        }
+        if (!version_events.empty())
+        {
+          RtEvent version_ready_event = Runtime::merge_events(version_events);
+          if (version_ready_event.exists() && 
+              !version_ready_event.has_triggered())
+            return defer_perform_mapping(version_ready_event, epoch_owner);
+        }
       }
-      
       std::set<RtEvent> mapped_events;
       for (unsigned idx = 0; idx < points.size(); idx++)
       {
@@ -7818,12 +7761,24 @@ namespace Legion {
       // See if we have to do our versioning computation first
       if (need_versioning_analysis)
       {
-        RtEvent version_ready_event = perform_versioning_analysis();
-        if (version_ready_event.exists() && 
-            !version_ready_event.has_triggered())
+        // After this we won't need to do it again
+        need_versioning_analysis = false;
+        std::set<RtEvent> version_events;
+        for (unsigned idx = 0; idx < points.size(); idx++)
         {
-          defer_map_and_launch(version_ready_event);
-          return;
+          RtEvent versions_ready = points[idx]->perform_versioning_analysis();
+          if (versions_ready.exists())
+            version_events.insert(versions_ready);
+        }
+        if (!version_events.empty())
+        {
+          RtEvent version_ready_event = Runtime::merge_events(version_events);
+          if (version_ready_event.exists() && 
+              !version_ready_event.has_triggered())
+          {
+            defer_map_and_launch(version_ready_event);
+            return;
+          }
         }
       }
       // Mark that this task is no longer stealable.  Once we start
@@ -7916,11 +7871,6 @@ namespace Legion {
         // with the whole index space task, so tell our owner
         index_owner->record_origin_mapped_slice(this);
         deactivate_now = false;
-      }
-      else
-      {
-        // Release our version infos
-        version_infos.clear();
       }
       // Always return true for slice tasks since they should
       // always be deactivated after they are sent somewhere else
@@ -8414,8 +8364,6 @@ namespace Legion {
         // futures already sent back
         index_owner->return_slice_commit(points.size());
       }
-      // We can release our version infos now
-      version_infos.clear();
       if (!commit_preconditions.empty())
         commit_operation(true/*deactivate*/, 
             Runtime::merge_events(commit_preconditions));

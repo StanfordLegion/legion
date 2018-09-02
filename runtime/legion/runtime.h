@@ -2262,9 +2262,23 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_version_owner_request(AddressSpaceID target, Serializer &rez);
-      void send_version_owner_response(AddressSpaceID target, Serializer &rez);
+      void send_compute_equivalence_sets_request(AddressSpaceID target, 
+                                                 Serializer &rez);
       void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
+      void send_equivalence_set_subset_request(AddressSpaceID target, 
+                                               Serializer &rez);
+      void send_equivalence_set_subset_response(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_equivalence_set_subset_invalidation(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_equivalence_set_create_remote_request(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_equivalence_set_create_remote_response(AddressSpaceID target,
+                                                       Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_update_request(AddressSpaceID target, 
                                              Serializer &rez);
@@ -2272,8 +2286,6 @@ namespace Legion {
                                               Serializer &rez);
       void send_version_state_valid_notification(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_version_manager_request(AddressSpaceID target, Serializer &rez);
-      void send_version_manager_response(AddressSpaceID target,Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
@@ -2443,13 +2455,22 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
-      void handle_version_owner_request(Deserializer &derez, 
-                                        AddressSpaceID source);
-      void handle_version_owner_response(Deserializer &derez);
+      void handle_compute_equivalence_sets_request(Deserializer &derez, 
+                                                   AddressSpaceID source);
       void handle_equivalence_set_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_equivalence_set_response(Deserializer &derez,
                                            AddressSpaceID source);
+      void handle_equivalence_set_subset_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_equivalence_set_subset_response(Deserializer &derez);
+      void handle_equivalence_set_subset_invalidation(Deserializer &derez);
+      void handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_equivalence_set_ray_trace_response(Deserializer &derez);
+      void handle_equivalence_set_create_remote_request(Deserializer &derez,
+                                                        AddressSpaceID source);
+      void handle_equivalence_set_create_remote_response(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,
@@ -2458,9 +2479,6 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_request(Deserializer &derez, 
-                                          AddressSpaceID source);
-      void handle_version_manager_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_external_detach(Deserializer &derez);

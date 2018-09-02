@@ -1421,18 +1421,20 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
+      version_info.initialize_mapping(op->get_mapped_event());
       InnerContext *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
       assert(ctx.exists());
       assert(req.handle_type == SINGULAR);
 #endif
-      RegionUsage usage(req);
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->perform_versioning_analysis(ctx.get_id(), usage, user_mask,
-                         context, version_info, ready_events, applied_events); 
+      region_node->perform_versioning_analysis(ctx.get_id(),
+                                               context, version_info);
+      // Now ask the version info to make them ready
+      version_info.make_ready(req, user_mask, ready_events, applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1534,26 +1536,14 @@ namespace Legion {
              context->create_instance_top_view(manager, 
                  local_space)->as_materialized_view();
             top_views[manager] = new_view;
-            // See if we need to get the appropriate subview
-            if (top_node != manager->region_node)
-              corresponding[idx] = 
-                top_node->convert_reference_region(manager, context);
-            else
-              corresponding[idx] = new_view;
+            corresponding[idx] = new_view;
           }
           else
-          {
-            // See if we have to pull down the right subview
-            if (top_node != manager->region_node)
-              corresponding[idx] = 
-                top_node->convert_reference_region(manager, context);
-            else // they are the same so we can just use the view as is
-              corresponding[idx] = finder->second;
-          }
+            corresponding[idx] = finder->second;
         }
       }
       // Now we can register all these instances
-      top_node->seed_state(ctx.get_id(), term_event, usage, user_mask, 
+      top_node->initialize_state(ctx.get_id(), term_event, usage, user_mask, 
                  sources, context, init_index, corresponding, applied_events); 
     }
 
@@ -1835,85 +1825,123 @@ namespace Legion {
     void RegionTreeForest::physical_premap_only(Operation *op, unsigned index,
                                                 const RegionRequirement &req,
                                                 VersionInfo &version_info,
-                                                InstanceSet &valid_instances)
+                                                InstanceSet &targets)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PREMAP_ONLY_CALL);
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
         return;
-      TaskContext *context = op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
-#ifdef DEBUG_LEGION
-      assert(ctx.exists());
-#endif
-      RegionNode *region_node = (req.handle_type == PART_PROJECTION) ? 
-        get_node(req.partition)->parent : get_node(req.region);
-      FieldMask user_mask = 
-        region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->premap_region(ctx.get_id(), req, user_mask, 
-                                 version_info, valid_instances);
+      FieldSpaceNode *field_node = get_node(req.parent.field_space);
+      FieldMask user_mask = field_node->get_field_mask(req.privilege_fields);
+      // Iterate over the equivalence sets and get all the instances that
+      // are valid for all the different equivalence classes
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();  
+      if (IS_REDUCE(req))
+      {
+        FieldMaskSet<ReductionView> reduction_insts;
+        bool first = true;
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          if (first)
+          {
+            (*it)->find_reduction_instances(reduction_insts, user_mask);
+            first = false;
+          }
+          else
+            (*it)->filter_reduction_instances(reduction_insts, user_mask);
+          if (reduction_insts.empty())
+            break;
+        }
+        if (!reduction_insts.empty())
+        {
+          for (FieldMaskSet<ReductionView>::const_iterator it = 
+                reduction_insts.begin(); it != reduction_insts.end(); it++)
+            targets.add_instance(InstanceRef(it->first->manager, it->second));
+        }
+      }
+      else
+      {
+        FieldMaskSet<LogicalView> valid_insts;
+        bool first = true;
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          if (first)
+          {
+            (*it)->find_valid_instances(valid_insts, user_mask);
+            first = false;
+          }
+          else
+            (*it)->filter_valid_instances(valid_insts, user_mask);
+          if (valid_insts.empty())
+            break;
+        }
+        if (!valid_insts.empty())
+        {
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_insts.begin(); it != valid_insts.end(); it++)
+            targets.add_instance(
+                InstanceRef(it->first->get_manager(), it->second));
+        }
+      }
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_register_only(const RegionRequirement &req,
+    ApEvent RegionTreeForest::physical_register_only(
+                                           const RegionRequirement &req,
                                            VersionInfo &version_info,
-                                           RestrictInfo &restrict_info,
                                            Operation *op, unsigned index,
                                            ApEvent term_event,
-                                           bool defer_add_users,
-                                           bool need_read_only_reservations,
                                            std::set<RtEvent> &map_applied,
                                            InstanceSet &targets,
-                                           const ProjectionInfo *proj_info,
-                                           const PhysicalTraceInfo &trace_info
+                                           const PhysicalTraceInfo &trace_info,
 #ifdef DEBUG_LEGION
-                                           , const char *log_name
-                                           , UniqueID uid
+                                           const char *log_name,
+                                           UniqueID uid,
 #endif
-                                           )
+                                           bool caller_holds_locks/*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
       // If we are a NO_ACCESS or there are no fields then we are already done 
       if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
-        return;
+        return ApEvent::NO_AP_EVENT;
       InnerContext *context = op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
 #ifdef DEBUG_LEGION
+      RegionTreeContext ctx = context->get_context();
       assert(ctx.exists());
       assert((req.handle_type == SINGULAR) || 
               (req.handle_type == REG_PROJECTION));
       assert(!targets.empty());
       assert(!targets.is_virtual_mapping());
 #endif
-      RegionNode *child_node = get_node(req.region);
+      RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
-        child_node->column_source->get_field_mask(req.privilege_fields);
-      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
-      
-      RegionUsage usage(req);
+        region_node->column_source->get_field_mask(req.privilege_fields);
 #ifdef DEBUG_LEGION 
       TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     child_node, ctx.get_id(), 
+                                     region_node, ctx.get_id(), 
                                      true/*before*/, false/*premap*/, 
                                      false/*closing*/, false/*logical*/,
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Perform the registration
       // See if we need to acquire locks for read-only privileges
-      if (need_read_only_reservations && IS_READ_ONLY(req))
+      std::set<Reservation> read_only_locks;
+      std::vector<InstanceView*> target_views;
+      if (IS_READ_ONLY(req) && !caller_holds_locks)
       {
         // This is the price of allowing read-only requirements from
         // different operations to be mapped in parallel, we have to 
         // serialize access to the requirements mapping to the same
-        // instance otherwise we can get weird effects with partial
-        // applications of reductions in composite instances, etc.
+        // instance to guarantee that all the effects of the copies 
+        // are applied before the next mapping operation runs
         //
         // Note that by using a set we deduplicate and put the
         // locks in the order to be taken to avoid deadlocks
-        std::set<Reservation> read_only_locks;
         targets.find_read_only_reservations(read_only_locks);
         RtEvent precondition;
         for (std::set<Reservation>::const_iterator it = 
@@ -1923,280 +1951,169 @@ namespace Legion {
                             true/*exclusive*/, precondition);
           precondition = next;
         }
+        context->convert_target_views(targets, target_views);
         // Have to wait for all the locks to be acquired
         if (precondition.exists())
           precondition.wait();
-        // Now do the mapping with our own applied event set
-        std::set<RtEvent> local_applied;
-        // Construct the traversal info
-        TraversalInfo info(ctx.get_id(), trace_info, index, req, version_info, 
-                           user_mask, local_applied);
-        if (info.recording)
-        {
-          TaskContext *context = op->find_logical_context(index);
-          info.logical_ctx = context->get_context().get_id();
-        }
-        child_node->register_region(info, logical_ctx_uid, context, 
-                                    restrict_info, term_event, usage, 
-                                    defer_add_users, targets, proj_info);
-        if (!local_applied.empty())
-        {
-          // Release the read only locks once our map applied 
-          // conditions have been met
-          RtEvent done_event = Runtime::merge_events(local_applied);
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_locks.begin(); it != read_only_locks.end(); it++)
-            it->release(done_event);
-          // Propagate the condition back to the map applied
-          map_applied.insert(done_event);
-        }
-        else
-        {
-          // Release the locks with no preconditions
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_locks.begin(); it != read_only_locks.end(); it++)
-            it->release();
-        }
       }
-      else // The common case
+      else
+        context->convert_target_views(targets, target_views);
+      // Now do the mapping with our own applied event set
+      std::set<RtEvent> local_applied;
+      CopyFillAggregator input_aggregator(false/*track*/);
+      CopyFillAggregator output_aggregator(true/*track*/);;
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();
+      const RegionUsage usage(req);
+      const UniqueID op_id = op->get_unique_op_id();
+      // Iterate over all the equivalence classes and perform the analysis
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->update_set(usage, user_mask, targets, target_views, 
+                          input_aggregator, output_aggregator);
+      // Issue any input copies that need to be performed
+      if (input_aggregator.has_copies())
+        input_aggregator.issue_copies(op_id, index, local_applied, trace_info);
+      // Register users for all our instances
+      IndexSpaceExpression *expr = region_node->get_index_space_expression();
+      // We can skip this if the term event is a 
+      // no-event (happens with post-mapping and copies)
+      if (term_event.exists())
       {
-        // Construct the traversal info
-        TraversalInfo info(ctx.get_id(), trace_info, index, req, version_info, 
-                           user_mask, map_applied);
-        if (info.recording)
+        for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          TaskContext *context = op->find_logical_context(index);
-          info.logical_ctx = context->get_context().get_id();
+          ApEvent ready = target_views[idx]->register_user(usage, user_mask, 
+                  expr, op_id, index, term_event, local_applied, trace_info);
+          // Record the event as the precondition for the task
+          targets[idx].set_ready_event(ready);
         }
-        child_node->register_region(info, logical_ctx_uid, context, 
-                                    restrict_info, term_event, usage, 
-                                    defer_add_users, targets, proj_info);
       }
+      // Perform any output copies (e.g. for restriction) that need to be done
+      if (output_aggregator.has_copies())
+      {
+        output_aggregator.issue_copies(op_id, index, local_applied, trace_info);
+        return output_aggregator.summarize();
+      }
+      else
+        return ApEvent::NO_AP_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::physical_register_users(
-                                  Operation *op, ApEvent term_event,
-                                  const std::vector<RegionRequirement> &regions,
-                                  const std::vector<bool> &to_skip,
-                                  std::vector<VersionInfo> &version_infos,
-                                  std::vector<RestrictInfo> &restrict_infos,
-                                  std::deque<InstanceSet> &target_sets,
-                                  std::set<RtEvent> &map_applied_events,
-                                  const PhysicalTraceInfo &trace_info)
+    void RegionTreeForest::acquire_restrictions(
+                                           const RegionRequirement &req,
+                                           VersionInfo &version_info,
+                                           Operation *op, unsigned index,
+                                           ApEvent term_event,
+                                           std::set<RtEvent> &map_applied,
+                                           InstanceSet &restricted_instances,
+                                           const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                           , const char *log_name
+                                           , UniqueID uid
+#endif
+                                           )
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_USERS_CALL);
 #ifdef DEBUG_LEGION
-      assert(regions.size() == to_skip.size());
-      assert(regions.size() == version_infos.size());
-      assert(regions.size() == target_sets.size());
-#endif
-      std::vector<std::vector<InstanceView*> > views(regions.size());
-      // Do the precondition pass
-      std::vector<InnerContext*> enclosing_contexts(regions.size());
-      for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
-      {
-        if (to_skip[idx1])
-          continue;
-        if (IS_NO_ACCESS(regions[idx1]) || 
-            regions[idx1].privilege_fields.empty())
-          continue;
-        const RegionRequirement &req = regions[idx1];
-        VersionInfo &info = version_infos[idx1];
-        InstanceSet &targets = target_sets[idx1];
-#ifdef DEBUG_LEGION
-        assert(req.handle_type == SINGULAR);
-        assert(!targets.empty());
-#endif
-        InnerContext *context = op->find_physical_context(idx1);
-        // Save this for later in case we need it
-        enclosing_contexts[idx1] = context;
-        RegionNode *region_node = get_node(req.region);
-        std::vector<InstanceView*> &target_views = views[idx1];
-        target_views.resize(targets.size());
-        region_node->convert_target_views(targets, context, target_views);
-        RegionUsage usage(req);
-
-        ContextID logical_ctx = -1U;
-        if (trace_info.recording)
-        {
-          TaskContext *context = op->find_logical_context(idx1);
-          logical_ctx = context->get_context().get_id();
-#ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-          trace_info.tpl->record_summary_info(req, targets,
-              op->find_parent_index(idx1));
-        }
-        for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
-        {
-          InstanceRef &ref = targets[idx2];
-#ifdef DEBUG_LEGION
-          assert(!ref.is_virtual_ref());
-#endif
-          ApEvent ready = target_views[idx2]->find_user_precondition(usage, 
-                            term_event, ref.get_valid_fields(), op, idx1, 
-                            &info, map_applied_events, trace_info);
-          if (trace_info.recording)
-          {
-#ifdef DEBUG_LEGION
-            assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-            assert(logical_ctx != -1U);
-#endif
-            ContextID physical_ctx = context->get_context().get_id();
-            trace_info.tpl->record_set_ready_event(op, idx1, idx2, ready, req,
-                                               region_node, target_views[idx2],
-                                               ref.get_valid_fields(),
-                                               logical_ctx, physical_ctx);
-          }
-          ref.set_ready_event(ready);
-        }
-      }
-      // Then do the registration pass
-      for (unsigned idx1 = 0; idx1 < regions.size(); idx1++)
-      {
-        if (to_skip[idx1])
-          continue;
-        const RegionRequirement &req = regions[idx1];
-        VersionInfo &info = version_infos[idx1];
-        InstanceSet &targets = target_sets[idx1];
-        std::vector<InstanceView*> &target_views = views[idx1];
-        RegionUsage usage(req);
-        // Information for dealing with restrictions
-        FieldMask restricted_fields;
-        LegionMap<LogicalView*,FieldMask>::aligned copy_out_views;
-        LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
-        if (restrict_infos[idx1].has_restrictions())
-          restrict_infos[idx1].populate_restrict_fields(restricted_fields);
-        const bool restricted_out = !!restricted_fields && !IS_READ_ONLY(req);
-        for (unsigned idx2 = 0; idx2 < targets.size(); idx2++)
-        {
-          InstanceRef &ref = targets[idx2];
-          target_views[idx2]->add_user(usage, term_event, 
-                                       ref.get_valid_fields(), 
-                                       op, idx1, runtime->address_space,
-                                       &info, map_applied_events, trace_info);
-          if (restricted_out)
-          {
-            FieldMask restricted = ref.get_valid_fields() & restricted_fields;
-            if (!!restricted)
-            {
-              if (target_views[idx2]->is_reduction_view())
-              {
-                ReductionView *reduction_view = 
-                  target_views[idx2]->as_reduction_view();
-                reduce_out_views[reduction_view] = restricted;
-              }
-              else
-                copy_out_views[target_views[idx2]] = restricted;
-            }
-          }
-        }
-        // Handle any restricted copy out operations we need to do
-        if (!copy_out_views.empty())
-        {
-          RegionNode *node = get_node(req.region);
-          RegionTreeContext ctx = enclosing_contexts[idx1]->get_context();
-#ifdef DEBUG_LEGION
-          assert(ctx.exists());
-#endif
-          TraversalInfo traversal_info(ctx.get_id(), trace_info, idx1, req, 
-                              info, restricted_fields, map_applied_events);
-          const InstanceSet &restricted_instances = 
-            restrict_infos[idx1].get_instances();
-          std::vector<MaterializedView*> restricted_views(
-                                             restricted_instances.size());
-          node->convert_target_views(restricted_instances,
-              enclosing_contexts[idx1], restricted_views);
-          node->issue_restricted_copies(traversal_info, restrict_infos[idx1],
-              restricted_instances, restricted_views, copy_out_views);
-        }
-        if (!reduce_out_views.empty())
-        {
-          RegionNode *node = get_node(req.region);
-          RegionTreeContext ctx = enclosing_contexts[idx1]->get_context();
-#ifdef DEBUG_LEGION
-          assert(ctx.exists());
-#endif
-          TraversalInfo traversal_info(ctx.get_id(), trace_info, idx1, req, 
-                              info, restricted_fields, map_applied_events);
-          const InstanceSet &restricted_instances = 
-            restrict_infos[idx1].get_instances();
-          std::vector<InstanceView*> restricted_views(
-                                             restricted_instances.size());
-          node->convert_target_views(restricted_instances,
-              enclosing_contexts[idx1], restricted_views);
-          node->issue_restricted_reductions(traversal_info, 
-              restrict_infos[idx1], restricted_instances, 
-              restricted_views, reduce_out_views);
-        }
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::physical_close_context(RegionTreeContext ctx,
-                                             const RegionRequirement &req,
-                                             VersionInfo &version_info,
-                                             Operation *op,unsigned index,
-                                             std::set<RtEvent> &map_applied,
-                                             InstanceSet &targets,
-                                             const PhysicalTraceInfo &trace_info
-#ifdef DEBUG_LEGION
-                                             , const char *log_name
-                                             , UniqueID uid
-#endif
-                                             )
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_CLOSE_CONTEXT_CALL);
-#ifdef DEBUG_LEGION
-      assert(!targets.empty());
       assert(req.handle_type == SINGULAR);
 #endif
-      RegionNode *top_node = get_node(req.region);
+      RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
-        top_node->column_source->get_field_mask(req.privilege_fields);
-      RegionUsage usage(req);
-      TraversalInfo info(ctx.get_id(), trace_info, index, req, version_info, 
-                         user_mask, map_applied);
-      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
-      InnerContext *context = op->find_physical_context(index);
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      // Iterate through the equivalence classes and find all the restrictions
+      FieldMaskSet<InstanceView> instances;
+      std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->acquire_restrictions(user_mask, instances, inst_exprs);
+      // Now add users for all the instances
+      const RegionUsage usage(req);
+      const UniqueID op_id = op->get_unique_op_id();
 #ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     true/*before*/, false/*premap*/, 
-                                     true/*closing*/, false/*logical*/,
-                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
+      assert(instances.size() == inst_exprs.size());
 #endif
-      top_node->close_state(info, usage, logical_ctx_uid, context, targets);
+      restricted_instances.resize(inst_exprs.size());
+      unsigned inst_index = 0;
+      for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+           const_iterator it = inst_exprs.begin(); it != inst_exprs.end(); it++)
+      {
+        IndexSpaceExpression *union_expr = union_index_spaces(it->second);
+        FieldMaskSet<InstanceView>::const_iterator finder = 
+          instances.find(it->first);
 #ifdef DEBUG_LEGION
-      TreeStateLogger::capture_state(runtime, &req, index, log_name, uid,
-                                     top_node, ctx.get_id(), 
-                                     false/*before*/, false/*premap*/, 
-                                     true/*closing*/, false/*logical*/,
-                 FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
+        assert(finder != instances.end());
 #endif
-      // Look through all the targets and get their ready events
-      // and then merge them together to indicate that the context is closed
-      std::set<ApEvent> closed_events;
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-        closed_events.insert(targets[idx].get_ready_event());
-      if (closed_events.size() == 1)
-        return *(closed_events.begin());
-      return Runtime::merge_events(&trace_info, closed_events);
+        ApEvent ready = it->first->register_user(usage, finder->second,
+            union_expr, op_id, index, term_event, map_applied, trace_info);
+        // Record this in the acquired_instances
+        restricted_instances[inst_index++] = 
+          InstanceRef(it->first->get_manager(), finder->second, ready);
+      }
     }
 
-#if 0
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::release_restrictions(
+                                           const RegionRequirement &req,
+                                           VersionInfo &version_info,
+                                           Operation *op, unsigned index,
+                                           ApEvent term_event,
+                                           std::set<RtEvent> &map_applied,
+                                           InstanceSet &restricted_instances,
+                                           const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                           , const char *log_name
+                                           , UniqueID uid
+#endif
+                                           )
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *region_node = get_node(req.region);
+      FieldMask user_mask = 
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      // Iterate through the equivalence classes and find all the restrictions
+      FieldMaskSet<InstanceView> instances;
+      std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->release_restrictions(user_mask, instances, inst_exprs);
+      // Now add users for all the instances
+      const RegionUsage usage(req);
+      const UniqueID op_id = op->get_unique_op_id();
+#ifdef DEBUG_LEGION
+      assert(instances.size() == inst_exprs.size());
+#endif
+      restricted_instances.resize(inst_exprs.size());
+      unsigned inst_index = 0;
+      for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+           const_iterator it = inst_exprs.begin(); it != inst_exprs.end(); it++)
+      {
+        IndexSpaceExpression *union_expr = union_index_spaces(it->second);
+        FieldMaskSet<InstanceView>::const_iterator finder = 
+          instances.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != instances.end());
+#endif
+        ApEvent ready = it->first->register_user(usage, finder->second,
+            union_expr, op_id, index, term_event, map_applied, trace_info);
+        // Record this in the acquired_instances
+        restricted_instances[inst_index++] = 
+          InstanceRef(it->first->get_manager(), finder->second, ready);
+      }
+    }
+
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::copy_across(
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
-                                              InstanceSet &src_targets, 
-                                        const InstanceSet &dst_targets,
                                         VersionInfo &src_version_info,
-                                        VersionInfo &dst_version_info, 
+                                        const InstanceSet &dst_targets,
                                         ApEvent term_event, Operation *op, 
                                         unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, PredEvent guard, 
@@ -2210,7 +2127,6 @@ namespace Legion {
       assert(dst_req.handle_type == SINGULAR);
       assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
 #endif
-      std::set<ApEvent> result_events;
       std::vector<unsigned> src_indexes(src_req.instance_fields.size());
       std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
       // Get the field indexes for all the fields
@@ -2220,351 +2136,212 @@ namespace Legion {
                                                  src_indexes);   
       dst_node->column_source->get_field_indexes(dst_req.instance_fields,
                                                  dst_indexes);
-      // Convert the destination references to views
-      std::vector<MaterializedView*> dst_views(dst_targets.size());
-      InnerContext *dst_context = op->find_physical_context(dst_index);
-      for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+      FieldMask src_mask, dst_mask; 
+      for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
       {
-        const InstanceRef &dst_ref = dst_targets[idx];
-#ifdef DEBUG_LEGION
-        assert(!dst_ref.is_virtual_ref());
-#endif
-        InstanceView *view = 
-              dst_node->convert_reference(dst_ref, dst_context);
-#ifdef DEBUG_LEGION
-        assert(view->is_materialized_view());
-#endif
-        dst_views[idx] = view->as_materialized_view();
-      }
+        src_mask.set_bit(src_indexes[idx]);
+        dst_mask.set_bit(dst_indexes[idx]);
+      } 
 
-      // If we need to, grab the valid views for the source
-      // and issue copies to any of the deferred views
-      if (src_targets.empty())
+      InnerContext *context = op->find_physical_context(dst_index);
+      std::vector<InstanceView*> target_views;
+      context->convert_target_views(dst_targets, target_views);
+      // Perform the copies/reductions across
+      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      const RegionUsage usage(dst_req);
+      const UniqueID op_id = op->get_unique_op_id();
+      const std::set<EquivalenceSet*> &src_eq_sets = 
+        src_version_info.get_equivalence_sets();
+      // Check to see if we have a perfect across-copy
+      bool perfect = true;
+      for (unsigned idx = 0; idx < src_indexes.size(); idx++)
       {
-        InnerContext *src_context = op->find_physical_context(src_index);
-        RegionTreeContext ctx = src_context->get_context();
-#ifdef DEBUG_LEGION
-        assert(ctx.exists());
-#endif
-        FieldMask src_mask = src_node->column_source->get_field_mask(
-                                            src_req.privilege_fields);
-        LegionMap<LogicalView*,FieldMask>::aligned src_views;
-        PhysicalState *state = src_node->get_physical_state(src_version_info);
-        src_node->find_valid_instance_views(ctx.get_id(), state, src_mask,
-            src_mask, src_version_info, false/*needs space*/, src_views);
-        // Sort them into deferred and materialized views
-        std::vector<DeferredView*> deferred_views;
-        std::vector<MaterializedView*> materialized_views;
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              src_views.begin(); it != src_views.end(); it++)
-        {
-          if (!it->first->is_materialized_view())
-          {
-#ifdef DEBUG_LEGION
-            assert(it->first->is_deferred_view());
-#endif
-            deferred_views.push_back(it->first->as_deferred_view()); 
-          }
-          else
-            materialized_views.push_back(it->first->as_materialized_view());
-        }
-        if (!deferred_views.empty())
-        {
-          // For each destination, find which composite views satisfy its fields
-          for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
-          {
-            const InstanceRef &dst_ref = dst_targets[idx1];
-#ifdef DEBUG_LEGION
-            assert(!dst_ref.is_virtual_ref());
-#endif
-            const FieldMask &dst_mask = dst_ref.get_valid_fields(); 
-            std::map<DeferredView*,std::vector<unsigned> > src_deferred_indexes;
-            std::map<DeferredView*,std::vector<unsigned> > dst_deferred_indexes;
-            for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
-            {
-              const unsigned dst_field_index = dst_indexes[idx2];
-              // If it's not set for the destination, then keep going 
-              if (!dst_mask.is_set(dst_field_index))
-                continue;
-              const unsigned src_field_index = src_indexes[idx2];
-              for (std::vector<DeferredView*>::const_iterator it = 
-                    deferred_views.begin(); it != deferred_views.end(); it++)
-              {
-                FieldMask &src_mask = src_views[*it];
-                if (!src_mask)
-                  continue; 
-                if (src_mask.is_set(src_field_index))
-                {
-                  src_deferred_indexes[*it].push_back(src_field_index);
-                  dst_deferred_indexes[*it].push_back(dst_field_index);
-                  src_mask.unset_bit(src_field_index);
-                  if (!src_mask)
-                    break;
-                }
-              }
-            }
-            if (src_deferred_indexes.empty())
-              continue;
-            // Now we've got the information necessary to do our copies
-            MaterializedView *dst_view = dst_views[idx1];
-            ApEvent precondition = dst_ref.get_ready_event();
-            for (std::map<DeferredView*,std::vector<unsigned> >::const_iterator
-                  src_it = src_deferred_indexes.begin(); 
-                  src_it != src_deferred_indexes.end(); src_it++)
-            {
-              std::map<DeferredView*,std::vector<unsigned> >::const_iterator
-                dst_it = dst_deferred_indexes.find(src_it->first);
-#ifdef DEBUG_LEGION
-              assert(dst_it != dst_deferred_indexes.end());
-              assert(src_it->second.size() == dst_it->second.size());
-#endif
-              FieldMask copy_mask;
-              for (std::vector<unsigned>::const_iterator it = 
-                    src_it->second.begin(); it != src_it->second.end(); it++)
-                copy_mask.set_bit(*it);
-              TraversalInfo info(ctx.get_id(), trace_info, src_index, src_req,
-                                 dst_version_info, copy_mask, map_applied);
-              src_it->first->issue_deferred_copies_across(info, dst_view,
-                            src_it->second, dst_it->second, precondition, 
-                            guard, result_events);
-              src_mask -= copy_mask;
-            }
-            // If we've handled all the sources, we are done
-            if (!src_mask)
-              break;
-          }
-        }
-        // Save any materialized views for the remaining fields
-        // in the src_targets and then issue copies like normal
-        if (!!src_mask && !materialized_views.empty())
-        {
-          RegionUsage src_usage(src_req);
-          for (std::vector<MaterializedView*>::const_iterator it = 
-                materialized_views.begin(); it != 
-                materialized_views.end(); it++)
-          {
-            FieldMask valid_mask = src_mask & src_views[*it]; 
-            if (!valid_mask)
-              continue;
-            // Need to add ourselves as a user of the instance
-            // and get the event precondition for our use
-            ApEvent ready = (*it)->add_user_fused(src_usage, term_event,
-                                                  valid_mask, op, src_index,
-                                                  &src_version_info,
-                                                  runtime->address_space,
-                                                  map_applied, trace_info);
-            src_targets.add_instance(
-                InstanceRef((*it)->get_manager(), valid_mask, ready));
-            src_mask -= valid_mask;
-            if (!src_mask)
-              break;
-          }
-        }
+        if (src_indexes[idx] == dst_indexes[idx])
+          continue;
+        perfect = false;
+        break;
       }
-      // If we have actual concrete instances to copy from now we can
-      // issue those copies to the destination
-      if (!src_targets.empty())
+      CopyFillAggregator across_aggregator(true/*track*/);
+      if (perfect)
       {
-        for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              src_eq_sets.begin(); it != src_eq_sets.end(); it++)
         {
-          const InstanceRef &dst_ref = dst_targets[idx1];
-#ifdef DEBUG_LEGION
-          assert(!dst_ref.is_virtual_ref());
-          assert(dst_ref.get_manager()->is_instance_manager());
-#endif
-          InstanceManager *dst_manager = 
-            dst_ref.get_manager()->as_instance_manager();
-          const FieldMask &dst_mask = dst_ref.get_valid_fields();
-          std::map<unsigned,
-                   std::vector<CopySrcDstField> > src_fields,dst_fields;
-          for (unsigned idx2 = 0; idx2 < dst_indexes.size(); idx2++)
-          {
-            const unsigned dst_field_index = dst_indexes[idx2];
-            // If it's not set for the destination, then keep going 
-            if (!dst_mask.is_set(dst_field_index))
-              continue;
-            const unsigned src_field_index = src_indexes[idx2];
-            for (unsigned idx3 = 0; idx3 < src_targets.size(); idx3++)
-            {
-              const InstanceRef &src_ref = src_targets[idx3];
-#ifdef DEBUG_LEGION
-              assert(!src_ref.is_virtual_ref());
-              assert(src_ref.get_manager()->is_instance_manager());
-#endif
-              const FieldMask &src_mask = src_ref.get_valid_fields();   
-              if (!src_mask.is_set(src_field_index))
-                continue;
-              InstanceManager *src_manager = 
-                src_ref.get_manager()->as_instance_manager();
-              src_manager->compute_copy_offsets(
-                  src_req.instance_fields[idx2], src_fields[idx3]);
-              dst_manager->compute_copy_offsets(
-                  dst_req.instance_fields[idx2], dst_fields[idx3]);
-            }
-          }
-          if (src_fields.empty())
+          // Check that the index spaces intersect
+          IndexSpaceExpression *overlap = 
+            intersect_index_spaces((*it)->set_expr, dst_expr);
+          if (overlap->is_empty())
             continue;
-          ApEvent dst_precondition = dst_ref.get_ready_event(); 
-          for (std::map<unsigned,std::vector<CopySrcDstField> >::
-                const_iterator src_it = src_fields.begin(); 
-                src_it != src_fields.end(); src_it++)
-          {
-            std::map<unsigned,std::vector<CopySrcDstField> >::
-              const_iterator dst_it = dst_fields.find(src_it->first);
-#ifdef DEBUG_LEGION
-            assert(dst_it != dst_fields.end());
-            assert(src_it->second.size() == dst_it->second.size());
-#endif
-            ApEvent src_precondition = 
-              src_targets[src_it->first].get_ready_event();
-            ApEvent copy_pre = Runtime::merge_events(&trace_info,
-                                                     src_precondition,
-                                                     dst_precondition,
-                                                     precondition);
-            ApEvent copy_post = dst_node->issue_copy(&trace_info,src_it->second,
-                                               dst_it->second, copy_pre, guard,
-                                               NULL/*intersect*/, NULL/*mask*/);
-            if (copy_post.exists())
-              result_events.insert(copy_post);
-          }
+          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
+                                     target_views, overlap, precondition,
+                                     guard, across_aggregator);
         }
       }
-      // Return the merge of all the result events
-      return Runtime::merge_events(&trace_info, result_events);
+      else
+      {
+        std::vector<CopyAcrossHelper> across_helpers;
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          across_helpers.push_back(CopyAcrossHelper(src_mask));
+          InstanceManager *manager = 
+            target_views[idx]->get_manager()->as_instance_manager();
+          manager->initialize_across_helper(&across_helpers.back(), 
+                                dst_mask, src_indexes, dst_indexes);
+        }
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              src_eq_sets.begin(); it != src_eq_sets.end(); it++)
+        {
+          // Check that the index spaces intersect
+          IndexSpaceExpression *overlap = 
+            intersect_index_spaces((*it)->set_expr, dst_expr);
+          if (overlap->is_empty())
+            continue;
+          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
+                                     target_views, overlap, precondition, 
+                                     guard, across_aggregator, &across_helpers);
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(across_aggregator.has_copies());
+#endif
+      across_aggregator.issue_copies(op_id, dst_index, map_applied, trace_info);
+      return across_aggregator.summarize();
     }
-    
+
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::reduce_across(const RegionRequirement &src_req,
-                                            const RegionRequirement &dst_req,
-                                            const InstanceSet &src_targets,
-                                            const InstanceSet &dst_targets,
-                                            Operation *op, ApEvent precondition,
-                                            PredEvent predicate_guard,
+    ApEvent RegionTreeForest::fill_fields(Operation *op,
+                                          const RegionRequirement &req,
+                                          const unsigned index,
+                                          const void *value, size_t value_size,
+                                          VersionInfo &version_info,
+                                          ApEvent precondition,
+                                          std::set<RtEvent> &map_applied,
+                                          PredEvent true_guard, 
+                                          const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *fill_node = get_node(req.region);
+      FieldMask fill_mask = 
+        fill_node->column_source->get_field_mask(req.privilege_fields);
+      // Make the fill instance
+      DistributedID did = runtime->get_available_distributed_id();
+      FillView::FillViewValue *fill_value = 
+        new FillView::FillViewValue(value, value_size);
+      FillView *fill_view = 
+        new FillView(this, did, runtime->address_space,
+                     fill_node, fill_value, true/*register now*/
+#ifdef LEGION_SPY
+                     , fill_op_uid
+#endif
+                     );
+      if (trace_info.recording)
+        trace_info.tpl->record_fill_view(fill_view, fill_mask);
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();     
+      CopyFillAggregator output_aggregator(true/*track*/);
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->overwrite_set(fill_view, fill_mask, 
+                             precondition, true_guard, output_aggregator);
+      if (output_aggregator.has_copies())
+      {
+        const UniqueID op_id = op->get_unique_op_id();
+        output_aggregator.issue_copies(op_id, index, map_applied, trace_info);
+        return output_aggregator.summarize();
+      }
+      else
+        return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    InstanceRef RegionTreeForest::create_external_instance(
+                             AttachOp *attach_op, const RegionRequirement &req,
+                             const std::vector<FieldID> &field_set)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *attach_node = get_node(req.region);
+      return attach_node->column_source->create_external_instance(
+                                field_set, attach_node, attach_op);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
+                                            unsigned index,
+                                            const RegionRequirement &req,
+                                            const InstanceRef &ext_instance, 
+                                            VersionInfo &version_info,
+                                            std::set<RtEvent> &map_applied,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REDUCE_ACROSS_CALL);
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
-      assert(src_req.handle_type == SINGULAR);
-      assert(dst_req.handle_type == SINGULAR);
-      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
-      assert(dst_req.privilege == REDUCE);
+      assert(req.handle_type == SINGULAR);
 #endif
-      std::set<ApEvent> result_events;
-      std::set<ApEvent> fold_copy_preconditions, list_copy_preconditions; 
-      fold_copy_preconditions.insert(precondition);
-      list_copy_preconditions.insert(precondition);
-      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
-      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
-      // Get the field indexes for all the fields
-      RegionNode *src_node = get_node(src_req.region);
-      RegionNode *dst_node = get_node(dst_req.region);
-      src_node->column_source->get_field_indexes(src_req.instance_fields, 
-                                                 src_indexes);   
-      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes);
-      // Next figure out which src_targets satisfy each field
-      std::vector<unsigned> src_target_indexes(src_indexes.size());
-      for (unsigned idx1 = 0; idx1 < src_targets.size(); idx1++)
-      {
-        const FieldMask valid_mask = src_targets[idx1].get_valid_fields();
-        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
-        {
-          if (valid_mask.is_set(src_indexes[idx2]))
-            src_target_indexes[idx2] = idx1;
-        }
-      }
-      // Let's handle all the actual instances first
-      std::vector<CopySrcDstField> src_fields_fold;
-      std::vector<CopySrcDstField> dst_fields_fold;
-      std::vector<CopySrcDstField> src_fields_list;
-      std::vector<CopySrcDstField> dst_fields_list;
-      for (unsigned idx1 = 0; idx1 < dst_targets.size(); idx1++)
-      {
-        const InstanceRef &dst_ref = dst_targets[idx1];
+      InstanceSet external(1);
+      external[0] = ext_instance;
+      InnerContext *context = attach_op->find_physical_context(index);
+      std::vector<InstanceView*> external_views;
+      context->convert_target_views(external, external_views);
 #ifdef DEBUG_LEGION
-        assert(!dst_ref.is_virtual_ref());
+      assert(external_views.size() == 1);
 #endif
-        PhysicalManager *dst_manager = dst_ref.get_manager();
-        FieldMask dst_valid = dst_ref.get_valid_fields();
-        const bool fold = dst_manager->is_reduction_manager();
-        // Iterate over all the fields and find the ones for this target
-        for (unsigned idx2 = 0; idx2 < src_indexes.size(); idx2++)
-        {
-          if (dst_valid.is_set(dst_indexes[idx2]))
-          {
-            // Find the index of the source
-            unsigned src_index = src_target_indexes[idx2];
-            // Otherwise, this is a normal copy, fill in offsets
-            const InstanceRef &src_ref = src_targets[src_index];
-#ifdef DEBUG_LEGION
-            assert(!src_ref.is_virtual_ref());
-#endif
-            PhysicalManager *src_manager = src_ref.get_manager();
-            if (src_manager->is_reduction_manager())
-            {
-              FieldMask src_mask;
-              src_mask.set_bit(src_indexes[idx2]);
-              src_manager->as_reduction_manager()->find_field_offsets(
-                  src_mask, fold ? src_fields_fold : src_fields_list);
-            }
-            else
-              src_manager->as_instance_manager()->compute_copy_offsets(
-                  src_req.instance_fields[idx2], 
-                  fold ? src_fields_fold : src_fields_list);
-            if (fold)
-            {
-              FieldMask dst_mask;
-              dst_mask.set_bit(dst_indexes[idx2]);
-              dst_manager->as_reduction_manager()->find_field_offsets(
-                  dst_mask, dst_fields_fold);
-              fold_copy_preconditions.insert(src_ref.get_ready_event());
-            }
-            else
-            {
-              dst_manager->as_instance_manager()->compute_copy_offsets(
-                  dst_req.instance_fields[idx2], dst_fields_list);
-              list_copy_preconditions.insert(src_ref.get_ready_event());
-            }
-            // Unset the bit and see if we are done with this instance
-            dst_valid.unset_bit(dst_indexes[idx2]);
-            if (!dst_valid)
-              break;
-          }
-        }
-        // Save the copy precondition for the dst
-        if (fold)
-          fold_copy_preconditions.insert(dst_ref.get_ready_event());
-        else
-          list_copy_preconditions.insert(dst_ref.get_ready_event());
-      }
-      // See if we have any fold copies
-      if (!dst_fields_fold.empty())
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();     
+      CopyFillAggregator output_aggregator(true/*track*/);
+      const FieldMask &ext_mask = ext_instance.get_valid_fields();
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->overwrite_set(external_views[0], ext_mask, 
+                             ApEvent::NO_AP_EVENT, PredEvent::NO_PRED_EVENT,
+                             output_aggregator, true/*add restriction*/);
+      if (output_aggregator.has_copies())
       {
-        ApEvent copy_pre = 
-          Runtime::merge_events(&trace_info, fold_copy_preconditions);
-        ApEvent copy_post = dst_node->issue_copy(&trace_info, 
-                            src_fields_fold, dst_fields_fold, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, NULL/*mask*/,
-                            dst_req.redop, true/*fold*/);
-        if (copy_post.exists())
-          result_events.insert(copy_post);
+        const UniqueID op_id = attach_op->get_unique_op_id();
+        output_aggregator.issue_copies(op_id, index, map_applied, trace_info);
+        return output_aggregator.summarize();
       }
-      // See if we have any reduction copies
-      if (!dst_fields_list.empty())
-      {
-        ApEvent copy_pre = 
-          Runtime::merge_events(&trace_info, list_copy_preconditions);
-        ApEvent copy_post = dst_node->issue_copy(&trace_info, 
-                            src_fields_list, dst_fields_list, copy_pre, 
-                            predicate_guard, NULL/*intersect*/, NULL/*mask*/, 
-                            dst_req.redop, false/*fold*/);
-        if (copy_post.exists())
-          result_events.insert(copy_post);
-      }
-      return Runtime::merge_events(&trace_info, result_events);
+      else
+        return ApEvent::NO_AP_EVENT;
     }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::detach_external(const RegionRequirement &req,
+                                          DetachOp *detach_op,
+                                          unsigned index,
+                                          VersionInfo &version_info,
+                                          const InstanceRef &ext_instance,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
 #endif
+      InstanceSet external(1);
+      external[0] = ext_instance;
+      InnerContext *context = detach_op->find_physical_context(index);
+      std::vector<InstanceView*> external_views;
+      context->convert_target_views(external, external_views);
+#ifdef DEBUG_LEGION
+      assert(external_views.size() == 1);
+#endif
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();
+      const FieldMask &ext_mask = ext_instance.get_valid_fields();
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->filter_set(external_views[0], ext_mask, 
+                          true/*remove restriction*/);
+      return ApEvent::NO_AP_EVENT;
+    }
 
     //--------------------------------------------------------------------------
     int RegionTreeForest::physical_convert_mapping(Operation *op,
@@ -2864,141 +2641,7 @@ namespace Legion {
         }
       }
       return true;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::fill_fields(Operation *op,
-                                          const RegionRequirement &req,
-                                          const unsigned index,
-                                          const void *value, size_t value_size,
-                                          VersionInfo &version_info,
-                                          RestrictInfo &restrict_info,
-                                          InstanceSet &instances, 
-                                          ApEvent precondition,
-                                          std::set<RtEvent> &map_applied_events,
-                                          PredEvent true_guard, 
-                                          PredEvent false_guard,
-                                          const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_FILL_FIELDS_CALL);
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      InnerContext *context = op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
-      RegionNode *fill_node = get_node(req.region);
-      FieldMask fill_mask = 
-        fill_node->column_source->get_field_mask(req.privilege_fields);
-      const UniqueID logical_ctx_uid = op->get_context()->get_context_uid();
-      // Check to see if we have any restricted fields that
-      // we need to fill eagerly
-      if (restrict_info.has_restrictions())
-      {
-#ifdef DEBUG_LEGION
-        assert(!instances.empty());
-#endif
-        // If we have restrictions, we have to eagerly fill these fields 
-        FieldMask eager_fields;
-        restrict_info.populate_restrict_fields(eager_fields);
-        ApEvent done_event = fill_node->eager_fill_fields(ctx.get_id(), 
-         op, index, logical_ctx_uid, context, eager_fields, value, value_size,
-         version_info, instances, precondition, true_guard, map_applied_events,
-         trace_info);
-        // Remove these fields from the fill set
-        fill_mask -= eager_fields;
-        // If we still have fields to fill, do that now
-        if (!!fill_mask)
-          fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                                 logical_ctx_uid, context, version_info, 
-                                 map_applied_events, true_guard, false_guard,
-                                 trace_info
-#ifdef LEGION_SPY
-                                 , op->get_unique_op_id()
-#endif
-                                 );
-        // We know the sync precondition is chained off at least
-        // one eager fill so we can return the done event
-        return done_event;
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(instances.empty());
-#endif
-        // Fill in these fields on this node
-        fill_node->fill_fields(ctx.get_id(), fill_mask, value, value_size,
-                               logical_ctx_uid, context, version_info, 
-                               map_applied_events, true_guard, false_guard,
-                               trace_info
-#ifdef LEGION_SPY
-                               , op->get_unique_op_id()
-#endif
-                               );
-        // We didn't actually use the precondition so just return it
-        return precondition;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceManager* RegionTreeForest::create_external_instance(
-                             AttachOp *attach_op, const RegionRequirement &req,
-                             const std::vector<FieldID> &field_set)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *attach_node = get_node(req.region);
-      return attach_node->column_source->create_external_instance(
-                                field_set, attach_node, attach_op);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef RegionTreeForest::attach_external(AttachOp *attach_op, 
-                                                 unsigned index,
-                                                 const RegionRequirement &req,
-                                                 InstanceManager *ext_instance,
-                                                 VersionInfo &version_info,
-                                                 std::set<RtEvent> &map_applied)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      InnerContext *context = attach_op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
-      RegionNode *attach_node = get_node(req.region);
-      UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
-      // Perform the attachment
-      return attach_node->attach_external(ctx.get_id(), context,logical_ctx_uid,
-                                        ext_instance->layout->allocated_fields, 
-                                        req, ext_instance, 
-                                        version_info, map_applied);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::detach_external(const RegionRequirement &req,
-                                          DetachOp *detach_op,
-                                          unsigned index,
-                                          VersionInfo &version_info,
-                                          const InstanceRef &ref,
-                                          std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      InnerContext *context = detach_op->find_physical_context(index);
-      RegionTreeContext ctx = context->get_context();
-      RegionNode *detach_node = get_node(req.region);
-      UniqueID logical_ctx_uid = detach_op->get_context()->get_context_uid();
-      // Perform the detachment
-      return detach_node->detach_external(ctx.get_id(), context,logical_ctx_uid,
-                                          version_info, ref,map_applied_events);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::check_context_state(RegionTreeContext ctx)
@@ -9956,7 +9599,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InstanceManager* FieldSpaceNode::create_external_instance(
+    InstanceRef FieldSpaceNode::create_external_instance(
                                          const std::vector<FieldID> &field_set,
                                          RegionNode *node, AttachOp *attach_op)
     //--------------------------------------------------------------------------
@@ -9964,9 +9607,9 @@ namespace Legion {
       std::vector<size_t> field_sizes(field_set.size());
       std::vector<unsigned> mask_index_map(field_set.size());
       std::vector<CustomSerdezID> serdez(field_set.size());
-      FieldMask file_mask;
+      FieldMask external_mask;
       compute_field_layout(field_set, field_sizes, 
-                           mask_index_map, serdez, file_mask);
+                           mask_index_map, serdez, external_mask);
       // Now make the instance, this should always succeed
       ApEvent ready_event;
       LayoutConstraintSet constraints;
@@ -9980,13 +9623,13 @@ namespace Legion {
       const unsigned total_dims = node->row_source->get_num_dims();
       // Get the layout
       LayoutDescription *layout = 
-        find_layout_description(file_mask, total_dims, constraints);
+        find_layout_description(external_mask, total_dims, constraints);
       if (layout == NULL)
       {
         LayoutConstraints *layout_constraints = 
           context->runtime->register_layout(handle, 
                                             constraints, true/*internal*/);
-        layout = create_layout_description(file_mask, total_dims,
+        layout = create_layout_description(external_mask, total_dims,
                                            layout_constraints,
                                            mask_index_map, field_set,
                                            field_sizes, serdez);
@@ -10008,7 +9651,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      return result;
+      return InstanceRef(result, external_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -10493,13 +10136,6 @@ namespace Legion {
             semantic_info.begin(); it != semantic_info.end(); it++)
       {
         legion_free(SEMANTIC_INFO_ALLOC, it->second.buffer, it->second.size);
-      }
-      // Notify any contexts that were tracking us that we are now deleted
-      if (!tracking_contexts.empty())
-      {
-        for (std::set<InnerContext*>::const_iterator it = 
-              tracking_contexts.begin(); it != tracking_contexts.end(); it++)
-          (*it)->notify_region_tree_node_deletion(this);
       }
     }
 
@@ -12790,17 +12426,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::perform_versioning_analysis(ContextID ctx,
-                                              const RegionUsage &usage,
-                                              const FieldMask &version_mask,
-                                              InnerContext *parent_ctx,
-                                              VersionInfo &version_info,
-                                              std::set<RtEvent> &ready_events,
-                                              std::set<RtEvent> &applied_events)
+                                                     InnerContext *parent_ctx,
+                                                     VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
-      manager.perform_versioning_analysis(usage, version_mask, parent_ctx,
-                                version_info, ready_events, applied_events);
+      manager.perform_versioning_analysis(parent_ctx, version_info);
     }
 
 #if 0
@@ -14026,169 +13657,6 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void RegionTreeNode::find_complete_fields(const FieldMask &scope_fields,
-                     const LegionMap<LegionColor,FieldMask>::aligned &children,
-                     FieldMask &complete_fields)
-    //--------------------------------------------------------------------------
-    {
-      for (LegionMap<LegionColor,FieldMask>::aligned::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        FieldMask test_fields = it->second - complete_fields;
-        // No fields to test so we are done
-        if (!test_fields)
-          continue;
-        RegionTreeNode *child = get_tree_child(it->first);
-        if (child->is_complete())
-        {
-          complete_fields |= test_fields;
-          // If we proved that they are all complete, we are done
-          if (scope_fields == complete_fields)
-            break;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* RegionTreeNode::convert_manager(PhysicalManager *manager,
-                                                  InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Small sanity check to make sure they are in the same tree
-      assert(get_tree_id() == manager->region_node->get_tree_id());
-      assert(manager->region_node->context == this->context);
-#endif
-      // Check to see if we've already registered it
-      InstanceView *result = find_instance_view(manager, context);
-      if (result != NULL)
-        return result;
-      // We have to make it if it doesn't exist yet
-      // If we're at the root, get the view we need for this context
-      if (manager->region_node == this)
-        result = context->create_instance_top_view(manager, 
-                                    context->runtime->address_space);
-      // If we didn't find it immediately, switch over to the explicit
-      // versions that don't have so many virtual function calls
-      else if (is_region())
-        result = as_region_node()->convert_reference_region(manager, context);
-      else
-        result = 
-          as_partition_node()->convert_reference_partition(manager, context); 
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* RegionTreeNode::convert_reference(const InstanceRef &ref,
-                                                    InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!ref.is_virtual_ref());
-#endif
-      PhysicalManager *manager = ref.get_manager();
-      return convert_manager(manager, context);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-                InnerContext *context, std::vector<InstanceView*> &target_views)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(targets.size() == target_views.size());
-#endif
-      if (targets.size() == 1)
-      {
-        // If we just have one there is a fast path 
-        target_views[0] = convert_reference(targets[0], context);
-      }
-      else
-      {
-        // Deduplicate the instances and then go up for any that we still need
-        std::map<PhysicalManager*,unsigned/*idx*/> deduplicated;
-        std::vector<PhysicalManager*> to_convert;
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          PhysicalManager *manager = targets[idx].get_manager();
-          target_views[idx] = find_instance_view(manager, context);
-          // Quick check to see if we are done early
-          if (target_views[idx] != NULL)
-            continue;
-          // If we didn't find it we will have to go looking for it 
-          // See if we've got this one already or not
-          if (deduplicated.find(manager) == deduplicated.end())
-          {
-            unsigned next = deduplicated.size();
-            deduplicated[manager] = next;
-            to_convert.push_back(manager);
-          }
-        }
-        if (to_convert.size() == 1)
-        {
-          // Easy case, there is only one deduplicated instance
-          InstanceView *result = is_region() ? 
-            as_region_node()->convert_reference_region(to_convert[0], context) :
-            as_partition_node()->convert_reference_partition(to_convert[0], 
-                                                             context);
-          for (unsigned idx = 0; idx < target_views.size(); idx++)
-          {
-            if (target_views[idx] != NULL) // skip if we already did it
-              continue;
-            target_views[idx] = result;
-          }
-        }
-        else
-        {
-          // Go up the tree for all the unhandled ones
-          std::vector<bool> up_mask(to_convert.size(), true);
-          std::vector<InstanceView*> results(to_convert.size(), NULL);
-          if (is_region())
-            as_region_node()->convert_references_region(to_convert, 
-                                        up_mask, context, results);
-          else
-            as_partition_node()->convert_references_partition(to_convert,
-                                        up_mask, context, results);
-          for (unsigned idx = 0; idx < target_views.size(); idx++)
-          {
-            if (target_views[idx] != NULL) // skip it if we already did it
-              continue;
-            PhysicalManager *manager = targets[idx].get_manager();
-#ifdef DEBUG_LEGION
-            assert(deduplicated.find(manager) != deduplicated.end());
-#endif
-            target_views[idx] = results[deduplicated[manager]];
-#ifdef DEBUG_LEGION
-            assert(target_views[idx] != NULL);
-#endif
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::convert_target_views(const InstanceSet &targets,
-            InnerContext *context, std::vector<MaterializedView*> &target_views)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(targets.size() == target_views.size());
-#endif
-      std::vector<InstanceView*> instance_views(target_views.size(), NULL);
-      // Call the instance view version
-      convert_target_views(targets, context, instance_views);
-      // Then do our conversion
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        InstanceView *inst_view = instance_views[idx];
-#ifdef DEBUG_LEGION
-        assert(inst_view->is_materialized_view());
-#endif
-        target_views[idx] = inst_view->as_materialized_view();
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeNode::initialize_current_state(ContextID ctx)
     //--------------------------------------------------------------------------
     {
@@ -14244,109 +13712,6 @@ namespace Legion {
       }
     }
     
-    //--------------------------------------------------------------------------
-    bool RegionTreeNode::register_instance_view(PhysicalManager *manager,
-                                       UniqueID context_uid, InstanceView *view)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<PhysicalManager*,UniqueID> key(manager, context_uid);
-      AutoLock n_lock(node_lock);
-      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
-        tracked::const_iterator finder = instance_views.find(key);
-      if (finder != instance_views.end())
-      {
-        // Duplicate registrations are alright
-        if (finder->second == view)
-          return true;
-        return false;
-      }
-      instance_views[key] = view;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::unregister_instance_view(PhysicalManager *manager,
-                                                  UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
-      std::pair<PhysicalManager*,UniqueID> key(manager, context_uid);
-      AutoLock n_lock(node_lock);
-      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
-        tracked::iterator finder = instance_views.find(key);
-      if (finder != instance_views.end())
-        instance_views.erase(finder);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* RegionTreeNode::find_instance_view(PhysicalManager *manager,
-                                                     InnerContext *context) 
-    //--------------------------------------------------------------------------
-    {
-      std::pair<PhysicalManager*,UniqueID> key(manager, 
-                                                  context->get_context_uid());
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*>::
-        tracked::const_iterator finder = instance_views.find(key);
-      if (finder != instance_views.end())
-        return finder->second;
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeNode::register_physical_manager(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      if (physical_managers.find(manager->did) != physical_managers.end())
-        return false;
-      physical_managers[manager->did] = manager;
-      return true;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::unregister_physical_manager(PhysicalManager *manager)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-      physical_managers.erase(manager->did);
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* RegionTreeNode::find_manager(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock,1,false/*exclusive*/);
-      LegionMap<DistributedID,PhysicalManager*,
-                PHYSICAL_MANAGER_ALLOC>::tracked::const_iterator finder = 
-                  physical_managers.find(did);
-#ifdef DEBUG_LEGION
-      assert(finder != physical_managers.end());
-#endif
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::register_tracking_context(InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(tracking_contexts.find(context) == tracking_contexts.end());
-#endif
-      tracking_contexts.insert(context);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::unregister_tracking_context(InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock n_lock(node_lock);
-#ifdef DEBUG_LEGION
-      assert(tracking_contexts.find(context) != tracking_contexts.end());
-#endif
-      tracking_contexts.erase(context);
-    }
-
     //--------------------------------------------------------------------------
     template<AllocationType ALLOC, bool RECORD, bool HAS_SKIP, bool TRACK_DOM>
     /*static*/ FieldMask RegionTreeNode::perform_dependence_checks(
@@ -15206,476 +14571,8 @@ namespace Legion {
                         unique_partitions.begin(), unique_partitions.end());
     }
 
-#if 0
     //--------------------------------------------------------------------------
-    void RegionNode::premap_region(ContextID ctx,
-                                   const RegionRequirement &req,
-                                   const FieldMask &valid_mask,
-                                   VersionInfo &version_info, 
-                                   InstanceSet &targets)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_PREMAP_REGION_CALL);
-      PhysicalState *state = get_physical_state(version_info);
-      if (!IS_REDUCE(req))
-      {
-        pull_valid_instance_views(ctx, state, 
-            valid_mask, true/*needs space*/, version_info);
-#ifdef DEBUG_LEGION
-        // Useful for checking premapping of actual regions
-        std::vector<LogicalRegion> to_check(1, req.handle_type != 
-            PART_PROJECTION ? req.region : LogicalRegion::NO_REGION);
-#endif
-        // Record the instances and the fields for which they are valid 
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it =
-              state->valid_views.begin(); it != state->valid_views.end();it++)
-        {
-          // Skip any deferred views, they don't actually count here
-          if (it->first->is_deferred_view())
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first->as_instance_view()->is_materialized_view());
-#endif
-          MaterializedView *cur_view = 
-            it->first->as_instance_view()->as_materialized_view();
-          // Check to see if it has space for any fields, if not we can skip it
-          FieldMask containing_fields = 
-           cur_view->manager->layout->allocated_fields & valid_mask;
-          if (!containing_fields)
-            continue;
-          // Now see if it has any valid fields already
-          FieldMask valid_fields = it->second & valid_mask;
-#ifdef DEBUG_LEGION
-          if (req.handle_type != PART_PROJECTION)
-            assert(cur_view->manager->meets_regions(to_check));
-#endif
-          // Save the reference
-          targets.add_instance(InstanceRef(cur_view->manager, valid_fields));
-        }
-      }
-      else
-      {
-        // See if there are any reduction instances that match locally
-        for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it =
-              state->reduction_views.begin(); it != 
-              state->reduction_views.end(); it++)
-        {
-          FieldMask overlap = it->second & valid_mask;
-          if (!overlap)
-            continue;
-          targets.add_instance(InstanceRef(it->first->manager, overlap));
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::register_region(const TraversalInfo &info,
-                                     UniqueID logical_ctx_uid,
-                                     InnerContext *context,
-                                     RestrictInfo &restrict_info,
-                                   ApEvent term_event, const RegionUsage &usage,
-                                     bool defer_add_users, InstanceSet &targets,
-                                     const ProjectionInfo *proj_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_REGISTER_REGION_CALL);
-      // If we're actually mapping this region requirement and its a write
-      // then we have to advance the version numbers because we didn't
-      // do it before when we were unsure of whether we were going to 
-      // virtual map the requirement or not. Note we are guaranteed
-      // by the logical analysis that this is safe to do without any
-      // kind of synchronization.
-      VersionManager &manager = get_current_version_manager(info.ctx);
-      if (IS_WRITE(usage))
-      {
-        // We update the parent state if we are not the top-level node
-        const bool update_parent_state = 
-          !info.version_info.is_upper_bound_node(this);
-        manager.advance_versions(info.traversal_mask, logical_ctx_uid, context,
-            update_parent_state, info.map_applied_events,
-            false/*dedup opens*/, 0/*epoch*/, false/*dedup advances*/, 
-            0/*epoch*/, NULL/*dirty previous*/, proj_info);
-      }
-      // Sine we're mapping we need to record the advance versions
-      // where we'll put the results when we're done
-      manager.record_advance_versions(info.traversal_mask, context,
-                                    info.version_info, info.map_applied_events);
-      PhysicalState *state = get_physical_state(info.version_info);
-      const AddressSpaceID local_space = context->runtime->address_space;
-#ifdef DEBUG_LEGION
-      for (unsigned idx = 0; idx < targets.size(); idx++)
-      {
-        const InstanceRef &ref = targets[idx];
-        const FieldMask &valid_fields = ref.get_valid_fields();
-        assert(unsigned(FieldMask::pop_count(valid_fields)) <= 
-                              info.req.privilege_fields.size());
-      }
-#endif
-      if (info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(info.tpl != NULL && info.tpl->is_recording());
-#endif
-        info.tpl->record_summary_info(info.req, targets,
-            info.op->find_parent_index(info.index));
-      }
-      if (IS_REDUCE(info.req))
-      {
-        // Reduction only case
-        // Get any restricted fields
-        FieldMask restricted_fields;
-        InstanceSet restricted_instances;
-        std::vector<InstanceView*> restricted_views;
-        if (restrict_info.has_restrictions())
-        {
-          restrict_info.populate_restrict_fields(restricted_fields);
-          restricted_instances = restrict_info.get_instances();
-          restricted_views.resize(restricted_instances.size());
-          convert_target_views(restricted_instances, context,
-                               restricted_views);
-        }
-        std::vector<InstanceView*> new_views;
-        new_views.resize(targets.size());
-
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-          assert(!ref.is_virtual_ref());
-#endif
-          LogicalView *view = convert_reference(ref, context);
-#ifdef DEBUG_LEGION
-          assert(view->is_instance_view());
-          assert(view->as_instance_view()->is_reduction_view());
-#endif
-          new_views[idx] = view->as_instance_view();
-        }
-        LegionMap<ReductionView*,FieldMask>::aligned reduce_out_views;
-        for (unsigned idx = 0; idx < targets.size(); idx++)
-        {
-          InstanceRef &ref = targets[idx];
-          ReductionView *new_view = new_views[idx]->as_reduction_view();
-          const FieldMask &user_mask = ref.get_valid_fields(); 
-          // Only add reductions which are not restricted
-          if (!!restricted_fields)
-          {
-            FieldMask unrestricted = user_mask - restricted_fields;
-            if (!!unrestricted)
-              update_reduction_views(state, unrestricted, new_view);
-          }
-          else // the normal path here
-            update_reduction_views(state, user_mask, new_view);
-          // Skip adding the user if requested
-          if (defer_add_users)
-            continue;
-          if (targets.size() > 1)
-          {
-            // Only find the preconditions now 
-            ApEvent ready = new_view->find_user_precondition(usage, term_event,
-                             user_mask, info.op, info.index, 
-                             &info.version_info, info.map_applied_events, info);
-            if (info.recording)
-            {
-#ifdef DEBUG_LEGION
-              assert(info.tpl != NULL && info.tpl->is_recording());
-              assert(info.logical_ctx != -1U);
-#endif
-              info.tpl->record_set_ready_event(info.op, info.index, idx,
-                                               ready, info.req, this,
-                                               new_view, user_mask,
-                                               info.logical_ctx,
-                                               info.ctx);
-            }
-            ref.set_ready_event(ready);
-            new_views[idx] = new_view;
-          }
-          else
-          {
-            // Do the fused find preconditions and add user
-            ApEvent ready = new_view->add_user_fused(usage,term_event,user_mask,
-                                   info.op, info.index,&info.version_info,
-                                   local_space, info.map_applied_events, info);
-            if (info.recording)
-            {
-#ifdef DEBUG_LEGION
-              assert(info.tpl != NULL && info.tpl->is_recording());
-              assert(info.logical_ctx != -1U);
-#endif
-              info.tpl->record_set_ready_event(info.op, info.index, idx,
-                                               ready, info.req, this,
-                                               new_view, user_mask,
-                                               info.logical_ctx, info.ctx);
-            }
-            ref.set_ready_event(ready);
-          }
-          if (!defer_add_users && !!restricted_fields)
-          {
-            FieldMask restricted = restricted_fields & user_mask;
-              if (!!restricted)
-                reduce_out_views[new_view] = restricted;
-          }
-        }
-        if (!defer_add_users && (targets.size() > 1))
-        {
-          // Second pass of the two pass approach, add our users
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            InstanceRef &ref = targets[idx]; 
-            new_views[idx]->add_user(usage, term_event,
-                                     ref.get_valid_fields(),
-                                     info.op, info.index, local_space,
-                                     &info.version_info,
-                                     info.map_applied_events, info);
-          }
-        }
-        if (!reduce_out_views.empty())
-          issue_restricted_reductions(info, restrict_info,
-                                      restricted_instances,
-                                      restricted_views, reduce_out_views);
-        // If we have any restricted instances, we can now update the state
-        // to reflect that they are going to be the valid instances
-        if (!!restricted_fields)
-        {
-          for (unsigned idx = 0; idx < restricted_views.size(); idx++)
-          {
-            const FieldMask valid_mask = 
-               restricted_instances[idx].get_valid_fields() & restricted_fields;
-            if (restricted_views[idx]->is_reduction_view())
-            {
-              ReductionView *restricted_view = 
-                restricted_views[idx]->as_reduction_view();
-              update_reduction_views(state, valid_mask, restricted_view);
-            }
-            else
-              update_valid_views(state, valid_mask, true/*dirty*/, 
-                                 restricted_views[idx]);
-          }
-        }
-      }
-      else
-      {
-        // Normal instances
-        // Get any restricted fields
-        FieldMask restricted_fields;
-        InstanceSet restricted_instances;
-        std::vector<MaterializedView*> restricted_views;
-        if (restrict_info.has_restrictions())
-        {
-          restrict_info.populate_restrict_fields(restricted_fields);
-          // We only need to get these things if we are not read-only
-          if (!IS_READ_ONLY(info.req))
-          {
-            restricted_instances = restrict_info.get_instances();
-            restricted_views.resize(restricted_instances.size());
-            convert_target_views(restricted_instances, context,
-                                 restricted_views);
-          }
-        }
-        std::vector<InstanceView*> new_views(targets.size());
-        convert_target_views(targets, context, new_views);
-        if (!HAS_WRITE_DISCARD(info.req))
-        {
-          // Any case but write-only
-          // All close operations have already been done, so all
-          // we need to do is bring our instances up to date for
-          // any of their missing fields, and then register our views
-
-          // Finding the valid views is expensive so hold off doing
-          // it at first, but as soon as we need it for any instance
-          // then do it for all of them and remember the result.
-          LegionMap<LogicalView*,FieldMask>::aligned valid_views;
-          bool has_valid_views = false;
-          for (unsigned idx = 0; idx < targets.size(); idx++)
-          {
-            const InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-            assert(!ref.is_virtual_ref());
-            assert(new_views[idx]->is_instance_view());
-            assert(new_views[idx]->as_instance_view()->is_materialized_view());
-#endif
-            const FieldMask &valid_fields = ref.get_valid_fields();
-            MaterializedView *view = 
-              new_views[idx]->as_instance_view()->as_materialized_view();
-
-            // See if this instance is valid already 
-            LegionMap<LogicalView*,FieldMask>::aligned::const_iterator
-              finder = state->valid_views.find(view);
-            if (finder != state->valid_views.end())
-            {
-              // See which fields if any we actually need to update
-              FieldMask needed_fields = valid_fields - finder->second;
-              if (!!needed_fields)
-              {
-                if (!has_valid_views)
-                {
-                  find_valid_instance_views(info.ctx, state, 
-                      info.traversal_mask, info.traversal_mask, 
-                      info.version_info, false/*needs space*/, valid_views);
-                  has_valid_views = true;
-                }
-                issue_update_copies(info, view, needed_fields, 
-                                    valid_views, restrict_info);
-              }
-            }
-            else
-            {
-              // Not valid for any fields, so bring it up to date for all fields
-              if (!has_valid_views)
-              {
-                find_valid_instance_views(info.ctx, state,
-                    info.traversal_mask, info.traversal_mask,
-                    info.version_info, false/*needs space*/, valid_views);
-                has_valid_views = true;
-              }
-              issue_update_copies(info, view, valid_fields, 
-                                  valid_views, restrict_info);
-            }
-            // Finally add this to the set of valid views for the state
-            if (!!restricted_fields)
-            {
-              // We can only update instances which aren't restricted
-              FieldMask unrestricted = valid_fields - restricted_fields;
-              if (!!unrestricted)
-                update_valid_views(state, unrestricted,
-                                   !IS_READ_ONLY(info.req)/*dirty*/, view);
-            }
-            else // The normal path
-              update_valid_views(state, valid_fields, 
-                                 !IS_READ_ONLY(info.req)/*dirty*/, view); 
-          }
-        }
-        else
-        {
-          // Write-only case
-          // Remove any overlapping reducitons
-          if (!(info.traversal_mask * state->reduction_mask))
-            invalidate_reduction_views(state, info.traversal_mask);
-          // This is write-only so update the valid views on the
-          // state with the new instance views while invalidating
-          // any old instances with views that interfere with the
-          // dirty mask
-          if (!!restricted_fields)
-          {
-            // If we have restricted fields, we have to update them
-            // one by one to make sure that we only add instances
-            // which aren't restricted
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              const InstanceRef &ref = targets[idx];
-              FieldMask unrestricted = 
-                ref.get_valid_fields() - restricted_fields;
-              if (!!unrestricted)
-                update_valid_views(state, unrestricted,
-                                   true/*dirty*/, new_views[idx]); 
-            }
-          }
-          else // The normal path
-            update_valid_views(state, info.traversal_mask, 
-                               new_views, targets);
-        }
-        // Finally we have to update our instance references
-        // to get the ready events
-        if (!defer_add_users)
-        {
-          // If there is exactly one instance, then we can do
-          // the fused analysis and register user, otherwise we
-          // have to make two passes in order to avoid event cycles 
-          LegionMap<LogicalView*,FieldMask>::aligned copy_out_views;
-          if (targets.size() == 1)
-          {
-            InstanceRef &ref = targets[0];
-#ifdef DEBUG_LEGION
-            assert(!ref.is_virtual_ref());
-            assert(new_views[0]->is_instance_view());
-#endif
-            ApEvent ready = new_views[0]->as_instance_view()->add_user_fused(
-                usage, term_event, ref.get_valid_fields(), info.op, info.index,
-                &info.version_info, local_space, info.map_applied_events, info);
-            if (info.recording)
-            {
-#ifdef DEBUG_LEGION
-              assert(info.tpl != NULL && info.tpl->is_recording());
-              assert(info.logical_ctx != -1U);
-#endif
-              info.tpl->record_set_ready_event(info.op,
-                                               info.index, 0, ready,
-                                               info.req, this,
-                                               new_views[0],
-                                               ref.get_valid_fields(),
-                                               info.logical_ctx,
-                                               info.ctx);
-            }
-            ref.set_ready_event(ready);
-            if (!!restricted_fields && !IS_READ_ONLY(info.req))
-            {
-              FieldMask restricted = ref.get_valid_fields() & restricted_fields;
-              if (!!restricted)
-                copy_out_views[new_views[0]] = restricted;
-            }
-          }
-          else
-          {
-            // Two pass approach to avoid event cycles 
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              InstanceRef &ref = targets[idx];
-#ifdef DEBUG_LEGION
-              assert(!ref.is_virtual_ref());
-              assert(new_views[idx]->is_instance_view());
-#endif
-              ApEvent ready = 
-                new_views[idx]->as_instance_view()->find_user_precondition(
-                    usage, term_event, ref.get_valid_fields(), info.op, 
-                    info.index,&info.version_info,info.map_applied_events,info);
-              if (info.recording)
-              {
-#ifdef DEBUG_LEGION
-                assert(info.tpl != NULL && info.tpl->is_recording());
-                assert(info.logical_ctx != -1U);
-#endif
-                info.tpl->record_set_ready_event(info.op, info.index, idx,
-                                                 ready, info.req,
-                                                 this,
-                                                 new_views[idx],
-                                                 ref.get_valid_fields(),
-                                                 info.logical_ctx,
-                                                 info.ctx);
-              }
-              ref.set_ready_event(ready);
-            }
-            const bool restricted_out = 
-              !!restricted_fields && !IS_READ_ONLY(info.req);
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              InstanceRef &ref = targets[idx];
-              new_views[idx]->as_instance_view()->add_user(usage, term_event,
-                 ref.get_valid_fields(), info.op, info.index, 
-                 local_space, &info.version_info,info.map_applied_events, info);
-              if (restricted_out)
-              {
-                FieldMask restricted = 
-                  ref.get_valid_fields() & restricted_fields;
-                if (!!restricted)
-                  copy_out_views[new_views[idx]] = restricted;
-              }
-            }
-          }
-          // If we have to do any copy out operations, then we do that now
-          if (!copy_out_views.empty())
-            issue_restricted_copies(info, restrict_info, restricted_instances, 
-                                    restricted_views, copy_out_views);
-        }
-        // If we have any restricted instances, we can now update the state
-        // to reflect that they are going to be the valid instances
-        if (!!restricted_fields && !IS_READ_ONLY(info.req))
-          update_valid_views(state, restricted_fields, 
-                             restricted_views, restricted_instances);
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void RegionNode::seed_state(ContextID ctx, ApEvent term_event,
+    void RegionNode::initialize_state(ContextID ctx, ApEvent term_event,
                                 const RegionUsage &usage,
                                 const FieldMask &user_mask,
                                 const InstanceSet &targets,
@@ -15687,335 +14584,6 @@ namespace Legion {
       get_current_version_manager(ctx).initialize_state(term_event, usage, 
         user_mask, targets, context, init_index, corresponding, applied_events);
     } 
-
-    //--------------------------------------------------------------------------
-    void RegionNode::close_state(const TraversalInfo &info, RegionUsage &usage, 
-                                 UniqueID logical_ctx_uid,InnerContext *context,
-                                 InstanceSet &targets) 
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REGION_NODE_CLOSE_STATE_CALL);
-#ifdef DEBUG_LEGION
-      assert(!IS_REDUCE(info.req));
-#endif
-      // All we should actually have to do here is just register
-      // our region because any actualy close operations that would
-      // need to be done would have been issued as part of the 
-      // logical analysis or will be done as part of the registration.
-      RestrictInfo empty_restrict_info;
-      register_region(info, logical_ctx_uid, context, empty_restrict_info, 
-                      ApEvent::NO_AP_EVENT, usage, false/*defer add users*/, 
-                      targets, NULL/*no advance close projection info*/);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void RegionNode::fill_fields(ContextID ctx, const FieldMask &fill_mask,
-                                 const void *value, size_t value_size,
-                                 UniqueID logical_ctx_uid,
-                                 InnerContext *inner_context,
-                                 VersionInfo &version_info,
-                                 std::set<RtEvent> &map_applied_events,
-                                 PredEvent true_guard, PredEvent false_guard,
-                                 const PhysicalTraceInfo &trace_info
-#ifdef LEGION_SPY
-                                 , UniqueID fill_op_uid
-#endif
-                                 )
-    //--------------------------------------------------------------------------
-    {
-      // A fill is a kind of a write, so we have to do the advance
-      // of the version information same as if we had mapped this region
-      VersionManager &manager = get_current_version_manager(ctx);
-      const bool update_parent_state = 
-        !version_info.is_upper_bound_node(this);
-      const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, logical_ctx_uid, inner_context,
-                               update_parent_state, map_applied_events);
-      // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, inner_context, 
-                                      version_info, map_applied_events);
-      // Make the fill instance
-      DistributedID did = context->runtime->get_available_distributed_id();
-      FillView::FillViewValue *fill_value = 
-        new FillView::FillViewValue(value, value_size);
-      FillView *fill_view = 
-        new FillView(context, did, local_space,
-                     this, fill_value, true/*register now*/
-#ifdef LEGION_SPY
-                     , fill_op_uid
-#endif
-                     );
-      if (trace_info.recording)
-        trace_info.tpl->record_fill_view(fill_view, fill_mask);
-
-      // Now update the physical state
-      PhysicalState *state = get_physical_state(version_info);
-      if (true_guard.exists())
-      {
-        // Special path for handling speculative execution of predicated fills
-#ifdef DEBUG_LEGION
-        assert(false_guard.exists());
-#endif
-        // Build a phi view and register that instead
-        DistributedID did = 
-          context->runtime->get_available_distributed_id();
-        // Copy the version info that we need
-        DeferredVersionInfo *view_info = new DeferredVersionInfo();
-        version_info.copy_to(*view_info); 
-        PhiView *phi_view = new PhiView(context, did, local_space,
-                                        view_info, this, true_guard, 
-                                        false_guard, inner_context,
-                                        true/*register now*/);
-        // Record the true and false views
-        phi_view->record_true_view(fill_view, fill_mask);
-        LegionMap<LogicalView*,FieldMask>::aligned current_views;
-        find_valid_instance_views(ctx, state, fill_mask, fill_mask,
-                                  version_info, false/*needs space*/, 
-                                  current_views);
-        for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-              current_views.begin(); it != current_views.end(); it++)
-          phi_view->record_false_view(it->first, it->second);
-        // Update the state with the phi view
-        update_valid_views(state, fill_mask, true/*dirty*/, phi_view);
-      }
-      else
-      {
-        // This is the non-predicated path
-        // Invalidate any reduction views
-        if (!(fill_mask * state->reduction_mask))
-          invalidate_reduction_views(state, fill_mask);
-        update_valid_views(state, fill_mask, true/*dirty*/, fill_view);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionNode::eager_fill_fields(ContextID ctx, Operation *op,
-                                          const unsigned index, 
-                                          UniqueID logical_ctx_uid,
-                                          InnerContext *context,
-                                          const FieldMask &fill_mask,
-                                          const void *value, size_t value_size,
-                                          VersionInfo &version_info, 
-                                          InstanceSet &instances,
-                                          ApEvent sync_precondition,
-                                          PredEvent true_guard,
-                                          std::set<RtEvent> &map_applied_events,
-                                          const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // A fill is a kind of a write, so we have to do the advance
-      // of the version information same as if we had mapped this region
-      VersionManager &manager = get_current_version_manager(ctx);
-      const bool update_parent_state = 
-        !version_info.is_upper_bound_node(this);
-      const AddressSpaceID local_space = context->runtime->address_space;
-      manager.advance_versions(fill_mask, logical_ctx_uid, context,
-                               update_parent_state, map_applied_events);
-      // Now record just the advanced versions
-      manager.record_advance_versions(fill_mask, context, 
-                                      version_info, map_applied_events);
-      // Effectively a fill is a special kind of copy so we can analyze
-      // it the same way to figure out how to issue the fill
-      std::set<ApEvent> post_events;
-      std::vector<InstanceView*> target_views(instances.size(), NULL);
-      convert_target_views(instances, context, target_views);
-      IndexSpaceExpression *fill_expr = get_index_space_expression();
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-      {
-        InstanceView *target = target_views[idx];
-        LegionMap<ApEvent,FieldMask>::aligned preconditions;
-        target->find_copy_preconditions(0/*redop*/, false/*reading*/, 
-                          true/*single copy*/, true/*restrict out*/, fill_mask,
-                          fill_expr, &version_info, op->get_unique_op_id(), 
-                          index, local_space, preconditions,
-                          map_applied_events, trace_info);
-        if (sync_precondition.exists())
-          preconditions[sync_precondition] = fill_mask;
-        // Sort the preconditions into event sets
-        LegionList<FieldSet<ApEvent> >::aligned event_sets;
-        compute_field_sets<ApEvent>(fill_mask, preconditions, event_sets);
-        // Iterate over the event sets and issue the fill operations on 
-        // the different fields
-        for (LegionList<FieldSet<ApEvent> >::aligned::iterator pit = 
-              event_sets.begin(); pit != event_sets.end(); pit++)
-        {
-          // If we have a predicate guard we add that to the set now
-          ApEvent precondition = 
-            Runtime::merge_events(&trace_info, pit->elements);
-          std::vector<CopySrcDstField> dst_fields;
-          target->copy_to(pit->set_mask, dst_fields);
-          ApEvent fill_event = issue_fill(&trace_info, dst_fields, value, 
-                                          value_size, precondition, true_guard
-#ifdef LEGION_SPY
-                                          , op->get_unique_op_id() 
-#endif
-                                          );
-          if (fill_event.exists())
-            post_events.insert(fill_event);
-        }
-        // Add user to make record when everyone is done writing
-        target->add_copy_user(0/*redop*/, op->get_completion_event(), 
-                              &version_info, fill_expr, op->get_unique_op_id(),
-                              index, fill_mask, false/*reading*/,
-                              true/*restrict out*/, local_space, 
-                              map_applied_events, trace_info);
-      }
-      // Finally do the update to the physical state like a normal fill
-      PhysicalState *state = get_physical_state(version_info);
-      // Invalidate any reduction views
-      if (!(fill_mask * state->reduction_mask))
-        invalidate_reduction_views(state, fill_mask);
-      update_valid_views(state, fill_mask, target_views, instances);
-      // Return the merge of all the post events
-      return Runtime::merge_events(&trace_info, post_events);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceRef RegionNode::attach_external(ContextID ctx, 
-                                          InnerContext *parent_ctx, 
-                                          const UniqueID logical_ctx_uid,
-                                          const FieldMask &attach_mask,
-                                          const RegionRequirement &req,
-                                          InstanceManager *instance_manager,
-                                          VersionInfo &version_info,
-                                          std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // We're effectively writing to this region by doing the attach
-      // so we need to bump the version numbers
-      VersionManager &manager = get_current_version_manager(ctx);
-      const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      manager.advance_versions(attach_mask, logical_ctx_uid, parent_ctx,
-                               update_parent_state, map_applied_events);
-      // Wrap it in a view
-      MaterializedView *view = 
-        parent_ctx->create_instance_top_view(instance_manager, 
-            context->runtime->address_space)->as_materialized_view();
-#ifdef DEBUG_LEGION
-      assert(view != NULL);
-#endif
-      // Update the physical state with the new instance
-      PhysicalState *state = get_physical_state(version_info);
-      // We need to invalidate all other instances for these fields since
-      // we are now making this the only valid copy of the data
-      update_valid_views(state, attach_mask, true/*dirty*/, view);
-      // Return the resulting instance
-      return InstanceRef(instance_manager,attach_mask,ApUserEvent::NO_AP_EVENT);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_external(ContextID ctx, InnerContext *context, 
-                                        const UniqueID logical_ctx_uid,  
-                                        VersionInfo &version_info, 
-                                        const InstanceRef &ref,
-                                        std::set<RtEvent> &map_applied_events)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView *view = convert_reference(ref, context);
-#ifdef DEBUG_LEGION
-      assert(view->is_materialized_view());
-#endif
-      MaterializedView *detach_view = view->as_materialized_view();
-      const FieldMask &detach_mask = 
-        detach_view->manager->layout->allocated_fields;
-      // A detach is also effectively a bumb of the version numbers because
-      // we are marking that the data in the logical region is no longer valid
-      VersionManager &manager = get_current_version_manager(ctx);
-      const bool update_parent_state = !version_info.is_upper_bound_node(this);
-      manager.advance_versions(detach_mask, logical_ctx_uid, context,
-                               update_parent_state, map_applied_events);
-      // First remove this view from the set of valid views
-      PhysicalState *state = get_physical_state(version_info);
-      filter_valid_views(state, detach_view);
-      return ApEvent::NO_AP_EVENT;
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    InstanceView* RegionNode::find_context_view(PhysicalManager *manager,
-                                                InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      return convert_reference_region(manager, context);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* RegionNode::convert_reference_region(PhysicalManager *manager,
-                                                       InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView *result = find_instance_view(manager, context);
-      if (result != NULL)
-        return result;
-      if (manager->region_node == this)
-        result = context->create_instance_top_view(manager,
-                                              context->runtime->address_space);
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(parent != NULL);
-#endif
-        InstanceView *parent_view = 
-          parent->convert_reference_partition(manager, context);
-        result = parent_view->get_instance_subview(row_source->color);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::convert_references_region(
-                              const std::vector<PhysicalManager*> &managers,
-                              std::vector<bool> &up_mask, InnerContext *context,
-                              std::vector<InstanceView*> &results)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(managers.size() == up_mask.size());
-#endif
-      // See which ones are still good here
-      std::vector<unsigned> up_indexes;
-      for (unsigned idx = 0; idx < managers.size(); idx++)
-      {
-        if (!up_mask[idx]) // skip any that are no longer valid
-          continue;
-        // Check to see if we already have it
-        PhysicalManager *manager = managers[idx];
-        results[idx] = find_instance_view(manager, context);
-        // If we've got it we are done with it
-        if (results[idx] != NULL)
-        {
-          // Mark that it is done
-          up_mask[idx] = false;
-          continue;
-        }
-        if (manager->region_node == this)
-        {
-          results[idx] = 
-            context->create_instance_top_view(manager, 
-                      context->runtime->address_space);
-          // Mark that it is done
-          up_mask[idx] = false;
-        }
-        else
-          up_indexes.push_back(idx);
-      }
-      // See if we have to keep going up
-      if (!up_indexes.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(parent != NULL);
-#endif
-        parent->convert_references_partition(managers, up_mask, 
-                                             context, results);
-        for (unsigned idx = 0; idx < up_indexes.size(); idx++)
-        {
-          unsigned index = up_indexes[idx];
-          InstanceView *parent_view = results[index];
-          results[index] = parent_view->get_instance_subview(row_source->color);
-        }
-      }
-    }
 
     //--------------------------------------------------------------------------
     void RegionNode::send_semantic_request(AddressSpaceID target,
@@ -16889,70 +15457,6 @@ namespace Legion {
       }
       if (send_deletion)
         context->runtime->send_logical_partition_destruction(handle, target);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* PartitionNode::find_context_view(PhysicalManager *manager,
-                                                   InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      return convert_reference_partition(manager, context);
-    }
-
-    //--------------------------------------------------------------------------
-    InstanceView* PartitionNode::convert_reference_partition(
-                                PhysicalManager *manager, InnerContext *context)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView *result = find_instance_view(manager, context);
-      if (result != NULL)
-        return result;
-      // No need to bother with the check here to see if we've arrived
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      InstanceView *parent_view = 
-        parent->convert_reference_region(manager, context);
-      result = parent_view->get_instance_subview(row_source->color);
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    void PartitionNode::convert_references_partition(
-                              const std::vector<PhysicalManager*> &managers,
-                              std::vector<bool> &up_mask, InnerContext *context,
-                              std::vector<InstanceView*> &results)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-      assert(managers.size() == up_mask.size());
-#endif
-      // See which ones are still good here
-      std::vector<unsigned> up_indexes;
-      for (unsigned idx = 0; idx < managers.size(); idx++)
-      {
-        if (!up_mask[idx])
-          continue;
-        PhysicalManager *manager = managers[idx];
-        results[idx] = find_instance_view(manager, context);
-        if (results[idx] != NULL)
-        {
-          up_mask[idx] = false;
-          continue;
-        }
-        up_indexes.push_back(idx);
-      }
-      if (!up_indexes.empty())
-      {
-        parent->convert_references_region(managers, up_mask, context, results);
-        for (unsigned idx = 0; idx < up_indexes.size(); idx++)
-        {
-          unsigned index = up_indexes[idx];
-          InstanceView *parent_view = results[index];
-          results[index] = parent_view->get_instance_subview(row_source->color);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------

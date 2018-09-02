@@ -219,7 +219,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      logical_node->register_instance_view(manager, owner_context, this);
       // If we are either not a parent or we are a remote parent add 
       // a resource reference to avoid being collected
       if (parent != NULL)
@@ -247,8 +246,6 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      // Always unregister ourselves with the region tree node
-      logical_node->unregister_instance_view(manager, owner_context);
       for (std::map<LegionColor,MaterializedView*>::const_iterator it = 
             children.begin(); it != children.end(); it++)
       {
@@ -8406,7 +8403,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      logical_node->register_instance_view(manager, owner_context, this);
       manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Reduction View %lld %d %lld", 
@@ -8428,8 +8424,6 @@ namespace Legion {
     ReductionView::~ReductionView(void)
     //--------------------------------------------------------------------------
     {
-      // Always unregister ourselves with the region tree node
-      logical_node->unregister_instance_view(manager, owner_context);
       if (manager->remove_nested_resource_ref(did))
       {
         if (manager->is_list_manager())
@@ -8459,6 +8453,13 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    PhysicalManager* ReductionView::get_manager(void) const
+    //--------------------------------------------------------------------------
+    {
+      return manager;
     }
 
 #if 0
@@ -8596,14 +8597,7 @@ namespace Legion {
                     true/*reading*/, false/*restrict out*/,
                     local_space, map_applied_events, trace_info);
       return reduce_post;
-    }
-
-    //--------------------------------------------------------------------------
-    PhysicalManager* ReductionView::get_manager(void) const
-    //--------------------------------------------------------------------------
-    {
-      return manager;
-    }
+    } 
 
     //--------------------------------------------------------------------------
     LogicalView* ReductionView::get_subview(const LegionColor c)

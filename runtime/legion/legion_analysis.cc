@@ -163,7 +163,7 @@ namespace Legion {
       : PhysicalTraceInfo(i), ctx(c), index(idx), req(r), 
         version_info(info), traversal_mask(k), 
         context_uid(i.op->get_context()->get_context_uid()),
-        map_applied_events(e), logical_ctx(-1U)
+        map_applied_events(e)
     //--------------------------------------------------------------------------
     {
     }
@@ -706,7 +706,10 @@ namespace Legion {
     VersionInfo::~VersionInfo(void)
     //--------------------------------------------------------------------------
     {
-      clear();
+#ifdef DEBUG_LEGION
+      assert(!mapped_event.exists());
+      assert(equivalence_sets.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -719,44 +722,69 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::record_equivalence_set(EquivalenceSet *set)
+    void VersionInfo::initialize_mapping(RtEvent mapped)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!mapped_event.exists());
+#endif
+      mapped_event = mapped;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::record_equivalence_set(EquivalenceSet *set,bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION 
+      assert(mapped_event.exists());
+#endif
       std::pair<std::set<EquivalenceSet*>::iterator,bool> result = 
         equivalence_sets.insert(set);
       // If we added this element then need to add a reference to it
       if (result.second)
+      {
         set->add_base_resource_ref(VERSION_INFO_REF);
+        set->add_mapping_guard(mapped_event, need_lock);
+      }
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::make_ready(const RegionUsage &usage, 
+    void VersionInfo::make_ready(const RegionRequirement &req, 
                                  const FieldMask &ready_mask,
                                  std::set<RtEvent> &ready_events,
                                  std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(mapped_event.exists());
+#endif
       // We only need an exclusive mode for this operation if we're 
       // writing otherwise, we know we can do things with a shared copy
-      const bool exclusive = IS_WRITE(usage);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->request_valid_copy(ready_mask, exclusive, 
+        (*it)->request_valid_copy(ready_mask, RegionUsage(req), 
                                   ready_events, applied_events);
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::clear(void)
+    void VersionInfo::finalize_mapping(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(mapped_event.exists());
+#endif
       if (!equivalence_sets.empty())
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
+          (*it)->remove_mapping_guard(mapped_event);
           if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
             delete (*it);
+        }
         equivalence_sets.clear();
       }
+      mapped_event = RtEvent::NO_RT_EVENT;
     }
 
     /////////////////////////////////////////////////////////////
@@ -3096,7 +3124,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
                  AddressSpaceID owner, IndexSpaceExpression *expr, bool reg_now)
-      : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr)
+      : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
+        eq_lock(gc_lock), eq_state(is_owner() ? MAPPING_STATE : INVALID_STATE),
+        unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -3104,7 +3134,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
-      : DistributedCollectable(rhs), set_expr(NULL)
+      : DistributedCollectable(rhs), set_expr(NULL), eq_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3117,6 +3147,14 @@ namespace Legion {
     {
       if (set_expr->remove_expression_reference())
         delete set_expr;
+      if (!subsets.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets.begin(); it != subsets.end(); it++)
+          if ((*it)->remove_nested_resource_ref(did))
+            delete (*it);
+        subsets.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3129,6 +3167,584 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::RefinementThunk::RefinementThunk(IndexSpaceExpression *exp,
+                                     EquivalenceSet *own, AddressSpaceID source)
+      : owner(own), expr(exp), refinement(NULL)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = owner->runtime;
+      // If we're not the owner send a request to make the refinement set
+      if (source != runtime->address_space)
+      {
+        refinement_ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(this);
+          expr->pack_expression(rez, source);
+        }
+        runtime->send_equivalence_set_create_remote_request(source, rez);
+      }
+      else
+      {
+        // We're the owner so we can make the refinement set now
+        DistributedID did = runtime->get_available_distributed_id();
+        refinement = new EquivalenceSet(runtime, did, source, 
+                                        expr, true/*register*/);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* EquivalenceSet::RefinementThunk::perform_refinement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (refinement_ready.exists() && !refinement_ready.has_triggered())
+        refinement_ready.wait();
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      refinement->clone_from(owner);
+      return refinement;
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet* EquivalenceSet::RefinementThunk::get_refinement(void)
+    //--------------------------------------------------------------------------
+    {
+      if (refinement_ready.exists() && !refinement_ready.has_triggered())
+        refinement_ready.wait();
+#ifdef DEBUG_LEGION
+      assert(refinement != NULL);
+#endif
+      return refinement;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::RefinementThunk::record_refinement(
+                                          EquivalenceSet *result, RtEvent ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(refinement == NULL);
+      assert(refinement_ready.exists());
+      assert(!refinement_ready.has_triggered());
+#endif
+      refinement = result;
+      Runtime::trigger_event(refinement_ready, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::LocalRefinement::LocalRefinement(IndexSpaceExpression *expr, 
+                                                     EquivalenceSet *owner) 
+      : RefinementThunk(expr, owner, owner->runtime->address_space)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::RemoteComplete::RemoteComplete(IndexSpaceExpression *expr, 
+                                   EquivalenceSet *owner, AddressSpaceID source)
+      : RefinementThunk(expr, owner, source), target(source)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    EquivalenceSet::RemoteComplete::~RemoteComplete(void)
+    //--------------------------------------------------------------------------
+    {
+      // We already hold the lock from the caller
+      owner->process_subset_request(target, false/*need lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::add_mapping_guard(RtEvent mapped_event, bool need_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (need_lock)
+      {
+        AutoLock eq(eq_lock);
+        add_mapping_guard(mapped_event, false/*need lock*/);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert((eq_state == MAPPING_STATE) || 
+              (eq_state == PENDING_REFINEMENT_STATE) ||
+              (eq_state == PENDING_INVALID_STATE));
+      assert(subsets.empty()); // should not have any subsets at this point
+      assert(unrefined_remainder == NULL); // nor a remainder
+#endif
+      std::map<RtEvent,unsigned>::iterator finder = 
+        mapping_guards.find(mapped_event);
+      if (finder == mapping_guards.end())
+        mapping_guards[mapped_event] = 1;
+      else
+        finder->second++;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_mapping_guard(RtEvent mapped_event)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      std::map<RtEvent,unsigned>::iterator finder = 
+        mapping_guards.find(mapped_event);
+#ifdef DEBUG_LEGION
+      assert((eq_state == MAPPING_STATE) || 
+              (eq_state == PENDING_REFINEMENT_STATE) ||
+              (eq_state == PENDING_INVALID_STATE));
+      assert(finder != mapping_guards.end());
+      assert(finder->second > 0);
+#endif
+      finder->second--;
+      if (finder->second == 0)
+      {
+        mapping_guards.erase(finder);
+        if (mapping_guards.empty() && (eq_state != MAPPING_STATE))
+        {
+          if (is_owner())
+          {
+#ifdef DEBUG_LEGION
+            assert(eq_state == PENDING_REFINEMENT_STATE);
+#endif
+            eq_state = REFINEMENT_STATE;
+            // Kick off the refinement task now that we're transitioning
+            launch_refinement_task();
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(eq_state == PENDING_INVALID_STATE);
+#endif
+            eq_state = INVALID_STATE;
+          }
+#ifdef DEBUG_LEGION
+          assert(transition_event.exists());
+#endif
+          // Check to see if we have any valid meta-data that needs to be
+          // sent back to the owner node
+          if (!valid_instances.empty() || !reduction_instances.empty())
+          {
+            // TODO: Send back any valid data to the owner node
+
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(version_numbers.empty());
+#endif
+            // We don't have any valid data so we can just invalidate
+            // ourself by triggering the transition event
+            Runtime::trigger_event(transition_event);  
+          }
+          transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent EquivalenceSet::ray_trace_equivalence_sets(VersionManager *target,
+                                                     IndexSpaceExpression *expr,
+                                                     AddressSpaceID source) 
+    //--------------------------------------------------------------------------
+    {
+      // If this is not the owner node then send the request there
+      if (!is_owner())
+      {
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(target);
+          expr->pack_expression(rez, owner_space);
+          rez.serialize(source);
+          rez.serialize(done_event);
+        }
+        runtime->send_equivalence_set_ray_trace_request(owner_space, rez);
+        return done_event;
+      }
+#ifdef DEBUG_LEGION
+      assert(expr != NULL);
+#endif
+      // At this point we're on the owner
+      std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse;
+      std::map<RefinementThunk*,IndexSpaceExpression*> refinements_to_traverse;
+      RtEvent refinement_done;
+      {
+        RegionTreeForest *forest = runtime->forest;
+        AutoLock eq(eq_lock);
+        // Ray tracing can happen in parallel with mapping since it's a 
+        // read-only process with respect to the subsets, but it can't
+        // happen in parallel with any refinements
+        while ((eq_state == REFINEMENT_STATE) || 
+                (eq_state == PENDING_MAPPING_STATE))
+        {
+          if (eq_state == REFINEMENT_STATE)
+          {
+#ifdef DEBUG_LEGION
+            assert(!transition_event.exists());
+#endif
+            transition_event = Runtime::create_rt_user_event();
+            eq_state = PENDING_MAPPING_STATE;
+          }
+#ifdef DEBUG_LEGION
+          assert(transition_event.exists());
+#endif
+          RtEvent wait_on = transition_event;
+          eq.release();
+          wait_on.wait();
+          eq.reacquire();
+        }
+        // Two cases here, one where refinement has already begun and
+        // one where it is just starting
+        if (!subsets.empty() || !pending_refinements.empty())
+        {
+          // Iterate through all the subsets and find any overlapping ones
+          // that we need to traverse in order to do our subsets
+          bool is_empty = false;
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                subsets.begin(); it != subsets.end(); it++)
+          {
+            IndexSpaceExpression *overlap = 
+              forest->intersect_index_spaces((*it)->set_expr, expr);
+            if (overlap->is_empty())
+              continue;
+            to_traverse[*it] = overlap;
+            expr = forest->subtract_index_spaces(expr, overlap);
+            if ((expr == NULL) || expr->is_empty())
+            {
+              is_empty = true;
+              break;
+            }
+          }
+          for (std::vector<RefinementThunk*>::const_iterator it = 
+                pending_refinements.begin(); !is_empty && (it != 
+                pending_refinements.end()); it++)
+          {
+            IndexSpaceExpression *overlap = 
+              forest->intersect_index_spaces((*it)->expr, expr);
+            if (overlap->is_empty())
+              continue;
+            (*it)->add_reference();
+            refinements_to_traverse[*it] = overlap;
+            // If this is a pending refinement then we'll need to
+            // wait for it before traversing farther
+            if (!refinement_done.exists())
+            {
+#ifdef DEBUG_LEGION
+              assert(eq_state == PENDING_REFINEMENT_STATE);
+              assert(transition_event.exists());
+#endif
+              refinement_done = transition_event;
+            }
+            expr = forest->subtract_index_spaces(expr, overlap);
+            if ((expr == NULL) || expr->is_empty())
+              is_empty = true;
+          }
+          if (!is_empty)
+          {
+#ifdef DEBUG_LEGION
+            assert(unrefined_remainder != NULL);
+#endif
+            LocalRefinement *refinement = new LocalRefinement(expr, this);
+            refinement->add_reference();
+            refinements_to_traverse[refinement] = expr;
+            add_pending_refinement(refinement);
+            // If this is a pending refinement then we'll need to
+            // wait for it before traversing farther
+            if (!refinement_done.exists())
+            {
+#ifdef DEBUG_LEGION
+              assert(eq_state == PENDING_REFINEMENT_STATE);
+              assert(transition_event.exists());
+#endif
+              refinement_done = transition_event;
+            }
+            unrefined_remainder = 
+              forest->subtract_index_spaces(unrefined_remainder, expr);
+            if ((unrefined_remainder != NULL) && 
+                  unrefined_remainder->is_empty())
+              unrefined_remainder = NULL;
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(unrefined_remainder == NULL);
+#endif
+          // See if the set expressions are the same or whether we 
+          // need to make a refinement
+          IndexSpaceExpression *diff = 
+            forest->subtract_index_spaces(set_expr, expr);
+          if ((diff != NULL) && !diff->is_empty())
+          {
+            // Time to refine this since we only need a subset of it
+            LocalRefinement *refinement = new LocalRefinement(expr, this);
+            refinement->add_reference();
+            refinements_to_traverse[refinement] = expr;
+            add_pending_refinement(refinement);
+#ifdef DEBUG_LEGION
+            assert(eq_state == PENDING_REFINEMENT_STATE);
+            assert(transition_event.exists());
+#endif
+            refinement_done = transition_event;
+            // Update the unrefined remainder
+            unrefined_remainder = diff;
+          }
+          else
+          {
+            // Just record this as one of the results
+            if (source != runtime->address_space)
+            {
+              // Not local so we need to send a message
+              RtUserEvent recorded_event = Runtime::create_rt_user_event();
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+                rez.serialize(target);
+                rez.serialize(recorded_event);
+              }
+              runtime->send_equivalence_set_ray_trace_response(source, rez);
+              return recorded_event;
+            }
+            else
+            {
+              // Local so we can update this directly
+              target->record_equivalence_set(this);
+              return RtEvent::NO_RT_EVENT;
+            }
+          }
+        }
+      }
+      // If we have a refinement to do then we need to wait for that
+      // to be done before we continue our traversal
+      if (refinement_done.exists() && !refinement_done.has_triggered())
+        refinement_done.wait();
+      // Get the actual equivalence sets for any refinements we needed to
+      // wait for because they weren't ready earlier
+      if (!refinements_to_traverse.empty())
+      {
+        for (std::map<RefinementThunk*,IndexSpaceExpression*>::const_iterator
+              it = refinements_to_traverse.begin(); 
+              it != refinements_to_traverse.end(); it++)
+        {
+          EquivalenceSet *result = it->first->get_refinement();
+#ifdef DEBUG_LEGION
+          assert(to_traverse.find(result) == to_traverse.end());
+#endif
+          to_traverse[result] = it->second;
+          if (it->first->remove_reference())
+            delete it->first;
+        }
+      }
+      // Finally traverse any subsets that we have to do
+      if (!to_traverse.empty())
+      {
+        std::set<RtEvent> done_events;
+        for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator 
+              it = to_traverse.begin(); it != to_traverse.end(); it++)
+        {
+          RtEvent done = it->first->ray_trace_equivalence_sets(target, 
+                                                  it->second, source);
+          if (done.exists())
+            done_events.insert(done);
+        }
+        if (!done_events.empty())
+          return Runtime::merge_events(done_events);
+        // Otherwise fall through and return a no-event
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::perform_versioning_analysis(VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<EquivalenceSet*> to_recurse;
+      {
+        AutoLock eq(eq_lock);
+        // We need to iterate until we get a valid lease while holding the lock
+        if (is_owner())
+        {
+          // If we have a unrefined remainder then we need that now
+          if (unrefined_remainder != NULL)
+          {
+            LocalRefinement *refinement = 
+              new LocalRefinement(unrefined_remainder, this);
+            // We can clear the unrefined remainder now
+            unrefined_remainder = NULL;
+            add_pending_refinement(refinement);
+#ifdef DEBUG_LEGION
+            // Should not be in the mapping state after this
+            // so we know the transition event applies to us
+            assert(eq_state != MAPPING_STATE);
+#endif
+            if (eq_state == PENDING_REFINEMENT_STATE)
+            {
+              // Have to wait to make sure that the refinement is at
+              // least in flight before going on to the next step
+              // since we need this refinement to do the mapping
+              RtEvent wait_on = transition_event;
+#ifdef DEBUG_LEGION
+              assert(wait_on.exists()); // should have an event here
+#endif
+              eq.release();
+              wait_on.wait();
+              eq.reacquire();
+            }
+          }
+          while ((eq_state != MAPPING_STATE) && 
+                  (eq_state != PENDING_REFINEMENT_STATE))
+          {
+            if (eq_state == REFINEMENT_STATE)
+            {
+#ifdef DEBUG_LEGION
+              assert(!transition_event.exists());
+#endif
+              transition_event = Runtime::create_rt_user_event(); 
+              eq_state = PENDING_MAPPING_STATE; 
+            }
+#ifdef DEBUG_LEGION
+            assert(transition_event.exists());
+#endif
+            RtEvent wait_on = transition_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
+          }
+        }
+        else
+        {
+          // We're not the owner so see if we need to request a mapping state
+          while ((eq_state != MAPPING_STATE) && 
+                  (eq_state != PENDING_INVALID_STATE))
+          {
+            bool send_request = false;
+            if (eq_state == INVALID_STATE)
+            {
+#ifdef DEBUG_LEGION
+              assert(!transition_event.exists());
+#endif
+              transition_event = Runtime::create_rt_user_event(); 
+              eq_state = PENDING_MAPPING_STATE;
+              // Send the request for the update
+              send_request = true;
+            }
+#ifdef DEBUG_LEGION
+            assert(transition_event.exists());
+#endif
+            RtEvent wait_on = transition_event;
+            eq.release();
+            if (send_request)
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+              }
+              runtime->send_equivalence_set_subset_request(owner_space, rez);
+            }
+            wait_on.wait();
+            eq.reacquire();
+          }
+        }
+        // If we have subsets then we're going to need to recurse and
+        // traverse those as well since we need to get to the leaves
+        if (!subsets.empty())
+          // Our set of subsets are now what we need
+          to_recurse = subsets;
+        else // Otherwise we can record ourselves
+          version_info.record_equivalence_set(this, false/*need lock*/);
+      }
+      // If we have subsets then continue the traversal
+      if (!to_recurse.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              to_recurse.begin(); it != to_recurse.end(); it++)
+          (*it)->perform_versioning_analysis(version_info);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::perform_refinements(void)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<RefinementThunk*> to_perform;
+      do 
+      {
+        std::vector<EquivalenceSet*> to_add;
+        for (std::vector<RefinementThunk*>::const_iterator it = 
+              to_perform.begin(); it != to_perform.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert((*it)->owner == this);
+#endif
+          EquivalenceSet *result = (*it)->perform_refinement();
+          // Add our resource reference too
+          result->add_nested_resource_ref(did);
+          to_add.push_back(result);
+        }
+        AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+        assert(is_owner());
+        assert((eq_state == REFINEMENT_STATE) || 
+                (eq_state == PENDING_MAPPING_STATE));
+#endif
+        if (!to_add.empty())
+          subsets.insert(subsets.end(), to_add.begin(), to_add.end());
+        // Add these refinements to our subsets and delete the thunks
+        if (!to_perform.empty())
+        {
+          for (std::vector<RefinementThunk*>::const_iterator it = 
+                to_perform.begin(); it != to_perform.end(); it++)
+            if ((*it)->remove_reference())
+              delete (*it);
+          to_perform.clear();
+        }
+        if (pending_refinements.empty())
+        {
+          // TODO: If we have too many subsets we need to make intermediates
+
+          // This is the end of the refinement task so we need to update
+          // the state and send out any notifications to anyone that the
+          // refinements are done
+          if (!remote_subsets.empty())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize<size_t>(subsets.size());
+              for (std::vector<EquivalenceSet*>::const_iterator it = 
+                    subsets.begin(); it != subsets.end(); it++)
+                rez.serialize((*it)->did);
+            }
+            for (std::set<AddressSpaceID>::const_iterator it = 
+                  remote_subsets.begin(); it != remote_subsets.end(); it++)
+              runtime->send_equivalence_set_subset_response(*it, rez);
+          }
+          if (eq_state == PENDING_MAPPING_STATE)
+          {
+#ifdef DEBUG_LEGION
+            assert(transition_event.exists());
+#endif
+            Runtime::trigger_event(transition_event);
+            transition_event = RtUserEvent::NO_RT_USER_EVENT;
+          }
+#ifdef DEBUG_LEGION
+          assert(!transition_event.exists());
+#endif
+          // No matter what we end up back in the mapping state
+          eq_state = MAPPING_STATE;
+        }
+        else // there are more refinements to do so we go around again
+          to_perform.swap(pending_refinements);
+      } while (!to_perform.empty());
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::send_equivalence_set(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -3137,6 +3753,7 @@ namespace Legion {
       // We should have had a request for this already
       assert(!has_remote_instance(target));
 #endif
+      update_remote_instances(target);
       Serializer rez;
       {
         RezCheck z(rez);
@@ -3144,7 +3761,234 @@ namespace Legion {
         set_expr->pack_expression(rez, target);
       }
       runtime->send_equivalence_set_response(target, rez);
-      update_remote_instances(target);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::add_pending_refinement(RefinementThunk *thunk)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+#endif
+      thunk->add_reference();
+      pending_refinements.push_back(thunk);
+      if (eq_state == MAPPING_STATE)
+      {
+        // Check to see if we can transition right now
+        if (!mapping_guards.empty())
+        {
+          eq_state = PENDING_REFINEMENT_STATE;
+#ifdef DEBUG_LEGION
+          assert(!transition_event.exists());
+#endif
+          transition_event = Runtime::create_rt_user_event();
+        }
+        else
+        {
+          // Transition straight to refinement
+          eq_state = REFINEMENT_STATE;
+          launch_refinement_task();
+        }
+      }
+      // Otherwise it is in a state where a refinement task is already 
+      // running or will be launched eventually to handle this
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::launch_refinement_task(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(eq_state == REFINEMENT_STATE);
+      assert(!pending_refinements.empty());
+#endif
+      // Send invalidations to all the remote nodes. This will invalidate
+      // their mapping privileges and also send back any remote meta data
+      // to the local node 
+      std::set<RtEvent> refinement_preconditions;
+      for (std::set<AddressSpaceID>::const_iterator it = 
+            remote_subsets.begin(); it != remote_subsets.end(); it++)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          RtUserEvent remote_done = Runtime::create_rt_user_event();
+          rez.serialize(remote_done);
+          refinement_preconditions.insert(remote_done);
+        }
+        runtime->send_equivalence_set_subset_invalidation(*it, rez);
+      }
+      // There are no more remote subsets
+      remote_subsets.clear();
+      // We now hold all the fields in exclusive mode
+      exclusive_fields |= shared_fields;
+      shared_fields.clear();
+      exclusive_copies.clear();
+      shared_copies.clear();
+      RefinementTaskArgs args(this);      
+      if (!refinement_preconditions.empty())
+      {
+        RtEvent wait_for = Runtime::merge_events(refinement_preconditions);
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_for);
+      }
+      else
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_subset_request(AddressSpaceID source,
+                                                bool needs_lock/*=true*/)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        process_subset_request(source, false/*needs lock*/);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(remote_subsets.find(source) == remote_subsets.end());
+#endif
+      // First check to see if we need to complete this refinement
+      if (unrefined_remainder != NULL)
+      {
+        RemoteComplete *refinement = 
+          new RemoteComplete(unrefined_remainder, this, source);
+        // We can clear the unrefined remainder now
+        unrefined_remainder = NULL;
+        add_pending_refinement(refinement);
+        // We can just return since the refinement will send the
+        // response after it's been done
+        return;
+      }
+      // Add ourselves as a remote location for the subsets
+      remote_subsets.insert(source);
+      // We can only send the 
+      if ((eq_state == MAPPING_STATE) || (eq_state == PENDING_REFINEMENT_STATE))
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<size_t>(subsets.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                subsets.begin(); it != subsets.end(); it++)
+            rez.serialize((*it)->did);
+        }
+        runtime->send_equivalence_set_subset_response(source, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_subset_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(subsets.empty());
+      assert(eq_state == PENDING_MAPPING_STATE);
+      assert(transition_event.exists());
+      assert(!transition_event.has_triggered());
+#endif
+      size_t num_subsets;
+      derez.deserialize(num_subsets);
+      std::set<RtEvent> wait_for;
+      if (num_subsets > 0)
+      {
+        subsets.resize(num_subsets);
+        for (unsigned idx = 0; idx < num_subsets; idx++)
+        {
+          DistributedID subdid;
+          derez.deserialize(subdid);
+          RtEvent ready;
+          subsets[idx] = 
+            runtime->find_or_request_equivalence_set(subdid, ready);
+          if (ready.exists())
+            wait_for.insert(ready);
+        }
+      }
+      if (!wait_for.empty())
+      {
+        // This has to block in case there is an invalidation that comes
+        // after it in the same virtual channel and we need to maintain
+        // the ordering of those two operations.
+        RtEvent wait_on = Runtime::merge_events(wait_for);
+        if (wait_on.exists() && !wait_on.has_triggered())
+        {
+          eq.release();
+          wait_on.wait();
+          eq.reacquire();
+        }
+      }
+      // Add our references
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            subsets.begin(); it != subsets.end(); it++)
+        (*it)->add_nested_resource_ref(did);
+      // Update the state
+      eq_state = MAPPING_STATE;
+      // Trigger the transition state to wake up any waiters
+      Runtime::trigger_event(transition_event);
+      transition_event = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_subset_invalidation(RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(eq_state == MAPPING_STATE);
+      assert(!transition_event.exists());
+#endif
+      // Check to see if we have any mapping guards in place
+      if (mapping_guards.empty())
+      {
+        // Remove our references and clear the subsets
+        if (!subsets.empty())
+        {
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                subsets.begin(); it != subsets.end(); it++)
+            if ((*it)->remove_nested_resource_ref(did))
+              delete (*it);
+          subsets.clear();
+        }
+        // Pack up any state that needs to be sent back to the owner node
+        // so that it can do any refinements
+        if (!valid_instances.empty() || !reduction_instances.empty())
+        {
+          // TODO: send back our state to the owner node 
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          assert(version_numbers.empty());
+#endif
+          // Nothing to send back so just trigger our event
+          Runtime::trigger_event(to_trigger);
+        }
+        // Update the state to reflect that we are now invalid
+        eq_state = INVALID_STATE;
+      }
+      else
+      {
+        // Update the state and save the event to trigger
+        eq_state = PENDING_INVALID_STATE;
+        transition_event = to_trigger;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_refinement(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const RefinementTaskArgs *rargs = (const RefinementTaskArgs*)args;
+      rargs->target->perform_refinements();
     }
 
     //--------------------------------------------------------------------------
@@ -3187,6 +4031,149 @@ namespace Legion {
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
 
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_subset_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
+      assert(set != NULL);
+#else
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
+#endif
+      set->process_subset_request(source);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_subset_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
+      assert(set != NULL);
+#else
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
+#endif
+      set->process_subset_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_subset_invalidation(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtUserEvent to_trigger;
+      derez.deserialize(to_trigger);
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
+      assert(set != NULL);
+#else
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
+#endif
+      set->process_subset_invalidation(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_ray_trace_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      VersionManager *target;
+      derez.deserialize(target);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
+#ifdef DEBUG_LEGION
+      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
+      assert(set != NULL);
+#else
+      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
+#endif
+      RtEvent done = set->ray_trace_equivalence_sets(target, expr, origin);
+      Runtime::trigger_event(done_event, done);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_ray_trace_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      VersionManager *target;
+      derez.deserialize(target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      target->record_equivalence_set(set);
+      Runtime::trigger_event(done_event, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_create_remote_request(
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RefinementThunk *thunk;
+      derez.deserialize(thunk);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+
+      DistributedID did = runtime->get_available_distributed_id();
+      EquivalenceSet *result = new EquivalenceSet(runtime, did, 
+                                runtime->address_space, expr, true/*register*/);
+      Serializer rez;
+      {
+        RezCheck z2(rez);
+        rez.serialize(thunk);
+        rez.serialize(result->did);
+      }
+      runtime->send_equivalence_set_create_remote_response(source, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_create_remote_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RefinementThunk *thunk;
+      derez.deserialize(thunk);
+      DistributedID did;
+      derez.deserialize(did);
+
+      RtEvent ready;
+      EquivalenceSet *result = 
+        runtime->find_or_request_equivalence_set(did, ready);
+      thunk->record_refinement(result, ready);
+    }
+
     /////////////////////////////////////////////////////////////
     // Version Manager 
     /////////////////////////////////////////////////////////////
@@ -3197,7 +4184,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)
       : ctx(c), node(n), runtime(n->context->runtime),
-        current_context(NULL), is_owner(false), has_equivalence_sets(false)
+        has_equivalence_sets(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3231,8 +4218,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      is_owner = false;
-      current_context = NULL;
       if (!equivalence_sets.empty())
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -3243,6 +4228,10 @@ namespace Legion {
         }
         equivalence_sets.clear();
       }
+#ifdef DEBUG_LEGION
+      assert(!equivalence_sets_ready.exists() || 
+              equivalence_sets_ready.has_triggered());
+#endif
       equivalence_sets_ready = RtUserEvent::NO_RT_USER_EVENT;
       has_equivalence_sets = false;
     }
@@ -3296,120 +4285,10 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void VersionManager::perform_versioning_analysis(const RegionUsage &usage,
-                                              const FieldMask &version_mask,
-                                              InnerContext *context,
-                                              VersionInfo &version_info,
-                                              std::set<RtEvent> &ready_events,
-                                              std::set<RtEvent> &applied_events)
+    void VersionManager::perform_versioning_analysis(InnerContext *context,
+                                                     VersionInfo &version_info)
     //--------------------------------------------------------------------------
     {
-      // See if we have been assigned
-      if (context != current_context)
-      {
-        const AddressSpaceID local_space = 
-          node->context->runtime->address_space;
-        owner_space = context->get_version_owner(node, local_space);
-        is_owner = (owner_space == local_space);
-        current_context = context;
-      }
-      // If we don't have equivalence classes for this region yet we 
-      // either need to compute them or request them from the owner
-      RtEvent wait_on;
-      bool send_request = false;
-      bool compute_sets = false;
-      if (!has_equivalence_sets)
-      {
-        // Retake the lock and see if we lost the race
-        AutoLock m_lock(manager_lock);
-        if (!has_equivalence_sets)
-        {
-          if (!equivalence_sets_ready.exists()) 
-          {
-            equivalence_sets_ready = Runtime::create_rt_user_event();
-            if (is_owner)
-              compute_sets = true;
-            else
-              send_request = true;
-          }
-          wait_on = equivalence_sets_ready;
-        }
-      }
-      if (send_request)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          // Send a pointer to this object for the response
-          rez.serialize(this);
-          rez.serialize(current_context->get_context_uid());
-          if (node->is_region())
-          {
-            rez.serialize<bool>(true);
-            rez.serialize(node->as_region_node()->handle);
-          }
-          else
-          {
-            rez.serialize<bool>(false);
-            rez.serialize(node->as_partition_node()->handle);
-          }
-        }
-        runtime->send_version_manager_request(owner_space, rez);
-      }
-      else if (compute_sets)
-        compute_equivalence_sets(runtime->address_space);
-      if (wait_on.exists())
-      {
-        if (!wait_on.has_triggered())
-          wait_on.wait();
-        // Possibly duplicate writes, but that is alright
-        has_equivalence_sets = true;
-      }
-      // Now that we have the equivalence classes we can have them add
-      // themselves in case they have been refined and we need to traverse
-      for (std::set<EquivalenceSet*>::const_iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->perform_versioning_analysis(usage, version_mask, 
-                    version_info, ready_events, applied_events);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void VerisonManager::compute_equivalence_sets(AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RegionTreeNode *parent = node->get_parent();
-#ifdef DEBUG_LEGION
-      assert(parent != NULL);
-#endif
-      // Find all the overlapping equivalence sets that we should start with
-      std::map<EquivalenceSet*,IndexSpaceExpression*> overlaps;
-      parent->find_overlapping_equivalence_sets(overlaps);
-
-       
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::print_physical_state(RegionTreeNode *node,
-                                              const FieldMask &capture_mask,
-                                              TreeStateLogger *logger)
-    //--------------------------------------------------------------------------
-    {
-      logger->log("Equivalence Sets:");
-      logger->down();
-      // TODO: log equivalence sets
-      logger->up();
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void VersionManager::process_request(VersionManager *remote_manager, 
-                                         AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner);
-#endif
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
       RtEvent wait_on;
@@ -3428,144 +4307,47 @@ namespace Legion {
           wait_on = equivalence_sets_ready;
         }
       }
-      if (wait_on.exists() && !wait_on.has_triggered())
-      {
-        // Defer this for later to avoid blocking the virtual channel
-        DeferVersionManagerRequestArgs args(this, remote_manager, 
-                                            source, compute_sets);
-        // If we're going to compute the set then there's no need to wait for it
-        if (compute_sets)
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
-        else
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY, 
-                                           wait_on);
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!compute_sets);
-#endif
-        if (wait_on.exists())
-          has_equivalence_sets = true;
-        // We can send the response now
-        send_response(remote_manager, source);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::send_response(VersionManager *remote_manager,
-                                       AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_manager);
-        rez.serialize<size_t>(equivalence_sets.size());
-        for (std::set<EquivalenceSet*>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          rez.serialize((*it)->did);
-      }
-      runtime->send_version_manager_response(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::process_defer_request(VersionManager *remote_manager,
-                                       AddressSpaceID target, bool compute_sets)
-    //--------------------------------------------------------------------------
-    {
       if (compute_sets)
-        compute_equivalence_sets(target);
-      has_equivalence_sets = true;
-      send_response(remote_manager, target);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionManager::process_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      size_t num_sets;
-      derez.deserialize(num_sets);
-      std::set<RtEvent> wait_for;
-      for (unsigned idx = 0; idx < num_sets; idx++)
       {
-        DistributedID did;
-        derez.deserialize(did);
-        RtEvent ready;
-        EquivalenceSet *set = 
-          runtime->find_or_request_equivalence_set(did, ready);
-        equivalence_sets.insert(set);
-        if (ready.exists())
-          wait_for.insert(ready);
+        IndexSpaceExpression *expr = node->get_index_space_expression();
+        RtEvent ready = context->compute_equivalence_sets(this, 
+            node->get_tree_id(), expr, runtime->address_space);
+        Runtime::trigger_event(equivalence_sets_ready, ready);
       }
-#ifdef DEBUG_LEGION
-      assert(equivalence_sets_ready.exists());
-#endif
-      if (!wait_for.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(wait_for);
-        if (wait_on.exists())
-          wait_on.wait();
-      }
-      // Now add references to all of them before marking that they are ready
+      // Wait if necessary for the results
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Possibly duplicate writes, but that is alright
+      if (!has_equivalence_sets)
+        has_equivalence_sets = true;
+      // Now that we have the equivalence classes we can have them add
+      // themselves in case they have been refined and we need to traverse
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->add_base_resource_ref(VERSION_MANAGER_REF);
-      // Then we can trigger our event indicating that they are ready
-      Runtime::trigger_event(equivalence_sets_ready);
+        (*it)->perform_versioning_analysis(version_info); 
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void VersionManager::handle_request(Deserializer &derez,
-                                  Runtime *runtime, AddressSpaceID source_space)
+    void VersionManager::record_equivalence_set(EquivalenceSet *set)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      VersionManager *remote_manager;
-      derez.deserialize(remote_manager);
-      UniqueID context_uid;
-      derez.deserialize(context_uid);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        node = runtime->forest->get_node(handle);
-      }     
-
-      InnerContext *context = runtime->find_context(context_uid);
-      ContextID ctx = context->get_context_id();
-      VersionManager &manager = node->get_current_version_manager(ctx);
-      manager.process_request(remote_manager, source_space);
+      AutoLock m_lock(manager_lock);
+      equivalence_sets.insert(set);
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    /*static*/ void VersionManager::handle_deferred_request(const void *args)
+    void VersionManager::print_physical_state(RegionTreeNode *node,
+                                              const FieldMask &capture_mask,
+                                              TreeStateLogger *logger)
     //--------------------------------------------------------------------------
     {
-      const DeferVersionManagerRequestArgs *dargs = 
-        (const DeferVersionManagerRequestArgs*)args;
-      dargs->proxy_this->process_defer_request(dargs->remote_manager, 
-                                               dargs->target, dargs->compute);
+      logger->log("Equivalence Sets:");
+      logger->down();
+      // TODO: log equivalence sets
+      logger->up();
     }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionManager::handle_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      VersionManager *local_manager;
-      derez.deserialize(local_manager);
-      local_manager->process_response(derez);
-    }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Version State 

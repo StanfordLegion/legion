@@ -455,6 +455,7 @@ namespace Legion {
       inline VariantID get_selected_variant(void) const 
         { return selected_variant; }
     public:
+      RtEvent perform_versioning_analysis(void);
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
                                      MustEpochOp *must_epoch_owner,
@@ -490,8 +491,7 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
-      virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own) = 0;
+      virtual bool distribute_task(void) = 0; 
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
@@ -530,20 +530,22 @@ namespace Legion {
           return result; }
     protected:
       // Boolean for each region saying if it is virtual mapped
-      std::vector<bool> virtual_mapped;
+      std::vector<bool>                     virtual_mapped;
       // Regions which are NO_ACCESS or have no privilege fields
-      std::vector<bool> no_access_regions;
+      std::vector<bool>                     no_access_regions;
+      // The version infos for this operation
+      std::vector<VersionInfo>              version_infos;
     protected:
-      std::vector<Processor> target_processors;
+      std::vector<Processor>                target_processors;
       // Hold the result of the mapping 
-      std::deque<InstanceSet> physical_instances;
+      std::deque<InstanceSet>               physical_instances;
     protected: // Mapper choices 
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
       bool                                  perform_postmap;
     protected:
       // Events that must be triggered before we are done mapping
-      std::set<RtEvent> map_applied_conditions;
+      std::set<RtEvent>                     map_applied_conditions;
     protected:
       TaskContext*                          execution_context;
     protected:
@@ -597,9 +599,7 @@ namespace Legion {
       virtual bool is_stealable(void) const = 0;
       virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual void map_and_launch(void) = 0;
-      virtual VersionInfo& get_version_info(unsigned idx);
       virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
@@ -631,7 +631,6 @@ namespace Legion {
                                  bool owner, bool exclusive); 
     protected:
       std::list<SliceTask*> slices;
-      std::vector<VersionInfo> version_infos;
       std::vector<RestrictInfo> restrict_infos;
       bool sliced;
     protected:
@@ -677,9 +676,6 @@ namespace Legion {
                              bool check_privileges,
                              bool track = true);
       void set_top_level(void);
-    public:
-      RtEvent perform_versioning_analysis(void);
-      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -748,7 +744,6 @@ namespace Legion {
       Future result; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
-      std::vector<VersionInfo>    version_infos;
       std::vector<RestrictInfo>   restrict_infos;
     protected:
       // Information for remotely executing task
@@ -795,9 +790,6 @@ namespace Legion {
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-    public:
-      void perform_versioning_analysis(std::set<RtEvent> &ready_events);
-      virtual RtEvent perform_must_epoch_version_analysis(MustEpochOp *own);
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
@@ -860,8 +852,6 @@ namespace Legion {
       std::set<ApEvent>           restrict_postconditions;
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
-    protected:
-      std::vector<VersionInfo>    version_infos;
     };
 
     /**
@@ -929,6 +919,7 @@ namespace Legion {
       virtual void perform_inlining(void);
       virtual void end_inline_task(const void *result, 
                                    size_t result_size, bool owned);
+      virtual VersionInfo& get_version_info(unsigned idx);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
     public:
@@ -975,6 +966,7 @@ namespace Legion {
       unsigned complete_points;
       unsigned committed_points;
     protected:
+      std::map<unsigned/*idx*/,VersionInfo> version_infos;
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> origin_mapped_slices;
     protected:
@@ -1056,8 +1048,6 @@ namespace Legion {
       void enumerate_points(void);
       const void* get_predicate_false_result(size_t &result_size);
     public:
-      RtEvent perform_versioning_analysis(void);
-      RtEvent perform_must_epoch_version_analysis(MustEpochOp *owner);
       std::map<PhysicalManager*,std::pair<unsigned,bool> >* 
                                      get_acquired_instances_ref(void);
       void check_target_processors(void) const;

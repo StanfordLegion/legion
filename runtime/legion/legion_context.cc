@@ -2013,13 +2013,14 @@ namespace Legion {
         }
       }
       // Unregister ourselves from any tracking contexts that we might have
-      if (!region_tree_owners.empty())
+      if (!tree_equivalence_sets.empty())
       {
-        for (std::map<RegionTreeNode*,
-                      std::pair<AddressSpaceID,bool> >::const_iterator it =
-              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-          it->first->unregister_tracking_context(this);
-        region_tree_owners.clear();
+        for (std::map<RegionTreeID,EquivalenceSet*>::const_iterator it = 
+              tree_equivalence_sets.begin(); it != 
+              tree_equivalence_sets.end(); it++)
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            delete it->second;
+        tree_equivalence_sets.clear();
       }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
@@ -2076,40 +2077,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID InnerContext::get_version_owner(RegionTreeNode *node,
-                                                   AddressSpaceID source)
+    RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      AutoLock tree_lock(tree_owner_lock); 
-      // See if we've already assigned it
-      std::map<RegionTreeNode*,std::pair<AddressSpaceID,bool> >::iterator
-        finder = region_tree_owners.find(node);
-      // If we already assigned it then we are done
-      if (finder != region_tree_owners.end())
+      EquivalenceSet *root = NULL;
       {
-        // If it is remote only, see if it gets to stay that way
-        if (finder->second.second && (source == runtime->address_space))
-          finder->second.second = false; // no longer remote only
-        return finder->second.first;
+        AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
+        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
+          tree_equivalence_sets.find(tree_id);
+        if (finder != tree_equivalence_sets.end())
+          root = finder->second;
       }
-      // Otherwise assign it to the source
-      region_tree_owners[node] = 
-        std::pair<AddressSpaceID,bool>(source, 
-                                      (source != runtime->address_space));
-      node->register_tracking_context(this);
-      return source;
-    } 
-
-    //--------------------------------------------------------------------------
-    void InnerContext::notify_region_tree_node_deletion(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tree_lock(tree_owner_lock);
+      if (root == NULL)
+      {
+        RegionNode *root_node = runtime->forest->get_tree(tree_id);
+        IndexSpaceExpression *root_expr = 
+          root_node->get_index_space_expression();
+        AutoLock tree_lock(tree_set_lock);
+        // See if we lost the race
+        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
+          tree_equivalence_sets.find(tree_id);
+        if (finder == tree_equivalence_sets.end())
+        {
+          // Didn't loose the race so we have to make the top-level
+          // equivalence set for this region tree
+          root = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(),
+              runtime->address_space, root_expr, true/*register now*/); 
+          tree_equivalence_sets[tree_id] = root;
+          root->add_base_resource_ref(CONTEXT_REF);
+        }
+        else
+          root = finder->second;
+      }
 #ifdef DEBUG_LEGION
-      assert(region_tree_owners.find(node) != region_tree_owners.end());
+      assert(root != NULL);
 #endif
-      region_tree_owners.erase(node);
-    }
+      return root->ray_trace_equivalence_sets(manager, expr, source);
+    } 
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
@@ -6529,96 +6535,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_version_owner_request(
+    /*static*/ void InnerContext::handle_compute_equivalence_sets_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *local_ctx = runtime->find_context(context_uid);
-      InnerContext *remote_ctx;
-      derez.deserialize(remote_ctx);
-      bool is_region;
-      derez.deserialize(is_region);
+      VersionManager *target_manager;
+      derez.deserialize(target_manager);
+      RegionTreeID tree_id;
+      derez.deserialize(tree_id);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
 
-      Serializer rez;
-      rez.serialize(remote_ctx);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(true);
-        rez.serialize(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(false);
-        rez.serialize(handle);
-      }
-      runtime->send_version_owner_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::process_version_owner_response(RegionTreeNode *node,
-                                                      AddressSpaceID result)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock tree_lock(tree_owner_lock);
-#ifdef DEBUG_LEGION
-        assert(region_tree_owners.find(node) == region_tree_owners.end());
-#endif
-        region_tree_owners[node] = 
-          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-        node->register_tracking_context(this);
-        // Find the event to trigger
-        std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
-          pending_version_owner_requests.find(node);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_version_owner_requests.end());
-#endif
-        to_trigger = finder->second;
-        pending_version_owner_requests.erase(finder);
-      }
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_version_owner_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext *ctx;
-      derez.deserialize(ctx);
-      AddressSpaceID result;
-      derez.deserialize(result);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
+      const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
+                                                         tree_id, expr, origin);
+      Runtime::trigger_event(ready_event, done);
     }
 
     //--------------------------------------------------------------------------
@@ -6933,70 +6871,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID TopLevelContext::get_version_owner(RegionTreeNode *node, 
-                                                      AddressSpaceID source)
+    RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We're the top-level task, so we handle the request on the node
       // that made the region
-      const AddressSpaceID owner_space = node->get_owner_space();
+      const AddressSpaceID owner_space = 
+        RegionTreeNode::get_owner_space(tree_id, runtime);
       if (owner_space == runtime->address_space)
-        return InnerContext::get_version_owner(node, source);
+        return InnerContext::compute_equivalence_sets(manager, tree_id, 
+                                                      expr, source);
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
+      // Send off a request to the owner node to handle it
+      RtUserEvent ready_event = Runtime::create_rt_user_event();
+      Serializer rez;
       {
-        AutoLock tree_lock(tree_owner_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
+        RezCheck z(rez);
         rez.serialize(context_uid);
-        rez.serialize<InnerContext*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space 
-        runtime->send_version_owner_request(owner_space, rez);
+        rez.serialize(manager);
+        rez.serialize(tree_id);
+        expr->pack_expression(rez, owner_space);
+        rez.serialize(source);
+        rez.serialize(ready_event);
       }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
+      // Send it to the owner space 
+      runtime->send_compute_equivalence_sets_request(owner_space, rez);
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -7213,75 +7116,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID RemoteContext::get_version_owner(RegionTreeNode *node,
-                                                    AddressSpaceID source)
+    RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = node->get_owner_space(); 
+      const AddressSpaceID owner_space = 
+        RegionTreeNode::get_owner_space(tree_id, runtime);
       // If we are the top-level context then we handle the request
       // on the node that made the region
       if (top_level_context && (owner_space == runtime->address_space))
-        return InnerContext::get_version_owner(node, source);
-        // Otherwise we fall through and issue the request to the 
-        // the node that actually made the region
+        return InnerContext::compute_equivalence_sets(manager, tree_id, 
+                                                      expr, source);
+      // Otherwise we fall through and issue the request to the 
+      // the node that actually made the region
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
+      // Send it to the owner space if we are the top-level context
+      // otherwise we send it to the owner of the context
+      const AddressSpaceID target = top_level_context ? owner_space :  
+                        runtime->get_runtime_owner(context_uid);
+      RtUserEvent ready_event = Runtime::create_rt_user_event();
+      // Send off a request to the owner node to handle it
+      Serializer rez;
       {
-        AutoLock tree_lock(tree_owner_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
+        RezCheck z(rez);
         rez.serialize(context_uid);
-        rez.serialize<InnerContext*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space if we are the top-level context
-        // otherwise we send it to the owner of the context
-        const AddressSpaceID target = top_level_context ? owner_space :  
-                          runtime->get_runtime_owner(context_uid);
-        runtime->send_version_owner_request(target, rez);
+        rez.serialize(manager);
+        rez.serialize(tree_id);
+        expr->pack_expression(rez, target);
+        rez.serialize(source);
+        rez.serialize(ready_event);
       }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
+      // Send it to the owner space 
+      runtime->send_compute_equivalence_sets_request(target, rez);
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------

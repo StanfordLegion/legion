@@ -294,7 +294,6 @@ namespace Legion {
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
-      LG_DEFER_VERSION_MANAGER_TASK_ID,
       LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
       LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
@@ -331,6 +330,7 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
+      LG_REFINEMENT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -375,7 +375,6 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Post Decrement Task",                                    \
-        "Defer Version Manager Request",                          \
         "Send Version State Update",                              \
         "Update Version State Reduce",                            \
         "Issue Frame",                                            \
@@ -412,6 +411,7 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
+        "Refinement",                                             \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -666,17 +666,21 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
-      SEND_VERSION_OWNER_REQUEST,
-      SEND_VERSION_OWNER_RESPONSE,
+      SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
       SEND_EQUIVALENCE_SET_REQUEST,
       SEND_EQUIVALENCE_SET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
+      SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+      SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
+      SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
       SEND_VERSION_STATE_REQUEST,
       SEND_VERSION_STATE_RESPONSE,
       SEND_VERSION_STATE_UPDATE_REQUEST,
       SEND_VERSION_STATE_UPDATE_RESPONSE,
       SEND_VERSION_STATE_VALID_NOTIFICATION,
-      SEND_VERSION_MANAGER_REQUEST,
-      SEND_VERSION_MANAGER_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -803,17 +807,21 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
-        "Send Version Owner Request",                                 \
-        "Send Version Owner Response",                                \
+        "Compute Equivalence Sets Request",                           \
         "Send Equivalence Set Request",                               \
         "Send Equivalence Set Response",                              \
+        "Send Equivalence Set Subset Request",                        \
+        "Send Equivalence Set Subset Response",                       \
+        "Send Equivalence Set Subset Invalidation",                   \
+        "Send Equivalence Set Ray Trace Request",                     \
+        "Send Equivalence Set Ray Trace Response",                    \
+        "Send Equivalence Set Remote Create Request",                 \
+        "Send Equivalence Set Remote Create Response",                \
         "Send Version State Request",                                 \
         "Send Version State Response",                                \
         "Send Version State Update Request",                          \
         "Send Version State Update Response",                         \
         "Send Version State Valid Notification",                      \
-        "Send Version Manager Request",                               \
-        "Send Version Manager Response",                              \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \
@@ -1385,6 +1393,7 @@ namespace Legion {
     class LogicalState;
     class PhysicalState;
     class EquivalenceSet;
+    class VersionManager;
     class VersionState;
     class VersionInfo;
     class RestrictInfo;

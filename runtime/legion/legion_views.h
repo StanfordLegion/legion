@@ -174,6 +174,14 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
                                     const unsigned index) = 0;
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
+                                    const UniqueID op_id,
+                                    const unsigned index,
+                                    ApEvent term_event,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -517,6 +525,14 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
                                     const unsigned index);
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
+                                    const UniqueID op_id,
+                                    const unsigned index,
+                                    ApEvent term_event,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -907,6 +923,14 @@ namespace Legion {
                                     const FieldMask &user_mask,
                                     const UniqueID op_id,
                                     const unsigned index);
+      virtual ApEvent register_user(const RegionUsage &usage,
+                                    const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
+                                    const UniqueID op_id,
+                                    const unsigned index,
+                                    ApEvent term_event,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info);
     protected:
       void find_reducing_preconditions(const FieldMask &user_mask,
                                        ApEvent term_event,

@@ -202,14 +202,17 @@ namespace Legion {
     protected:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      inline bool has_version_info(void) const 
-        { return !equivalence_sets.empty(); }
+      inline bool has_version_info(void) const { return mapped_event.exists(); }
+      inline const std::set<EquivalenceSet*>& get_equivalence_sets(void) const
+        { return equivalence_sets; }
     public:
-      void record_equivalence_set(EquivalenceSet *set);
-      void make_ready(const RegionUsage &usage, const FieldMask &mask,
+      void initialize_mapping(RtEvent mapped_event);
+      void record_equivalence_set(EquivalenceSet *set, bool need_lock);
+      void make_ready(const RegionRequirement &req, const FieldMask &mask,
           std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
-      void clear(void);
+      void finalize_mapping(void);
     protected:
+      RtEvent mapped_event;
       std::set<EquivalenceSet*> equivalence_sets;
     };
 
@@ -427,7 +430,6 @@ namespace Legion {
       const FieldMask traversal_mask;
       const UniqueID context_uid;
       std::set<RtEvent> &map_applied_events;
-      ContextID logical_ctx;
     };
 
     /**
@@ -726,6 +728,28 @@ namespace Legion {
 #endif
 
     /**
+     * \class CopyFillAggregator
+     * The copy aggregator class is one that records the copies
+     * that needs to be done for different equivalence classes and
+     * then merges them together into the biggest possible copies
+     * that can be issued together.
+     */
+    class CopyFillAggregator {
+    public:
+      CopyFillAggregator(bool track_copies);
+      CopyFillAggregator(const CopyFillAggregator &rhs);
+      ~CopyFillAggregator(void);
+    public:
+      CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
+    public:
+      bool has_copies(void) const;
+      void issue_copies(const UniqueID op_id, const unsigned index,
+                        std::set<RtEvent> &applied_events,
+                        const PhysicalTraceInfo &trace_info);
+      ApEvent summarize(void) const;
+    };
+
+    /**
      * \class EquivalenceSet
      * The equivalence set class tracks the physical state of a
      * set of points in a logical region for all the fields. There
@@ -739,6 +763,69 @@ namespace Legion {
                            public LegionHeapify<EquivalenceSet> {
     public:
       static const AllocationType alloc_type = EQUIVALENCE_SET_ALLOC;
+    public:
+      struct RefinementTaskArgs : public LgTaskArgs<RefinementTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REFINEMENT_TASK_ID;
+      public:
+        RefinementTaskArgs(EquivalenceSet *t)
+          : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), target(t) { }
+      public:
+        EquivalenceSet *const target;
+      };
+    protected:
+      enum EqState {
+        PENDING_MAPPING_STATE, // still invalid/refining but mappings waiting
+        MAPPING_STATE,
+        // Owner-only
+        PENDING_REFINEMENT_STATE, // still mapping but refinements waiting
+        REFINEMENT_STATE,
+        // Remote-only
+        PENDING_INVALID_STATE, // still mapping but invalidation waiting
+        INVALID_STATE,
+      };
+    protected:
+      class RefinementThunk : public Collectable {
+      public:
+        RefinementThunk(IndexSpaceExpression *expr, 
+            EquivalenceSet *owner, AddressSpaceID source);
+        RefinementThunk(const RefinementThunk &rhs) 
+          : owner(NULL), expr(NULL) { assert(false); }
+        virtual ~RefinementThunk(void) { }
+      public:
+        EquivalenceSet* perform_refinement(void);
+        EquivalenceSet* get_refinement(void);
+        void record_refinement(EquivalenceSet *result, RtEvent ready);
+      public:
+        EquivalenceSet *const owner;
+        IndexSpaceExpression *const expr;
+      protected:
+        EquivalenceSet *refinement;
+        RtUserEvent refinement_ready;
+      };
+      class LocalRefinement : public RefinementThunk {
+      public:
+        LocalRefinement(IndexSpaceExpression *expr, EquivalenceSet *owner);
+        LocalRefinement(const LocalRefinement &rhs) 
+          : RefinementThunk(rhs) { assert(false); }
+        virtual ~LocalRefinement(void) { }
+      public:
+        LocalRefinement& operator=(const LocalRefinement &rhs)
+          { assert(false); return *this; }
+      };
+      class RemoteComplete : public RefinementThunk {
+      public:
+        RemoteComplete(IndexSpaceExpression *expr, 
+            EquivalenceSet *owner, AddressSpaceID source);
+        RemoteComplete(const RemoteComplete &rhs) 
+          : RefinementThunk(rhs), target(0) { assert(false); }
+        virtual ~RemoteComplete(void);
+      public:
+        RemoteComplete& operator=(const RemoteComplete &rhs)
+          { assert(false); return *this; }
+      public:
+        const AddressSpaceID target;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space, 
@@ -754,80 +841,133 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
-      void perform_versioning_analysis(const RegionUsage &usage,
-                                       const FieldMask &version_mask,
-                                       VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events,
-                                       std::set<RtEvent> &applied_events);
-      void request_valid_copy(const FieldMask &field_mask, bool exclusive,
-          std::set<RtEvent> &read_events, std::set<RtEvent> &applied_events);
-    protected:
-      void send_equivalence_set(AddressSpaceID target);
+      void clone_from(EquivalenceSet *parent);
+      void add_mapping_guard(RtEvent mapped_event, bool need_lock);
+      void remove_mapping_guard(RtEvent mapped_event);
+      RtEvent ray_trace_equivalence_sets(VersionManager *target,
+                                         IndexSpaceExpression *expr, 
+                                         AddressSpaceID source); 
+      void perform_versioning_analysis(VersionInfo &version_info);
+      void request_valid_copy(const FieldMask &field_mask,
+                              const RegionUsage usage,
+                              std::set<RtEvent> &read_events, 
+                              std::set<RtEvent> &applied_events);
     public:
+      // Analysis methods
+      void find_valid_instances(FieldMaskSet<LogicalView> &insts,
+                                const FieldMask &user_mask);
+      void filter_valid_instances(FieldMaskSet<LogicalView> &insts,
+                                  const FieldMask &user_mask);
+      void find_reduction_instances(FieldMaskSet<ReductionView> &insts,
+                                    const FieldMask &user_mask);
+      void filter_reduction_instances(FieldMaskSet<ReductionView> &insts,
+                                      const FieldMask &user_mask);
+      void update_set(const RegionUsage &usage, const FieldMask &user_mask,
+                      const InstanceSet &target_instances,
+                      const std::vector<InstanceView*> &target_views,
+                      CopyFillAggregator &input_aggregator,
+                      CopyFillAggregator &output_aggregator);
+      void acquire_restrictions(const FieldMask &acquire_mask,
+                                FieldMaskSet<InstanceView> &instances,
+          std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
+      void release_restrictions(const FieldMask &release_mask,
+                                FieldMaskSet<InstanceView> &instances,
+          std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
+      void issue_across_copies(const RegionUsage &usage,
+                const FieldMask &src_mask, const InstanceSet &target_instances,
+                const std::vector<InstanceView*> &target_views,
+                IndexSpaceExpression *overlap, ApEvent precondition, 
+                PredEvent true_guard, CopyFillAggregator &across_aggregator,
+                const std::vector<CopyAcrossHelper> *across_helpers = NULL);
+      void overwrite_set(LogicalView *view, const FieldMask &mask,
+                    ApEvent precondition, PredEvent true_guard,
+                    CopyFillAggregator &output_aggregator, 
+                    bool add_restriction = false);
+      void filter_set(LogicalView *view, const FieldMask &mask,
+                      bool remove_restriction = false);
+    protected:
+      void perform_refinements(void);
+      void send_equivalence_set(AddressSpaceID target);
+      void add_pending_refinement(RefinementThunk *thunk); // call with lock
+      void launch_refinement_task(void); // call with lock
+      void process_subset_request(AddressSpaceID source,bool needs_lock = true);
+      void process_subset_response(Deserializer &derez);
+      void process_subset_invalidation(RtUserEvent to_trigger);
+    public:
+      static void handle_refinement(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
+      static void handle_subset_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_subset_response(Deserializer &derez, Runtime *runtime);
+      static void handle_subset_invalidation(Deserializer &derez, Runtime *rt);
+      static void handle_ray_trace_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_ray_trace_response(Deserializer &derez, Runtime *rt);
+      static void handle_create_remote_request(Deserializer &derez,
+                            Runtime *runtime, AddressSpaceID source);
+      static void handle_create_remote_response(Deserializer &derez, 
+                                                Runtime *runtime);
     public:
       IndexSpaceExpression *const set_expr;
     protected:
-      // This is the actual physical state of the equivalence class
-      FieldMaskSet<LogicalView> valid_instances;
-      FieldMaskSet<ReductionView> reduction_instances;
+      LocalLock &eq_lock;
     protected:
+      // This is the actual physical state of the equivalence class
+      FieldMaskSet<LogicalView>                           valid_instances;
+      std::map<unsigned/*field idx*/,
+               std::vector<ReductionView*> >              reduction_instances;
+      FieldMaskSet<LogicalView>                           restricted_instances;
       // This is the current version number of the equivalence set
       // Each field should appear in exactly one mask
-      LegionMap<VersionID,FieldMask>::aligned version_numbers;
+      LegionMap<VersionID,FieldMask>::aligned             version_numbers;
+    protected:
+      // Track the current state of this equivalence state
+      EqState eq_state;
+      // Whenever we have to defer transitioning to the next state
+      // then we keep a user event to signal when the transition is done
+      RtUserEvent transition_event;
+      // Track the mapping events of the current operations that
+      // are using this equivalence class to map
+      std::map<RtEvent,unsigned> mapping_guards;
+      // Keep track of the refinements that need to be done
+      std::vector<RefinementThunk*> pending_refinements;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
       // except for the remainder expression which is just waiting until
       // someone else decides that they need to access it
       std::vector<EquivalenceSet*> subsets;
-      IndexSpaceExpression *remainder;
+      // Set on the owner node for tracking the remote subset leases
+      std::set<AddressSpaceID> remote_subsets;
+      // Index space expression for unrefined remainder of our set_expr
+      // This is only valid on the owner node
+      IndexSpaceExpression *unrefined_remainder;
     protected:
-      // Used for tracking which fields have valid data here
-      // The owner node starts with all the valid fields
-      FieldMask local_valid_fields;
-      // The remainder of these members are only valid on the owner node
+      // Track which fields we hold in exclusive mode
       FieldMask exclusive_fields;
+      // Track which fields we hold in shared mode
       FieldMask shared_fields;
-      LegionMap<AddressSpaceID,FieldMask>::aligned remote_valid;
+      // These members are only valid on the owner node
+      // Track which nodes have shared copies of fields
+      LegionMap<AddressSpaceID,FieldMask>::aligned exclusive_copies;
+      LegionMap<AddressSpaceID,FieldMask>::aligned shared_copies;
     };
 
     /**
      * \class VersionManager
-     * The VersionManager class tracks the current version state
-     * objects for a given region tree node in a specific context
-     * VersionManager objects are either an owner or remote. 
-     * The owner tracks the set of remote managers and invalidates
-     * them whenever changes occur to the version state.
-     * Owners are assigned by the enclosing task context using
-     * a first-touch policy. The first node to ask to be an owner
-     * for a given logical region or partition will be assigned
-     * to be the owner.
+     * The VersionManager class tracks the starting equivalence
+     * sets for a given node in the logical region tree. Note
+     * that its possible that these have since been shattered
+     * and we need to traverse them, but it's a cached starting
+     * point that doesn't involve tracing the entire tree.
      */
     class VersionManager : public LegionHeapify<VersionManager> {
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
       static const VersionID init_version = 1;
-    public:
-      struct DeferVersionManagerRequestArgs : 
-        public LgTaskArgs<DeferVersionManagerRequestArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_VERSION_MANAGER_TASK_ID;
-      public:
-        DeferVersionManagerRequestArgs(VersionManager *proxy, 
-            VersionManager *remote, AddressSpaceID tar, bool c)
-          : LgTaskArgs<DeferVersionManagerRequestArgs>(implicit_provenance),
-            proxy_this(proxy), remote_manager(remote), 
-            target(tar), compute(c) { }
-      public:
-        VersionManager *const proxy_this;
-        VersionManager *const remote_manager;
-        const AddressSpaceID target;
-        const bool compute;
-      };
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
@@ -845,41 +985,19 @@ namespace Legion {
                             const std::vector<LogicalView*> &corresponding,
                             std::set<RtEvent> &applied_events);
     public:
-      void perform_versioning_analysis(const RegionUsage &usage,
-                                       const FieldMask &version_mask,
-                                       InnerContext *parent_ctx,
-                                       VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events,
-                                       std::set<RtEvent> &applied_events);
-    protected:
-      void compute_equivalence_sets(AddressSpaceID source);
+      void perform_versioning_analysis(InnerContext *parent_ctx,
+                                       VersionInfo &version_info);
+      void record_equivalence_set(EquivalenceSet *set);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,
                                 TreeStateLogger *logger);
-    protected:
-      void process_request(VersionManager *remote_manager, 
-                           AddressSpaceID source);
-      void send_response(VersionManager *remote_manager, AddressSpaceID target);
-      void process_defer_request(VersionManager *remote_manager,
-                                 AddressSpaceID target, bool compute_sets);
-      void process_response(Deserializer &derez);
-    public:
-      static void handle_request(Deserializer &derez, Runtime *runtime,
-                                 AddressSpaceID source_space);
-      static void handle_deferred_request(const void *args);
-      static void handle_response(Deserializer &derez);
     public:
       const ContextID ctx;
       RegionTreeNode *const node;
       Runtime *const runtime;
     protected:
       mutable LocalLock manager_lock;
-    protected:
-      InnerContext *current_context;
-    protected:
-      bool is_owner;
-      AddressSpaceID owner_space;
     protected: 
       std::set<EquivalenceSet*> equivalence_sets; 
       RtUserEvent equivalence_sets_ready;

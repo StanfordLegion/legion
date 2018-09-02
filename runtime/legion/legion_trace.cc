@@ -1792,11 +1792,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
         runtime->forest->physical_register_only(requirements[idx],
                                                 version_infos[idx],
-                                                restrict_infos[idx],
                                                 this, idx,
                                                 completion_event,
-                                                false/*defer add users*/,
-                                                false/*read only locks*/,
                                                 map_applied_conditions,
                                                 instances[idx],
                                                 trace_info
@@ -1805,6 +1802,8 @@ namespace Legion {
                                                 , unique_op_id
 #endif
                                                 );
+      for (unsigned idx = 0; idx < requirements.size(); ++idx)
+        version_infos[idx].finalize_mapping();
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -1827,9 +1826,6 @@ namespace Legion {
     void TraceSummaryOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-           it != version_infos.end(); it++)
-        it->clear();
       commit_operation(true);
     }
 

@@ -495,7 +495,6 @@ namespace Legion {
       if (region_node != NULL)
       {
         region_node->add_base_gc_ref(PHYSICAL_MANAGER_REF);
-        region_node->register_physical_manager(this);
       }
       if (instance_domain != NULL)
         instance_domain->add_base_resource_ref(PHYSICAL_MANAGER_REF);
@@ -510,7 +509,6 @@ namespace Legion {
     {
       if (region_node != NULL)
       {
-        region_node->unregister_physical_manager(this);
         if (region_node->remove_base_gc_ref(PHYSICAL_MANAGER_REF))
           delete region_node;
       }

@@ -717,9 +717,8 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-      void notify_region_tree_node_deletion(RegionTreeNode *node);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1027,12 +1026,8 @@ namespace Legion {
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
     public:
-      static void handle_version_owner_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      void process_version_owner_response(RegionTreeNode *node, 
-                                          AddressSpaceID result);
-      static void handle_version_owner_response(Deserializer &derez,
-                                                Runtime *runtime);
+      static void handle_compute_equivalence_sets_request(Deserializer &derez,
+                                     Runtime *runtime, AddressSpaceID source);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
@@ -1042,6 +1037,12 @@ namespace Legion {
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+    public:
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<InstanceView*> &target_views);
+      // I hate the container problem, same as previous except MaterializedView
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<MaterializedView*> &target_views);
     protected:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &launch_domain);
@@ -1141,10 +1142,8 @@ namespace Legion {
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
-      mutable LocalLock                         tree_owner_lock;
-      std::map<RegionTreeNode*,
-        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
-      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
+      mutable LocalLock                         tree_set_lock;
+      std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
@@ -1189,8 +1188,8 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                      const void *result, size_t size, PhysicalInstance inst);
     public:
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1280,8 +1279,8 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);

@@ -339,60 +339,75 @@ namespace Legion {
                                 const RegionRequirement &req,
                                 VersionInfo &version_info,
                                 InstanceSet &valid_instances);
-      void physical_register_only(const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  RestrictInfo &restrict_info,
-                                  Operation *op, unsigned index,
-                                  ApEvent term_event,
-                                  bool defer_add_users,
-                                  bool need_read_only_reservations,
-                                  std::set<RtEvent> &map_applied,
-                                  InstanceSet &targets,
-                                  const PhysicalTraceInfo &trace_info
-#ifdef DEBUG_LEGION
-                                 , const char *log_name
-                                 , UniqueID uid
-#endif
-                                 );
-      // For when we deferred registration of users
-      void physical_register_users(Operation *op, ApEvent term_event,
-                   const std::vector<RegionRequirement> &regions,
-                   const std::vector<bool> &to_skip,
-                   std::vector<VersionInfo> &version_infos,
-                   std::vector<RestrictInfo> &restrict_infos,
-                   std::deque<InstanceSet> &targets,
-                   std::set<RtEvent> &map_applied_events,
-                   const PhysicalTraceInfo &trace_info);
-      ApEvent physical_close_context(RegionTreeContext ctx,
-                                     const RegionRequirement &req,
+      // Return an event for when the copy-out effects of the 
+      // registration are done (e.g. for restricted coherence)
+      ApEvent physical_register_only(const RegionRequirement &req,
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
+                                     ApEvent term_event,
                                      std::set<RtEvent> &map_applied,
                                      InstanceSet &targets,
-                                     const PhysicalTraceInfo &trace_info
+                                     const PhysicalTraceInfo &trace_info,
 #ifdef DEBUG_LEGION
-                                     , const char *log_name
-                                     , UniqueID uid
+                                     const char *log_name,
+                                     UniqueID uid,
 #endif
-                                     );
+                                     bool caller_holds_locks = false);
+      void acquire_restrictions(const RegionRequirement &req,
+                                VersionInfo &version_info,
+                                Operation *op, unsigned index,
+                                ApEvent term_event,
+                                std::set<RtEvent> &map_applied,
+                                InstanceSet &restricted_instances,
+                                const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                , const char *log_name
+                                , UniqueID uid
+#endif
+                                );
+      void release_restrictions(const RegionRequirement &req,
+                                VersionInfo &version_info,
+                                Operation *op, unsigned index,
+                                ApEvent term_event,
+                                std::set<RtEvent> &map_applied,
+                                InstanceSet &restricted_instances,
+                                const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                , const char *log_name
+                                , UniqueID uid
+#endif
+                               );
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                                InstanceSet &src_targets, 
-                          const InstanceSet &dst_targets,
                           VersionInfo &src_version_info,
-                          VersionInfo &dst_version_info, 
+                          const InstanceSet &dst_targets,
                           ApEvent term_event, Operation *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
                           std::set<RtEvent> &map_applied,
                           const PhysicalTraceInfo &trace_info);
-      ApEvent reduce_across(const RegionRequirement &src_req,
-                            const RegionRequirement &dst_req,
-                            const InstanceSet &src_targets,
-                            const InstanceSet &dst_targets,
-                            Operation *op, ApEvent precondition,
-                            PredEvent predication_guard,
-                            const PhysicalTraceInfo &trace_info);
+      // This takes ownership of the value buffer
+      ApEvent fill_fields(Operation *op,
+                          const RegionRequirement &req,
+                          const unsigned index,
+                          const void *value, size_t value_size,
+                          VersionInfo &version_info, ApEvent precondition,
+                          std::set<RtEvent> &map_applied_events,
+                          PredEvent true_guard,
+                          const PhysicalTraceInfo &trace_info);
+      InstanceRef create_external_instance(AttachOp *attach_op,
+                                const RegionRequirement &req,
+                                const std::vector<FieldID> &field_set);
+      ApEvent attach_external(AttachOp *attach_op, unsigned index,
+                              const RegionRequirement &req,
+                              const InstanceRef &ext_instance,
+                              VersionInfo &version_info,
+                              std::set<RtEvent> &map_applied_events,
+                              const PhysicalTraceInfo &trace_info);
+      ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
+                              unsigned index, VersionInfo &version_info, 
+                              const InstanceRef &ref, 
+                              std::set<RtEvent> &map_applied_events);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -423,30 +438,6 @@ namespace Legion {
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
                          unsigned &idx1, unsigned &idx2);
-    public:
-      // This takes ownership of the value buffer
-      ApEvent fill_fields(Operation *op,
-                          const RegionRequirement &req,
-                          const unsigned index,
-                          const void *value, size_t value_size,
-                          VersionInfo &version_info,
-                          RestrictInfo &restrict_info,
-                          InstanceSet &instances, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events,
-                          PredEvent true_guard, PredEvent false_guard,
-                          const PhysicalTraceInfo &trace_info);
-      InstanceManager* create_external_instance(AttachOp *attach_op,
-                                const RegionRequirement &req,
-                                const std::vector<FieldID> &field_set);
-      InstanceRef attach_external(AttachOp *attach_op, unsigned index,
-                                  const RegionRequirement &req,
-                                  InstanceManager *ext_instance,
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events);
-      ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
-                              unsigned index, VersionInfo &version_info, 
-                              const InstanceRef &ref, 
-                              std::set<RtEvent> &map_applied_events);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -2265,7 +2256,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceManager* create_external_instance(
+      InstanceRef create_external_instance(
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
@@ -2508,12 +2499,8 @@ namespace Legion {
                               Deserializer &derez, AddressSpaceID source);
     public:
       void perform_versioning_analysis(ContextID ctx,
-                                       const RegionUsage &usage,
-                                       const FieldMask &version_mask,
                                        InnerContext *parent_ctx,
-                                       VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events,
-                                       std::set<RtEvent> &applied_events);
+                                       VersionInfo &version_info);
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -2642,31 +2629,6 @@ namespace Legion {
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
-    public: // Help for physical analysis
-      void find_complete_fields(const FieldMask &scope_fields,
-          const LegionMap<LegionColor,FieldMask>::aligned &children,
-          FieldMask &complete_fields);
-      InstanceView* convert_manager(PhysicalManager *manager,InnerContext *ctx);
-      InstanceView* convert_reference(const InstanceRef &ref,InnerContext *ctx);
-      void convert_target_views(const InstanceSet &targets, 
-          InnerContext *context, std::vector<InstanceView*> &target_views);
-      // I hate the container problem, same as previous except MaterializedView
-      void convert_target_views(const InstanceSet &targets, 
-          InnerContext *context, std::vector<MaterializedView*> &target_views);
-    public:
-      bool register_instance_view(PhysicalManager *manager, 
-                                  UniqueID context_uid, InstanceView *view);
-      void unregister_instance_view(PhysicalManager *manager, 
-                                    UniqueID context_uid);
-      InstanceView* find_instance_view(PhysicalManager *manager,
-                                       InnerContext *context);
-    public:
-      bool register_physical_manager(PhysicalManager *manager);
-      void unregister_physical_manager(PhysicalManager *manager);
-      PhysicalManager* find_manager(DistributedID did);
-    public:
-      void register_tracking_context(InnerContext *context);
-      void unregister_tracking_context(InnerContext *context);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
@@ -2697,8 +2659,6 @@ namespace Legion {
     public:
       virtual size_t get_num_children(void) const = 0;
       virtual void send_node(AddressSpaceID target) = 0;
-      virtual InstanceView* find_context_view(PhysicalManager *manager, 
-                                              InnerContext *context) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
@@ -2748,18 +2708,6 @@ namespace Legion {
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
       LocalLock &node_lock;
-      // While logical states and version managers have dense keys
-      // within a node, distributed IDs don't so we use a map that
-      // should rarely need to be accessed for tracking views
-      // The distributed IDs here correspond to the Instance Manager
-      // distributed ID.
-      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*,
-                LOGICAL_VIEW_ALLOC>::tracked instance_views;
-      LegionMap<DistributedID,PhysicalManager*,
-                PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
-      // Also need to track any contexts that are tracking this
-      // region tree node in case we get deleted during execution
-      std::set<InnerContext*> tracking_contexts;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
@@ -2885,68 +2833,13 @@ namespace Legion {
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
                     std::vector<LogicalPartition> &partitions);
-    public:
-      void premap_region(ContextID ctx, 
-                         const RegionRequirement &req,
-                         const FieldMask &valid_mask,
-                         VersionInfo &version_info,
-                         InstanceSet &targets);
-      void register_region(const TraversalInfo &info, UniqueID logical_ctx_uid,
-                           InnerContext *context, RestrictInfo &restrict_info, 
-                           ApEvent term_event, const RegionUsage &usage, 
-                           bool defer_add_users, InstanceSet &targets,
-                           const ProjectionInfo *proj_info);
-      void seed_state(ContextID ctx, ApEvent term_event,
-                             const RegionUsage &usage,
-                             const FieldMask &user_mask,
-                             const InstanceSet &targets,
-                             InnerContext *context, unsigned init_index,
-                             const std::vector<LogicalView*> &corresponding,
-                             std::set<RtEvent> &applied_events);
-      void close_state(const TraversalInfo &info, RegionUsage &usage, 
-                       UniqueID logical_context_uid, InnerContext *context, 
-                       InstanceSet &targets);
-      void fill_fields(ContextID ctx, const FieldMask &fill_mask,
-                       const void *value, size_t value_size, 
-                       UniqueID logical_ctx_uid, InnerContext *context, 
-                       VersionInfo &version_info,
-                       std::set<RtEvent> &map_applied_events,
-                       PredEvent true_guard, PredEvent false_guard,
-                       const PhysicalTraceInfo &trace_info
-#ifdef LEGION_SPY
-                       , UniqueID fill_op_uid
-#endif
-                       );
-      ApEvent eager_fill_fields(ContextID ctx, Operation *op,
-                              const unsigned index, 
-                              UniqueID logical_ctx_uid, InnerContext *context,
-                              const FieldMask &fill_mask,
-                              const void *value, size_t value_size,
-                              VersionInfo &version_info, InstanceSet &instances,
-                              ApEvent precondition, PredEvent true_guard,
-                              std::set<RtEvent> &map_applied_events,
-                              const PhysicalTraceInfo &trace_info);
-      InstanceRef attach_external(ContextID ctx, InnerContext *parent_ctx,
-                                  const UniqueID logical_ctx_uid,
-                                  const FieldMask &attach_mask,
-                                  const RegionRequirement &req, 
-                                  InstanceManager *manager, 
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events);
-      ApEvent detach_external(ContextID ctx, InnerContext *context, 
-                              const UniqueID logical_ctx_uid,
-                              VersionInfo &version_info, 
-                              const InstanceRef &ref,
-                              std::set<RtEvent> &map_applied_events);
-    public:
-      virtual InstanceView* find_context_view(PhysicalManager *manager,
-                                              InnerContext *context);
-      InstanceView* convert_reference_region(PhysicalManager *manager, 
-                                             InnerContext *context);
-      void convert_references_region(
-                              const std::vector<PhysicalManager*> &managers,
-                              std::vector<bool> &up_mask, InnerContext *context,
-                              std::vector<InstanceView*> &results);
+      void initialize_state(ContextID ctx, ApEvent term_event,
+                            const RegionUsage &usage,
+                            const FieldMask &user_mask,
+                            const InstanceSet &targets,
+                            InnerContext *context, unsigned init_index,
+                            const std::vector<LogicalView*> &corresponding,
+                            std::set<RtEvent> &applied_events);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -3031,16 +2924,6 @@ namespace Legion {
       virtual bool dominates(RegionTreeNode *other);
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);
-    public:
-      virtual InstanceView* find_context_view(PhysicalManager *manager,
-                                              InnerContext *context);
-      InstanceView* convert_reference_partition(PhysicalManager *manager,
-                                                InnerContext *context);
-      void convert_references_partition(
-                                  const std::vector<PhysicalManager*> &managers,
-                                  std::vector<bool> &up_mask, 
-                                  InnerContext *context,
-                                  std::vector<InstanceView*> &results);
     public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
