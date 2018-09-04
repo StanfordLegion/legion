@@ -366,19 +366,6 @@ namespace Legion {
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
     public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void release_restrictions(void) = 0;
-      virtual bool has_restrictions(void) const = 0; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info) = 0;
-    public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f) = 0;
       virtual void find_collective_contributions(DynamicCollective dc,
@@ -1005,19 +992,6 @@ namespace Legion {
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
-    public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
@@ -1134,9 +1108,6 @@ namespace Legion {
       // For managing changing task priorities
       ApEvent realm_done_event;
       TaskPriority current_priority;
-    protected:
-      // For tracking restricted coherence
-      std::list<Restriction*> coherence_restrictions;
     protected: // Instance top view data structures
       mutable LocalLock                         instance_view_lock;
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
@@ -1607,19 +1578,6 @@ namespace Legion {
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
-    public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
@@ -1924,19 +1882,6 @@ namespace Legion {
       virtual void end_task(const void *res, size_t res_size, bool owned,
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);

@@ -589,6 +589,7 @@ namespace Legion {
       void filter_previous_user(ApEvent user_event, 
                                 const FieldMask &filter_mask);
     protected:
+#if 0
       template<bool TRACK_DOM>
       void find_current_preconditions(const FieldMask &user_mask,
                                       const RegionUsage &usage,
@@ -662,6 +663,7 @@ namespace Legion {
                                       const PhysicalTraceInfo &trace_info);
       void find_previous_filter_users(const FieldMask &dominated_mask,
                   LegionMap<ApEvent,FieldMask>::aligned &filter_events);
+#endif
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                      const RegionUsage &next_user,
                                      const LegionColor child_color,
@@ -1040,19 +1042,12 @@ namespace Legion {
       virtual void update_gc_events(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
-      void issue_deferred_copies_across(const TraversalInfo &info,
-                                        MaterializedView *dst,
-                                  const std::vector<unsigned> &src_indexes,
-                                  const std::vector<unsigned> &dst_indexes,
-                                        ApEvent precondition, PredEvent guard,
-                                        std::set<ApEvent> &postconditions);
-    public:
+#if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out) = 0;
-#if 0
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
                                          const WriteMasks &write_masks,
@@ -1115,12 +1110,12 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
+#if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
-#if 0
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
                                          const WriteMasks &write_masks,
@@ -1138,7 +1133,6 @@ namespace Legion {
                               IndexSpaceExpression *mask,
                               WriteSet &performed_writes,
                               PredEvent pred_guard) const;
-#endif
       void issue_internal_fills(const TraversalInfo &info,
                                 MaterializedView *dst,
                                 const FieldMask &fill_mask,
@@ -1148,6 +1142,7 @@ namespace Legion {
                                 CopyAcrossHelper *helper = NULL,
                                 IndexSpaceExpression *mask = NULL,
                                 WriteSet *perf = NULL) const;
+#endif
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -1224,12 +1219,12 @@ namespace Legion {
       virtual InnerContext* get_context(void) const
         { return owner_context; }
     public:
+#if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
                                          FieldMask copy_mask,
                                          const RestrictInfo &restrict_info,
                                          bool restrict_out);
-#if 0
       virtual void issue_deferred_copies(DeferredCopier &copier,
                                          const FieldMask &local_copy_mask,
                                          const WriteMasks &write_masks,

@@ -450,7 +450,6 @@ namespace Legion {
       std::vector<unsigned> parent_indices;
       std::vector<RegionTreePath> privilege_paths;
       std::vector<VersionInfo> version_infos;
-      std::vector<RestrictInfo> restrict_infos;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> mapped_preconditions;
     };

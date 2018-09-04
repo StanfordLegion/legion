@@ -6256,33 +6256,6 @@ namespace Legion {
               runtime->handle_equivalence_set_create_remote_response(derez);
               break;
             }
-          case SEND_VERSION_STATE_REQUEST:
-            {
-              runtime->handle_version_state_request(derez,remote_address_space);
-              break;
-            }
-          case SEND_VERSION_STATE_RESPONSE:
-            {
-              runtime->handle_version_state_response(derez,
-                                                     remote_address_space);
-              break;
-            }
-          case SEND_VERSION_STATE_UPDATE_REQUEST:
-            {
-              runtime->handle_version_state_update_request(derez);
-              break;
-            }
-          case SEND_VERSION_STATE_UPDATE_RESPONSE:
-            {
-              runtime->handle_version_state_update_response(derez);
-              break;
-            }
-          case SEND_VERSION_STATE_VALID_NOTIFICATION:
-            {
-              runtime->handle_version_state_valid_notification(derez,
-                                                 remote_address_space);
-              break;
-            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -14254,46 +14227,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_state_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
-                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_request(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-                               SEND_VERSION_STATE_UPDATE_REQUEST,
-                               ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_response(AddressSpaceID target,
-                                                     Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_UPDATE_RESPONSE,
-                                ANALYSIS_VIRTUAL_CHANNEL, 
-                                true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_valid_notification(AddressSpaceID target,
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_VALID_NOTIFICATION,
-                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15384,44 +15317,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_request(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_response(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_request(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_response(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_valid_notification(Deserializer &derez,
-                                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_valid_notification(derez,this,source);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -16315,18 +16210,6 @@ namespace Legion {
         assert(false);
       // Have to static cast since the memory might not have been initialized
       return static_cast<PhysicalManager*>(dc);
-    }
-
-    //--------------------------------------------------------------------------
-    VersionState* Runtime::find_or_request_version_state(DistributedID did,
-                                                         RtEvent &ready)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable *dc = find_or_request_distributed_collectable<
-        VersionState, SEND_VERSION_STATE_REQUEST, VERSION_VIRTUAL_CHANNEL>(did,
-                                                                        ready);
-      // Have to static cast since the memory might not have been initialized
-      return static_cast<VersionState*>(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -19911,18 +19794,6 @@ namespace Legion {
             runtime->activate_context(dargs->parent_ctx);
             break;
           }
-        case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
-          {
-            VersionState::SendVersionStateArgs *vargs = 
-              (VersionState::SendVersionStateArgs*)args;
-            vargs->proxy_this->send_version_state_update(vargs->target, 
-                                                  vargs->context,
-                                                  *(vargs->request_mask),
-                                                  vargs->request_kind,
-                                                  vargs->to_trigger);
-            delete (vargs->request_mask);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 
@@ -20039,31 +19910,6 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case LG_CONVERT_VIEW_TASK_ID:
-          {
-            VersionState::process_convert_view(args);
-            break;
-          }
-        case LG_UPDATE_VIEW_REFERENCES_TASK_ID:
-          {
-            VersionState::process_view_references(args);
-            break;
-          }
-        case LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID:
-          {
-            VersionState::process_version_state_reduction(args);
-            break;
-          }
-        case LG_REMOVE_VERSION_STATE_REF_TASK_ID:
-          {
-            VersionState::process_remove_version_state_ref(args);
-            break;
-          }
-        case LG_DEFER_RESTRICTED_MANAGER_TASK_ID:
-          {
-            RestrictInfo::handle_deferred_reference(args);
-            break;
-          }
         case LG_REMOTE_VIEW_CREATION_TASK_ID:
           {
             InnerContext::handle_remote_view_creation(args);
@@ -20098,14 +19944,6 @@ namespace Legion {
             const SliceTask::DeferMapAndLaunchArgs *margs = 
               (const SliceTask::DeferMapAndLaunchArgs*)args;
             margs->proxy_this->map_and_launch();
-            break;
-          }
-        case LG_ADD_VERSIONING_SET_REF_TASK_ID:
-          {
-            const VersioningSetRefArgs *ref_args = 
-              (const VersioningSetRefArgs*)args;
-            LocalReferenceMutator mutator;
-            ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
             break;
           }
         case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:

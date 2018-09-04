@@ -282,9 +282,7 @@ namespace Legion {
                                     const PhysicalTraceInfo &info) const;
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual void early_map_task(void) = 0;
@@ -292,7 +290,6 @@ namespace Legion {
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -312,12 +309,6 @@ namespace Legion {
     protected:
       void enqueue_ready_task(bool use_target_processor,
                               RtEvent wait_on = RtEvent::NO_RT_EVENT);
-    protected:
-      void pack_restrict_infos(Serializer &rez, 
-                               std::vector<RestrictInfo> &infos);
-      void unpack_restrict_infos(Deserializer &derez,
-                                 std::vector<RestrictInfo> &infos,
-                                 std::set<RtEvent> &ready_events);
     public:
       // Tell the parent context that this task is in a ready queue
       void activate_outstanding_task(void);
@@ -494,7 +485,6 @@ namespace Legion {
       virtual bool distribute_task(void) = 0; 
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual bool is_stealable(void) const = 0;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
     public:
       virtual ApEvent get_task_completion(void) const = 0;
@@ -597,10 +587,7 @@ namespace Legion {
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle) = 0;
       virtual void map_and_launch(void) = 0;
-      virtual RestrictInfo& get_restrict_info(unsigned idx);
-      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:
       virtual ApEvent get_task_completion(void) const = 0;
       virtual TaskKind get_task_kind(void) const = 0;
@@ -631,7 +618,6 @@ namespace Legion {
                                  bool owner, bool exclusive); 
     protected:
       std::list<SliceTask*> slices;
-      std::vector<RestrictInfo> restrict_infos;
       bool sliced;
     protected:
       IndexSpace launch_space; // global set of points
@@ -692,12 +678,9 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const;
@@ -744,7 +727,6 @@ namespace Legion {
       Future result; 
       std::set<Operation*>        child_operations;
       std::vector<RegionTreePath> privilege_paths;
-      std::vector<RestrictInfo>   restrict_infos;
     protected:
       // Information for remotely executing task
       IndividualTask *orig_task; // Not a valid pointer when remote
@@ -799,12 +781,9 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
       virtual bool is_stealable(void) const;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual RestrictInfo& get_restrict_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual const std::vector<RestrictInfo>* get_restrict_infos(void);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -904,7 +883,6 @@ namespace Legion {
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual void map_and_launch(void);
     public:
       virtual ApEvent get_task_completion(void) const;
@@ -1026,7 +1004,6 @@ namespace Legion {
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
-      virtual bool has_restrictions(unsigned idx, LogicalRegion handle);
       virtual void map_and_launch(void);
     public:
       virtual ApEvent get_task_completion(void) const;

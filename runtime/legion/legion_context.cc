@@ -5678,82 +5678,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_acquisition(AcquireOp *op,
-                                       const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      if (!runtime->forest->add_acquisition(coherence_restrictions, op, req))
-        // We faiiled to acquire, report the error
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_ACQUIRE_OPERATION,
-          "Illegal acquire operation (ID %lld) performed in "
-                      "task %s (ID %lld). Acquire was performed on a non-"
-                      "restricted region.", op->get_unique_op_id(),
-                      get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::remove_acquisition(ReleaseOp *op, 
-                                          const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      if (!runtime->forest->remove_acquisition(coherence_restrictions, op, req))
-        // We failed to release, report the error
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RELEASE_OPERATION,
-          "Illegal release operation (ID %lld) performed in "
-                      "task %s (ID %lld). Release was performed on a region "
-                      "that had not previously been acquired.",
-                      op->get_unique_op_id(), get_task_name(), 
-                      get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::add_restriction(AttachOp *op, InstanceManager *inst,
-                                       const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      runtime->forest->add_restriction(coherence_restrictions, op, inst, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::remove_restriction(DetachOp *op, 
-                                          const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      // Try to remove the restriction, it is alright if it fails
-      runtime->forest->remove_restriction(coherence_restrictions, op, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::list<Restriction*>::const_iterator it = 
-            coherence_restrictions.begin(); it != 
-            coherence_restrictions.end(); it++)
-        delete (*it);
-      coherence_restrictions.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !coherence_restrictions.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::perform_restricted_analysis(const RegionRequirement &req,
-                                                   RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!coherence_restrictions.empty());
-#endif
-      runtime->forest->perform_restricted_analysis(
-                                coherence_restrictions, req, restrict_info);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f) 
     //--------------------------------------------------------------------------
@@ -5894,22 +5818,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
-          // Always make reduce-only privileges restricted so that
-          // we always flush data back, this will prevent us from 
-          // needing a post close op later
-          if (IS_REDUCE(regions[idx]))
-            coherence_restrictions.push_back(
-                runtime->forest->create_coherence_restriction(regions[idx],
-                                                  physical_instances[idx]));
-          // If we need to add restricted coherence, do that now
-          // Not we only need to do this for non-virtually mapped task
-          else if ((regions[idx].prop == SIMULTANEOUS) && 
-                   ((regions[idx].privilege == READ_ONLY) ||
-                    (regions[idx].privilege == READ_WRITE) ||
-                    (regions[idx].privilege == WRITE_DISCARD)))
-            coherence_restrictions.push_back(
-                runtime->forest->create_coherence_restriction(regions[idx],
-                                                  physical_instances[idx]));
         }
       }
     }
@@ -6028,6 +5936,62 @@ namespace Legion {
       // Should only be called on RemoteContext
       assert(false);
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::convert_target_views(const InstanceSet &targets,
+                                       std::vector<InstanceView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      std::vector<unsigned> still_needed;
+      {
+        AutoLock inst_lock(instance_view_lock,1,false/*exclusive*/); 
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          // See if we can find it
+          PhysicalManager *manager = targets[idx].get_manager();
+          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+            instance_top_views.find(manager);     
+          if (finder != instance_top_views.end())
+            target_views[idx] = finder->second;
+          else
+            still_needed.push_back(idx);
+        }
+      }
+      if (!still_needed.empty())
+      {
+        std::set<RtEvent> ready_events;
+        const AddressSpaceID local_space = runtime->address_space;
+        for (std::vector<unsigned>::const_iterator it = 
+              still_needed.begin(); it != still_needed.end(); it++)
+        {
+          PhysicalManager *manager = targets[*it].get_manager();
+          RtEvent ready;
+          target_views[*it] = 
+            create_instance_top_view(manager, local_space, &ready);
+          if (ready.exists())
+            ready_events.insert(ready);
+        }
+        if (!ready_events.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists())
+            wait_on.wait();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::convert_target_views(const InstanceSet &targets,
+                                   std::vector<MaterializedView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<InstanceView*> inst_views(targets.size());
+      convert_target_views(targets, inst_views);
+      target_views.resize(inst_views.size());
+      for (unsigned idx = 0; idx < inst_views.size(); idx++)
+        target_views[idx] = inst_views[idx]->as_materialized_view();
+    }
 
     //--------------------------------------------------------------------------
     InstanceView* InnerContext::create_instance_top_view(
@@ -8729,60 +8693,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::add_acquisition(AcquireOp *op, 
-                                      const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::remove_acquisition(ReleaseOp *op,
-                                         const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::add_restriction(AttachOp *op, InstanceManager *instance,
-                                      const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::remove_restriction(DetachOp *op,
-                                         const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    bool LeafContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::perform_restricted_analysis(const RegionRequirement &req,
-                                                  RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void LeafContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f) 
     //--------------------------------------------------------------------------
@@ -9836,60 +9746,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_acquisition(AcquireOp *op,
-                                        const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_acquisition(op, req);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::remove_acquisition(ReleaseOp *op,
-                                           const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->remove_acquisition(op, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_restriction(AttachOp *op, InstanceManager *instance,
-                                        const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_restriction(op, instance, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::remove_restriction(DetachOp *op,
-                                           const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->remove_restriction(op, req);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->release_restrictions();
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->has_restrictions();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_restricted_analysis(
-                      const RegionRequirement &req, RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_restricted_analysis(req, restrict_info);
     }
 
     //--------------------------------------------------------------------------

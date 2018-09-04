@@ -283,12 +283,10 @@ namespace Legion {
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
-                                       RestrictInfo &restrict_info,
                                        const ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
-                                     RestrictInfo &restrict_info,
                                      RegionTreePath &path);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
@@ -319,24 +317,9 @@ namespace Legion {
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
                                  const InstanceSet &inst2);
-    public:
-      Restriction* create_coherence_restriction(const RegionRequirement &req,
-                                                const InstanceSet &instances);
-      bool add_acquisition(const std::list<Restriction*> &restrictions,
-                           AcquireOp *op, const RegionRequirement &req);
-      bool remove_acquisition(const std::list<Restriction*> &restrictions,
-                              ReleaseOp *op, const RegionRequirement &req);
-      void add_restriction(std::list<Restriction*> &restrictions, AttachOp *op,
-                           InstanceManager *inst, const RegionRequirement &req);
-      bool remove_restriction(std::list<Restriction*> &restrictions,
-                              DetachOp *op, const RegionRequirement &req);
-      void perform_restricted_analysis(
-                              const std::list<Restriction*> &restrictions,
-                              const RegionRequirement &req, 
-                              RestrictInfo &restrict_info);
     public: // Physical analysis methods
       void physical_premap_only(Operation *op, unsigned index,
-                                const RegionRequirement &req,
+                                RegionRequirement &req,
                                 VersionInfo &version_info,
                                 InstanceSet &valid_instances);
       // Return an event for when the copy-out effects of the 
@@ -1364,24 +1347,6 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual bool check_field_size(size_t field_size, bool range) = 0;
     public:
-      virtual ApEvent issue_copy(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &src_fields,
-              const std::vector<CopySrcDstField> &dst_fields,
-              ApEvent precondition, PredEvent predicate_guard,
-              IndexTreeNode *intersect, IndexSpaceExpression *mask,
-              ReductionOpID redop = 0, bool reduction_fold = true,
-              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
-      virtual ApEvent issue_fill(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &dst_fields,
-              const void *fill_value, size_t fill_size,
-              ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-              UniqueID fill_uid,
-#endif
-              IndexTreeNode *intersect = NULL,
-              IndexSpaceExpression *mask = NULL,
-              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
-    public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
                            const OrderingConstraint &constraint) = 0;
@@ -1575,24 +1540,6 @@ namespace Legion {
                 const std::vector<FieldDataDescriptor> &instances,
                                       ApEvent instances_ready);
       virtual bool check_field_size(size_t field_size, bool range);
-    public:
-      virtual ApEvent issue_copy(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &src_fields,
-              const std::vector<CopySrcDstField> &dst_fields,
-              ApEvent precondition, PredEvent predicate_guard,
-              IndexTreeNode *intersect, IndexSpaceExpression *mask,
-              ReductionOpID redop = 0, bool reduction_fold = true,
-              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
-      virtual ApEvent issue_fill(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &dst_fields,
-              const void *fill_value, size_t fill_size,
-              ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-              UniqueID fill_uid,
-#endif
-              IndexTreeNode *intersect = NULL,
-              IndexSpaceExpression *mask = NULL,
-              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
     public:
       virtual Realm::InstanceLayoutGeneric* create_layout(
                            const Realm::InstanceLayoutConstraints &ilc,
@@ -2380,26 +2327,6 @@ namespace Legion {
       {
         return current_versions.lookup_entry(ctx, this, ctx);
       }
-      // Trampolines for copies and fills
-      inline ApEvent issue_copy(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true,
-                  WriteSet *performed = NULL,
-                  const FieldMask *performed_mask = NULL);
-      inline ApEvent issue_fill(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-                  UniqueID fill_uid,
-#endif
-                  RegionTreeNode *intersect = NULL,
-                  IndexSpaceExpression *mask = NULL,
-                  WriteSet *performed = NULL,
-                  const FieldMask *performed_mask = NULL);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                             const void *buffer, size_t size, bool is_mutable);
@@ -2482,7 +2409,6 @@ namespace Legion {
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
-                                     RestrictInfo &restrict_info,
                                      const LogicalTraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
@@ -2509,6 +2435,7 @@ namespace Legion {
       bool invalidate_version_state(ContextID ctx);
       void invalidate_version_managers(void);
     public:
+#if 0
       // This method will always add valid references to the set of views
       // that are returned.  It is up to the caller to remove the references.
       void find_valid_instance_views(ContextID ctx,
@@ -2553,7 +2480,6 @@ namespace Legion {
                                       MaterializedView *&src_instance,
                                       DeferredView *&deferred_instance);
       // Issue copies for fields with the same event preconditions and masks
-#if 0
       void issue_grouped_copies(const TraversalInfo &info,
                                 MaterializedView *dst, bool restrict_out,
                                 PredEvent predicate_guard,
@@ -2587,7 +2513,6 @@ namespace Legion {
                                 CopyAcrossHelper *across_helper,
                                 RegionTreeNode *intersect,
                                 IndexSpaceExpression *mask);
-#endif
       void issue_update_reductions(LogicalView *target,
                                    const FieldMask &update_mask,
                                    VersionInfo &version_info,
@@ -2600,17 +2525,6 @@ namespace Legion {
                                      const FieldMask &invalid_mask); 
       void invalidate_reduction_views(PhysicalState *state,
                                       const FieldMask &invalid_mask);
-      // Helper methods for doing copy/reduce-out for restricted coherence
-      void issue_restricted_copies(const TraversalInfo &info,
-         const RestrictInfo &restrict_info, 
-         const InstanceSet &restricted_instances,
-         const std::vector<MaterializedView*> &restricted_views,
-         const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views);
-      void issue_restricted_reductions(const TraversalInfo &info,
-         const RestrictInfo &restrict_info,
-         const InstanceSet &restricted_instances,
-         const std::vector<InstanceView*> &restricted_views,
-         const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
       // Look for a view to remove from the set of valid views
       void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
       void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
@@ -2629,6 +2543,7 @@ namespace Legion {
       void update_reduction_views(PhysicalState *state, 
                                   const FieldMask &valid_mask,
                                   ReductionView *new_view);
+#endif
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
@@ -2998,51 +2913,6 @@ namespace Legion {
       return static_cast<PartitionNode*>(const_cast<RegionTreeNode*>(this));
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    inline ApEvent RegionTreeNode::issue_copy(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop, bool reduction_fold,
-                  WriteSet *performed, const FieldMask *performed_mask)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = is_region() ? 
-        as_region_node() : as_partition_node()->parent;
-      return node->row_source->issue_copy(info, node, src_fields, dst_fields,
-          precondition, predicate_guard, 
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, redop, reduction_fold, performed, performed_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    inline ApEvent RegionTreeNode::issue_fill(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-                  UniqueID fill_uid,
-#endif
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  WriteSet *performed, const FieldMask *performed_mask)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = is_region() ? 
-        as_region_node() : as_partition_node()->parent;
-#ifdef LEGION_SPY
-      return node->row_source->issue_fill(info, node, dst_fields, 
-          fill_value, fill_size, precondition, predicate_guard, fill_uid,
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, performed, performed_mask);
-#else
-      return node->row_source->issue_fill(info, node, dst_fields, 
-          fill_value, fill_size, precondition, predicate_guard,
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, performed, performed_mask);
-#endif
-    }
 
   }; // namespace Internal
 }; // namespace Legion

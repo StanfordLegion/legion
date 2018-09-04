@@ -1816,6 +1816,7 @@ namespace Legion {
       layout->compute_copy_offsets(reduce_mask, this, fields);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     ApEvent FoldReductionManager::issue_reduction(const PhysicalTraceInfo &info,
         const std::vector<CopySrcDstField> &src_fields,
@@ -1832,6 +1833,7 @@ namespace Legion {
       return dst->issue_copy(&info, src_fields, dst_fields, precondition,
                              guard, intersect, mask, redop, reduction_fold);
     }
+#endif
 
     //--------------------------------------------------------------------------
     Domain FoldReductionManager::get_pointer_space(void) const
@@ -1960,6 +1962,7 @@ namespace Legion {
       return (total_field_bytes * instance_domain->get_volume());
     }
 
+#if 0
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
                                                        RegionTreeForest *forest)
@@ -2149,6 +2152,7 @@ namespace Legion {
 #endif
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(

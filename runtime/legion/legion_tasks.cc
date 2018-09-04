@@ -1270,25 +1270,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RestrictInfo& TaskOp::get_restrict_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // this should never be called
-      assert(false);
-      return (*(new RestrictInfo()));
-    }
-
-    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<RestrictInfo>* TaskOp::get_restrict_infos(void)
     //--------------------------------------------------------------------------
     {
       // This should never be called
@@ -1353,59 +1335,6 @@ namespace Legion {
       }
       else
         runtime->add_to_ready_queue(current_proc, this, wait_on);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::pack_restrict_infos(Serializer &rez,
-                                     std::vector<RestrictInfo> &infos)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      size_t count = 0;
-      for (unsigned idx = 0; idx < infos.size(); idx++)
-      {
-        if (infos[idx].has_restrictions())
-          count++;
-      }
-      rez.serialize(count);
-      if (count > 0)
-      {
-        rez.serialize(runtime->address_space);
-        for (unsigned idx = 0; idx < infos.size(); idx++)
-        {
-          if (infos[idx].has_restrictions())
-          {
-            rez.serialize(idx);
-            infos[idx].pack_info(rez);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskOp::unpack_restrict_infos(Deserializer &derez,
-              std::vector<RestrictInfo> &infos, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      // Always resize the restrictions
-      infos.resize(regions.size());
-      size_t num_restrictions;
-      derez.deserialize(num_restrictions);
-      if (num_restrictions > 0)
-      {
-        AddressSpaceID source;
-        derez.deserialize(source);
-        for (unsigned idx = 0; idx < num_restrictions; idx++)
-        {
-          unsigned index;
-          derez.deserialize(index);
-#ifdef DEBUG_LEGION
-          assert(index < infos.size());
-#endif
-          infos[index].unpack_info(derez, runtime, ready_events);
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1833,9 +1762,6 @@ namespace Legion {
           regions[idx].privilege = NO_ACCESS;
           continue;
         }
-        // Always check to see if there are any restrictions
-        if (has_restrictions(idx, regions[idx].region))
-          regions[idx].flags |= RESTRICTED_FLAG;
       }
       complete_point_projection(); 
     }
@@ -1907,16 +1833,12 @@ namespace Legion {
       {
         InstanceSet valid;    
         VersionInfo &version_info = get_version_info(*it);
-        RestrictInfo &restrict_info = get_restrict_info(*it);
         // Do the premapping
         runtime->forest->physical_premap_only(this, *it, regions[*it],
                                               version_info, valid);
         // If we need visible instances, filter them as part of the conversion
         if (regions[*it].is_no_access())
           prepare_for_mapping(valid, input.valid_instances[*it]);
-        else if (restrict_info.has_restrictions())
-          prepare_for_mapping(restrict_info.get_instances(),
-                              input.valid_instances[*it]);
         else
           prepare_for_mapping(valid, visible_memories, 
                               input.valid_instances[*it]);
@@ -2638,34 +2560,6 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
-        // Handle the case of restricted simultaneous coherence where if
-        // we are restricted and are requesting simultaneous coherence then
-        // we need to use the same instances as our parent instance
-        RestrictInfo &restrict_info = get_restrict_info(idx);
-        if (IS_SIMULT(regions[idx]) && restrict_info.has_restrictions())
-        {
-          // Check to see if we cover all the fields, if not we 
-          // have no way to handle this currently
-          FieldMask restricted_mask;
-          restrict_info.populate_restrict_fields(restricted_mask);
-          if (FieldMask::pop_count(restricted_mask) != 
-              int(regions[idx].privilege_fields.size()))
-            REPORT_LEGION_FATAL(LEGION_FATAL_RESTRICTED_SIMULTANEOUS,
-                          "Partially restricted region requirement %d with "
-                          "simultaneous coherence for task %s (ID %lld) is "
-                          "not currently supported by the Legion runtime. "
-                          "Please report this use case to the Legion "
-                          "developers mailing list.", idx, get_task_name(),
-                          get_unique_id())
-          input.premapped_regions.push_back(idx);
-          // Still fill in the valid regions so that mappers can use
-          // the instance names for constraints
-          prepare_for_mapping(restrict_info.get_instances(),
-                              input.valid_instances[idx]);
-          // We can also copy them over to the output too
-          output.chosen_instances[idx] = input.valid_instances[idx];
-          continue;
-        }
         // Always have to do the traversal at this point to mark open children
         InstanceSet &current_valid = valid[idx];
         perform_physical_traversal(idx, enclosing, current_valid);
@@ -2682,9 +2576,6 @@ namespace Legion {
         // filter for visible memories if necessary
         if (regions[idx].is_no_access())
           prepare_for_mapping(current_valid, input.valid_instances[idx]);
-        else if (restrict_info.has_restrictions())
-          prepare_for_mapping(restrict_info.get_instances(),
-                              input.valid_instances[idx]);
         // There are no valid instances for reduction-only cases
         else if (regions[idx].privilege != REDUCE)
           prepare_for_mapping(current_valid, visible_memories,
@@ -2842,21 +2733,12 @@ namespace Legion {
         runtime->find_visible_memories(target_proc, visible_memories);
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // If it was early mapped or is restricted, then it is easy
+        // If it was early mapped then it is easy
         std::map<unsigned,InstanceSet>::const_iterator finder = 
           early_mapped_regions.find(idx);
-        if ((finder != early_mapped_regions.end()) ||
-            (IS_SIMULT(regions[idx]) && 
-             get_restrict_info(idx).has_restrictions()))
+        if (finder != early_mapped_regions.end())
         {
-          if (finder == early_mapped_regions.end())
-          {
-            RestrictInfo &restrict_info = get_restrict_info(idx);
-            // Must cover given the assertion in initialize_map_task_input
-            physical_instances[idx] = restrict_info.get_instances();
-          }
-          else
-            physical_instances[idx] = finder->second;
+          physical_instances[idx] = finder->second;
           // Check to see if it is visible or not from the target processors
           if (!runtime->unsafe_mapper && !regions[idx].is_no_access())
           {
@@ -3575,7 +3457,7 @@ namespace Legion {
         if (output.chosen_instances.empty())
           continue;
         RegionRequirement &req = regions[idx];
-        if (has_restrictions(idx, req.region))
+        if (req.is_restricted())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_MAPPER_REQUESTED_POST,
                           "Mapper %s requested post mapping "
@@ -4125,7 +4007,6 @@ namespace Legion {
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
       slices.clear(); 
-      restrict_infos.clear();
       if (predicate_false_result != NULL)
       {
         legion_free(PREDICATE_ALLOC, predicate_false_result, 
@@ -4327,7 +4208,6 @@ namespace Legion {
         this->serdez_redop_fns = rhs->serdez_redop_fns;
         initialize_reduction_state();
       }
-      this->restrict_infos = rhs->restrict_infos;
       this->predicate_false_future = rhs->predicate_false_future;
       this->predicate_false_size = rhs->predicate_false_size;
       if (this->predicate_false_size > 0)
@@ -4512,23 +4392,6 @@ namespace Legion {
         free(const_cast<void*>(result));
     } 
 
-    //--------------------------------------------------------------------------
-    RestrictInfo& MultiTask::get_restrict_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < restrict_infos.size());
-#endif
-      return restrict_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<RestrictInfo>* MultiTask::get_restrict_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return &restrict_infos;
-    }
-
     /////////////////////////////////////////////////////////////
     // Individual Task 
     /////////////////////////////////////////////////////////////
@@ -4621,7 +4484,6 @@ namespace Legion {
       result = Future();
       predicate_false_future = Future();
       privilege_paths.clear();
-      restrict_infos.clear();
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
@@ -4829,13 +4691,11 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      restrict_infos.resize(regions.size());
       version_infos.resize(regions.size());
       ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     restrict_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -5047,17 +4907,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool IndividualTask::has_restrictions(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < restrict_infos.size());
-#endif
-      // We know that if there are any restrictions they directly apply
-      return restrict_infos[idx].has_restrictions();
-    }
-
-    //--------------------------------------------------------------------------
     bool IndividualTask::can_early_complete(ApUserEvent &chain_event)
     //--------------------------------------------------------------------------
     {
@@ -5084,27 +4933,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RestrictInfo& IndividualTask::get_restrict_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(idx < restrict_infos.size());
-#endif
-      return restrict_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* IndividualTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
       return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<RestrictInfo>* IndividualTask::get_restrict_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return &restrict_infos;
     }
 
     //--------------------------------------------------------------------------
@@ -5165,9 +4997,6 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      // Release any restrictions we might have had
-      if ((execution_context != NULL) && execution_context->has_restrictions())
-        execution_context->release_restrictions();
       // Invalidate any state that we had if we didn't already
       // Do this before sending the complete message to avoid the
       // race condition in the remote case where the top-level
@@ -5359,7 +5188,6 @@ namespace Legion {
       rez.serialize(remote_unique_id);
       rez.serialize(remote_owner_uid);
       rez.serialize(top_level_task);
-      pack_restrict_infos(rez, restrict_infos);
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
       else
@@ -5389,7 +5217,6 @@ namespace Legion {
       set_current_proc(current);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(top_level_task);
-      unpack_restrict_infos(derez, restrict_infos, ready_events);
       // Quick check to see if we've been sent back to our original node
       if (!is_remote())
       {
@@ -5850,13 +5677,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PointTask::has_restrictions(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->has_restrictions(idx, handle);
-    }
-
-    //--------------------------------------------------------------------------
     bool PointTask::can_early_complete(ApUserEvent &chain_event)
     //--------------------------------------------------------------------------
     {
@@ -5876,24 +5696,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RestrictInfo& PointTask::get_restrict_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->get_restrict_info(idx);
-    }
-
-    //--------------------------------------------------------------------------
     const std::vector<VersionInfo>* PointTask::get_version_infos(void)
     //--------------------------------------------------------------------------
     {
       return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<RestrictInfo>* PointTask::get_restrict_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return slice_owner->get_restrict_infos();
     }
 
     //--------------------------------------------------------------------------
@@ -5964,9 +5770,6 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
-      // Release any restrictions we might have had
-      if (execution_context->has_restrictions())
-        execution_context->release_restrictions();
       // Pass back our created and deleted operations 
       slice_owner->return_privileges(execution_context);
       slice_owner->record_child_complete();
@@ -6158,8 +5961,6 @@ namespace Legion {
       // if it is then switch the privilege to NO_ACCESS
       if (req.region == LogicalRegion::NO_REGION)
         req.privilege = NO_ACCESS;
-      else if (has_restrictions(idx, req.region))
-        req.flags |= RESTRICTED_FLAG;
     }
 
     //--------------------------------------------------------------------------
@@ -6608,12 +6409,10 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      restrict_infos.resize(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         ProjectionInfo projection_info(runtime, regions[idx], launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     restrict_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -6842,19 +6641,6 @@ namespace Legion {
       // split into slices which can then be stolen.  Note that slicing
       // always happens after premapping so we know stealing is safe.
       return false;
-    }
-
-    //--------------------------------------------------------------------------
-    bool IndexTask::has_restrictions(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      // Handle the case of inline tasks
-      if (restrict_infos.empty())
-        return false;
-#ifdef DEBUG_LEGION
-      assert(idx < restrict_infos.size());
-#endif
-      return restrict_infos[idx].has_restrictions();
     }
 
     //--------------------------------------------------------------------------
@@ -7736,21 +7522,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool SliceTask::has_restrictions(unsigned idx, LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      if (is_remote())
-      {
-#ifdef DEBUG_LEGION
-        assert(idx < restrict_infos.size());
-#endif
-        return restrict_infos[idx].has_restrictions();
-      }
-      else
-        return index_owner->has_restrictions(idx, handle);
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::map_and_launch(void)
     //--------------------------------------------------------------------------
     {
@@ -7840,10 +7611,6 @@ namespace Legion {
       rez.serialize(origin_mapped);
       rez.serialize(remote_owner_uid);
       rez.serialize(internal_space);
-      if (is_remote())
-        pack_restrict_infos(rez, restrict_infos);
-      else
-        index_owner->pack_restrict_infos(rez, index_owner->restrict_infos);
       if (predicate_false_future.impl != NULL)
         rez.serialize(predicate_false_future.impl->did);
       else
@@ -7895,7 +7662,6 @@ namespace Legion {
       derez.deserialize(origin_mapped);
       derez.deserialize(remote_owner_uid);
       derez.deserialize(internal_space);
-      unpack_restrict_infos(derez, restrict_infos, ready_events);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_slice_slice(remote_unique_id, get_unique_id());
       if (runtime->profiler != NULL)

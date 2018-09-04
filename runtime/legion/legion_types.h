@@ -294,8 +294,6 @@ namespace Legion {
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
-      LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
-      LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
@@ -311,16 +309,11 @@ namespace Legion {
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
-      LG_CONVERT_VIEW_TASK_ID,
-      LG_UPDATE_VIEW_REFERENCES_TASK_ID,
-      LG_REMOVE_VERSION_STATE_REF_TASK_ID,
-      LG_DEFER_RESTRICTED_MANAGER_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFER_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
-      LG_ADD_VERSIONING_SET_REF_TASK_ID,
       LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
@@ -375,8 +368,6 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Post Decrement Task",                                    \
-        "Send Version State Update",                              \
-        "Update Version State Reduce",                            \
         "Issue Frame",                                            \
         "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
@@ -392,16 +383,11 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
-        "Convert View for Version State",                         \
-        "Update View References for Version State",               \
-        "Deferred Remove Version State Valid Ref",                \
-        "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
         "Defer Task Distribution",                                \
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
         "Defer Task Map and Launch",                              \
-        "Defer Versioning Set Reference",                         \
         "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
@@ -676,11 +662,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
       SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
       SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
-      SEND_VERSION_STATE_REQUEST,
-      SEND_VERSION_STATE_RESPONSE,
-      SEND_VERSION_STATE_UPDATE_REQUEST,
-      SEND_VERSION_STATE_UPDATE_RESPONSE,
-      SEND_VERSION_STATE_VALID_NOTIFICATION,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -817,11 +798,6 @@ namespace Legion {
         "Send Equivalence Set Ray Trace Response",                    \
         "Send Equivalence Set Remote Create Request",                 \
         "Send Equivalence Set Remote Create Response",                \
-        "Send Version State Request",                                 \
-        "Send Version State Response",                                \
-        "Send Version State Update Request",                          \
-        "Send Version State Update Response",                         \
-        "Send Version State Valid Notification",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \
@@ -979,14 +955,6 @@ namespace Legion {
       PHYSICAL_STATE_APPLY_PATH_ONLY_CALL,
       PHYSICAL_STATE_APPLY_STATE_CALL,
       PHYSICAL_STATE_MAKE_LOCAL_CALL,
-      VERSION_STATE_UPDATE_PATH_ONLY_CALL,
-      VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
-      VERSION_STATE_REQUEST_CHILDREN_CALL,
-      VERSION_STATE_REQUEST_INITIAL_CALL,
-      VERSION_STATE_REQUEST_FINAL_CALL,
-      VERSION_STATE_SEND_STATE_CALL,
-      VERSION_STATE_HANDLE_REQUEST_CALL,
-      VERSION_STATE_HANDLE_RESPONSE_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL,
@@ -1136,14 +1104,6 @@ namespace Legion {
       "Physical State Apply Path Only",                               \
       "Physical State Apply State",                                   \
       "Physical State Make Local",                                    \
-      "Version State Update Path Only",                               \
-      "Version State Merge Physical State",                           \
-      "Version State Request Children",                               \
-      "Version State Request Initial",                                \
-      "Version State Request Final",                                  \
-      "Version State Send State",                                     \
-      "Version State Handle Request",                                 \
-      "Version State Handle Response",                                \
       "Materialized View Find Local Preconditions",                   \
       "Materialized View Find Local Copy Preconditions",              \
       "Materialized View Filter Previous Users",                      \
@@ -1391,14 +1351,9 @@ namespace Legion {
 
     class ProjectionEpoch;
     class LogicalState;
-    class PhysicalState;
     class EquivalenceSet;
     class VersionManager;
-    class VersionState;
     class VersionInfo;
-    class RestrictInfo;
-    class Restriction;
-    class Acquisition;
 
     class Collectable;
     class Notifiable;

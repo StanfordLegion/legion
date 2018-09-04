@@ -2590,8 +2590,6 @@ namespace Legion {
                                                 RtEvent &ready);
       PhysicalManager* find_or_request_physical_manager(DistributedID did, 
                                                         RtEvent &ready);
-      VersionState* find_or_request_version_state(DistributedID did,
-                                                  RtEvent &ready);
       EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
                                                       RtEvent &ready);
     protected:

@@ -880,7 +880,6 @@ namespace Legion {
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
@@ -984,8 +983,6 @@ namespace Legion {
       std::vector<unsigned>       dst_parent_indexes;
       std::vector<VersionInfo>    src_versions;
       std::vector<VersionInfo>    dst_versions;
-      std::vector<RestrictInfo>   src_restrict_infos;
-      std::vector<RestrictInfo>   dst_restrict_infos;
     public: // These are only used for indirect copies
       std::vector<RegionTreePath> gather_privilege_paths;
       std::vector<RegionTreePath> scatter_privilege_paths;
@@ -993,8 +990,6 @@ namespace Legion {
       std::vector<unsigned>       scatter_parent_indexes;
       std::vector<VersionInfo>    gather_versions;
       std::vector<VersionInfo>    scatter_versions;
-      std::vector<RestrictInfo>   gather_restrict_infos;
-      std::vector<RestrictInfo>   scatter_restrict_infos;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -1317,7 +1312,6 @@ namespace Legion {
     protected:
       RegionTreePath privilege_path;
       VersionInfo    version_info;
-      RestrictInfo   restrict_info;
     };
 
     /**
@@ -1503,7 +1497,6 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -1589,7 +1582,6 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
       VersionInfo       version_info;
-      RestrictInfo      restrict_info;
       unsigned          parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
@@ -2436,7 +2428,6 @@ namespace Legion {
       void handle_point_commit(RtEvent point_committed);
     public:
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       RegionTreePath privilege_path;
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
@@ -2557,7 +2548,6 @@ namespace Legion {
     public:
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       unsigned parent_req_index;
       void *value;
       size_t value_size;
@@ -2686,7 +2676,6 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       const char *file_name;
       std::map<FieldID,const char*> field_map;
       std::map<FieldID,void*> field_pointers_map;
@@ -2735,7 +2724,6 @@ namespace Legion {
       RegionRequirement requirement;
       RegionTreePath privilege_path;
       VersionInfo version_info;
-      RestrictInfo restrict_info;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
       Future result;

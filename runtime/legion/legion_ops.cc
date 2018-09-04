@@ -2129,7 +2129,6 @@ namespace Legion {
       wait_barriers.clear();
       arrive_barriers.clear();
       privilege_path.clear();
-      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -2206,7 +2205,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -2694,12 +2692,7 @@ namespace Legion {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
-      if (restrict_info.has_restrictions())
-      {
-        prepare_for_mapping(restrict_info.get_instances(), 
-                            input.valid_instances);
-      }
-      else if (!requirement.is_no_access())
+      if (!requirement.is_no_access())
       {
         std::set<Memory> visible_memories;
         runtime->find_visible_memories(parent_ctx->get_executing_processor(),
@@ -3001,8 +2994,6 @@ namespace Legion {
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
       dst_versions.resize(launcher.dst_requirements.size());
-      src_restrict_infos.resize(launcher.src_requirements.size());
-      dst_restrict_infos.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -3042,7 +3033,6 @@ namespace Legion {
         const size_t gather_size = launcher.src_indirect_requirements.size();
         src_indirect_requirements.resize(gather_size);
         gather_versions.resize(gather_size);
-        gather_restrict_infos.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
           src_indirect_requirements[idx] = 
@@ -3055,7 +3045,6 @@ namespace Legion {
         const size_t scatter_size = launcher.dst_indirect_requirements.size();
         dst_indirect_requirements.resize(scatter_size);
         scatter_versions.resize(scatter_size);
-        scatter_restrict_infos.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
           dst_indirect_requirements[idx] = 
@@ -3293,10 +3282,6 @@ namespace Legion {
       dst_versions.clear();
       gather_versions.clear();
       scatter_versions.clear();
-      src_restrict_infos.clear();
-      dst_restrict_infos.clear();
-      gather_restrict_infos.clear();
-      scatter_restrict_infos.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -3480,7 +3465,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
-                                                     src_restrict_infos[idx],
                                                      projection_info,
                                                      src_privilege_paths[idx]);
       dst_versions.resize(dst_requirements.size());
@@ -3494,7 +3478,6 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
-                                                     dst_restrict_infos[idx],
                                                      projection_info,
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
@@ -3508,7 +3491,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  src_indirect_requirements[idx],
-                                                 gather_restrict_infos[idx],
                                                  projection_info,
                                                  gather_privilege_paths[idx]);
       }
@@ -3519,7 +3501,6 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
           runtime->forest->perform_dependence_analysis(this, offset + idx, 
                                                  dst_indirect_requirements[idx],
-                                                 scatter_restrict_infos[idx],
                                                  projection_info,
                                                  scatter_privilege_paths[idx]);
       }
@@ -3672,11 +3653,7 @@ namespace Legion {
                                               valid_instances);
         // Convert these to the valid set of mapping instances
         // No need to filter for copies
-        if (src_restrict_infos[idx].has_restrictions())
-          prepare_for_mapping(src_restrict_infos[idx].get_instances(), 
-                              input.src_instances[idx]);
-        else
-          prepare_for_mapping(valid_instances, input.src_instances[idx]);
+        prepare_for_mapping(valid_instances, input.src_instances[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3686,14 +3663,7 @@ namespace Legion {
                                               dst_versions[idx],
                                               valid_instances);
         // No need to filter for copies
-        if (dst_restrict_infos[idx].has_restrictions())
-        {
-          prepare_for_mapping(dst_restrict_infos[idx].get_instances(), 
-                              input.dst_instances[idx]);
-          assert(!input.dst_instances[idx].empty());
-        }
-        else
-          prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+        prepare_for_mapping(valid_instances, input.dst_instances[idx]);
       }
       // Now we can ask the mapper what to do
       if (mapper == NULL)
@@ -4600,8 +4570,6 @@ namespace Legion {
       dst_requirements.resize(launcher.dst_requirements.size());
       src_versions.resize(launcher.src_requirements.size());
       dst_versions.resize(launcher.dst_requirements.size());
-      src_restrict_infos.resize(launcher.src_requirements.size());
-      dst_restrict_infos.resize(launcher.dst_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
         if (launcher.src_requirements[idx].privilege_fields.empty())
@@ -4652,7 +4620,6 @@ namespace Legion {
         const size_t gather_size = launcher.src_indirect_requirements.size();
         src_indirect_requirements.resize(gather_size);
         gather_versions.resize(gather_size);
-        gather_restrict_infos.resize(gather_size);
         for (unsigned idx = 0; idx < gather_size; idx++)
         {
           src_indirect_requirements[idx] = 
@@ -4665,7 +4632,6 @@ namespace Legion {
         const size_t scatter_size = launcher.dst_indirect_requirements.size();
         dst_indirect_requirements.resize(scatter_size);
         scatter_versions.resize(scatter_size);
-        scatter_restrict_infos.resize(scatter_size);
         for (unsigned idx = 0; idx < scatter_size; idx++)
         {
           dst_indirect_requirements[idx] = 
@@ -5022,7 +4988,6 @@ namespace Legion {
         ProjectionInfo src_info(runtime, src_requirements[idx], launch_space);
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
-                                                     src_restrict_infos[idx],
                                                      src_info,
                                                      src_privilege_paths[idx]);
       }
@@ -5038,7 +5003,6 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
-                                                     dst_restrict_infos[idx],
                                                      dst_info,
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
@@ -5054,7 +5018,6 @@ namespace Legion {
                                      launch_space);
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  src_indirect_requirements[idx],
-                                                 gather_restrict_infos[idx],
                                                  gather_info,
                                                  gather_privilege_paths[idx]);
         }
@@ -5068,7 +5031,6 @@ namespace Legion {
                                       launch_space);
           runtime->forest->perform_dependence_analysis(this, idx, 
                                                  dst_indirect_requirements[idx],
-                                                 scatter_restrict_infos[idx],
                                                  scatter_info,
                                                  scatter_privilege_paths[idx]);
         }
@@ -5407,10 +5369,6 @@ namespace Legion {
       dst_parent_indexes        = owner->dst_parent_indexes;
       gather_parent_indexes     = owner->gather_parent_indexes;
       scatter_parent_indexes    = owner->scatter_parent_indexes;
-      src_restrict_infos        = owner->src_restrict_infos;
-      dst_restrict_infos        = owner->dst_restrict_infos;
-      gather_restrict_infos     = owner->gather_restrict_infos;
-      scatter_restrict_infos    = owner->scatter_restrict_infos;
       predication_guard         = owner->predication_guard;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
@@ -6163,11 +6121,9 @@ namespace Legion {
       {
         RegionRequirement &req = deletion_requirements[idx];
         // Perform the normal region requirement analysis
-        RestrictInfo restrict_info;
         RegionTreePath privilege_path;
         initialize_privilege_path(privilege_path, req);
         runtime->forest->perform_deletion_analysis(this, idx, req, 
-                                                   restrict_info,
                                                    privilege_path);
       }
       // We treat this as a fence on everything that came before it since
@@ -6501,7 +6457,6 @@ namespace Legion {
     {
       deactivate_internal();
       privilege_path.clear();
-      restrict_info.clear();
       if (mapper_data != NULL)
       {
         free(mapper_data);
@@ -6725,7 +6680,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -6996,7 +6950,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -7125,7 +7078,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -7203,11 +7155,8 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
-      // Tell the parent that we've done an acquisition
-      parent_ctx->add_acquisition(this, requirement);
     }
 
     //--------------------------------------------------------------------------
@@ -7807,7 +7756,6 @@ namespace Legion {
       grants.clear();
       wait_barriers.clear();
       arrive_barriers.clear();
-      restrict_info.clear();
 #ifdef DEBUG_LEGION
       assert(acquired_instances.empty());
 #endif
@@ -7883,12 +7831,9 @@ namespace Legion {
       register_predicate_dependence();
       // First register any mapping dependences that we have
       ProjectionInfo projection_info;
-      // Tell the parent that we did the release
-      parent_ctx->remove_acquisition(this, requirement);
       // Register any mapping dependences that we have
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -10949,7 +10894,6 @@ namespace Legion {
         projection_info = ProjectionInfo(runtime, requirement, launch_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -11199,13 +11143,7 @@ namespace Legion {
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
-      if (restrict_info.has_restrictions())
-      {
-        prepare_for_mapping(restrict_info.get_instances(), 
-                            input.valid_instances);
-      }
-      else
-        prepare_for_mapping(valid_instances, input.valid_instances);
+      prepare_for_mapping(valid_instances, input.valid_instances);
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -11518,7 +11456,6 @@ namespace Legion {
         thunk = NULL;
       }
       privilege_path = RegionTreePath();
-      restrict_info.clear();
       map_applied_conditions.clear();
       acquired_instances.clear();
       restricted_postconditions.clear();
@@ -11707,7 +11644,6 @@ namespace Legion {
       map_id      = owner->map_id;
       tag         = owner->tag;
       parent_req_index = owner->parent_req_index;
-      restrict_info = owner->restrict_info;
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(own->get_unique_op_id(), unique_op_id, p);
     }
@@ -11900,7 +11836,6 @@ namespace Legion {
         value = NULL;
       }
       future = Future();
-      restrict_info.clear();
       map_applied_conditions.clear();
       grants.clear();
       wait_barriers.clear();
@@ -12017,7 +11952,6 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -12614,7 +12548,6 @@ namespace Legion {
       ProjectionInfo projection_info(runtime, requirement, launch_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -12829,7 +12762,6 @@ namespace Legion {
       tag                = owner->tag;
       // From FillOp
       parent_req_index   = owner->parent_req_index;
-      restrict_info      = owner->restrict_info;
       true_guard         = owner->true_guard;
       false_guard        = owner->false_guard;
       future             = owner->future;
@@ -13084,7 +13016,6 @@ namespace Legion {
       field_pointers_map.clear();
       region = PhysicalRegion();
       privilege_path.clear();
-      restrict_info.clear();
       map_applied_conditions.clear();
       external_instance = InstanceRef();
       runtime->free_attach_op(this);
@@ -13141,20 +13072,8 @@ namespace Legion {
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
-                                                   restrict_info, 
                                                    projection_info,
                                                    privilege_path);
-      // If we have any restriction on ourselves, that is very bad
-      if (restrict_info.has_restrictions())
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_FILE_ATTACHMENT,
-                      "Illegal file attachment for file %s performed on "
-                      "logical region (%x,%x,%x) which is under "
-                      "restricted coherence! User coherence must first "
-                      "be acquired with an acquire operation before "
-                      "attachment can be performed.", file_name,
-                      requirement.region.index_space.id,
-                      requirement.region.field_space.id,
-                      requirement.region.tree_id)
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -13594,7 +13513,6 @@ namespace Legion {
       deactivate_operation();
       region = PhysicalRegion();
       privilege_path.clear();
-      restrict_info.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
       runtime->free_detach_op(this);
@@ -13651,11 +13569,8 @@ namespace Legion {
       // Before we do our dependence analysis, we can remove the 
       // restricted coherence on the logical region
       ProjectionInfo projection_info;
-      // Tell the parent that we've release the restriction
-      parent_ctx->remove_restriction(this, requirement);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement, 
-                                                   restrict_info,
                                                    projection_info,
                                                    privilege_path);
     }

@@ -2619,6 +2619,7 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
     template<bool TRACK_DOM>
     void MaterializedView::find_current_preconditions(
@@ -3115,6 +3116,7 @@ namespace Legion {
         filter_users[it->first] = overlap;
       }
     }
+#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_atomic_reservations(const FieldMask &mask,
@@ -5095,75 +5097,6 @@ namespace Legion {
     DeferredView::~DeferredView(void)
     //--------------------------------------------------------------------------
     {
-    }
-
-    //--------------------------------------------------------------------------
-    void DeferredView::issue_deferred_copies_across(const TraversalInfo &info,
-                                                     MaterializedView *dst,
-                                      const std::vector<unsigned> &src_indexes,
-                                      const std::vector<unsigned> &dst_indexes,
-                                         ApEvent precondition, PredEvent guard,
-                                         std::set<ApEvent> &postconditions)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(src_indexes.size() == dst_indexes.size());
-#endif
-      bool perfect = true;
-      FieldMask src_mask, dst_mask;
-      for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
-      {
-        src_mask.set_bit(src_indexes[idx]);
-        dst_mask.set_bit(dst_indexes[idx]);
-        if (perfect && (src_indexes[idx] != dst_indexes[idx]))
-          perfect = false;
-      }
-      if (src_indexes.size() == 1)
-      {
-        IndexSpaceExpression *write_performed = NULL;
-        if (perfect)
-        {
-          DeferredSingleCopier copier(&info, dst, src_mask, precondition);
-          issue_deferred_copies_single(copier, NULL/*write mask*/,
-                                       write_performed, guard);
-          copier.finalize(this, &postconditions);
-        }
-        else
-        {
-          // Initialize the across copy helper
-          CopyAcrossHelper across_helper(src_mask);
-          dst->manager->initialize_across_helper(&across_helper, dst_mask, 
-                                                 src_indexes, dst_indexes);
-          DeferredSingleCopier copier(&info, dst, src_mask, 
-                                      precondition, &across_helper);
-          issue_deferred_copies_single(copier, NULL/*write mask*/,
-                                       write_performed, guard);
-          copier.finalize(this, &postconditions);
-        }
-      }
-      else
-      {
-        WriteMasks write_masks; 
-        WriteSet performed_writes;
-        if (perfect)
-        {
-          DeferredCopier copier(&info, dst, src_mask, precondition);
-          issue_deferred_copies(copier, src_mask, write_masks, 
-                                performed_writes, guard);
-          copier.finalize(this, &postconditions);
-        }
-        else
-        {
-          // Initialize the across copy helper
-          CopyAcrossHelper across_helper(src_mask);
-          dst->manager->initialize_across_helper(&across_helper, dst_mask, 
-                                                 src_indexes, dst_indexes);
-          DeferredCopier copier(&info,dst,src_mask,precondition,&across_helper);
-          issue_deferred_copies(copier, src_mask, write_masks,
-                                performed_writes, guard);
-          copier.finalize(this, &postconditions);
-        }
-      }
     }
 
     /////////////////////////////////////////////////////////////

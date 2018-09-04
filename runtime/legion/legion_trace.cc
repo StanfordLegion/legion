@@ -1670,7 +1670,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_requirements; ++idx)
         initialize_privilege_path(privilege_paths[idx], requirements[idx]);
       version_infos.resize(num_requirements);
-      restrict_infos.resize(num_requirements);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_summary_operation(parent_ctx->get_unique_id(),
@@ -1724,7 +1723,6 @@ namespace Legion {
       parent_indices.clear();
       privilege_paths.clear();
       version_infos.clear();
-      restrict_infos.clear();
       map_applied_conditions.clear();
       mapped_preconditions.clear();
     }
@@ -1760,7 +1758,6 @@ namespace Legion {
       {
         runtime->forest->perform_dependence_analysis(this, idx,
                                                      requirements[idx],
-                                                     restrict_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -4650,6 +4647,7 @@ namespace Legion {
         delete mask;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void IssueCopy::execute(void)
     //--------------------------------------------------------------------------
@@ -4665,6 +4663,7 @@ namespace Legion {
           dst_fields, precondition, predicate_guard, intersect, mask, 
           redop, reduction_fold);
     }
+#endif
 
     //--------------------------------------------------------------------------
     std::string IssueCopy::to_string(void)
@@ -4767,6 +4766,7 @@ namespace Legion {
         delete mask;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void IssueFill::execute(void)
     //--------------------------------------------------------------------------
@@ -4785,6 +4785,7 @@ namespace Legion {
 #endif
           intersect, mask);
     }
+#endif
 
     //--------------------------------------------------------------------------
     std::string IssueFill::to_string(void)

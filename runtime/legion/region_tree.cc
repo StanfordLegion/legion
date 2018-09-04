@@ -1278,7 +1278,6 @@ namespace Legion {
     void RegionTreeForest::perform_dependence_analysis(
                                         Operation *op, unsigned idx,
                                         RegionRequirement &req,
-                                        RestrictInfo &restrict_info,
                                         const ProjectionInfo &projection_info,
                                         RegionTreePath &path)
     //--------------------------------------------------------------------------
@@ -1325,21 +1324,13 @@ namespace Legion {
 #endif
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
-      // Do our check for restricted coherence
-      TaskContext *parent_ctx = op->get_context();
-      if (parent_ctx->has_restrictions())
-        parent_ctx->perform_restricted_analysis(req, restrict_info);
-      // If we have a restriction, then record it on the region requirement
-      if (restrict_info.has_restrictions())
-        req.flags |= RESTRICTED_FLAG;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::perform_deletion_analysis(DeletionOp *op, 
-                                                    unsigned idx,
-                                                    RegionRequirement &req,
-                                                    RestrictInfo &restrict_info,
-                                                    RegionTreePath &path)
+                                                     unsigned idx,
+                                                     RegionRequirement &req,
+                                                     RegionTreePath &path)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_LOGICAL_ANALYSIS_CALL);
@@ -1364,8 +1355,8 @@ namespace Legion {
                        FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Do the traversal
-      parent_node->register_logical_deletion(ctx.get_id(), user, user_mask, 
-                                             path, restrict_info, trace_info);
+      parent_node->register_logical_deletion(ctx.get_id(), user, 
+                                             user_mask, path, trace_info);
       // Once we are done we can clear out the list of recorded dependences
       op->clear_logical_records();
 #ifdef DEBUG_LEGION
@@ -1635,195 +1626,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Restriction* RegionTreeForest::create_coherence_restriction(
-                     const RegionRequirement &req, const InstanceSet &instances)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *node = get_node(req.region);  
-      Restriction *result = new Restriction(node);    
-      for (unsigned idx = 0; idx < instances.size(); idx++)
-      {
-        const InstanceRef &ref = instances[idx];
-        PhysicalManager *manager = ref.get_manager();
-        result->add_restricted_instance(manager, ref.get_valid_fields());
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::add_acquisition(
-                                    const std::list<Restriction*> &restrictions,
-                                    AcquireOp *op, const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *node = get_node(req.region);
-      FieldMask acquired_fields = 
-        node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID tid = req.region.get_tree_id();
-      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
-            it != restrictions.end(); it++)
-      {
-        // If the tree IDs are different, we don't even bother
-        if ((*it)->tree_id != tid)
-          continue;
-        (*it)->add_acquisition(op, node, acquired_fields);
-        if (!acquired_fields)
-          return true;
-      }
-      // Return true if don't have any more fields to acquired
-      return !acquired_fields;
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::remove_acquisition(
-                                    const std::list<Restriction*> &restrictions,
-                                    ReleaseOp *op, const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *node = get_node(req.region);
-      FieldMask released_fields = 
-        node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID tid = req.region.get_tree_id();
-      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
-            it != restrictions.end(); it++)
-      {
-        // If the tree IDs are different, we don't even bother
-        if ((*it)->tree_id != tid)
-          continue;
-        (*it)->remove_acquisition(op, node, released_fields);
-        if (!released_fields)
-          return true;
-      }
-      // Return true if we don't have any more fields to release
-      return !released_fields;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::add_restriction(
-                            std::list<Restriction*> &restrictions, AttachOp *op,
-                            InstanceManager *inst, const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *node = get_node(req.region);
-      FieldMask restricted_fields = 
-        node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID tid = req.region.get_tree_id();
-      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
-            it != restrictions.end(); it++)
-      {
-        // If the tree IDs are different, we don't even bother 
-        if ((*it)->tree_id != tid)
-          continue;
-        (*it)->add_restriction(op, node, inst, restricted_fields);
-        if (!restricted_fields)
-          return;
-      }
-      // If we still had any restricted fields we can make a new restriction
-      if (!!restricted_fields)
-      {
-        Restriction *restriction = new Restriction(node);
-        restriction->add_restricted_instance(inst, restricted_fields);
-        restrictions.push_back(restriction);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool RegionTreeForest::remove_restriction(
-                                     std::list<Restriction*> &restrictions, 
-                                     DetachOp *op, const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
-#endif
-      RegionNode *node = get_node(req.region);
-      FieldMask released_fields = 
-        node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID tid = req.region.get_tree_id();
-      for (std::list<Restriction*>::iterator it = restrictions.begin();
-            it != restrictions.end(); /*nothing*/)
-      {
-        // If the tree IDs are different, we don't even bother
-        if ((*it)->tree_id != tid)
-        {
-          it++;
-          continue;
-        }
-        // Try ot match it first
-        if ((*it)->matches(op, node, released_fields))
-        {
-          it = restrictions.erase(it);
-          if (!released_fields)
-            return true;
-          continue;
-        }
-        // Otherwise try to remove it internally
-        (*it)->remove_restriction(op, node, released_fields);
-        if (!released_fields)
-          return true;
-        it++;
-      }
-      return !released_fields;
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::perform_restricted_analysis(
-                      const std::list<Restriction*> &restrictions,
-                      const RegionRequirement &req, RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-      // Don't compute this until we need to
-      RegionTreeNode *node = NULL;
-      FieldMask possibly_restricted;
-      const RegionTreeID tid = req.parent.get_tree_id();
-      for (std::list<Restriction*>::const_iterator it = restrictions.begin();
-            it != restrictions.end(); it++)
-      {
-        // Skip the same tree ID
-        if ((*it)->tree_id != tid)
-          continue;
-        // If we get here we have to do the analysis, if we haven't
-        // computed our node and fields yet, do that now
-        if (node == NULL)
-        {
-          if (req.handle_type == PART_PROJECTION)
-          {
-            PartitionNode *part_node = get_node(req.partition);
-            possibly_restricted = 
-              part_node->column_source->get_field_mask(req.privilege_fields);
-            node = part_node;
-          }
-          else
-          {
-            RegionNode *reg_node = get_node(req.region);
-            possibly_restricted = 
-              reg_node->column_source->get_field_mask(req.privilege_fields);
-            node = reg_node;
-          }
-        }
-        // Now we can do the analysis
-        (*it)->find_restrictions(node, possibly_restricted, restrict_info);
-        // See if we are done early
-        if (!possibly_restricted)
-          break;
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void RegionTreeForest::physical_premap_only(Operation *op, unsigned index,
-                                                const RegionRequirement &req,
+                                                RegionRequirement &req,
                                                 VersionInfo &version_info,
                                                 InstanceSet &targets)
     //--------------------------------------------------------------------------
@@ -1847,11 +1651,13 @@ namespace Legion {
         {
           if (first)
           {
-            (*it)->find_reduction_instances(reduction_insts, user_mask);
+            if ((*it)->find_reduction_instances(reduction_insts, user_mask))
+              req.flags |= RESTRICTED_FLAG;
             first = false;
           }
           else
-            (*it)->filter_reduction_instances(reduction_insts, user_mask);
+            if ((*it)->filter_reduction_instances(reduction_insts, user_mask))
+              req.flags |= RESTRICTED_FLAG;
           if (reduction_insts.empty())
             break;
         }
@@ -1871,11 +1677,13 @@ namespace Legion {
         {
           if (first)
           {
-            (*it)->find_valid_instances(valid_insts, user_mask);
+            if ((*it)->find_valid_instances(valid_insts, user_mask))
+              req.flags |= RESTRICTED_FLAG;
             first = false;
           }
           else
-            (*it)->filter_valid_instances(valid_insts, user_mask);
+            if ((*it)->filter_valid_instances(valid_insts, user_mask))
+              req.flags |= RESTRICTED_FLAG;
           if (valid_insts.empty())
             break;
         }
@@ -11988,7 +11796,6 @@ namespace Legion {
                                              const LogicalUser &user,
                                              const FieldMask &check_mask,
                                              RegionTreePath &path,
-                                             RestrictInfo &restrict_info,
                                              const LogicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -12050,8 +11857,7 @@ namespace Legion {
         // Continue the traversal
         RegionTreeNode *child = get_tree_child(next_child);
         // Only continue checking the fields that are open below
-        child->register_logical_deletion(ctx, user, open_below, path,
-                                         restrict_info, trace_info);
+        child->register_logical_deletion(ctx, user, open_below,path,trace_info);
       }
       else
       {
@@ -12818,7 +12624,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::sort_copy_instances(const TraversalInfo &info,
@@ -13120,7 +12925,6 @@ namespace Legion {
       return false;
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::issue_grouped_copies(const TraversalInfo &info,
                                               MaterializedView *dst,
@@ -13406,78 +13210,7 @@ namespace Legion {
         state->reduction_views.erase(*it);
       }
     }
-#endif
 
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::issue_restricted_copies(const TraversalInfo &info,
-      const RestrictInfo &restrict_info,const InstanceSet &restricted_instances,
-      const std::vector<MaterializedView*> &restricted_views,
-      const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask src_fields;
-      for (LegionMap<LogicalView*,FieldMask>::aligned::const_iterator it = 
-            copy_out_views.begin(); it != copy_out_views.end(); it++)
-        src_fields |= it->second;
-      // For each one of our restricted views, issue an update copy
-      for (unsigned idx = 0; idx < restricted_views.size(); idx++)
-      {
-        FieldMask overlap = src_fields & 
-                              restricted_instances[idx].get_valid_fields();
-        if (!overlap)
-          continue;
-        src_fields -= overlap;
-        // If it's already the same there is nothing to do
-        LegionMap<LogicalView*,FieldMask>::aligned::const_iterator finder =
-          copy_out_views.find(restricted_views[idx]);
-        if (finder != copy_out_views.end())
-        {
-          overlap -= finder->second;
-          if (!overlap)
-          {
-            if (!src_fields)
-              break;
-            continue;
-          }
-        }
-        // Issue the update copy
-        issue_update_copies(info, restricted_views[idx], 
-                            overlap, copy_out_views, 
-                            restrict_info, true/*restrict out*/);
-        if (!src_fields)
-          break;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::issue_restricted_reductions(const TraversalInfo &info,
-      const RestrictInfo &restrict_info,const InstanceSet &restricted_instances,
-      const std::vector<InstanceView*> &restricted_views,
-      const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask reduction_fields;
-      for (LegionMap<ReductionView*,FieldMask>::aligned::const_iterator it = 
-            reduce_out_views.begin(); it != reduce_out_views.end(); it++)
-        reduction_fields |= it->second;
-      // Issue updates for any of reductions to the targets
-      for (unsigned idx = 0; idx < restricted_views.size(); idx++)
-      {
-        FieldMask overlap = reduction_fields &
-                              restricted_instances[idx].get_valid_fields();
-        if (!overlap)
-          continue;
-        issue_update_reductions(restricted_views[idx], overlap, 
-                                info.version_info, reduce_out_views,
-                                info.op, info.index, info.map_applied_events, 
-                                info, true/*restrict out*/);
-        reduction_fields -= overlap;
-        if (!reduction_fields)
-          break;
-      }
-    }
-
-#if 0
     //--------------------------------------------------------------------------
     void RegionTreeNode::update_valid_views(PhysicalState *state, 
                                             const FieldMask &valid_mask,

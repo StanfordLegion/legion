@@ -2727,6 +2727,7 @@ namespace Legion {
         return (sizeof(Realm::Point<DIM,T>) == field_size);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
@@ -3025,6 +3026,7 @@ namespace Legion {
       }
       return result;
     }
+#endif
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
