@@ -9052,7 +9052,6 @@ local function generate_parallel_prefix_cpu(cx, node)
   local rhs_type = std.as_read(node.rhs.expr_type)
   assert(std.is_region(lhs_type))
   assert(std.is_region(rhs_type))
-  assert(not (std.type_eq(lhs_type, rhs_type) and lhs_field == rhs_field))
   local bounds = cx:ispace(rhs_type:ispace()).bounds
 
   local index_type = rhs_type:ispace().index_type
@@ -9217,7 +9216,6 @@ local function generate_parallel_prefix_gpu(cx, node)
   local rhs_type = std.as_read(node.rhs.expr_type)
   assert(std.is_region(lhs_type))
   assert(std.is_region(rhs_type))
-  assert(not (std.type_eq(lhs_type, rhs_type) and lhs_field == rhs_field))
   local bounds = cx:ispace(rhs_type:ispace()).bounds
 
   local index_type = rhs_type:ispace().index_type

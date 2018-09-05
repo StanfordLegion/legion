@@ -3603,10 +3603,6 @@ function type_check.stat_parallel_prefix(cx, node)
     return field1[1] == field2[1]
   end
 
-  if std.type_eq(lhs.expr_type, rhs.expr_type) and field_eq(lhs.fields, rhs.fields) then
-    report.error(node, "source and target of parallel prefix operator must be different")
-  end
-
   if not supported_parallel_prefix_ops[node.op] then
     report.error(node,
         "type mismatch in argument 3: operator " .. node.op .. " is not a parallel prefix operator")

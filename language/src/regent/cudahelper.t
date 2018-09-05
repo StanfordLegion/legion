@@ -565,14 +565,26 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
   local prescan_full, prescan_arbitrary
   local NUM_LEAVES = THREAD_BLOCK_SIZE * 2
 
+  local function advance_ptrs(lhs_ptr, rhs_ptr, bid)
+    if lhs_ptr == rhs_ptr then
+      return quote
+        [lhs_ptr] = &([lhs_ptr][ bid * [NUM_LEAVES] ])
+      end
+    else
+      return quote
+        [lhs_ptr] = &([lhs_ptr][ bid * [NUM_LEAVES] ])
+        [rhs_ptr] = &([rhs_ptr][ bid * [NUM_LEAVES] ])
+      end
+    end
+  end
+
   terra prescan_full([lhs_ptr],
                      [rhs_ptr],
                      [dir])
     var [idx]
     var t = tid_x()
     var bid = [cudahelper.global_block_id()]
-    [lhs_ptr] = &([lhs_ptr][ bid * [NUM_LEAVES] ])
-    [rhs_ptr] = &([rhs_ptr][ bid * [NUM_LEAVES] ])
+    [advance_ptrs(lhs_ptr, rhs_ptr, bid)]
     var lr = [int]([dir] >= 0)
 
     [idx].__ptr = t
