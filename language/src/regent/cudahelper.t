@@ -882,7 +882,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
         [lhs_ptr_arg] = &[lhs_ptr][(remaining % [BLOCK_SIZE]) * [offset]]
       end
       [call_scan_full]
-      RuntimeAPI.cudaDeviceSynchronize()
     end
     if remaining % [BLOCK_SIZE] > 0 then
       var [lhs_ptr_arg]
@@ -898,7 +897,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
       end
       var [num_threads] = [num_leaves] / 2
       [call_scan_arbitrary]
-      RuntimeAPI.cudaDeviceSynchronize()
     end
 
     var [lhs_ptr_arg]
@@ -918,7 +916,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
       var [num_elmts] = remaining
       var [num_threads] = remaining - [BLOCK_SIZE]
       [call_postscan_full]
-      RuntimeAPI.cudaDeviceSynchronize()
     end
   end
 
@@ -976,8 +973,8 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
         var [num_elmts] = total
         var [num_threads] = total - [BLOCK_SIZE]
         [call_postscan_full]
-        RuntimeAPI.cudaDeviceSynchronize()
       end
+      RuntimeAPI.cudaDeviceSynchronize()
     end
   end
 
