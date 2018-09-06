@@ -256,7 +256,7 @@ function std.search_any_privilege(cx, region, field_path, visited)
     function(cx, region)
       for _, regions in cx.privileges:items() do
         if regions[region] and regions[region][field_path] then
-          return true
+          return region
         end
       end
       return false

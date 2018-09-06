@@ -94,6 +94,7 @@ function context:new_local_scope(divergence, must_epoch, must_epoch_point, break
   return setmetatable({
     variant = self.variant,
     expected_return_type = self.expected_return_type,
+    privileges = self.privileges,
     constraints = self.constraints,
     orderings = self.orderings,
     task = self.task,
@@ -117,6 +118,7 @@ function context:new_task_scope(expected_return_type, constraints, orderings, le
   return setmetatable({
     variant = self.variant,
     expected_return_type = expected_return_type,
+    privileges = data.newmap(),
     constraints = constraints,
     orderings = orderings,
     task = task,
@@ -9629,6 +9631,18 @@ function codegen.top_task(cx, node)
                                variant:get_config_options().leaf,
                                task, c_task, c_context, c_runtime)
 
+  -- FIXME: This code should be deduplicated with type_check, no
+  -- reason to do it twice....
+  for _, privilege_list in ipairs(task.privileges) do
+    for _, privilege in ipairs(privilege_list) do
+      local privilege_type = privilege.privilege
+      local region = privilege.region
+      local field_path = privilege.field_path
+      assert(std.type_supports_privileges(region:gettype()))
+      std.add_privilege(cx, privilege_type, region:gettype(), field_path)
+    end
+  end
+
   -- Unpack the by-value parameters to the task.
   local task_setup = terralib.newlist()
   -- FIXME: This is an obnoxious hack to avoid inline mappings in shard tasks.
@@ -9838,16 +9852,41 @@ function codegen.top_task(cx, node)
       end
       cx:add_ispace_root(region_type:ispace(), is, it, bounds)
     end
-    cx:add_region_root(region_type, r,
-                       field_paths,
-                       privilege_field_paths,
-                       privileges_by_field_path,
-                       data.dict(data.zip(field_paths:map(data.hash), field_types)),
-                       field_ids_by_field_path,
-                       data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
-                       physical_regions_by_field_path,
-                       base_pointers_by_field_path,
-                       strides_by_field_path)
+
+    -- If the region does *NOT* have privileges, look for parents that
+    -- might be the root of privilege. In certain cases privileges
+    -- might be split across multiple parents; we do not handle this
+    -- case right now and such programs will hit runtime errors.
+    local has_privileges = data.any(unpack(
+      privileges:map(function(privilege) return privilege ~= "none" end)))
+
+    local parent
+    if not has_privileges then
+      local parent_has_privileges = false
+      for _, field_path in ipairs(field_paths) do
+        for i = #field_path, 0, -1 do
+          parent = std.search_any_privilege(cx, region_type, field_path:slice(1, i), {})
+          if parent then break end
+        end
+        if parent then break end
+      end
+    end
+
+    if parent then
+      assert(cx:has_region(parent))
+      cx:add_region_subregion(region_type, r, parent)
+    else
+      cx:add_region_root(region_type, r,
+                         field_paths,
+                         privilege_field_paths,
+                         privileges_by_field_path,
+                         data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                         field_ids_by_field_path,
+                         data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
+                         physical_regions_by_field_path,
+                         base_pointers_by_field_path,
+                         strides_by_field_path)
+    end
   end
 
   for _, list_i in ipairs(std.fn_param_lists_of_regions_by_index(fn_type)) do
