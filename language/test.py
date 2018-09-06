@@ -354,6 +354,8 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verb
             result_set -= completed
             if len(result_set) > 0:
                 time.sleep(0.1)
+            else:
+                break
     except KeyboardInterrupt:
         raise
 
