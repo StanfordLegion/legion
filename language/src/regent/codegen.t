@@ -9872,8 +9872,7 @@ function codegen.top_task(cx, node)
       end
     end
 
-    if parent then
-      assert(cx:has_region(parent))
+    if parent and cx:has_region(parent) then
       cx:add_region_subregion(region_type, r, parent)
     else
       cx:add_region_root(region_type, r,
