@@ -274,10 +274,10 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
 
     result = []
     if not use_run and not use_spy and not use_hdf5:
-        result.extend(run)
+        result.extend(base)
         if not short:
             result.extend(pretty)
-        result.extend(base)
+        result.extend(run)
     if use_run:
         result.extend(run)
     if use_spy:
