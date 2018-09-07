@@ -7907,7 +7907,7 @@ function codegen.stat_for_list(cx, node)
     ---- kernel launch
     local count = terralib.newsymbol(c.size_t, "count")
     local kernel_call =
-      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
+      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
 
     if ispace_type:is_opaque() then
       return quote

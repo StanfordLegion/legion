@@ -840,27 +840,27 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   local prescan_full_args = terralib.newlist()
   prescan_full_args:insertall({lhs_ptr_arg, rhs_ptr_arg, dir})
   local call_prescan_full =
-    cudahelper.codegen_kernel_call(prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE)
+    cudahelper.codegen_kernel_call(prescan_full_id, num_threads, prescan_full_args, SHMEM_SIZE, true)
 
   local prescan_arb_args = terralib.newlist()
   prescan_arb_args:insertall({lhs_ptr_arg, rhs_ptr_arg, num_elmts, num_leaves, dir})
   local call_prescan_arbitrary =
-    cudahelper.codegen_kernel_call(prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE)
+    cudahelper.codegen_kernel_call(prescan_arb_id, num_threads, prescan_arb_args, SHMEM_SIZE, true)
 
   local scan_full_args = terralib.newlist()
   scan_full_args:insertall({lhs_ptr_arg, offset, dir})
   local call_scan_full =
-    cudahelper.codegen_kernel_call(scan_full_id, num_threads, scan_full_args, SHMEM_SIZE)
+    cudahelper.codegen_kernel_call(scan_full_id, num_threads, scan_full_args, SHMEM_SIZE, true)
 
   local scan_arb_args = terralib.newlist()
   scan_arb_args:insertall({lhs_ptr_arg, num_elmts, num_leaves, offset, dir})
   local call_scan_arbitrary =
-    cudahelper.codegen_kernel_call(scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE)
+    cudahelper.codegen_kernel_call(scan_arb_id, num_threads, scan_arb_args, SHMEM_SIZE, true)
 
   local postscan_full_args = terralib.newlist()
   postscan_full_args:insertall({lhs_ptr, offset, num_elmts, dir})
   local call_postscan_full =
-    cudahelper.codegen_kernel_call(postscan_full_id, num_threads, postscan_full_args, 0)
+    cudahelper.codegen_kernel_call(postscan_full_id, num_threads, postscan_full_args, 0, true)
 
   local terra recursive_scan :: {uint64,uint64,uint64,lhs_ptr.type,dir.type} -> {}
 
@@ -981,7 +981,7 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
   return launch
 end
 
-function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
+function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, tight)
   local setupArguments = terralib.newlist()
 
   local offset = 0
@@ -1002,7 +1002,7 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size)
   end
 
   local launch_domain_init = quote
-    if [count] <= THREAD_BLOCK_SIZE then
+    if [count] <= THREAD_BLOCK_SIZE and tight then
       [block].x, [block].y, [block].z = [count], 1, 1
     else
       [block].x, [block].y, [block].z = THREAD_BLOCK_SIZE, 1, 1
