@@ -4411,9 +4411,9 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper requested the creation of a "
-                      "composite instance for destination region requiremnt "
+                      "virtual instance for destination region requiremnt "
                       "%d. Only source region requirements are permitted to "
-                      "be composite instances for explicit region-to-region "
+                      "be virtual instances for explicit region-to-region "
                       "copy operations. Operation was issued in task %s "
                       "(ID %lld).", mapper->get_mapper_name(), idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
@@ -4421,7 +4421,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper requested the creation of a "
-                      "composite instance for the source requirement %d of "
+                      "virtual instance for the source requirement %d of "
                       "an explicit region-to-region reduction. Only real "
                       "physical instances are permitted to be sources of "
                       "explicit region-to-region reductions. Operation was "

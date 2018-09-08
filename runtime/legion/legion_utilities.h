@@ -11242,7 +11242,7 @@ namespace Legion {
         if (finder == entries.multi_entries->end())
           return end();
         return const_iterator(this,
-            reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder)), false);
+          reinterpret_cast<const std::pair<T*,FieldMask>*>(&(*finder)), false);
       }
     }
 

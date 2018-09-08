@@ -81,7 +81,8 @@ namespace Legion {
       RUNTIME_REF = 24,
       IS_EXPR_REF = 25,
       TRACE_REF = 26,
-      LAST_SOURCE_REF = 26,
+      AGGREGATORE_REF = 27,
+      LAST_SOURCE_REF = 28,
     };
 
     enum ReferenceKind {
@@ -119,6 +120,7 @@ namespace Legion {
       "Runtime Reference",                          \
       "Index Space Expression Reference",           \
       "Physical Trace Reference",                   \
+      "Aggregator Reference",                       \
     }
 
     extern Realm::Logger log_garbage;

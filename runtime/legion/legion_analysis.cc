@@ -1541,8 +1541,695 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Copy Fill Aggregator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o,
+                                    unsigned idx, std::set<RtEvent> &ev, bool t)
+      : WrapperReferenceMutator(ev), forest(f), op(o), index(idx), 
+        track_events(t), effects(ev)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::CopyFillAggregator(const CopyFillAggregator &rhs)
+      : WrapperReferenceMutator(rhs.effects), forest(rhs.forest), op(rhs.op),
+        index(rhs.index), track_events(rhs.track_events), effects(rhs.effects)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::~CopyFillAggregator(void)
+    //--------------------------------------------------------------------------
+    {
+      // Remove references from any views that we have
+      for (std::set<LogicalView*>::const_iterator it = 
+            all_views.begin(); it != all_views.end(); it++)
+        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF))
+          delete (*it);
+      // Delete all our copy updates
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator mit = sources.begin(); mit != sources.end(); mit++)
+      {
+        for (FieldMaskSet<Update>::const_iterator it = 
+              mit->second.begin(); it != mit->second.end(); it++)
+          delete it->first;
+      }
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator mit = reductions.begin(); 
+            mit != reductions.end(); mit++)
+      {
+        for (FieldMaskSet<Update>::const_iterator it = 
+              mit->second.begin(); it != mit->second.end(); it++)
+          delete it->first;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator& CopyFillAggregator::operator=(
+                                                  const CopyFillAggregator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::CopyUpdate::record_source_expressions(
+                                            InstanceFieldExprs &src_exprs) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<IndexSpaceExpression> &exprs = src_exprs[source];  
+      FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+        exprs.find(expr);
+      if (finder == exprs.end())
+        exprs.insert(expr, src_mask);
+      else
+        finder.merge(src_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::CopyUpdate::compute_source_preconditions(
+                     RegionTreeForest *forest,
+                     const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                     LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
+    //--------------------------------------------------------------------------
+    {
+      std::map<InstanceView*,EventFieldExprs>::const_iterator finder = 
+        src_pre.find(source);
+      if (finder == src_pre.end())
+        return;
+      for (EventFieldExprs::const_iterator eit = 
+            finder->second.begin(); eit != finder->second.end(); eit++)
+      {
+        FieldMask set_overlap = src_mask & eit->second.get_valid_mask();
+        if (!set_overlap)
+          continue;
+        for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+              eit->second.begin(); it != eit->second.end(); it++)
+        {
+          const FieldMask overlap = set_overlap & it->second;
+          if (!overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            forest->intersect_index_spaces(expr, it->first);
+          if (expr_overlap->is_empty())
+            continue;
+          // Overlap in both so record it
+          LegionMap<ApEvent,FieldMask>::aligned::iterator
+            event_finder = preconditions.find(eit->first);
+          if (event_finder == preconditions.end())
+            preconditions[eit->first] = overlap;
+          else
+            event_finder->second |= overlap;
+          set_overlap -= overlap;
+          if (!set_overlap)
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::CopyUpdate::sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                          std::vector<ReduceUpdate*> &reduces,
+                                          std::vector<FillUpdate*> &fills)
+    //--------------------------------------------------------------------------
+    {
+      copies[source].push_back(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::FillUpdate::record_source_expressions(
+                                            InstanceFieldExprs &src_exprs) const
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing, we have no source expressions
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::FillUpdate::compute_source_preconditions(
+                     RegionTreeForest *forest,
+                     const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                     LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing, we have no source preconditions to worry about
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::FillUpdate::sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                          std::vector<ReduceUpdate*> &reduces,
+                                          std::vector<FillUpdate*> &fills)
+    //--------------------------------------------------------------------------
+    {
+      fills.push_back(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::ReduceUpdate::record_source_expressions(
+                                            InstanceFieldExprs &src_exprs) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMask src_mask;
+      src_mask.set_bit(src_fidx);
+      for (std::vector<ReductionView*>::const_iterator sit = 
+            sources.begin(); sit != sources.end(); sit++)
+      {
+        FieldMaskSet<IndexSpaceExpression> &exprs = src_exprs[*sit];
+        FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+          exprs.find(expr);
+        if (finder == exprs.end())
+          exprs.insert(expr, src_mask);
+        else
+          finder.merge(src_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::ReduceUpdate::compute_source_preconditions(
+                     RegionTreeForest *forest,
+                     const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                     LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMask src_mask;
+      src_mask.set_bit(src_fidx);
+      for (std::vector<ReductionView*>::const_iterator sit = 
+            sources.begin(); sit != sources.end(); sit++)
+      {
+        std::map<InstanceView*,EventFieldExprs>::const_iterator expr_finder =
+          src_pre.find(*sit);
+        if (expr_finder == src_pre.end())
+          continue;
+        for (EventFieldExprs::const_iterator eit = expr_finder->second.begin();
+              eit != expr_finder->second.end(); eit++)
+        {
+          if (!eit->second.get_valid_mask().is_set(src_fidx))
+            continue;
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            if (!it->second.is_set(src_fidx))
+              continue;
+            IndexSpaceExpression *overlap = 
+              forest->intersect_index_spaces(expr, it->first);
+            if (overlap->is_empty())
+              continue;
+            // Overlap on both so record them
+            LegionMap<ApEvent,FieldMask>::aligned::iterator
+              finder = preconditions.find(eit->first);
+            if (finder == preconditions.end())
+              preconditions[eit->first] = src_mask;
+            else
+              finder->second.set_bit(src_fidx);
+            // We found an overlap for this event and field so 
+            // we can go on to the next event
+            break;
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::ReduceUpdate::sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                          std::vector<ReduceUpdate*> &reduces,
+                                          std::vector<FillUpdate*> &fills)
+    //--------------------------------------------------------------------------
+    {
+      reduces.push_back(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_updates(InstanceView *dst_view, 
+                                    const FieldMaskSet<LogicalView> &src_views,
+                                    const FieldMask &src_mask,
+                                    IndexSpaceExpression *expr,
+                                    ReductionOpID redop /*=0*/,
+                                    CopyAcrossHelper *helper /*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!src_mask);
+      assert(!src_views.empty());
+      assert(!expr->is_empty());
+#endif
+      FieldMaskSet<Update> &updates = sources[dst_view];
+      record_view(dst_view);
+      if (src_views.size() == 1)
+      {
+        const LogicalView *view = src_views.begin()->first;
+        const FieldMask record_mask = 
+          src_views.get_valid_mask() & src_mask;
+#ifdef DEBUG_LEGION
+        assert(!!record_mask);
+#endif
+        if (view->is_instance_view())
+        {
+          InstanceView *inst = view->as_instance_view();
+          record_view(inst);
+          CopyUpdate *update = 
+            new CopyUpdate(inst, record_mask, expr, redop, helper);
+          if (helper == NULL)
+            updates.insert(update, record_mask);
+          else
+            updates.insert(update, helper->convert_src_to_dst(record_mask));
+        }
+        else
+        {
+          DeferredView *def = view->as_deferred_view();
+          def->flatten(*this, dst_view, record_mask, expr, helper);
+        }
+      }
+      else
+      {
+        // We have multiple views, so let's sort them
+        LegionList<FieldSet<LogicalView*> >::aligned view_sets;
+        src_views.compute_field_sets(src_mask, view_sets);
+        for (LegionList<FieldSet<LogicalView*> >::aligned::const_iterator
+              vit = view_sets.begin(); vit != view_sets.end(); vit++)
+        {
+#ifdef DEBUG_LEGION
+          assert(!vit->elements.empty());
+#endif
+          if (vit->elements.size() == 1)
+          {
+            // Easy case, just one view so do it  
+            const LogicalView *view = *(vit->elements.begin());
+            const FieldMask &record_mask = vit->set_mask;
+            if (view->is_instance_view())
+            {
+              InstanceView *inst = view->as_instance_view();
+              record_view(inst);
+              CopyUpdate *update = 
+                new CopyUpdate(inst, record_mask, expr, redop, helper);
+              if (helper == NULL)
+                updates.insert(update, record_mask);
+              else
+                updates.insert(update, helper->convert_src_to_dst(record_mask));
+            }
+            else
+            {
+              DeferredView *def = view->as_deferred_view();
+              def->flatten(*this, dst_view, record_mask, expr, helper);
+            }
+          }
+          else
+          {
+            // Sort the views, prefer fills, then instances, then deferred
+            FillView *fill = NULL;
+            DeferredView *deferred = NULL;
+            std::vector<InstanceView*> instances;
+            for (std::set<LogicalView*>::const_iterator it = 
+                  vit->elements.begin(); it != vit->elements.end(); it++)
+            {
+              if (!(*it)->is_instance_view())
+              {
+                DeferredView *def = (*it)->as_deferred_view();
+                if (!def->is_fill_view())
+                {
+                  if (deferred == NULL)
+                    deferred = def;
+                }
+                else
+                {
+                  fill = def->as_fill_view();
+                  // Break out since we found what we're looking for
+                  break;
+                }
+              }
+              else
+                instances.push_back((*it)->as_instance_view());
+            }
+            if (fill != NULL)
+              record_fill(dst_view, fill, vit->set_mask, expr, helper);
+            else if (!instances.empty())
+            {
+              if (instances.size() == 1)
+              {
+                // Easy, just one instance to use
+                InstanceView *inst = instances.back();
+                record_view(inst);
+                CopyUpdate *update = 
+                  new CopyUpdate(inst, vit->set_mask, expr, redop, helper);
+                if (helper == NULL)
+                  updates.insert(update, vit->set_mask);
+                else
+                  updates.insert(update, 
+                      helper->convert_src_to_dst(vit->set_mask));
+              }
+              else
+              {
+                // Hard, multiple potential sources,
+                // ask the mapper which one to use
+                // First though check to see if we've already asked it
+
+              }
+            }
+            else
+            {
+#ifdef DEBUG_LEGION
+              assert(deferred != NULL);
+#endif
+              deferred->flatten(*this, dst_view, vit->set_mask, expr, helper);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_fill(InstanceView *dst_view,
+                                         FillView *src_view,
+                                         const FieldMask &fill_mask,
+                                         IndexSpaceExpression *expr,
+                                         CopyAcrossHelper *helper /*=NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // No need to record the destination as we already did that the first
+      // time through on our way to finding this fill view
+#ifdef DEBUG_LEGION
+      assert(all_views.find(dst_view) != all_views.end());
+      assert(!!fill_mask);
+      assert(!expr->is_empty());
+#endif
+      record_view(src_view);
+      FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
+      if (helper == NULL)
+        sources[dst_view].insert(update, fill_mask);
+      else
+        sources[dst_view].insert(update, helper->convert_src_to_dst(fill_mask));
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_reductions(InstanceView *dst_view,
+                                   const std::vector<ReductionView*> &src_views,
+                                   const unsigned src_fidx,
+                                   const unsigned dst_fidx,
+                                   IndexSpaceExpression *expr,
+                                   CopyAcrossHelper *across_helper)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!src_views.empty());
+      assert(!expr->is_empty());
+#endif 
+      record_view(dst_view);
+      for (std::vector<ReductionView*>::const_iterator it = 
+            src_views.begin(); it != src_views.end(); it++)
+        record_view(*it);
+      ReduceUpdate *update = 
+        new ReduceUpdate(src_views, src_fidx, dst_fidx, expr, across_helper);
+      FieldMask dst_mask;
+      dst_mask.set_bit(dst_fidx);
+      reductions[dst_view].insert(update, dst_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
+                                           ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // Perform updates from any sources first
+      if (!sources.empty())
+        perform_updates(sources, trace_info, precondition);
+      // Then apply any reductions that we might have
+      if (!reductions.empty())
+        perform_updates(reductions, trace_info, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyFillAggregator::summarize(const PhysicalTraceInfo &info) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(track_events);
+#endif
+      if (!events.empty())
+        return Runtime::merge_events(&info, events);
+      else
+        return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_view(LogicalView *new_view)
+    //--------------------------------------------------------------------------
+    {
+      std::pair<std::set<LogicalView*>::iterator,bool> result = 
+        all_views.insert(new_view);
+      if (result.second)
+        new_view->add_base_valid_ref(AGGREGATORE_REF, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::perform_updates(
+         const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
+         const PhysicalTraceInfo &trace_info, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // First compute the access expressions for all the copies
+      InstanceFieldExprs dst_exprs, src_exprs;
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      {
+        FieldMaskSet<IndexSpaceExpression> &dst_expr = dst_exprs[uit->first];
+        for (FieldMaskSet<Update>::const_iterator it = 
+              uit->second.begin(); it != uit->second.end(); it++)
+        {
+          // Update the destinations first
+          FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+            dst_expr.find(it->first->expr);
+          if (finder == dst_expr.end())
+            dst_expr.insert(it->first->expr, it->second);
+          else
+            finder.merge(it->second);
+          // Now record the source expressions
+          it->first->record_source_expressions(src_exprs);
+        }
+      }
+      // Next compute the event preconditions for these accesses
+      std::map<InstanceView*,EventFieldExprs> dst_pre, src_pre;
+      for (InstanceFieldExprs::const_iterator dit = 
+            dst_exprs.begin(); dit != dst_exprs.end(); dit++)
+      {
+        EventFieldExprs &preconditions = dst_pre[dit->first];
+        if (dit->second.size() == 1)
+        {
+          // No need to do any kind of sorts here
+          IndexSpaceExpression *copy_expr = dit->second.begin()->first;
+          const FieldMask &copy_mask = dit->second.get_valid_mask();
+          dit->first->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                      copy_mask, copy_expr, preconditions); 
+        }
+        else
+        {
+          // Sort into field sets and merge expressions
+          LegionList<FieldSet<IndexSpaceExpression*> >::aligned sorted_exprs;
+          dit->second.compute_field_sets(FieldMask(), sorted_exprs);
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator it = sorted_exprs.begin(); 
+                it != sorted_exprs.end(); it++)
+          {
+            const FieldMask &copy_mask = it->set_mask; 
+            IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
+              *(it->elements.begin()) : 
+              forest->union_index_spaces(it->elements);
+            dit->first->find_copy_preconditions(0/*redop*/, false/*reading*/,
+                                        copy_mask, copy_expr, preconditions);
+          }
+        }
+      }
+      for (InstanceFieldExprs::const_iterator sit = 
+            src_exprs.begin(); sit != src_exprs.end(); sit++)
+      {
+        EventFieldExprs &preconditions = src_pre[sit->first];
+        if (sit->second.size() == 1)
+        {
+          // No need to do any kind of sorts here
+          IndexSpaceExpression *copy_expr = sit->second.begin()->first;
+          const FieldMask &copy_mask = sit->second.get_valid_mask();
+          sit->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                      copy_mask, copy_expr, preconditions);
+        }
+        else
+        {
+          // Sort into field sets and merge expressions
+          LegionList<FieldSet<IndexSpaceExpression*> >::aligned sorted_exprs;
+          sit->second.compute_field_sets(FieldMask(), sorted_exprs);
+          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                const_iterator it = sorted_exprs.begin(); 
+                it != sorted_exprs.end(); it++)
+          {
+            const FieldMask &copy_mask = it->set_mask; 
+            IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
+              *(it->elements.begin()) : 
+              forest->union_index_spaces(it->elements);
+            sit->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+                                        copy_mask, copy_expr, preconditions);
+          }
+        }
+      }
+      // Iterate over the destinations and compute updates that have the
+      // same preconditions on different fields
+      std::map<std::set<ApEvent>,ApEvent> merge_cache;
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      {
+        EventFieldUpdates update_groups;
+        const EventFieldExprs &dst_preconditions = dst_pre[uit->first];
+        for (FieldMaskSet<Update>::const_iterator it = 
+              uit->second.begin(); it != uit->second.end(); it++)
+        {
+          // Compute the preconditions for this update
+          LegionMap<ApEvent,FieldMask>::aligned preconditions;
+          // Compute the destination preconditions first
+          if (!dst_preconditions.empty())
+          {
+            for (EventFieldExprs::const_iterator pit = 
+                  dst_preconditions.begin(); pit != 
+                  dst_preconditions.end(); pit++)
+            {
+              FieldMask set_overlap = it->second & pit->second.get_valid_mask();
+              if (!set_overlap)
+                continue;
+              for (FieldMaskSet<IndexSpaceExpression>::const_iterator eit =
+                    pit->second.begin(); eit != pit->second.end(); eit++)
+              {
+                const FieldMask overlap = set_overlap & eit->second;
+                if (!overlap)
+                  continue;
+                IndexSpaceExpression *expr_overlap = 
+                  forest->intersect_index_spaces(eit->first, it->first->expr);
+                if (expr_overlap->is_empty())
+                  continue;
+                // Overlap on both so add it to the set
+                LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
+                  preconditions.find(pit->first);
+                if (finder == preconditions.end())
+                  preconditions[pit->first] = overlap;
+                else
+                  finder->second |= overlap;
+                set_overlap -= overlap;
+                // If we found preconditions on all our fields then we're done
+                if (!set_overlap)
+                  break;
+              }
+            }
+          }
+          // The compute the source preconditions for this update
+          it->first->compute_source_preconditions(forest,src_pre,preconditions);
+          if (preconditions.size() == 1)
+          {
+            LegionMap<ApEvent,FieldMask>::aligned::const_iterator
+              first = preconditions.begin();
+            update_groups[first->first].insert(it->first, first->second);
+          }
+          else
+          {
+            // Group event preconditions by fields
+            LegionList<FieldSet<ApEvent> >::aligned grouped_events;
+            compute_field_sets<ApEvent>(FieldMask(), 
+                                        preconditions, grouped_events);
+            for (LegionList<FieldSet<ApEvent> >::aligned::const_iterator ait =
+                  grouped_events.begin(); ait != grouped_events.end(); ait++) 
+            {
+              ApEvent key;
+              if (ait->elements.size() > 1)
+              {
+                // See if the set is in the cache or we need to compute it 
+                std::map<std::set<ApEvent>,ApEvent>::const_iterator finder =
+                  merge_cache.find(ait->elements);
+                if (finder == merge_cache.end())
+                {
+                  key = Runtime::merge_events(&trace_info, ait->elements);
+                  merge_cache[ait->elements] = key;
+                }
+                else
+                  key = finder->second;
+              }
+              else
+                key = *(ait->elements.begin());
+              FieldMaskSet<Update> &group = update_groups[key]; 
+              FieldMaskSet<Update>::iterator finder = group.find(it->first);
+              if (finder != group.end())
+                finder.merge(ait->set_mask);
+              else
+                group.insert(it->first, ait->set_mask);
+            }
+          }
+        }
+        // Now iterate over events and group by fields
+        for (EventFieldUpdates::const_iterator eit = 
+              update_groups.begin(); eit != update_groups.end(); eit++)
+        {
+          // Merge in the over-arching precondition if necessary
+          const ApEvent group_precondition = precondition.exists() ? 
+            Runtime::merge_events(&trace_info, precondition, eit->first) :
+            eit->first;
+          const FieldMaskSet<Update> &group = eit->second;
+          if (group.size() == 1)
+          {
+            // Only one update so no need to try to group or merge 
+            std::vector<FillUpdate*> fills;
+            std::vector<ReduceUpdate*> reduces;
+            std::map<InstanceView* /*src*/,std::vector<CopyUpdate*> > copies;
+            Update *update = group.begin()->first;
+            update->sort_updates(copies, reduces, fills);
+            const FieldMask &update_mask = group.get_valid_mask();
+            if (!fills.empty())
+              issue_fills(uit->first, fills, group_precondition, 
+                          update_mask, trace_info);
+            if (!copies.empty())
+              issue_copies(uit->first, copies, group_precondition, 
+                           update_mask, trace_info);
+            if (!reduces.empty())
+              issue_reductions(uit->first, reduces, group_precondition,
+                               update_mask, trace_info); 
+          }
+          else
+          {
+            // Group by fields
+            LegionList<FieldSet<Update*> >::aligned field_groups;
+            group.compute_field_sets(FieldMask(), field_groups);
+            for (LegionList<FieldSet<Update*> >::aligned::const_iterator fit =
+                  field_groups.begin(); fit != field_groups.end(); fit++)
+            {
+              std::vector<FillUpdate*> fills;
+              std::vector<ReduceUpdate*> reduces;
+              std::map<InstanceView* /*src*/,
+                       std::vector<CopyUpdate*> > copies;
+              for (std::set<Update*>::const_iterator it = 
+                    fit->elements.begin(); it != fit->elements.end(); it++)
+                (*it)->sort_updates(copies, reduces, fills);
+              if (!fills.empty())
+                issue_fills(uit->first, fills, group_precondition,
+                            fit->set_mask, trace_info);
+              if (!copies.empty())
+                issue_copies(uit->first, copies, group_precondition, 
+                             fit->set_mask, trace_info);
+              if (!reduces.empty())
+                issue_reductions(uit->first, reduces, group_precondition,
+                                 fit->set_mask, trace_info);
+            }
+          }
+        }
+      } // iterate over dst instances
+    }
+
+    /////////////////////////////////////////////////////////////
     // Equivalence Set
     /////////////////////////////////////////////////////////////
+
+    // C++ is dumb
+    const VersionID EquivalenceSet::init_version;
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
@@ -1679,6 +2366,38 @@ namespace Legion {
       // We already hold the lock from the caller
       owner->process_subset_request(target, false/*need lock*/);
     }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_active(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_inactive(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_valid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::notify_invalid(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    } 
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::add_mapping_guard(RtEvent mapped_event, bool need_lock)
@@ -2088,6 +2807,910 @@ namespace Legion {
               to_recurse.begin(); it != to_recurse.end(); it++)
           (*it)->perform_versioning_analysis(version_info);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::find_valid_instances(FieldMaskSet<LogicalView> &insts,
+                                              const FieldMask &user_mask) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
+      {
+        const FieldMask overlap = it->second & user_mask;
+        if (!overlap)
+          continue;
+        FieldMaskSet<LogicalView>::iterator finder = insts.find(it->first);
+        if (finder == insts.end())
+          insts.insert(it->first, it->second);
+        else
+          finder.merge(it->second);
+      }
+      return has_restrictions(user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::filter_valid_instances(
+             FieldMaskSet<LogicalView> &insts, const FieldMask &user_mask) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      std::vector<LogicalView*> to_erase;
+      for (FieldMaskSet<LogicalView>::iterator it = 
+            insts.begin(); it != insts.end(); it++)
+      {
+        FieldMaskSet<LogicalView>::const_iterator finder = 
+          valid_instances.find(it->first);
+        if (finder != insts.end())
+        {
+          const FieldMask diff = it->second - finder->second;
+          if (!!diff)
+          {
+            it.filter(diff);
+            if (!it->second)
+              to_erase.push_back(it->first);
+          }
+        }
+        else
+          to_erase.push_back(it->first);
+      }
+      if (!to_erase.empty())
+      {
+        if (to_erase.size() != insts.size())
+        {
+          for (std::vector<LogicalView*>::const_iterator it = 
+                to_erase.begin(); it != to_erase.end(); it++)
+            insts.erase(*it);
+        }
+        else
+          insts.clear();
+      }
+      return has_restrictions(user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::find_reduction_instances(
+                        FieldMaskSet<ReductionView> &insts, ReductionOpID redop,
+                        const FieldMask &user_mask) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      // Iterate over all the fields
+      int fidx = user_mask.find_first_set();
+      while (fidx >= 0)
+      {
+        std::map<unsigned,std::vector<ReductionView*> >::const_iterator 
+          current = reduction_instances.find(fidx);
+        if (current != reduction_instances.end())
+        {
+          FieldMask local_mask;
+          local_mask.set_bit(fidx);
+          for (std::vector<ReductionView*>::const_reverse_iterator it = 
+                current->second.crbegin(); it != current->second.crend(); it++)
+          {
+            ReductionManager *manager = 
+              (*it)->get_manager()->as_reduction_manager();
+            if (manager->redop != redop)
+              break;
+            FieldMaskSet<ReductionView>::iterator finder = 
+              insts.find(*it);
+            if (finder == insts.end())
+              insts.insert(*it, local_mask);
+            else
+              finder.merge(local_mask);
+          }
+        }
+        fidx = user_mask.find_next_set(fidx+1);
+      }
+      return has_restrictions(user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::filter_reduction_instances(
+                       FieldMaskSet<ReductionView> &insts, ReductionOpID redop,
+                       const FieldMask &user_mask) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      // Iterate over all the fields
+      int fidx = user_mask.find_first_set();
+      FieldMask filter_mask;
+      std::vector<ReductionView*> to_erase;
+      while (fidx >= 0)
+      {
+        std::map<unsigned,std::vector<ReductionView*> >::const_iterator 
+          current = reduction_instances.find(fidx);
+        if (current != reduction_instances.end())
+        {
+          FieldMask local_mask;
+          local_mask.set_bit(fidx);
+          for (FieldMaskSet<ReductionView>::iterator cit = 
+                insts.begin(); cit != insts.end(); cit++)
+          {
+            bool found = false;
+            for (std::vector<ReductionView*>::const_reverse_iterator it = 
+                  current->second.crbegin(); it != current->second.crend();it++)
+            {
+              ReductionManager *manager = 
+                  (*it)->get_manager()->as_reduction_manager();
+              if (manager->redop != redop)
+                break;
+              if (cit->first != (*it))
+                continue;
+              found = true;
+              break;
+            }
+            if (!found)
+            {
+              cit.filter(local_mask);
+              if (!cit->second)
+                to_erase.push_back(cit->first);
+            }
+          }
+        }
+        else
+          filter_mask.set_bit(fidx);
+        fidx = user_mask.find_next_set(fidx+1);
+      }
+      if (!!filter_mask)
+        insts.filter(filter_mask);
+      if (!to_erase.empty())
+      {
+        if (to_erase.size() != insts.size())
+        {
+          for (std::vector<ReductionView*>::const_iterator it = 
+                to_erase.begin(); it != to_erase.end(); it++)
+            insts.erase(*it);
+        }
+        else
+          insts.clear();
+      }
+      return has_restrictions(user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_set(const RegionUsage &usage, 
+                                const FieldMask &user_mask,
+                                const InstanceSet &target_instances,
+                                const std::vector<InstanceView*> &target_views,
+                                CopyFillAggregator &input_aggregator,
+                                CopyFillAggregator &output_aggregator,
+                                std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target_instances.size() == target_views.size());
+#endif
+      WrapperReferenceMutator mutator(applied_events);
+      AutoLock eq(eq_lock);
+      if (IS_REDUCE(usage))
+      {
+        // Reduction-only
+        // Record the reduction instances
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          ReductionView *red_view = target_views[idx]->as_reduction_view();
+#ifdef DEBUG_LEGION
+          assert(red_view->get_redop() == usage.redop);
+#endif
+          const FieldMask &update_fields = 
+            target_instances[idx].get_valid_fields(); 
+          int fidx = update_fields.find_first_set();
+          while (fidx >= 0)
+          {
+            std::vector<ReductionView*> &field_views = 
+              reduction_instances[fidx];
+            red_view->add_nested_valid_ref(did, &mutator); 
+            field_views.push_back(red_view);
+            fidx = update_fields.find_next_set(fidx+1);
+          }
+        }
+        // Flush any restricted fields
+        if (!!restricted_fields)
+        {
+          const FieldMask reduce_mask = user_mask & restricted_fields;
+          if (!!reduce_mask)
+            apply_reductions(reduce_mask, output_aggregator); 
+          reduction_fields |= (user_mask - restricted_fields);
+        }
+        else
+          reduction_fields |= user_mask;
+      }
+      else if (IS_WRITE(usage) && IS_DISCARD(usage))
+      {
+        // Write-only
+        // Filter any reductions that we no longer need
+        const FieldMask reduce_filter = reduction_fields & user_mask;
+        if (!!reduce_filter)
+          filter_reduction_instances(reduce_filter);
+        // Filter any normal instances that will be overwritten
+        const FieldMask non_restricted = user_mask - restricted_fields; 
+        if (!!non_restricted)
+        {
+          filter_valid_instances(non_restricted);
+          // Record any non-restricted instances
+          record_instances(non_restricted, target_instances, 
+                           target_views, mutator);
+        }
+        // Issue copy-out copies for any restricted fields
+        if (!!restricted_fields)
+        {
+          const FieldMask restricted_mask = user_mask & restricted_fields;
+          if (!!restricted_mask)
+            copy_out(restricted_mask, target_instances,
+                     target_views, output_aggregator);
+        }
+        // Advance our version numbers
+        advance_version_numbers(user_mask);
+      }
+      else
+      {
+        // Read-write or read-only
+        // Check for any copies from normal instances first
+        issue_update_copies_and_fills(input_aggregator, user_mask, 
+                                      target_instances, target_views, set_expr);
+        // Get the set of fields to filter, any for which we're about
+        // to apply pending reductions or overwite, except those that
+        // are restricted
+        const FieldMask reduce_mask = reduction_fields & user_mask;
+        const FieldMask restricted_mask = restricted_fields & user_mask;
+        const bool is_write = IS_WRITE(usage);
+        FieldMask filter_mask = is_write ? user_mask : reduce_mask;
+        if (!!restricted_mask)
+          filter_mask -= restricted_mask;
+        if (!!filter_mask)
+          filter_valid_instances(filter_mask);
+        // Save the instances if they are not restricted
+        // Otherwise if they are restricted then the restricted instances
+        // are already listed as the valid views so there's nothing more
+        // for us to have to do
+        if (!!restricted_mask)
+        {
+          const FieldMask non_restricted = user_mask - restricted_fields;
+          if (!!non_restricted)
+            record_instances(non_restricted, target_instances, 
+                             target_views, mutator); 
+        }
+        else
+          record_instances(user_mask, target_instances,
+                           target_views, mutator);
+        // Next check for any reductions that need to be applied
+        if (!!reduce_mask)
+          apply_reductions(reduce_mask, input_aggregator); 
+        // Issue copy-out copies for any restricted fields if we wrote stuff
+        if (is_write) 
+        {
+          advance_version_numbers(user_mask);
+          if (!!restricted_mask)
+            copy_out(restricted_mask, target_instances,
+                     target_views, output_aggregator);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::acquire_restrictions(FieldMask acquire_mask,
+                                          FieldMaskSet<InstanceView> &instances,
+           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      acquire_mask &= restricted_fields;
+      if (!acquire_mask)
+        return;
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            restricted_instances.begin(); it != restricted_instances.end();it++)
+      {
+        const FieldMask overlap = acquire_mask & it->second;
+        if (!overlap)
+          continue;
+        InstanceView *view = it->first->as_instance_view();
+        FieldMaskSet<InstanceView>::iterator finder = 
+          instances.find(view);
+        if (finder != instances.end())
+          finder.merge(overlap);
+        else
+          instances.insert(view, overlap);
+        inst_exprs[view].insert(set_expr);
+      }
+      restricted_fields -= acquire_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::release_restrictions(const FieldMask &release_mask,
+                                        CopyFillAggregator &release_aggregator,
+                                        FieldMaskSet<InstanceView> &instances,
+           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
+                                        std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // Find our local restricted instances and views and record them
+      InstanceSet local_instances;
+      std::vector<InstanceView*> local_views;
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            restricted_instances.begin(); it != restricted_instances.end();it++)
+      {
+        const FieldMask overlap = it->second & release_mask;
+        if (!overlap)
+          continue;
+        InstanceView *view = it->first->as_instance_view();
+        local_instances.add_instance(InstanceRef(view->get_manager(), overlap));
+        local_views.push_back(view);
+        FieldMaskSet<InstanceView>::iterator finder = instances.find(view);
+        if (finder != instances.end())
+          finder.merge(overlap);
+        else
+          instances.insert(view, overlap);
+        inst_exprs[view].insert(set_expr);
+      }
+      // Issue the updates
+      issue_update_copies_and_fills(release_aggregator, release_mask,
+                                    local_instances, local_views, set_expr);
+      // Filter the valid views
+      filter_valid_instances(release_mask);
+      // Update with just the restricted instances
+      WrapperReferenceMutator mutator(ready_events);
+      record_instances(release_mask, local_instances, local_views, mutator);
+      // See if we have any reductions to apply as well
+      const FieldMask reduce_mask = release_mask & reduction_fields;
+      if (!!reduce_mask)
+        apply_reductions(reduce_mask, release_aggregator);
+      // Add the fields back to the restricted ones
+      restricted_fields |= release_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::issue_across_copies(const RegionUsage &usage,
+                const FieldMask &src_mask, const InstanceSet &target_instances,
+                const std::vector<InstanceView*> &target_views,
+                IndexSpaceExpression *overlap, CopyFillAggregator &aggregator, 
+                PredEvent pred_guard, ReductionOpID redop,
+                const std::vector<unsigned> *src_indexes,
+                const std::vector<unsigned> *dst_indexes,
+                const std::vector<CopyAcrossHelper> *across_helpers) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(target_instances.size() == target_views.size());
+#endif
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      if (pred_guard.exists())
+        assert(false);
+      if (across_helpers != NULL)
+      {
+        // The general case where fields don't align regardless of
+        // whether we are doing a reduction across or not
+#ifdef DEBUG_LEGION
+        assert(src_indexes != NULL);
+        assert(dst_indexes != NULL);
+        assert(src_indexes->size() == dst_indexes->size());
+        assert(across_helpers->size() == target_instances.size());
+#endif
+        // We need to figure out how to issue these copies ourself since
+        // we need to map from one field to another
+        // First construct a map from dst indexes to src indexes 
+        std::map<unsigned,unsigned> dst_to_src;
+        for (unsigned idx = 0; idx < src_indexes->size(); idx++)
+          dst_to_src[(*dst_indexes)[idx]] = (*src_indexes)[idx];
+        // Iterate over the target instances
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          const FieldMask dst_mask = target_instances[idx].get_valid_fields();
+          // Compute a src_mask based on the dst mask
+          FieldMask src_mask;
+          int fidx = dst_mask.find_first_set();
+          while (fidx >= 0)
+          {
+            std::map<unsigned,unsigned>::const_iterator finder = 
+              dst_to_src.find(fidx);
+#ifdef DEBUG_LEGION
+            assert(finder != dst_to_src.end());
+#endif
+            src_mask.set_bit(finder->second);
+            fidx = dst_mask.find_next_set(fidx+1);
+          }
+          // Now find all the source instances for this destination
+          FieldMaskSet<LogicalView> src_views;
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            const FieldMask overlap = it->second & src_mask;
+            if (!overlap)
+              continue;
+            src_views.insert(it->first, overlap);
+          }
+          aggregator.record_updates(target_views[idx], src_views,
+              src_mask, overlap, redop, 
+              const_cast<CopyAcrossHelper*>(&((*across_helpers)[idx])));
+        }
+        // Now check for any reductions that need to be applied
+        FieldMask reduce_mask = reduction_fields & src_mask;
+        if (!!reduce_mask)
+        {
+#ifdef DEBUG_LEGION
+          assert(redop == 0); // can't have reductions of reductions
+#endif
+          std::map<unsigned,unsigned> src_to_dst;
+          for (unsigned idx = 0; idx < src_indexes->size(); idx++)
+            src_to_dst[(*src_indexes)[idx]] = (*dst_indexes)[idx];
+          int src_fidx = reduce_mask.find_first_set();
+          while (src_fidx >= 0)
+          {
+            std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              finder = reduction_instances.find(src_fidx);
+#ifdef DEBUG_LEGION
+            assert(finder != reduction_instances.end());
+            assert(src_to_dst.find(src_fidx) != src_to_dst.end());
+#endif
+            const unsigned dst_fidx = src_to_dst[src_fidx];
+            // Find the target targets and record them
+            for (unsigned idx = 0; idx < target_views.size(); idx++)
+            {
+              const FieldMask target_mask = 
+                target_instances[idx].get_valid_fields();
+              if (!target_mask.is_set(dst_fidx))
+                continue;
+              aggregator.record_reductions(target_views[idx],
+                  finder->second, src_fidx, dst_fidx, overlap,
+                  const_cast<CopyAcrossHelper*>(&((*across_helpers)[idx])));
+            }
+            src_fidx = reduce_mask.find_next_set(src_fidx+1);
+          }
+        }
+      }
+      else if (redop == 0)
+      {
+        // Fields align and we're not doing a reduction so we can just 
+        // do a normal update copy analysis to figure out what to do
+        issue_update_copies_and_fills(aggregator, src_mask, target_instances,
+                                      target_views, overlap,true/*skip check*/);
+        // We also need to check for any reductions that need to be applied
+        const FieldMask reduce_mask = reduction_fields & src_mask;
+        if (!!reduce_mask)
+        {
+          int fidx = reduce_mask.find_first_set();
+          while (fidx >= 0)
+          {
+            std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              finder = reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+            assert(finder != reduction_instances.end());
+#endif
+            // Find the target targets and record them
+            for (unsigned idx = 0; idx < target_views.size(); idx++)
+            {
+              const FieldMask target_mask = 
+                target_instances[idx].get_valid_fields();
+              if (!target_mask.is_set(fidx))
+                continue;
+              aggregator.record_reductions(target_views[idx], 
+                          finder->second, fidx, fidx, overlap);
+            }
+            fidx = reduce_mask.find_next_set(fidx+1);
+          }
+        }
+      }
+      else
+      {
+        // Fields align but we're doing a reduction across
+        // Find the valid views that we need for issuing the updates  
+        FieldMaskSet<LogicalView> src_views;
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          const FieldMask overlap = it->second & src_mask;
+          if (!overlap)
+            continue;
+          src_views.insert(it->first, overlap);
+        }
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          const FieldMask &mask = target_instances[idx].get_valid_fields(); 
+          aggregator.record_updates(target_views[idx], src_views, mask,
+                                    overlap, redop, NULL/*across*/);
+        }
+        // There shouldn't be any reduction instances to worry about here
+#ifdef DEBUG_LEGION
+        assert(reduction_fields * src_mask);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::overwrite_set(LogicalView *view, const FieldMask &mask,
+                                       CopyFillAggregator &output_aggregator,
+                                       std::set<RtEvent> &ready_events,
+                                       PredEvent pred_guard,
+                                       bool add_restriction)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // Two different cases here depending on whether we have a precidate 
+      if (pred_guard.exists())
+      {
+#ifdef DEBUG_LEGION
+        assert(!add_restriction); // shouldn't be doing this in this case
+#endif
+        // We have a predicate so collapse everything to all the valid
+        // instances and then do predicate fills to all those instances
+        assert(false);
+      }
+      else
+      {
+        // Easy case, just filter everything and add the new view
+        const FieldMask reduce_filter = mask & reduction_fields;
+        if (!!reduce_filter)
+          filter_reduction_instances(reduce_filter);
+        filter_valid_instances(mask);
+        FieldMaskSet<LogicalView>::iterator finder = 
+          valid_instances.find(view);
+        if (finder == valid_instances.end())
+        {
+          WrapperReferenceMutator mutator(ready_events);
+          view->add_nested_valid_ref(did, &mutator);
+          valid_instances.insert(view, mask);
+        }
+        else
+          finder.merge(mask);
+        // Advance the version numbers
+        advance_version_numbers(mask);
+        if (add_restriction)
+        {
+          finder = restricted_instances.find(view);
+          if (finder == restricted_instances.end())
+          {
+            WrapperReferenceMutator mutator(ready_events);
+            view->add_nested_valid_ref(did, &mutator);
+            restricted_instances.insert(view, mask);
+          }
+          else
+            finder.merge(mask);
+          restricted_fields |= mask; 
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_set(LogicalView *view, const FieldMask &mask,
+                                    bool remove_restriction/*= false*/)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
+      if (finder != valid_instances.end())
+      {
+        finder.filter(mask);
+        if (!finder->second)
+        {
+          if (view->remove_nested_valid_ref(did))
+            delete view;
+          valid_instances.erase(view);
+        }
+      }
+      if (remove_restriction)
+      {
+        restricted_fields -= mask;
+        finder = restricted_instances.find(view);
+        if (finder != restricted_instances.end())
+        {
+          finder.filter(mask);
+          if (!finder->second)
+          {
+            if (view->remove_nested_valid_ref(did))
+              delete view;
+            restricted_instances.erase(view);
+          }
+        }
+      }
+    }
+    
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_instances(const FieldMask &record_mask,
+                                 const InstanceSet &target_instances, 
+                                 const std::vector<InstanceView*> &target_views,
+                                          ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < target_views.size(); idx++)
+      {
+        const FieldMask valid_mask = 
+          target_instances[idx].get_valid_fields() & record_mask;
+        if (!valid_mask)
+          continue;
+        InstanceView *target = target_views[idx];
+        // Add it to the set
+        FieldMaskSet<LogicalView>::iterator finder = 
+          valid_instances.find(target);
+        if (finder == valid_instances.end())
+        {
+          target->add_nested_valid_ref(did, &mutator);
+          valid_instances.insert(target, valid_mask);
+        }
+        else
+          finder.merge(valid_mask);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::issue_update_copies_and_fills(
+                                 CopyFillAggregator &aggregator,
+                                 FieldMask update_mask,
+                                 const InstanceSet &target_instances,
+                                 const std::vector<InstanceView*> &target_views,
+                                 IndexSpaceExpression *update_expr,
+                                 bool skip_check) const
+    //--------------------------------------------------------------------------
+    {
+      if (!skip_check)
+      {
+        // Scan through and figure out which fields are already valid
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          FieldMaskSet<LogicalView>::const_iterator finder = 
+            valid_instances.find(target_views[idx]);
+          if (finder == valid_instances.end())
+            continue;
+          const FieldMask &needed_mask = 
+            target_instances[idx].get_valid_fields();
+          const FieldMask already_valid = needed_mask & finder->second;
+          if (!already_valid)
+            continue;
+          update_mask -= already_valid;
+          // If we're already valid for all the fields then we're done
+          if (!update_mask)
+            return;
+        }
+      }
+#ifdef DEBUG_LEGION
+      assert(!!update_mask);
+#endif
+      // Find the valid views that we need for issuing the updates  
+      FieldMaskSet<LogicalView> valid_views;
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
+      {
+        const FieldMask overlap = it->second & update_mask;
+        if (!overlap)
+          continue;
+        valid_views.insert(it->first, overlap);
+      }
+      if (target_instances.size() == 1)
+        aggregator.record_updates(target_views[0], valid_views, 
+                                  update_mask, update_expr);
+      else if (valid_views.size() == 1)
+      {
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          const FieldMask &mask = target_instances[idx].get_valid_fields();
+          aggregator.record_updates(target_views[idx], valid_views,
+                                    mask, update_expr);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < target_views.size(); idx++)
+        {
+          const FieldMask &dst_mask = target_instances[idx].get_valid_fields();
+          FieldMaskSet<LogicalView> src_views;
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_views.begin(); it != valid_views.end(); it++)
+          {
+            const FieldMask overlap = dst_mask & it->second;
+            if (!overlap)
+              continue;
+            src_views.insert(it->first, overlap);
+          }
+          aggregator.record_updates(target_views[idx], src_views,
+                                    dst_mask, update_expr);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_valid_instances(const FieldMask &filter_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!filter_mask);
+#endif
+      std::vector<LogicalView*> to_erase;
+      for (FieldMaskSet<LogicalView>::iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
+      {
+        const FieldMask overlap = it->second & filter_mask;
+        if (!overlap)
+          continue;
+        it.filter(overlap);
+        if (!it->second)
+          to_erase.push_back(it->first);
+      }
+      if (!to_erase.empty())
+      {
+        for (std::vector<LogicalView*>::const_iterator it = 
+              to_erase.begin(); it != to_erase.end(); it++)
+        {
+          valid_instances.erase(*it);
+          if ((*it)->remove_nested_valid_ref(did))
+            delete (*it);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_reduction_instances(const FieldMask &to_filter)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!to_filter);
+#endif
+      int fidx = to_filter.find_first_set();
+      while (fidx >= 0)
+      {
+        std::map<unsigned,std::vector<ReductionView*> >::iterator
+          finder = reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+        assert(finder != reduction_instances.end());
+#endif
+        for (std::vector<ReductionView*>::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+          if ((*it)->remove_nested_valid_ref(did))
+            delete (*it);
+        reduction_instances.erase(finder);
+        fidx = to_filter.find_next_set(fidx+1);
+      }
+      reduction_fields -= to_filter;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::apply_reductions(const FieldMask &reduce_mask,
+                                          CopyFillAggregator &aggregator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!reduce_mask);
+#endif
+      int fidx = reduce_mask.find_first_set();
+      while (fidx >= 0)
+      {
+        std::map<unsigned,std::vector<ReductionView*> >::iterator finder = 
+          reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+        assert(finder != reduction_instances.end());
+#endif
+        // Find the target targets and record them
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          if (!it->second.is_set(fidx))
+            continue;
+          // Shouldn't have any deferred views here
+          InstanceView *dst_view = it->first->as_instance_view();
+          aggregator.record_reductions(dst_view, finder->second, fidx, 
+                                       fidx, set_expr);
+        }
+        // Remove the reduction views from those available
+        for (std::vector<ReductionView*>::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+          if ((*it)->remove_nested_valid_ref(did))
+            delete (*it);
+        reduction_instances.erase(finder);
+        fidx = reduce_mask.find_next_set(fidx+1);
+      }
+      // Record that we advanced the version number in this case
+      advance_version_numbers(reduce_mask);
+      // These reductions have been applied so we are done
+      reduction_fields -= reduce_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::copy_out(const FieldMask &restricted_mask,
+                                  const InstanceSet &src_instances,
+                                  const std::vector<InstanceView*> &src_views,
+                                  CopyFillAggregator &aggregator) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!!restricted_mask);
+#endif
+      if (valid_instances.size() == 1)
+      {
+        // Only 1 destination
+        FieldMaskSet<LogicalView>::const_iterator first = 
+          valid_instances.begin();
+#ifdef DEBUG_LEGION
+        assert(!(restricted_mask - first->second));
+#endif
+        InstanceView *dst_view = first->first->as_instance_view();
+        FieldMaskSet<LogicalView> srcs;
+        for (unsigned idx = 0; idx < src_views.size(); idx++)
+        {
+          const FieldMask overlap = 
+            src_instances[idx].get_valid_fields() & restricted_mask;
+          if (!overlap)
+            continue;
+          srcs.insert(src_views[idx], overlap);
+        }
+        aggregator.record_updates(dst_view, srcs, restricted_mask, set_expr);
+      }
+      else if (src_instances.size() == 1)
+      {
+        // Only 1 source
+#ifdef DEBUG_LEGION
+        assert(!(restricted_mask - src_instances[0].get_valid_fields()));
+#endif
+        FieldMaskSet<LogicalView> srcs;
+        srcs.insert(src_views[0], restricted_mask);
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          const FieldMask overlap = it->second & restricted_mask;
+          if (!overlap)
+            continue;
+          InstanceView *dst_view = it->first->as_instance_view();
+          aggregator.record_updates(dst_view, srcs, overlap, set_expr);
+        }
+      }
+      else
+      {
+        // General case for cross-products
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          const FieldMask dst_overlap = it->second & restricted_mask;
+          if (!dst_overlap)
+            continue;
+          InstanceView *dst_view = it->first->as_instance_view();
+          FieldMaskSet<LogicalView> srcs;
+          for (unsigned idx = 0; idx < src_views.size(); idx++)
+          {
+            const FieldMask src_overlap = 
+              src_instances[idx].get_valid_fields() & dst_overlap;
+            if (!src_overlap)
+              continue;
+            srcs.insert(src_views[idx], src_overlap);
+          }
+#ifdef DEBUG_LEGION
+          assert(!srcs.empty());
+#endif
+          aggregator.record_updates(dst_view, srcs, dst_overlap, set_expr);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::advance_version_numbers(FieldMask advance_mask)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<VersionID> to_remove; 
+      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
+            version_numbers.begin(); it != version_numbers.end(); it++)
+      {
+        const FieldMask overlap = it->second & advance_mask;
+        if (!overlap)
+          continue;
+        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          version_numbers.find(it->first + 1);
+        if (finder == version_numbers.end())
+          version_numbers[it->first + 1] = overlap;
+        else
+          finder->second |= overlap;
+        it->second -= overlap;
+        if (!it->second)
+          to_remove.push_back(it->first);
+        advance_mask -= overlap;
+        if (!advance_mask)
+          break;
+      }
+      if (!to_remove.empty())
+      {
+        for (std::vector<VersionID>::const_iterator it = 
+              to_remove.begin(); it != to_remove.end(); it++)
+          version_numbers.erase(*it);
+      }
+      if (!!advance_mask)
+        version_numbers[init_version] = advance_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -2599,10 +4222,7 @@ namespace Legion {
 
     /////////////////////////////////////////////////////////////
     // Version Manager 
-    /////////////////////////////////////////////////////////////
-
-    // C++ is dumb
-    const VersionID VersionManager::init_version;
+    ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)

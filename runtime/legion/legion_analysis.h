@@ -403,74 +403,6 @@ namespace Legion {
       GenerationID merge_close_gen;
     }; 
 
-#if 0
-    /**
-     * \class PhysicalState
-     * A physical state is a temporary buffer for holding a merged
-     * group of version state objects which can then be used by 
-     * physical traversal routines. Physical state objects track
-     * the version state objects that they use and remove references
-     * to them when they are done.
-     */
-    class PhysicalState : public LegionHeapify<PhysicalState> {
-    public:
-      static const AllocationType alloc_type = PHYSICAL_STATE_ALLOC;
-    public:
-      PhysicalState(RegionTreeNode *node, bool path_only);
-      PhysicalState(const PhysicalState &rhs);
-      ~PhysicalState(void);
-    public:
-      PhysicalState& operator=(const PhysicalState &rhs);
-    public:
-      void pack_physical_state(Serializer &rez);
-      void unpack_physical_state(Deserializer &derez, Runtime *runtime,
-                                 std::set<RtEvent> &ready_events);
-    public:
-      void add_version_state(VersionState *state, const FieldMask &mask);
-      void add_advance_state(VersionState *state, const FieldMask &mask);
-    public:
-      inline bool is_captured(void) const { return captured; }
-      void capture_state(void);
-      inline bool has_advance_states(void) const 
-        { return (!advance_states.empty()); } 
-      void apply_state(std::set<RtEvent> &applied_conditions) const; 
-    public:
-      void capture_composite_root(CompositeView *composite_view,
-        const FieldMask &closed_mask, ReferenceMutator *mutator,
-        const LegionMap<LogicalView*,FieldMask>::aligned &valid_above);
-      void perform_disjoint_close(InterCloseOp *op, unsigned index,
-                   InnerContext *context, const FieldMask &closing_mask);
-    public:
-      PhysicalState* clone(void) const;
-      void clone_to(const FieldMask &version_mask, const FieldMask &split_mask,
-                    InnerContext *context, VersionInfo &target_info,
-                    std::set<RtEvent> &ready_events) const;
-    public:
-      void print_physical_state(const FieldMask &capture_mask,
-                                TreeStateLogger *logger);
-    public:
-      RegionTreeNode *const node;
-      const bool path_only;
-    public:
-      // Fields which have dirty data
-      FieldMask dirty_mask;
-      // Fields with outstanding reductions
-      FieldMask reduction_mask;
-      // The valid instance views
-      LegionMap<LogicalView*, FieldMask,
-                VALID_VIEW_ALLOC>::track_aligned valid_views;
-      // The valid reduction veiws
-      LegionMap<ReductionView*, FieldMask,
-                VALID_REDUCTION_ALLOC>::track_aligned reduction_views;
-    protected:
-      typedef VersioningSet<PHYSICAL_STATE_REF> PhysicalVersions;
-      PhysicalVersions version_states;
-      PhysicalVersions advance_states;
-    protected:
-      bool captured;
-    };
-#endif
-
     /**
      * \class CopyFillAggregator
      * The copy aggregator class is one that records the copies
@@ -478,19 +410,190 @@ namespace Legion {
      * then merges them together into the biggest possible copies
      * that can be issued together.
      */
-    class CopyFillAggregator {
+    class CopyFillAggregator : public WrapperReferenceMutator {
     public:
-      CopyFillAggregator(bool track_copies);
+      typedef LegionMap<InstanceView*,
+               FieldMaskSet<IndexSpaceExpression> >::aligned InstanceFieldExprs;
+      typedef LegionMap<ApEvent,
+               FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
+      class CopyUpdate;
+      class FillUpdate;
+      class ReduceUpdate;
+      class Update {
+      public:
+        Update(IndexSpaceExpression *exp)
+          : expr(exp) { }
+        virtual ~Update(void) { }
+      public:
+        virtual void record_source_expressions(
+                        InstanceFieldExprs &src_exprs) const = 0;
+        virtual void compute_source_preconditions(RegionTreeForest *forest,
+               const std::map<InstanceView*,EventFieldExprs> &src_pre,
+               LegionMap<ApEvent,FieldMask>::aligned &preconditions) const = 0;
+        virtual void sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                  std::vector<ReduceUpdate*> &reduces,
+                                  std::vector<FillUpdate*> &fills) = 0;
+      public:
+        IndexSpaceExpression *const expr;
+      };
+      class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
+      public:
+        CopyUpdate(InstanceView *src, const FieldMask &mask,
+                   IndexSpaceExpression *expr,
+                   ReductionOpID red = 0,
+                   CopyAcrossHelper *helper = NULL)
+          : Update(expr), source(src), src_mask(mask), 
+            redop(red), across_helper(helper) { }
+        virtual ~CopyUpdate(void) { }
+      private:
+        CopyUpdate(const CopyUpdate &rhs)
+          : Update(rhs.expr), source(rhs.source), src_mask(rhs.src_mask),
+            redop(rhs.redop),across_helper(rhs.across_helper) { assert(false); }
+        CopyUpdate& operator=(const CopyUpdate &rhs)
+          { assert(false); return *this; }
+      public:
+        virtual void record_source_expressions(
+                        InstanceFieldExprs &src_exprs) const;
+        virtual void compute_source_preconditions(RegionTreeForest *forest,
+                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+        virtual void sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                  std::vector<ReduceUpdate*> &reduces,
+                                  std::vector<FillUpdate*> &fills);
+      public:
+        InstanceView *const source;
+        const FieldMask src_mask;
+        const ReductionOpID redop;
+        CopyAcrossHelper *const across_helper;
+      };
+      class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
+      public:
+        FillUpdate(FillView *src, const FieldMask &mask,
+                   IndexSpaceExpression *expr,
+                   CopyAcrossHelper *helper = NULL)
+          : Update(expr), source(src), src_mask(mask), across_helper(helper) { }
+        virtual ~FillUpdate(void) { }
+      private:
+        FillUpdate(const FillUpdate &rhs)
+          : Update(rhs.expr), source(rhs.source), src_mask(rhs.src_mask),
+            across_helper(rhs.across_helper) { assert(false); }
+        FillUpdate& operator=(const FillUpdate &rhs)
+          { assert(false); return *this; }
+      public:
+        virtual void record_source_expressions(
+                        InstanceFieldExprs &src_exprs) const;
+        virtual void compute_source_preconditions(RegionTreeForest *forest,
+                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+        virtual void sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                  std::vector<ReduceUpdate*> &reduces,
+                                  std::vector<FillUpdate*> &fills);
+      public:
+        FillView *const source;
+        const FieldMask src_mask;
+        CopyAcrossHelper *const across_helper;
+      };
+      class ReduceUpdate : public Update, public LegionHeapify<ReduceUpdate> {
+      public:
+        ReduceUpdate(const std::vector<ReductionView*> &srcs,
+                     unsigned srcf, unsigned dstf, 
+                     IndexSpaceExpression *expr,
+                     CopyAcrossHelper *helper)
+          : Update(expr), sources(srcs), src_fidx(srcf), dst_fidx(dstf),
+            across_helper(helper) { }
+        virtual ~ReduceUpdate(void) { }
+      private:
+        ReduceUpdate(const ReduceUpdate &rhs)
+          : Update(rhs.expr), sources(rhs.sources), src_fidx(rhs.src_fidx),
+            dst_fidx(rhs.dst_fidx), across_helper(rhs.across_helper)
+          { assert(false); }
+        ReduceUpdate& operator=(const ReduceUpdate &rhs)
+          { assert(false); return *this; }
+      public:
+        virtual void record_source_expressions(
+                        InstanceFieldExprs &src_exprs) const;
+        virtual void compute_source_preconditions(RegionTreeForest *forest,
+                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
+                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
+        virtual void sort_updates(std::map<InstanceView*,
+                                           std::vector<CopyUpdate*> > &copies,
+                                  std::vector<ReduceUpdate*> &reduces,
+                                  std::vector<FillUpdate*> &fills);
+      public:
+        const std::vector<ReductionView*> sources;
+        const unsigned src_fidx;
+        const unsigned dst_fidx;
+        CopyAcrossHelper *const across_helper;
+      };
+      typedef LegionMap<ApEvent,
+               FieldMaskSet<Update> >::aligned EventFieldUpdates;
+    public:
+      CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
+                         std::set<RtEvent> &applied_events, bool track_events);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       ~CopyFillAggregator(void);
     public:
       CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
     public:
-      bool has_copies(void) const;
-      void issue_copies(const UniqueID op_id, const unsigned index,
-                        std::set<RtEvent> &applied_events,
+      void record_updates(InstanceView *dst_view, 
+                          const FieldMaskSet<LogicalView> &src_views,
+                          const FieldMask &src_mask,
+                          IndexSpaceExpression *expr,
+                          ReductionOpID redop = 0,
+                          CopyAcrossHelper *across_helper = NULL);
+      void record_fill(InstanceView *dst_view,
+                       FillView *src_view,
+                       const FieldMask &fill_mask,
+                       IndexSpaceExpression *expr,
+                       CopyAcrossHelper *across_helper = NULL);
+      void record_reductions(InstanceView *dst_view,
+                             const std::vector<ReductionView*> &src_views,
+                             const unsigned src_fidx,
+                             const unsigned dst_fidx,
+                             IndexSpaceExpression *expr,
+                             CopyAcrossHelper *across_helper = NULL);
+      inline bool has_updates(void) const
+        { return !sources.empty() || !reductions.empty(); }
+      void issue_updates(const PhysicalTraceInfo &trace_info,
+                         ApEvent precondition = ApEvent::NO_AP_EVENT);
+      ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
+    protected:
+      void record_view(LogicalView *new_view);
+      void perform_updates(const LegionMap<InstanceView*,
+                            FieldMaskSet<Update> >::aligned &updates,
+                           const PhysicalTraceInfo &trace_info,
+                           ApEvent precondition);
+      void issue_fills(InstanceView *target,
+                       const std::vector<FillUpdate*> &fills,
+                       ApEvent precondition, const FieldMask &fill_mask,
+                       const PhysicalTraceInfo &trace_info);
+      void issue_copies(InstanceView *target, 
+                        const std::map<InstanceView*,
+                                       std::vector<CopyUpdate*> > &copies,
+                        ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info);
-      ApEvent summarize(void) const;
+      void issue_reductions(InstanceView *target,
+                            const std::vector<ReduceUpdate*> &reduces,
+                            ApEvent precondition, const FieldMask &reduce_mask,
+                            const PhysicalTraceInfo &trace_info);
+    public:
+      RegionTreeForest *const forest;
+      Operation *const op;
+      const unsigned index;
+      const bool track_events;
+    protected:
+      LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
+      LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned reductions;
+      std::set<LogicalView*> all_views; // used for reference counting
+    protected:
+      // Runtime mapping effects that we create
+      std::set<RtEvent> &effects;
+      // Events for the completion of our copies if we are supposed
+      // to be tracking them
+      std::set<ApEvent> events;
     };
 
     /**
@@ -598,37 +701,66 @@ namespace Legion {
                               std::set<RtEvent> &applied_events);
     public:
       // Analysis methods
+      inline bool has_restrictions(const FieldMask &mask) const
+        { return !(mask * restricted_fields); }
       bool find_valid_instances(FieldMaskSet<LogicalView> &insts,
-                                const FieldMask &user_mask);
+                                const FieldMask &user_mask) const;
       bool filter_valid_instances(FieldMaskSet<LogicalView> &insts,
-                                  const FieldMask &user_mask);
+                                  const FieldMask &user_mask) const;
       bool find_reduction_instances(FieldMaskSet<ReductionView> &insts,
-                                    const FieldMask &user_mask);
+                ReductionOpID redop, const FieldMask &user_mask) const;
       bool filter_reduction_instances(FieldMaskSet<ReductionView> &insts,
-                                      const FieldMask &user_mask);
+                  ReductionOpID redop, const FieldMask &user_mask) const;
       void update_set(const RegionUsage &usage, const FieldMask &user_mask,
                       const InstanceSet &target_instances,
                       const std::vector<InstanceView*> &target_views,
                       CopyFillAggregator &input_aggregator,
-                      CopyFillAggregator &output_aggregator);
-      void acquire_restrictions(const FieldMask &acquire_mask,
+                      CopyFillAggregator &output_aggregator,
+                      std::set<RtEvent> &applied_events);
+      void acquire_restrictions(FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
       void release_restrictions(const FieldMask &release_mask,
+                                CopyFillAggregator &release_aggregator,
                                 FieldMaskSet<InstanceView> &instances,
-          std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
+          std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
+                                std::set<RtEvent> &ready_events);
       void issue_across_copies(const RegionUsage &usage,
-                const FieldMask &src_mask, const InstanceSet &target_instances,
-                const std::vector<InstanceView*> &target_views,
-                IndexSpaceExpression *overlap, ApEvent precondition, 
-                PredEvent true_guard, CopyFillAggregator &across_aggregator,
-                const std::vector<CopyAcrossHelper> *across_helpers = NULL);
+              const FieldMask &src_mask, const InstanceSet &target_instances,
+              const std::vector<InstanceView*> &target_views,
+              IndexSpaceExpression *overlap, CopyFillAggregator &aggregator,
+              PredEvent pred_guard, ReductionOpID redop,
+              const std::vector<unsigned> *src_indexes = NULL,
+              const std::vector<unsigned> *dst_indexes = NULL,
+              const std::vector<CopyAcrossHelper> *across_helpers = NULL) const;
       void overwrite_set(LogicalView *view, const FieldMask &mask,
-                    ApEvent precondition, PredEvent true_guard,
-                    CopyFillAggregator &output_aggregator, 
-                    bool add_restriction = false);
+                         CopyFillAggregator &output_aggregator, 
+                         std::set<RtEvent> &ready_events,
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
+                         bool add_restriction = false);
       void filter_set(LogicalView *view, const FieldMask &mask,
                       bool remove_restriction = false);
+    protected:
+      // Help for analysis, all must be called while holding the lock
+      void record_instances(const FieldMask &record_mask, 
+                            const InstanceSet &target_instances,
+                            const std::vector<InstanceView*> &target_views,
+                                  ReferenceMutator &mutator);
+      void issue_update_copies_and_fills(CopyFillAggregator &aggregator,
+                                         FieldMask update_mask,
+                                         const InstanceSet &target_instances,
+                         const std::vector<InstanceView*> &target_views,
+                                         IndexSpaceExpression *expr,
+                                         bool skip_check = false) const;
+      void filter_valid_instances(const FieldMask &filter_mask);
+      void filter_reduction_instances(const FieldMask &filter_mask);
+      void apply_reductions(const FieldMask &reduce_mask, 
+                            CopyFillAggregator &aggregator);
+      void copy_out(const FieldMask &restricted_mask,
+                    const InstanceSet &src_instances,
+                    const std::vector<InstanceView*> &src_views,
+                          CopyFillAggregator &aggregator) const;
+      void advance_version_numbers(FieldMask advance_mask);
     protected:
       void perform_refinements(void);
       void send_equivalence_set(AddressSpaceID target);
@@ -663,7 +795,9 @@ namespace Legion {
       FieldMaskSet<LogicalView>                           valid_instances;
       std::map<unsigned/*field idx*/,
                std::vector<ReductionView*> >              reduction_instances;
+      FieldMask                                           reduction_fields;
       FieldMaskSet<LogicalView>                           restricted_instances;
+      FieldMask                                           restricted_fields;
       // This is the current version number of the equivalence set
       // Each field should appear in exactly one mask
       LegionMap<VersionID,FieldMask>::aligned             version_numbers;
@@ -698,6 +832,8 @@ namespace Legion {
       // Track which nodes have shared copies of fields
       LegionMap<AddressSpaceID,FieldMask>::aligned exclusive_copies;
       LegionMap<AddressSpaceID,FieldMask>::aligned shared_copies;
+    public:
+      static const VersionID init_version = 1;
     };
 
     /**
@@ -711,7 +847,6 @@ namespace Legion {
     class VersionManager : public LegionHeapify<VersionManager> {
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
-      static const VersionID init_version = 1;
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);

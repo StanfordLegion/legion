@@ -1651,12 +1651,14 @@ namespace Legion {
         {
           if (first)
           {
-            if ((*it)->find_reduction_instances(reduction_insts, user_mask))
+            if ((*it)->find_reduction_instances(reduction_insts, 
+                                                req.redop, user_mask))
               req.flags |= RESTRICTED_FLAG;
             first = false;
           }
           else
-            if ((*it)->filter_reduction_instances(reduction_insts, user_mask))
+            if ((*it)->filter_reduction_instances(reduction_insts, 
+                                                  req.redop, user_mask))
               req.flags |= RESTRICTED_FLAG;
           if (reduction_insts.empty())
             break;
@@ -1768,8 +1770,10 @@ namespace Legion {
         context->convert_target_views(targets, target_views);
       // Now do the mapping with our own applied event set
       std::set<RtEvent> local_applied;
-      CopyFillAggregator input_aggregator(false/*track*/);
-      CopyFillAggregator output_aggregator(true/*track*/);;
+      CopyFillAggregator input_aggregator(this, op, index, 
+                                          local_applied, false/*track*/);
+      CopyFillAggregator output_aggregator(this, op, index,
+                                           local_applied, true/*track*/);
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
       const RegionUsage usage(req);
@@ -1778,10 +1782,10 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->update_set(usage, user_mask, targets, target_views, 
-                          input_aggregator, output_aggregator);
+                          input_aggregator, output_aggregator, local_applied);
       // Issue any input copies that need to be performed
-      if (input_aggregator.has_copies())
-        input_aggregator.issue_copies(op_id, index, local_applied, trace_info);
+      if (input_aggregator.has_updates())
+        input_aggregator.issue_updates(trace_info);
       // Register users for all our instances
       IndexSpaceExpression *expr = region_node->get_index_space_expression();
       // We can skip this if the term event is a 
@@ -1797,10 +1801,10 @@ namespace Legion {
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done
-      if (output_aggregator.has_copies())
+      if (output_aggregator.has_updates())
       {
-        output_aggregator.issue_copies(op_id, index, local_applied, trace_info);
-        return output_aggregator.summarize();
+        output_aggregator.issue_updates(trace_info);
+        return output_aggregator.summarize(trace_info);
       }
       else
         return ApEvent::NO_AP_EVENT;
@@ -1888,12 +1892,18 @@ namespace Legion {
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
+      CopyFillAggregator release_aggregator(this, op, index, 
+                                            map_applied, false/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->release_restrictions(user_mask, instances, inst_exprs);
+        (*it)->release_restrictions(user_mask, release_aggregator, 
+                                    instances, inst_exprs, map_applied);
+      const UniqueID op_id = op->get_unique_op_id();
+      // Issue any release copies/fills that need to be done
+      if (release_aggregator.has_updates())
+        release_aggregator.issue_updates(trace_info);
       // Now add users for all the instances
       const RegionUsage usage(req);
-      const UniqueID op_id = op->get_unique_op_id();
 #ifdef DEBUG_LEGION
       assert(instances.size() == inst_exprs.size());
 #endif
@@ -1950,14 +1960,12 @@ namespace Legion {
         src_mask.set_bit(src_indexes[idx]);
         dst_mask.set_bit(dst_indexes[idx]);
       } 
-
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
       // Perform the copies/reductions across
       IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
       const RegionUsage usage(dst_req);
-      const UniqueID op_id = op->get_unique_op_id();
       const std::set<EquivalenceSet*> &src_eq_sets = 
         src_version_info.get_equivalence_sets();
       // Check to see if we have a perfect across-copy
@@ -1969,7 +1977,8 @@ namespace Legion {
         perfect = false;
         break;
       }
-      CopyFillAggregator across_aggregator(true/*track*/);
+      CopyFillAggregator across_aggregator(this, op, dst_index,
+                                           map_applied, true/*track*/);
       if (perfect)
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -1981,8 +1990,8 @@ namespace Legion {
           if (overlap->is_empty())
             continue;
           (*it)->issue_across_copies(usage, src_mask, dst_targets, 
-                                     target_views, overlap, precondition,
-                                     guard, across_aggregator);
+                                     target_views, overlap, 
+                                     across_aggregator, guard, dst_req.redop);
         }
       }
       else
@@ -2004,16 +2013,17 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
-                                     target_views, overlap, precondition, 
-                                     guard, across_aggregator, &across_helpers);
+          (*it)->issue_across_copies(usage, src_mask, dst_targets, target_views,
+                                     overlap, across_aggregator, guard,
+                                     dst_req.redop, &src_indexes,
+                                     &dst_indexes, &across_helpers);
         }
       }
 #ifdef DEBUG_LEGION
-      assert(across_aggregator.has_copies());
+      assert(across_aggregator.has_updates());
 #endif
-      across_aggregator.issue_copies(op_id, dst_index, map_applied, trace_info);
-      return across_aggregator.summarize();
+      across_aggregator.issue_updates(trace_info, precondition);
+      return across_aggregator.summarize(trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -2050,16 +2060,15 @@ namespace Legion {
         trace_info.tpl->record_fill_view(fill_view, fill_mask);
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
-      CopyFillAggregator output_aggregator(true/*track*/);
+      CopyFillAggregator output_aggregator(this, op, index, 
+                                           map_applied, true/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->overwrite_set(fill_view, fill_mask, 
-                             precondition, true_guard, output_aggregator);
-      if (output_aggregator.has_copies())
+        (*it)->overwrite_set(fill_view,fill_mask,output_aggregator,map_applied);
+      if (output_aggregator.has_updates())
       {
-        const UniqueID op_id = op->get_unique_op_id();
-        output_aggregator.issue_copies(op_id, index, map_applied, trace_info);
-        return output_aggregator.summarize();
+        output_aggregator.issue_updates(trace_info, precondition);
+        return output_aggregator.summarize(trace_info);
       }
       else
         return ApEvent::NO_AP_EVENT;
@@ -2103,18 +2112,18 @@ namespace Legion {
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
-      CopyFillAggregator output_aggregator(true/*track*/);
+      CopyFillAggregator output_aggregator(this, attach_op, index,
+                                           map_applied, true/*track*/);
       const FieldMask &ext_mask = ext_instance.get_valid_fields();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->overwrite_set(external_views[0], ext_mask, 
-                             ApEvent::NO_AP_EVENT, PredEvent::NO_PRED_EVENT,
-                             output_aggregator, true/*add restriction*/);
-      if (output_aggregator.has_copies())
+        (*it)->overwrite_set(external_views[0], ext_mask, output_aggregator,
+                             map_applied, PredEvent::NO_PRED_EVENT, 
+                             true/*add restriction*/);
+      if (output_aggregator.has_updates())
       {
-        const UniqueID op_id = attach_op->get_unique_op_id();
-        output_aggregator.issue_copies(op_id, index, map_applied, trace_info);
-        return output_aggregator.summarize();
+        output_aggregator.issue_updates(trace_info);
+        return output_aggregator.summarize(trace_info);
       }
       else
         return ApEvent::NO_AP_EVENT;

@@ -104,6 +104,9 @@ namespace Legion {
      */
     class InstanceView : public LogicalView {
     public:
+      typedef LegionMap<ApEvent,
+                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
+    public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
                    RegionTreeNode *node, UniqueID owner_context, 
@@ -121,6 +124,10 @@ namespace Legion {
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions) = 0;
 #if 0
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -335,6 +342,10 @@ namespace Legion {
       virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions);
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -873,6 +884,10 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
+      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions);
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -1042,6 +1057,11 @@ namespace Legion {
       virtual void update_gc_events(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
+      virtual void flatten(CopyFillAggregator &aggregator,
+                           InstanceView *dst_view,
+                           const FieldMask src_mask,
+                           IndexSpaceExpression *expr,
+                           CopyAcrossHelper *helper) = 0;
 #if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -1110,6 +1130,11 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
+      virtual void flatten(CopyFillAggregator &aggregator,
+                           InstanceView *dst_view,
+                           const FieldMask src_mask,
+                           IndexSpaceExpression *expr,
+                           CopyAcrossHelper *helper);
 #if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
@@ -1219,6 +1244,11 @@ namespace Legion {
       virtual InnerContext* get_context(void) const
         { return owner_context; }
     public:
+      virtual void flatten(CopyFillAggregator &aggregator,
+                           InstanceView *dst_view,
+                           const FieldMask src_mask,
+                           IndexSpaceExpression *expr,
+                           CopyAcrossHelper *helper);
 #if 0
       virtual void issue_deferred_copies(const TraversalInfo &info,
                                          MaterializedView *dst,
