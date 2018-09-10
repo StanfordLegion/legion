@@ -172,6 +172,51 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return issue_fill_internal(local_space, trace_info, dst_fields,src_view,
+            Runtime::merge_events(&trace_info, space_ready, precondition));
+      else if (space_ready.exists())
+        return issue_fill_internal(local_space, trace_info, dst_fields, 
+                                   src_view, space_ready);
+      else
+        return issue_fill_internal(local_space, trace_info, dst_fields,
+                                   src_view, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return issue_copy_internal(local_space,trace_info,dst_fields,src_fields,
+            Runtime::merge_events(&trace_info, precondition, space_ready),
+            redop, reduction_fold);
+      else if (space_ready.exists())
+        return issue_copy_internal(local_space, trace_info, dst_fields, 
+                       src_fields, space_ready, redop, reduction_fold);
+      else
+        return issue_copy_internal(local_space, trace_info, dst_fields, 
+                       src_fields, precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                             const std::vector<IndexSpaceExpression*> &to_union,
                             RegionTreeForest *ctx)
@@ -574,6 +619,56 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(node->handle.get_id());
       return node;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent RemoteExpression<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+      {
+        if (precondition.exists())
+          return issue_fill_internal(realm_index_space, trace_info, dst_fields,
+              src_view, Runtime::merge_events(&trace_info, precondition,
+                                              realm_index_space_ready));
+        else
+          return issue_fill_internal(realm_index_space, trace_info, dst_fields,
+                                     src_view, realm_index_space_ready);
+      }
+      else
+        return issue_fill_internal(realm_index_space, trace_info, dst_fields,
+                                   src_view, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent RemoteExpression<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+      {
+        if (precondition.exists())
+          return issue_copy_internal(realm_index_space, trace_info, dst_fields,
+              src_fields, Runtime::merge_events(&trace_info, precondition,
+                realm_index_space_ready), redop, reduction_fold);
+        else
+          return issue_copy_internal(realm_index_space, trace_info, dst_fields,
+                    src_fields, realm_index_space_ready, redop, reduction_fold);
+      }
+      else
+        return issue_copy_internal(realm_index_space, trace_info, dst_fields,
+                              src_fields, precondition, redop, reduction_fold);
     }
 
     /////////////////////////////////////////////////////////////
@@ -3127,6 +3222,51 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external(result,
                                         memory, base, ilg, requests));
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return issue_fill_internal(local_space, trace_info, dst_fields,src_view,
+            Runtime::merge_events(&trace_info, space_ready, precondition));
+      else if (space_ready.exists())
+        return issue_fill_internal(local_space, trace_info, dst_fields,
+                                   src_view, space_ready);
+      else
+        return issue_fill_internal(local_space, trace_info, dst_fields,
+                                   src_view, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return issue_copy_internal(local_space,trace_info,dst_fields,src_fields,
+            Runtime::merge_events(&trace_info, space_ready, precondition),
+            redop, reduction_fold);
+      else if (space_ready.exists())
+        return issue_copy_internal(local_space, trace_info, dst_fields,
+                       src_fields, space_ready, redop, reduction_fold);
+      else
+        return issue_copy_internal(local_space, trace_info, dst_fields,
+                       src_fields, precondition, redop, reduction_fold);
     }
     
     //--------------------------------------------------------------------------

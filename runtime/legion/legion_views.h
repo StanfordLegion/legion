@@ -124,10 +124,15 @@ namespace Legion {
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
-      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+      virtual void find_copy_preconditions(bool reading,
                                            const FieldMask &copy_mask,
                                            IndexSpaceExpression *copy_expr,
                                            EventFieldExprs &preconditions) = 0;
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events) = 0;
 #if 0
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -342,10 +347,15 @@ namespace Legion {
       virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
     public:
-      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+      virtual void find_copy_preconditions(bool reading,
                                            const FieldMask &copy_mask,
                                            IndexSpaceExpression *copy_expr,
                                            EventFieldExprs &preconditions);
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events);
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -884,10 +894,15 @@ namespace Legion {
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
-      virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
+      virtual void find_copy_preconditions(bool reading,
                                            const FieldMask &copy_mask,
                                            IndexSpaceExpression *copy_expr,
                                            EventFieldExprs &preconditions);
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events);
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,

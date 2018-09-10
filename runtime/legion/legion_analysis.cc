@@ -1891,7 +1891,66 @@ namespace Legion {
                 // Hard, multiple potential sources,
                 // ask the mapper which one to use
                 // First though check to see if we've already asked it
-
+                bool found = false;
+                const std::set<InstanceView*> instances_set(instances.begin(),
+                                                            instances.end());
+                std::map<InstanceView*,LegionVector<SourceQuery>::aligned>::
+                  const_iterator finder = mapper_queries.find(dst_view);
+                if (finder != mapper_queries.end())
+                {
+                  for (LegionVector<SourceQuery>::aligned::const_iterator qit = 
+                        finder->second.begin(); qit != 
+                        finder->second.end(); qit++)
+                  {
+                    if ((qit->query_mask == vit->set_mask) &&
+                        (qit->sources == instances_set))
+                    {
+                      found = true;
+                      record_view(qit->result);
+                      CopyUpdate *update = new CopyUpdate(qit->result, 
+                                    qit->query_mask, expr, redop, helper);
+                      if (helper == NULL)
+                        updates.insert(update, qit->query_mask);
+                      else
+                        updates.insert(update, 
+                            helper->convert_src_to_dst(qit->query_mask));
+                      break;
+                    }
+                  }
+                }
+                if (!found)
+                {
+                  // If we didn't find the query result we need to do
+                  // it for ourself, start by constructing the inputs
+                  InstanceRef dst(dst_view->get_manager(),
+                      helper == NULL ? vit->set_mask : 
+                        helper->convert_src_to_dst(vit->set_mask));
+                  InstanceSet sources(instances.size());
+                  unsigned src_idx = 0;
+                  for (std::vector<InstanceView*>::const_iterator it = 
+                        instances.begin(); it != instances.end(); it++)
+                    sources[src_idx++] = InstanceRef((*it)->get_manager(),
+                                                     vit->set_mask);
+                  std::vector<unsigned> ranking;
+                  op->select_sources(dst, sources, ranking);
+                  // We know that which ever one was chosen first is
+                  // the one that satisfies all our fields since all
+                  // these instances are valid for all fields
+                  InstanceView *result = ranking.empty() ? 
+                    instances.front() : instances[ranking[0]];
+                  // Record the update
+                  record_view(result);
+                  CopyUpdate *update = new CopyUpdate(result, vit->set_mask,
+                                                      expr, redop, helper);
+                  if (helper == NULL)
+                    updates.insert(update, vit->set_mask);
+                  else
+                    updates.insert(update, 
+                        helper->convert_src_to_dst(vit->set_mask));
+                  // Save the result for the future
+                  mapper_queries[dst_view].push_back(
+                      SourceQuery(instances_set, vit->set_mask, result));
+                }
               }
             }
             else
@@ -2026,7 +2085,7 @@ namespace Legion {
           // No need to do any kind of sorts here
           IndexSpaceExpression *copy_expr = dit->second.begin()->first;
           const FieldMask &copy_mask = dit->second.get_valid_mask();
-          dit->first->find_copy_preconditions(0/*redop*/, false/*reading*/,
+          dit->first->find_copy_preconditions(false/*reading*/,
                                       copy_mask, copy_expr, preconditions); 
         }
         else
@@ -2042,7 +2101,7 @@ namespace Legion {
             IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
               *(it->elements.begin()) : 
               forest->union_index_spaces(it->elements);
-            dit->first->find_copy_preconditions(0/*redop*/, false/*reading*/,
+            dit->first->find_copy_preconditions(false/*reading*/,
                                         copy_mask, copy_expr, preconditions);
           }
         }
@@ -2056,7 +2115,7 @@ namespace Legion {
           // No need to do any kind of sorts here
           IndexSpaceExpression *copy_expr = sit->second.begin()->first;
           const FieldMask &copy_mask = sit->second.get_valid_mask();
-          sit->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+          sit->first->find_copy_preconditions(true/*reading*/,
                                       copy_mask, copy_expr, preconditions);
         }
         else
@@ -2072,7 +2131,7 @@ namespace Legion {
             IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
               *(it->elements.begin()) : 
               forest->union_index_spaces(it->elements);
-            sit->first->find_copy_preconditions(0/*redop*/, true/*reading*/,
+            sit->first->find_copy_preconditions(true/*reading*/,
                                         copy_mask, copy_expr, preconditions);
           }
         }
@@ -2089,6 +2148,10 @@ namespace Legion {
               uit->second.begin(); it != uit->second.end(); it++)
         {
           // Compute the preconditions for this update
+          // This is a little tricky for across copies because we need
+          // to make sure that all the fields are in same field space
+          // which will be the source field space, so we need to convert
+          // some field masks back to that space if necessary
           LegionMap<ApEvent,FieldMask>::aligned preconditions;
           // Compute the destination preconditions first
           if (!dst_preconditions.empty())
@@ -2113,10 +2176,24 @@ namespace Legion {
                 // Overlap on both so add it to the set
                 LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
                   preconditions.find(pit->first);
+                // Make sure to convert back to the source field space
+                // in the case of across copies if necessary
                 if (finder == preconditions.end())
-                  preconditions[pit->first] = overlap;
+                {
+                  if (it->first->across_helper == NULL)
+                    preconditions[pit->first] = overlap;
+                  else
+                    preconditions[pit->first] = 
+                      it->first->across_helper->convert_dst_to_src(overlap);
+                }
                 else
-                  finder->second |= overlap;
+                {
+                  if (it->first->across_helper == NULL)
+                    finder->second |= overlap;
+                  else
+                    finder->second |= 
+                      it->first->across_helper->convert_dst_to_src(overlap);
+                }
                 set_overlap -= overlap;
                 // If we found preconditions on all our fields then we're done
                 if (!set_overlap)
@@ -2126,17 +2203,24 @@ namespace Legion {
           }
           // The compute the source preconditions for this update
           it->first->compute_source_preconditions(forest,src_pre,preconditions);
-          if (preconditions.size() == 1)
+          if (preconditions.empty())
+            // NO precondition so enter it with a no event
+            update_groups[ApEvent::NO_AP_EVENT].insert(it->first, 
+                                                       it->first->src_mask);
+          else if (preconditions.size() == 1)
           {
             LegionMap<ApEvent,FieldMask>::aligned::const_iterator
               first = preconditions.begin();
             update_groups[first->first].insert(it->first, first->second);
+            const FieldMask remainder = it->first->src_mask - first->second;
+            if (!!remainder)
+              update_groups[ApEvent::NO_AP_EVENT].insert(it->first, remainder);
           }
           else
           {
             // Group event preconditions by fields
             LegionList<FieldSet<ApEvent> >::aligned grouped_events;
-            compute_field_sets<ApEvent>(FieldMask(), 
+            compute_field_sets<ApEvent>(it->first->src_mask,
                                         preconditions, grouped_events);
             for (LegionList<FieldSet<ApEvent> >::aligned::const_iterator ait =
                   grouped_events.begin(); ait != grouped_events.end(); ait++) 
@@ -2155,7 +2239,7 @@ namespace Legion {
                 else
                   key = finder->second;
               }
-              else
+              else if (ait->elements.size() == 1)
                 key = *(ait->elements.begin());
               FieldMaskSet<Update> &group = update_groups[key]; 
               FieldMaskSet<Update>::iterator finder = group.find(it->first);
@@ -2222,6 +2306,410 @@ namespace Legion {
           }
         }
       } // iterate over dst instances
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::issue_fills(InstanceView *target,
+                                         const std::vector<FillUpdate*> &fills,
+                                         ApEvent precondition, 
+                                         const FieldMask &fill_mask,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!fills.empty());
+      assert(!!fill_mask); 
+#endif
+      std::vector<CopySrcDstField> dst_fields;
+      target->copy_to(fill_mask, dst_fields, fills[0]->across_helper);
+      const UniqueID op_id = op->get_unique_op_id();
+      if (fills.size() == 1)
+      {
+#ifdef DEBUG_LEGION
+        // Should cover all the fields
+        assert(!(fill_mask - fills[0]->src_mask));
+#endif
+        IndexSpaceExpression *fill_expr = fills[0]->expr;
+        FillView *fill_view = fills[0]->source;
+        const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
+                                                     fill_view, precondition);
+        // Record the fill result in the destination 
+        if (result.exists())
+        {
+          target->add_copy_user(false/*reading*/,
+                                result, fill_mask, fill_expr,
+                                op_id, index, effects); 
+          if (track_events)
+            events.insert(result);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+#ifndef NDEBUG
+        // These should all have had the same across helper
+        for (unsigned idx = 1; idx < fills.size(); idx++)
+          assert(fills[idx]->across_helper == fills[0]->across_helper);
+#endif
+#endif
+        std::map<FillView*,std::set<IndexSpaceExpression*> > exprs;
+        for (std::vector<FillUpdate*>::const_iterator it = 
+              fills.begin(); it != fills.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          // Should cover all the fields
+          assert(!(fill_mask - (*it)->src_mask));
+#endif
+          exprs[(*it)->source].insert((*it)->expr);
+        }
+        for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
+              const_iterator it = exprs.begin(); it != exprs.end(); it++)
+        {
+          IndexSpaceExpression *fill_expr = (it->second.size() == 1) ?
+            *(it->second.begin()) : forest->union_index_spaces(it->second);
+          const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
+                                                       it->first, precondition);
+          if (result.exists())
+          {
+            target->add_copy_user(false/*reading*/,
+                                  result, fill_mask, fill_expr,
+                                  op_id, index, effects);
+            if (track_events)
+              events.insert(result);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::issue_copies(InstanceView *target, 
+                              const std::map<InstanceView*,
+                                             std::vector<CopyUpdate*> > &copies,
+                              ApEvent precondition, const FieldMask &copy_mask,
+                              const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!copies.empty());
+      assert(!!copy_mask);
+#endif
+      const UniqueID op_id = op->get_unique_op_id();
+      for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
+            cit = copies.begin(); cit != copies.end(); cit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!cit->second.empty());
+#endif
+        std::vector<CopySrcDstField> dst_fields, src_fields;
+        target->copy_to(copy_mask, dst_fields, cit->second[0]->across_helper);
+        if (cit->second.size() == 1)
+        {
+          // Easy case of a single update copy
+          CopyUpdate *update = cit->second[0];
+#ifdef DEBUG_LEGION
+          // Should cover all the fields
+          assert(!(copy_mask - update->src_mask));
+#endif
+          InstanceView *source = update->source;
+          source->copy_from(copy_mask, src_fields);
+          IndexSpaceExpression *copy_expr = update->expr;
+          const ApEvent result = copy_expr->issue_copy(trace_info, 
+            dst_fields, src_fields, precondition, update->redop, false/*fold*/);
+          if (result.exists())
+          {
+            source->add_copy_user(true/*reading*/,
+                                  result, copy_mask, copy_expr,
+                                  op_id, index, effects);
+            target->add_copy_user(false/*reading*/,
+                                  result, copy_mask, copy_expr,
+                                  op_id, index, effects);
+            if (track_events)
+              events.insert(result);
+          }
+        }
+        else
+        {
+          // Have to group by source instances in order to merge together
+          // different index space expressions for the same copy
+          std::map<InstanceView*,std::set<IndexSpaceExpression*> > src_exprs;
+          const ReductionOpID redop = cit->second[0]->redop;
+          for (std::vector<CopyUpdate*>::const_iterator it = 
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            // Should cover all the fields
+            assert(!(copy_mask - (*it)->src_mask));
+            // Should have the same redop
+            assert(redop == (*it)->redop);
+            // Should also have the same across helper as the first one
+            assert(cit->second[0]->across_helper == (*it)->across_helper);
+#endif
+            src_exprs[(*it)->source].insert((*it)->expr);
+          }
+          for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+                const_iterator it = src_exprs.begin(); 
+                it != src_exprs.end(); it++)
+          {
+            IndexSpaceExpression *copy_expr = (it->second.size() == 1) ? 
+              *(it->second.begin()) : forest->union_index_spaces(it->second);
+            src_fields.clear();
+            it->first->copy_from(copy_mask, src_fields);
+            const ApEvent result = copy_expr->issue_copy(trace_info, 
+              dst_fields, src_fields, precondition, redop, false/*fold*/);
+            if (result.exists())
+            {
+              it->first->add_copy_user(true/*reading*/,
+                                    result, copy_mask, copy_expr,
+                                    op_id, index, effects);
+              target->add_copy_user(false/*reading*/,
+                                    result, copy_mask, copy_expr,
+                                    op_id, index, effects);
+              if (track_events)
+                events.insert(result);
+            }
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::issue_reductions(InstanceView *target,
+                             const std::vector<ReduceUpdate*> &reduces,
+                             ApEvent precondition, const FieldMask &reduce_mask,
+                             const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // We have to iterate through and find the reduction epochs for each
+      // field that have to be issued, we'll keep doing this for all the 
+      // reduction updates until we've issued all their reductions 
+      std::vector<ReduceUpdateState> reduce_states(reduces.size());
+      for (unsigned idx = 0; idx < reduces.size(); idx++)
+      {
+        ReduceUpdateState &state = reduce_states[idx];
+        state.reduce = reduces[idx];
+        state.current_index = 0;
+        state.current_precondition = precondition;
+      }
+      const bool reduction_fold = target->is_reduction_view();
+      const UniqueID op_id = op->get_unique_op_id();
+      bool done = false;
+      while (!done)
+      {
+        // Group by fields and reduction epochs
+        std::map<std::pair<unsigned,ReductionOpID>,
+                 std::vector<unsigned/*live index*/> > current_epochs;
+        for (unsigned idx = 0; idx < reduce_states.size(); idx++)
+        {
+          const ReduceUpdateState &state = reduce_states[idx];
+          // Skip any updates which we're aleady done for
+          if (state.current_index == state.reduce->sources.size())
+            continue;
+          const ReductionOpID redop =
+            state.reduce->sources[state.current_index]->get_redop();
+          const std::pair<unsigned,ReductionOpID> key(
+              state.reduce->src_fidx, redop);
+          current_epochs[key].push_back(idx);
+        }
+        // Set this to true, if we have unfinished updates then we'll
+        // set it back to false 
+        done = true;
+        for (std::map<std::pair<unsigned,ReductionOpID>,
+                      std::vector<unsigned> >::const_iterator eit = 
+              current_epochs.begin(); eit != current_epochs.end(); eit++)
+        {
+          FieldMask src_mask;
+          src_mask.set_bit(eit->first.first);
+          if (eit->second.size() == 1)
+          {
+            // Simple: just issue the reductions from this update
+            ReduceUpdateState &state = reduce_states[eit->second[0]];
+            ReduceUpdate *update = state.reduce;
+            std::set<ApEvent> result_events;
+            for (unsigned idx = state.current_index;
+                  idx < update->sources.size(); idx++)
+            {
+              ReductionView *src_view = update->sources[idx];
+              if (src_view->get_redop() != eit->first.second)
+              {
+                done = false;
+                state.current_index = idx;
+                break;
+              }
+              else
+              {
+                state.current_index = idx+1;
+                // Issue the reduction from this view
+                std::vector<CopySrcDstField> src_fields, dst_fields;
+                src_view->reduce_from(eit->first.second, src_mask, src_fields);
+                target->reduce_to(eit->first.second, src_mask, src_fields,
+                                  update->across_helper); 
+                ApEvent result = update->expr->issue_copy(trace_info,
+                    src_fields, dst_fields, state.current_precondition, 
+                    eit->first.second, reduction_fold); 
+                if (result.exists())
+                {
+                  src_view->add_copy_user(true/*reading*/,
+                                          result, src_mask,
+                                          update->expr, op_id, index, effects);
+                  result_events.insert(result);
+                }
+              }
+            }
+            // Update the precondition based on the done events
+            if (!result_events.empty())
+              state.current_precondition = 
+                Runtime::merge_events(&trace_info, result_events);
+          }
+          else
+          {
+            // Harder: group by event preconditions and source instances
+            // Then issue merged reductions for index space expressions
+            std::map<std::pair<ApEvent,ReductionView*>,
+                     std::vector<unsigned> > grouped_sources;
+            for (std::vector<unsigned>::const_iterator sit = 
+                  eit->second.begin(); sit != eit->second.end(); sit++)
+            {
+              ReduceUpdateState &state = 
+                reduce_states[eit->second[*sit]];
+              for (unsigned idx = state.current_index;
+                    idx < state.reduce->sources.size(); idx++)
+              {
+                ReductionView *src_view = state.reduce->sources[idx];
+                if (src_view->get_redop() != eit->first.second)
+                {
+                  done = false;
+                  state.current_index = idx;
+                  break;
+                }
+                else 
+                {
+                  state.current_index = idx+1;
+                  const std::pair<ApEvent,ReductionView*> key(
+                      state.current_precondition, src_view);
+                  grouped_sources[key].push_back(*sit);
+                }
+              }
+            }
+            // Issue the merged reductions for each and record
+            // the result events for each of the updates
+            std::map<unsigned,std::set<ApEvent> > result_events;
+            for (std::map<std::pair<ApEvent,ReductionView*>,
+                          std::vector<unsigned> >::const_iterator git = 
+                  grouped_sources.begin(); git != grouped_sources.end(); git++)
+            {
+#ifdef DEBUG_LEGION
+              assert(!git->second.empty());
+#endif
+              const ReduceUpdateState &state = 
+                reduce_states[git->second[0]];
+              std::vector<CopySrcDstField> src_fields, dst_fields;
+              git->first.second->reduce_from(eit->first.second, 
+                                             src_mask, src_fields);
+              target->reduce_to(eit->first.second, src_mask, src_fields,
+                                state.reduce->across_helper); 
+              IndexSpaceExpression *reduce_expr = NULL;
+              if (git->second.size() > 1)
+              {
+                std::set<IndexSpaceExpression*> reduce_exprs;
+                for (unsigned idx = 0; idx < git->second.size(); idx++)
+                  reduce_exprs.insert(
+                      reduce_states[git->second[idx]].reduce->expr);
+                reduce_expr = forest->union_index_spaces(reduce_exprs);
+              }
+              else
+                reduce_expr = state.reduce->expr; 
+              ApEvent result = reduce_expr->issue_copy(trace_info,
+                  src_fields, dst_fields, git->first.first, 
+                  eit->first.second, reduction_fold);
+              if (result.exists())
+              {
+                // Record the source user
+                git->first.second->add_copy_user(true/*reading*/, 
+                    result, src_mask, reduce_expr, op_id, index, effects);
+                for (unsigned idx = 0; idx < git->second.size(); idx++)
+                  result_events[git->second[idx]].insert(result);
+              }
+            }
+            // Update the event preconditions for each of the updates
+            for (std::map<unsigned,std::set<ApEvent> >::const_iterator
+                  it = result_events.begin(); it != result_events.end(); it++)
+            {
+              ReduceUpdateState &state = reduce_states[it->first]; 
+              if (it->second.size() > 1)
+                state.current_precondition = 
+                  Runtime::merge_events(&trace_info, it->second);
+              else
+                state.current_precondition = *(it->second.begin());
+            }
+          }
+        }
+      }
+      // Once we're done iterating, save out the copy results and 
+      // record the done events if necessary
+      std::map<ApEvent,std::vector<unsigned> > grouped_updates;
+      for (unsigned idx = 0; idx < reduce_states.size(); idx++)
+      {
+        const ReduceUpdateState &state = reduce_states[idx];
+#ifdef DEBUG_LEGION
+        assert(state.current_precondition != precondition);
+#endif
+        grouped_updates[state.current_precondition].push_back(idx);
+      }
+      for (std::map<ApEvent,std::vector<unsigned> >::const_iterator git =
+            grouped_updates.begin(); git != grouped_updates.end(); git++)
+      {
+        if (git->second.size() == 1)
+        {
+          ReduceUpdate *update = reduce_states[0].reduce;
+          IndexSpaceExpression *reduce_expr = update->expr;
+          FieldMask reduce_mask;
+          reduce_mask.set_bit(update->dst_fidx);
+          target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
+                                reduce_expr, op_id, index, effects);
+        }
+        else
+        {
+          FieldMaskSet<IndexSpaceExpression> reduce_sets;
+          for (std::vector<unsigned>::const_iterator sit = 
+                git->second.begin(); sit != git->second.end(); sit++)
+          {
+            ReduceUpdate *update = reduce_states[*sit].reduce;
+            IndexSpaceExpression *expr = update->expr;
+            FieldMask dst_mask;
+            dst_mask.set_bit(update->dst_fidx);
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              reduce_sets.find(expr);
+            if (finder != reduce_sets.end())
+              finder.merge(dst_mask);
+            else
+              reduce_sets.insert(expr, dst_mask);
+          }
+          if (reduce_sets.size() == 1)
+          {
+            IndexSpaceExpression *reduce_expr = reduce_sets.begin()->first;
+            const FieldMask &reduce_mask = reduce_sets.get_valid_mask();
+            target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
+                                  reduce_expr, op_id, index, effects);
+          }
+          else
+          {
+            LegionList<FieldSet<IndexSpaceExpression*> >::aligned expr_sets;
+            reduce_sets.compute_field_sets(FieldMask(), expr_sets);
+            for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                  const_iterator it = expr_sets.begin(); 
+                  it != expr_sets.end(); it++)
+            {
+              IndexSpaceExpression *reduce_expr = (it->elements.size() == 1) ?
+                *(it->elements.begin()) : 
+                forest->union_index_spaces(it->elements);
+              target->add_copy_user(false/*reading*/, git->first, it->set_mask,
+                                    reduce_expr, op_id, index, effects);
+            }
+          }
+        }
+        if (track_events)
+          events.insert(git->first);
+      }
     }
 
     /////////////////////////////////////////////////////////////

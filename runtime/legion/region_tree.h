@@ -683,6 +683,15 @@ namespace Legion {
       virtual bool remove_expression_reference(void) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
     public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition) = 0;
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold) = 0;
+    public:
       static void handle_tighten_index_space(const void *args);
     public:
       void add_parent_operation(IndexSpaceOperation *op);
@@ -698,6 +707,19 @@ namespace Legion {
         }
         return empty;
       }
+    protected:
+      template<int DIM, typename T>
+      inline ApEvent issue_fill_internal(const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition);
+      template<int DIM, typename T>
+      inline ApEvent issue_copy_internal(const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -798,6 +820,15 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -954,6 +985,15 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+    public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;
     };
@@ -1000,6 +1040,15 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
     public:
       void set_result(IndexSpaceExpression *result);
     public:
@@ -1557,6 +1606,15 @@ namespace Legion {
       virtual PhysicalInstance create_external_instance(Memory memory,
                              uintptr_t base, Realm::InstanceLayoutGeneric *ilg,
                              ApEvent &ready_event);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,

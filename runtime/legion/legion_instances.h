@@ -234,6 +234,7 @@ namespace Legion {
       void compute_across_offsets(const FieldMask &src_mask,
                    std::vector<CopySrcDstField> &dst_fields);
       FieldMask convert_src_to_dst(const FieldMask &src_mask);
+      FieldMask convert_dst_to_src(const FieldMask &dst_mask);
     public:
       std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;

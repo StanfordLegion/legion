@@ -421,8 +421,9 @@ namespace Legion {
       class ReduceUpdate;
       class Update {
       public:
-        Update(IndexSpaceExpression *exp)
-          : expr(exp) { }
+        Update(IndexSpaceExpression *exp, const FieldMask &mask,
+               CopyAcrossHelper *helper)
+          : expr(exp), src_mask(mask), across_helper(helper) { }
         virtual ~Update(void) { }
       public:
         virtual void record_source_expressions(
@@ -436,6 +437,8 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills) = 0;
       public:
         IndexSpaceExpression *const expr;
+        const FieldMask src_mask;
+        CopyAcrossHelper *const across_helper;
       };
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
@@ -443,13 +446,12 @@ namespace Legion {
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
                    CopyAcrossHelper *helper = NULL)
-          : Update(expr), source(src), src_mask(mask), 
-            redop(red), across_helper(helper) { }
+          : Update(expr, mask, helper), source(src), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
         CopyUpdate(const CopyUpdate &rhs)
-          : Update(rhs.expr), source(rhs.source), src_mask(rhs.src_mask),
-            redop(rhs.redop),across_helper(rhs.across_helper) { assert(false); }
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+            source(rhs.source), redop(rhs.redop) { assert(false); }
         CopyUpdate& operator=(const CopyUpdate &rhs)
           { assert(false); return *this; }
       public:
@@ -464,21 +466,19 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
-        const FieldMask src_mask;
         const ReductionOpID redop;
-        CopyAcrossHelper *const across_helper;
       };
       class FillUpdate : public Update, public LegionHeapify<FillUpdate> {
       public:
         FillUpdate(FillView *src, const FieldMask &mask,
                    IndexSpaceExpression *expr,
                    CopyAcrossHelper *helper = NULL)
-          : Update(expr), source(src), src_mask(mask), across_helper(helper) { }
+          : Update(expr, mask, helper), source(src) { }
         virtual ~FillUpdate(void) { }
       private:
         FillUpdate(const FillUpdate &rhs)
-          : Update(rhs.expr), source(rhs.source), src_mask(rhs.src_mask),
-            across_helper(rhs.across_helper) { assert(false); }
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+            source(rhs.source) { assert(false); }
         FillUpdate& operator=(const FillUpdate &rhs)
           { assert(false); return *this; }
       public:
@@ -493,23 +493,21 @@ namespace Legion {
                                   std::vector<FillUpdate*> &fills);
       public:
         FillView *const source;
-        const FieldMask src_mask;
-        CopyAcrossHelper *const across_helper;
       };
       class ReduceUpdate : public Update, public LegionHeapify<ReduceUpdate> {
       public:
         ReduceUpdate(const std::vector<ReductionView*> &srcs,
                      unsigned srcf, unsigned dstf, 
                      IndexSpaceExpression *expr,
-                     CopyAcrossHelper *helper)
-          : Update(expr), sources(srcs), src_fidx(srcf), dst_fidx(dstf),
-            across_helper(helper) { }
+                     CopyAcrossHelper *helper = NULL)
+          : Update(expr, init_mask(srcf), helper), sources(srcs), 
+            src_fidx(srcf), dst_fidx(dstf) { }
         virtual ~ReduceUpdate(void) { }
       private:
         ReduceUpdate(const ReduceUpdate &rhs)
-          : Update(rhs.expr), sources(rhs.sources), src_fidx(rhs.src_fidx),
-            dst_fidx(rhs.dst_fidx), across_helper(rhs.across_helper)
-          { assert(false); }
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+            sources(rhs.sources), src_fidx(rhs.src_fidx), 
+            dst_fidx(rhs.dst_fidx) { assert(false); }
         ReduceUpdate& operator=(const ReduceUpdate &rhs)
           { assert(false); return *this; }
       public:
@@ -522,14 +520,22 @@ namespace Legion {
                                            std::vector<CopyUpdate*> > &copies,
                                   std::vector<ReduceUpdate*> &reduces,
                                   std::vector<FillUpdate*> &fills);
+      private:
+        static inline FieldMask init_mask(unsigned fidx)
+          { FieldMask result; result.set_bit(fidx); return result; }
       public:
         const std::vector<ReductionView*> sources;
         const unsigned src_fidx;
         const unsigned dst_fidx;
-        CopyAcrossHelper *const across_helper;
       };
       typedef LegionMap<ApEvent,
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
+      struct ReduceUpdateState {
+      public:
+        ReduceUpdate *reduce;
+        unsigned current_index;
+        ApEvent current_precondition;
+      };
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
                          std::set<RtEvent> &applied_events, bool track_events);
@@ -544,6 +550,8 @@ namespace Legion {
                           IndexSpaceExpression *expr,
                           ReductionOpID redop = 0,
                           CopyAcrossHelper *across_helper = NULL);
+      // Neither fills nor reductions should have a redop across as they
+      // should have been applied an instance directly for across copies
       void record_fill(InstanceView *dst_view,
                        FillView *src_view,
                        const FieldMask &fill_mask,
@@ -594,6 +602,21 @@ namespace Legion {
       // Events for the completion of our copies if we are supposed
       // to be tracking them
       std::set<ApEvent> events;
+    protected:
+      struct SourceQuery {
+      public:
+        SourceQuery(void) { }
+        SourceQuery(const std::set<InstanceView*> srcs,
+                    const FieldMask src_mask,
+                    InstanceView *res)
+          : sources(srcs), query_mask(src_mask), result(res) { }
+      public:
+        std::set<InstanceView*> sources;
+        FieldMask query_mask;
+        InstanceView *result;
+      };
+      // Cached calls to the mapper for selecting sources
+      std::map<InstanceView*,LegionVector<SourceQuery>::aligned> mapper_queries;
     };
 
     /**

@@ -4795,6 +4795,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent PendingIndexSpaceExpression::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 FillView *src_view, ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->issue_fill(trace_info, dst_fields, src_view, precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PendingIndexSpaceExpression::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->issue_copy(trace_info, dst_fields, src_fields, 
+                                precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingIndexSpaceExpression::set_result(IndexSpaceExpression *res)
     //--------------------------------------------------------------------------
     {
