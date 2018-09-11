@@ -6014,16 +6014,6 @@ namespace Legion {
               runtime->handle_create_top_view_response(derez);
               break;
             }
-          case SEND_SUBVIEW_DID_REQUEST:
-            {
-              runtime->handle_subview_did_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_SUBVIEW_DID_RESPONSE:
-            {
-              runtime->handle_subview_did_response(derez);
-              break;
-            }
           case SEND_VIEW_REQUEST:
             {
               runtime->handle_view_request(derez, remote_address_space);
@@ -13845,24 +13835,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_request(AddressSpaceID target, 
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_response(AddressSpaceID target,
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
-                    VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_view_update_request(AddressSpaceID target,
                                            Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14924,21 +14896,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InnerContext::handle_create_top_view_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_response(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -19944,11 +19901,6 @@ namespace Legion {
             const SliceTask::DeferMapAndLaunchArgs *margs = 
               (const SliceTask::DeferMapAndLaunchArgs*)args;
             margs->proxy_this->map_and_launch();
-            break;
-          }
-        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
-          {
-            MaterializedView::handle_deferred_materialized_view(runtime, args);
             break;
           }
         case LG_MISSPECULATE_TASK_ID:

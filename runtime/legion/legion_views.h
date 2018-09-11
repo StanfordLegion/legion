@@ -56,9 +56,6 @@ namespace Legion {
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
-      virtual bool has_parent(void) const = 0;
-      virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -76,8 +73,7 @@ namespace Legion {
       static void handle_deferred_collect(LogicalView *view,
                                           const std::set<ApEvent> &term_events);
     public:
-      static inline DistributedID encode_materialized_did(DistributedID did,
-                                                           bool top);
+      static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
       static inline DistributedID encode_phi_did(DistributedID did);
@@ -85,7 +81,6 @@ namespace Legion {
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
       static inline bool is_phi_did(DistributedID did);
-      static inline bool is_top_did(DistributedID did);
     public:
       RegionTreeForest *const context;
       RegionTreeNode *const logical_node;
@@ -118,9 +113,6 @@ namespace Legion {
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
-      virtual bool has_parent(void) const = 0;
-      virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
     public:
@@ -220,9 +212,6 @@ namespace Legion {
                                const FieldMask &reduce_mask, 
                        std::vector<CopySrcDstField> &src_fields) = 0;
     public:
-      inline InstanceView* get_instance_subview(const LegionColor c) 
-        { return get_subview(c)->as_instance_view(); }
-    public:
       virtual void process_update_request(AddressSpaceID source,
                                RtUserEvent done_event, Deserializer &derez) = 0;
       virtual void process_update_response(Deserializer &derez,
@@ -261,28 +250,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
-      struct DeferMaterializedViewArgs : 
-        public LgTaskArgs<DeferMaterializedViewArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
-      public:
-        DeferMaterializedViewArgs(DistributedID id, AddressSpaceID own,
-                                  AddressSpaceID log, RegionTreeNode *target,
-                                  PhysicalManager *man, MaterializedView *par,
-                                  UniqueID ctx_uid)
-          : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
-            did(id), owner_space(own), logical_owner(log), target_node(target),
-            manager(man), parent(par), context_uid(ctx_uid) { }
-      public:
-        const DistributedID did;
-        const AddressSpaceID owner_space;
-        const AddressSpaceID logical_owner;
-        RegionTreeNode *const target_node;
-        PhysicalManager *const manager;
-        MaterializedView *const parent;
-        const UniqueID context_uid;
-      };
-    public:
       struct EventUsers {
       public:
         EventUsers(void)
@@ -302,14 +269,12 @@ namespace Legion {
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, 
                        AddressSpaceID logical_owner, RegionTreeNode *node, 
-                       InstanceManager *manager, MaterializedView *parent, 
+                       InstanceManager *manager,
                        UniqueID owner_context, bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
     public:
       MaterializedView& operator=(const MaterializedView &rhs);
-    public:
-      void add_remote_child(MaterializedView *child);
     public:
       inline const FieldMask& get_space_mask(void) const 
         { return manager->layout->allocated_fields; }
@@ -317,12 +282,6 @@ namespace Legion {
       const FieldMask& get_physical_mask(void) const;
     public:
       virtual bool has_space(const FieldMask &space_mask) const;
-    public:
-      MaterializedView* get_materialized_subview(const LegionColor c);
-      static void handle_subview_did_request(Deserializer &derez,
-                             Runtime *runtime, AddressSpaceID source);
-      static void handle_subview_did_response(Deserializer &derez); 
-      MaterializedView* get_materialized_parent_view(void) const;
     public:
       void copy_field(FieldID fid, std::vector<CopySrcDstField> &infos);
     public:
@@ -342,9 +301,6 @@ namespace Legion {
     public:
       virtual bool has_manager(void) const { return true; }
       virtual PhysicalManager* get_manager(void) const { return manager; }
-      virtual bool has_parent(void) const { return (parent != NULL); }
-      virtual LogicalView* get_parent(void) const { return parent; }
-      virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
     public:
       virtual void find_copy_preconditions(bool reading,
@@ -708,16 +664,6 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
-      static void handle_deferred_materialized_view(Runtime *runtime, 
-                                                    const void *args);
-      static void create_remote_materialized_view(Runtime *runtime,
-                                                  DistributedID did,
-                                                  AddressSpaceID owner_space,
-                                                  AddressSpaceID logical_owner,
-                                                  RegionTreeNode *target_node,
-                                                  PhysicalManager *manager,
-                                                  MaterializedView *parent,
-                                                  UniqueID context_uid);
     public:
 #if 0
       void perform_remote_valid_check(const FieldMask &check_mask,
@@ -746,15 +692,11 @@ namespace Legion {
                                              RtUserEvent done_event);
     public:
       InstanceManager *const manager;
-      MaterializedView *const parent;
-      const bool disjoint_children;
     protected:
       // Keep track of the locks used for managing atomic coherence
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
       std::map<FieldID,Reservation> atomic_reservations;
-      // Keep track of the child views
-      std::map<LegionColor,MaterializedView*> children;
       // There are three operations that are done on materialized views
       // 1. iterate over all the users for use analysis
       // 2. garbage collection to remove old users for an event
@@ -886,10 +828,6 @@ namespace Legion {
     public:
       virtual bool has_manager(void) const { return true; } 
       virtual PhysicalManager* get_manager(void) const;
-      virtual bool has_parent(void) const { return false; }
-      virtual LogicalView* get_parent(void) const 
-        { assert(false); return NULL; } 
-      virtual LogicalView* get_subview(const LegionColor c);
       virtual Memory get_location(void) const;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
@@ -1049,9 +987,6 @@ namespace Legion {
       virtual bool has_manager(void) const { return false; }
       virtual PhysicalManager* get_manager(void) const
         { return NULL; }
-      virtual bool has_parent(void) const = 0;
-      virtual LogicalView* get_parent(void) const = 0;
-      virtual LogicalView* get_subview(const LegionColor c) = 0;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
     public:
@@ -1132,11 +1067,6 @@ namespace Legion {
       virtual ~FillView(void);
     public:
       FillView& operator=(const FillView &rhs);
-    public:
-      virtual bool has_parent(void) const { return false; }
-      virtual LogicalView* get_parent(void) const 
-        { assert(false); return NULL; }
-      virtual LogicalView* get_subview(const LegionColor c);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -1245,11 +1175,6 @@ namespace Legion {
     public:
       PhiView& operator=(const PhiView &rhs);
     public:
-      virtual bool has_parent(void) const { return false; }
-      virtual LogicalView* get_parent(void) const 
-        { assert(false); return NULL; }
-      virtual LogicalView* get_subview(const LegionColor c);
-    public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
@@ -1312,17 +1237,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ inline DistributedID LogicalView::encode_materialized_did(
-                                                    DistributedID did, bool top)
+                                                              DistributedID did)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(DIST_TYPE_LAST_DC < (1U << 7));
 #endif
-      if (top)
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
-                MATERIALIZED_VIEW_DC | (1ULL << 7));
-      else
-        return LEGION_DISTRIBUTED_HELP_ENCODE(did, MATERIALIZED_VIEW_DC);
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, MATERIALIZED_VIEW_DC); 
     }
 
     //--------------------------------------------------------------------------
@@ -1333,8 +1254,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(DIST_TYPE_LAST_DC < (1U << 7));
 #endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, 
-                REDUCTION_VIEW_DC | (1ULL << 7));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, REDUCTION_VIEW_DC); 
     }
 
     //--------------------------------------------------------------------------
@@ -1345,7 +1265,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(DIST_TYPE_LAST_DC < (1U << 7));
 #endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, FILL_VIEW_DC | (1ULL << 7));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, FILL_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -1356,7 +1276,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(DIST_TYPE_LAST_DC < (1U << 7));
 #endif
-      return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHI_VIEW_DC | (1ULL << 7));
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, PHI_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -1388,13 +1308,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == PHI_VIEW_DC);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ inline bool LogicalView::is_top_did(DistributedID did)
-    //--------------------------------------------------------------------------
-    {
-      return (((LEGION_DISTRIBUTED_HELP_DECODE(did) & (1ULL << 7)) >> 7) == 1);
     }
 
     //--------------------------------------------------------------------------
@@ -1499,6 +1412,7 @@ namespace Legion {
       return static_cast<PhiView*>(const_cast<LogicalView*>(this));
     }
 
+#if 0
     //--------------------------------------------------------------------------
     inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
                                                const RegionUsage &next_user,
@@ -1550,6 +1464,7 @@ namespace Legion {
         return false;
       return true;
     }
+#endif
 
   }; // namespace Internal 
 }; // namespace Legion 

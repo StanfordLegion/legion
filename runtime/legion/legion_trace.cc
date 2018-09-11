@@ -3657,6 +3657,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_copy_views(InstanceView *src,
                                              const FieldMask &src_mask,
@@ -3677,6 +3678,7 @@ namespace Legion {
       update_valid_view(
           false, false, false, dst, dst_mask, dst_logical_ctx, dst_physical_ctx);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(Operation* op, ApEvent &lhs,
@@ -3777,6 +3779,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::update_valid_view(bool is_reduction,
                                                     bool has_read,
@@ -3879,7 +3882,7 @@ namespace Legion {
       logical_contexts[view] = logical_ctx;
       physical_contexts[view] = physical_ctx;
     }
-
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
@@ -3976,8 +3979,10 @@ namespace Legion {
         free(fill_buffer);
       }
 
+#if 0
       update_valid_view(IS_REDUCE(req), HAS_READ(req), HAS_WRITE(req),
                         view, fields, logical_ctx, physical_ctx);
+#endif
 
       std::map<TraceLocalID, unsigned>::iterator finder =
         memo_entries.find(op_key);
@@ -4129,6 +4134,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_view(
                                 FillView *fill_view, const FieldMask &fill_mask)
@@ -4141,6 +4147,7 @@ namespace Legion {
 #endif
       fill_views[fill_view] = fill_mask;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_deferred_copy_from_fill_view(

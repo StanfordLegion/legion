@@ -604,6 +604,7 @@ namespace Legion {
                                ApEvent e3, Operation *owner);
       void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
                                Operation *owner);
+#if 0
       void record_copy_views(InstanceView *src,
                              const FieldMask &src_mask,
                              ContextID src_logical_ctx,
@@ -612,6 +613,7 @@ namespace Legion {
                              const FieldMask &dst_mask,
                              ContextID dst_logical_ctx,
                              ContextID dst_physical_ctx);
+#endif
       void record_issue_copy(Operation* op, ApEvent &lhs,
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
@@ -645,7 +647,9 @@ namespace Legion {
                              UniqueID fill_uid,
 #endif
                              ApEvent precondition);
+#if 0
       void record_fill_view(FillView *fill_view, const FieldMask &fill_mask);
+#endif
       void record_deferred_copy_from_fill_view(FillView *fill_view,
                                                InstanceView *dst_view,
                                                const FieldMask &copy_mask,
@@ -662,6 +666,7 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     private:
+#if 0
       void update_valid_view(bool is_reduction,
                              bool has_read,
                              bool has_write,
@@ -669,6 +674,7 @@ namespace Legion {
                              const FieldMask &fields,
                              ContextID logical_ctx,
                              ContextID physical_ctx);
+#endif
       void record_last_user(const PhysicalInstance &inst, 
                             IndexSpaceExpression *expr,
                             unsigned field, unsigned user, bool read);

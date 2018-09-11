@@ -1112,7 +1112,6 @@ namespace Legion {
               new MaterializedView(context, view_did, owner_space, 
                                    logical_owner, region_node,
                                    const_cast<InstanceManager*>(this),
-                                   (MaterializedView*)NULL/*parent*/, 
                                    context_uid, true/*register now*/);
       register_active_context(own_ctx);
       return result;

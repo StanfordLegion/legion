@@ -207,24 +207,18 @@ namespace Legion {
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
                                AddressSpaceID log_own, RegionTreeNode *node, 
-                               InstanceManager *man, MaterializedView *par, 
+                               InstanceManager *man,
                                UniqueID own_ctx, bool register_now)
-      : InstanceView(ctx, encode_materialized_did(did, par == NULL), own_addr, 
-                     log_own, node, own_ctx, register_now), 
-        manager(man), parent(par), 
-        disjoint_children(node->are_all_children_disjoint())
+      : InstanceView(ctx, encode_materialized_did(did), own_addr,
+                     log_own, node, own_ctx, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      // If we are either not a parent or we are a remote parent add 
-      // a resource reference to avoid being collected
-      if (parent != NULL)
-        add_nested_resource_ref(parent->did);
-      else 
-        manager->add_nested_resource_ref(did);
+      // Keep the manager from being collected
+      manager->add_nested_resource_ref(did);
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
@@ -234,8 +228,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false),
-        manager(NULL), parent(NULL), disjoint_children(false)
+      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -246,13 +239,7 @@ namespace Legion {
     MaterializedView::~MaterializedView(void)
     //--------------------------------------------------------------------------
     {
-      for (std::map<LegionColor,MaterializedView*>::const_iterator it = 
-            children.begin(); it != children.end(); it++)
-      {
-        if (it->second->remove_nested_resource_ref(did))
-          delete it->second;
-      }
-      if ((parent == NULL) && manager->remove_nested_resource_ref(did))
+      if (manager->remove_nested_resource_ref(did))
         delete manager;
       if (!atomic_reservations.empty())
       {
@@ -294,18 +281,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::add_remote_child(MaterializedView *child)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(manager == child->manager);
-#endif
-      LegionColor c = child->logical_node->get_color();
-      AutoLock v_lock(view_lock);
-      children[c] = child;
-    }
-
-    //--------------------------------------------------------------------------
     Memory MaterializedView::get_location(void) const
     //--------------------------------------------------------------------------
     {
@@ -324,144 +299,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return !(space_mask - manager->layout->allocated_fields);
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalView* MaterializedView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      return get_materialized_subview(c);
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* MaterializedView::get_materialized_subview(
-                                                            const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // This is the common case we should already have it
-      {
-        AutoLock v_lock(view_lock, 1, false/*exclusive*/);
-        std::map<LegionColor,MaterializedView*>::const_iterator finder = 
-                                                            children.find(c);
-        if (finder != children.end())
-          return finder->second;
-      }
-      // If we don't have it, we have to make it
-      if (is_owner())
-      {
-        RegionTreeNode *child_node = logical_node->get_tree_child(c);
-        // Allocate the DID eagerly
-        DistributedID child_did = 
-          context->runtime->get_available_distributed_id();
-        bool free_child_did = false;
-        MaterializedView *child_view = NULL;
-        {
-          // Retake the lock and see if we lost the race
-          AutoLock v_lock(view_lock);
-          std::map<LegionColor,MaterializedView*>::const_iterator finder = 
-                                                              children.find(c);
-          if (finder != children.end())
-          {
-            child_view = finder->second;
-            free_child_did = true;
-          }
-          else
-          {
-            // Otherwise we get to make it
-            child_view = new MaterializedView(context, child_did, 
-                                              owner_space, logical_owner, 
-                                              child_node, manager, this, 
-                                              owner_context, true/*reg now*/);
-            children[c] = child_view;
-          }
-          if (free_child_did)
-            context->runtime->recycle_distributed_id(child_did,
-                                                     RtEvent::NO_RT_EVENT);
-          return child_view;
-        }
-      }
-      else
-      {
-        // Find the distributed ID for this child view
-        volatile DistributedID child_did;
-        RtUserEvent wait_on = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(c);
-          rez.serialize(&child_did);
-          rez.serialize(wait_on);
-        }
-        runtime->send_subview_did_request(owner_space, rez); 
-        wait_on.wait();
-        RtEvent ready;
-        LogicalView *child_view = 
-          context->runtime->find_or_request_logical_view(child_did, ready);
-        if (ready.exists())
-          ready.wait();
-#ifdef DEBUG_LEGION
-        assert(child_view->is_materialized_view());
-#endif
-        return child_view->as_materialized_view();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_subview_did_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID parent_did;
-      derez.deserialize(parent_did);
-      LegionColor color;
-      derez.deserialize(color);
-      DistributedID *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      DistributedCollectable *dc = 
-        runtime->find_distributed_collectable(parent_did);
-#ifdef DEBUG_LEGION
-      MaterializedView *parent_view = dynamic_cast<MaterializedView*>(dc);
-      assert(parent_view != NULL);
-#else
-      MaterializedView *parent_view = static_cast<MaterializedView*>(dc);
-#endif
-      MaterializedView *child_view = 
-        parent_view->get_materialized_subview(color);
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(child_view->did);
-        rez.serialize(target);
-        rez.serialize(to_trigger);
-      }
-      runtime->send_subview_did_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_subview_did_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID result;
-      derez.deserialize(result);
-      DistributedID *target;
-      derez.deserialize(target);
-      RtUserEvent to_trigger;
-      derez.deserialize(to_trigger);
-      (*target) = result;
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    MaterializedView* MaterializedView::get_materialized_parent_view(void) const
-    //--------------------------------------------------------------------------
-    {
-      return parent;
     }
 
     //--------------------------------------------------------------------------
@@ -1522,67 +1359,47 @@ namespace Legion {
     void MaterializedView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
-        if (is_owner())
-          manager->add_nested_gc_ref(did, mutator);
-        else
-          send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
-      }
+      if (is_owner())
+        manager->add_nested_gc_ref(did, mutator);
       else
-        parent->add_nested_gc_ref(did, mutator);
+        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-      {
-        // we have a resource reference on the manager so no need to check
-        if (is_owner())
-          manager->remove_nested_gc_ref(did, mutator);
-        else
-          send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
-      }
-      else if (parent->remove_nested_gc_ref(did, mutator))
-        delete parent;
+      // we have a resource reference on the manager so no need to check
+      if (is_owner())
+        manager->remove_nested_gc_ref(did, mutator);
+      else
+        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL)
-        manager->add_nested_valid_ref(did, mutator);
-      else
-        parent->add_nested_valid_ref(did, mutator);
+      manager->add_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (parent == NULL) 
-        // we have a resource reference on the manager so no need to check
-        manager->remove_nested_valid_ref(did, mutator);
-      else if (parent->remove_nested_valid_ref(did, mutator))
-        delete parent;
+      // we have a resource reference on the manager so no need to check
+      manager->remove_nested_valid_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::collect_users(const std::set<ApEvent> &term_events)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock v_lock(view_lock);
-        // Remove any event users from the current and previous users
-        for (std::set<ApEvent>::const_iterator it = term_events.begin();
-              it != term_events.end(); it++)
-          filter_local_users(*it); 
-      }
-      if (parent != NULL)
-        parent->collect_users(term_events);
+      AutoLock v_lock(view_lock);
+      // Remove any event users from the current and previous users
+      for (std::set<ApEvent>::const_iterator it = term_events.begin();
+            it != term_events.end(); it++)
+        filter_local_users(*it); 
     }
 
     //--------------------------------------------------------------------------
@@ -1590,14 +1407,10 @@ namespace Legion {
                                            const std::set<ApEvent> &term_events)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->update_gc_events(term_events);
       AutoLock v_lock(view_lock);
       for (std::set<ApEvent>::const_iterator it = term_events.begin();
             it != term_events.end(); it++)
-      {
         outstanding_gc_events.insert(*it);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -1612,10 +1425,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        if (parent == NULL)
-          rez.serialize<DistributedID>(0);
-        else
-          rez.serialize<DistributedID>(parent->did);
         if (logical_node->is_region())
         {
           rez.serialize<bool>(true);
@@ -1639,14 +1448,10 @@ namespace Legion {
                                            const std::deque<ApEvent> &gc_events)
     //--------------------------------------------------------------------------
     {
-      if (parent != NULL)
-        parent->update_gc_events(gc_events);
       AutoLock v_lock(view_lock);
       for (std::deque<ApEvent>::const_iterator it = gc_events.begin();
             it != gc_events.end(); it++)
-      {
         outstanding_gc_events.insert(*it);
-      }
     }    
 
 #if 0
@@ -3123,68 +2928,62 @@ namespace Legion {
                                                     Operation *op, bool excl)
     //--------------------------------------------------------------------------
     {
-      // Keep going up the tree until we get to the root
-      if (parent == NULL)
+      // Compute the field set
+      std::vector<FieldID> atomic_fields;
+      logical_node->column_source->get_field_set(mask, atomic_fields);
+      // If we are the owner we can do this here
+      if (is_owner())
       {
-        // Compute the field set
-        std::vector<FieldID> atomic_fields;
-        logical_node->column_source->get_field_set(mask, atomic_fields);
-        // If we are the owner we can do this here
-        if (is_owner())
+        std::vector<Reservation> reservations(atomic_fields.size());
+        find_field_reservations(atomic_fields, reservations);
+        for (unsigned idx = 0; idx < reservations.size(); idx++)
+          op->update_atomic_locks(reservations[idx], excl);
+      }
+      else
+      {
+        // Figure out which fields we need requests for and send them
+        std::vector<FieldID> needed_fields;
         {
-          std::vector<Reservation> reservations(atomic_fields.size());
-          find_field_reservations(atomic_fields, reservations);
-          for (unsigned idx = 0; idx < reservations.size(); idx++)
-            op->update_atomic_locks(reservations[idx], excl);
-        }
-        else
-        {
-          // Figure out which fields we need requests for and send them
-          std::vector<FieldID> needed_fields;
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                atomic_fields.begin(); it != atomic_fields.end(); it++)
           {
-            AutoLock v_lock(view_lock, 1, false);
-            for (std::vector<FieldID>::const_iterator it = 
-                  atomic_fields.begin(); it != atomic_fields.end(); it++)
-            {
-              std::map<FieldID,Reservation>::const_iterator finder = 
-                atomic_reservations.find(*it);
-              if (finder == atomic_reservations.end())
-                needed_fields.push_back(*it);
-              else
-                op->update_atomic_locks(finder->second, excl);
-            }
-          }
-          if (!needed_fields.empty())
-          {
-            RtUserEvent wait_on = Runtime::create_rt_user_event();
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize<size_t>(needed_fields.size());
-              for (unsigned idx = 0; idx < needed_fields.size(); idx++)
-                rez.serialize(needed_fields[idx]);
-              rez.serialize(wait_on);
-            }
-            runtime->send_atomic_reservation_request(owner_space, rez);
-            wait_on.wait();
-            // Now retake the lock and get the remaining reservations
-            AutoLock v_lock(view_lock, 1, false);
-            for (std::vector<FieldID>::const_iterator it = 
-                  needed_fields.begin(); it != needed_fields.end(); it++)
-            {
-              std::map<FieldID,Reservation>::const_iterator finder =
-                atomic_reservations.find(*it);
-#ifdef DEBUG_LEGION
-              assert(finder != atomic_reservations.end());
-#endif
+            std::map<FieldID,Reservation>::const_iterator finder = 
+              atomic_reservations.find(*it);
+            if (finder == atomic_reservations.end())
+              needed_fields.push_back(*it);
+            else
               op->update_atomic_locks(finder->second, excl);
-            }
+          }
+        }
+        if (!needed_fields.empty())
+        {
+          RtUserEvent wait_on = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(needed_fields.size());
+            for (unsigned idx = 0; idx < needed_fields.size(); idx++)
+              rez.serialize(needed_fields[idx]);
+            rez.serialize(wait_on);
+          }
+          runtime->send_atomic_reservation_request(owner_space, rez);
+          wait_on.wait();
+          // Now retake the lock and get the remaining reservations
+          AutoLock v_lock(view_lock, 1, false);
+          for (std::vector<FieldID>::const_iterator it = 
+                needed_fields.begin(); it != needed_fields.end(); it++)
+          {
+            std::map<FieldID,Reservation>::const_iterator finder =
+              atomic_reservations.find(*it);
+#ifdef DEBUG_LEGION
+            assert(finder != atomic_reservations.end());
+#endif
+            op->update_atomic_locks(finder->second, excl);
           }
         }
       }
-      else
-        parent->find_atomic_reservations(mask, op, excl);
     }
 
     //--------------------------------------------------------------------------
@@ -3308,8 +3107,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      DistributedID parent_did;
-      derez.deserialize(parent_did);
       bool is_region;
       derez.deserialize(is_region);
       RegionTreeNode *target_node;
@@ -3334,56 +3131,11 @@ namespace Legion {
       RtEvent man_ready;
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
-      MaterializedView *parent = NULL;
-      if (parent_did != 0)
-      {
-        RtEvent par_ready;
-        LogicalView *par_view = 
-          runtime->find_or_request_logical_view(parent_did, par_ready);
-        if (par_ready.exists() && !par_ready.has_triggered())
-        {
-          // Need to avoid virtual channel deadlock here so defer it
-          DeferMaterializedViewArgs args(did, owner_space, logical_owner, 
-              // Have to static cast this since it might not be ready
-              target_node, phy_man, static_cast<MaterializedView*>(par_view), 
-              context_uid);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                  Runtime::merge_events(par_ready, man_ready));
-          return;
-        }
-#ifdef DEBUG_LEGION
-        assert(par_view->is_materialized_view());
-#endif
-        parent = par_view->as_materialized_view();
-      }
       if (man_ready.exists())
         man_ready.wait();
 #ifdef DEBUG_LEGION
       assert(phy_man->is_instance_manager());
 #endif
-      create_remote_materialized_view(runtime, did, owner_space, logical_owner,
-                                    target_node, phy_man, parent, context_uid);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::handle_deferred_materialized_view(
-                                             Runtime *runtime, const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferMaterializedViewArgs *margs = 
-        (const DeferMaterializedViewArgs*)args;
-      create_remote_materialized_view(runtime, margs->did, margs->owner_space,
-          margs->logical_owner, margs->target_node, margs->manager,
-          margs->parent, margs->context_uid);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void MaterializedView::create_remote_materialized_view(
-       Runtime *runtime, DistributedID did, AddressSpaceID owner_space,
-       AddressSpaceID logical_owner, RegionTreeNode *target_node, 
-       PhysicalManager *phy_man, MaterializedView *parent, UniqueID context_uid)
-    //--------------------------------------------------------------------------
-    {
       InstanceManager *inst_manager = phy_man->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
@@ -3392,14 +3144,12 @@ namespace Legion {
                                               did, owner_space, 
                                               logical_owner, 
                                               target_node, inst_manager,
-                                              parent, context_uid,
+                                              context_uid,
                                               false/*register now*/);
       else
         view = new MaterializedView(runtime->forest, did, owner_space,
                                     logical_owner, target_node, inst_manager, 
-                                    parent, context_uid,false/*register now*/);
-      if (parent != NULL)
-        parent->add_remote_child(view);
+                                    context_uid, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
     }
@@ -6167,14 +5917,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalView* CompositeView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Composite views don't need subviews
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
     void CompositeView::prune(
                 const WriteMasks &partial_write_masks, FieldMask &valid_mask,
                 LegionMap<CompositeView*,FieldMask>::aligned &replacements, 
@@ -7477,14 +7219,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalView* FillView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Fill views don't need subviews
-      return this;
-    }
-
-    //--------------------------------------------------------------------------
     void FillView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -7881,14 +7615,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    LogicalView* PhiView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Phi views don't need subviews
-      return this;
     }
 
     //--------------------------------------------------------------------------
@@ -8531,14 +8257,6 @@ namespace Legion {
                     local_space, map_applied_events, trace_info);
       return reduce_post;
     } 
-
-    //--------------------------------------------------------------------------
-    LogicalView* ReductionView::get_subview(const LegionColor c)
-    //--------------------------------------------------------------------------
-    {
-      // Right now we don't make sub-views for reductions
-      return this;
-    }
 
     //--------------------------------------------------------------------------
     void ReductionView::find_copy_preconditions(ReductionOpID redop,

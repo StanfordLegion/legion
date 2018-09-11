@@ -2214,8 +2214,6 @@ namespace Legion {
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
-      void send_subview_did_request(AddressSpaceID target, Serializer &rez);
-      void send_subview_did_response(AddressSpaceID target, Serializer &rez);
       void send_view_update_request(AddressSpaceID target, Serializer &rez);
       void send_view_update_response(AddressSpaceID target, Serializer &rez);
       void send_view_remote_update(AddressSpaceID target, Serializer &rez);
@@ -2400,9 +2398,6 @@ namespace Legion {
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
-      void handle_subview_did_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
       void handle_view_update_request(Deserializer &derez, 
                                       AddressSpaceID source);

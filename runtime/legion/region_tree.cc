@@ -2056,8 +2056,10 @@ namespace Legion {
                      , fill_op_uid
 #endif
                      );
+#if 0
       if (trace_info.recording)
         trace_info.tpl->record_fill_view(fill_view, fill_mask);
+#endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
       CopyFillAggregator output_aggregator(this, op, index, 

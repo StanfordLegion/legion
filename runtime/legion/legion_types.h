@@ -314,7 +314,6 @@ namespace Legion {
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
       LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
-      LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
@@ -388,7 +387,6 @@ namespace Legion {
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
         "Defer Task Map and Launch",                              \
-        "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
@@ -618,8 +616,6 @@ namespace Legion {
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
-      SEND_SUBVIEW_DID_REQUEST,
-      SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
       SEND_VIEW_UPDATE_REQUEST,
       SEND_VIEW_UPDATE_RESPONSE,
@@ -754,8 +750,6 @@ namespace Legion {
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
-        "Send Subview DID Request",                                   \
-        "Send Subview DID Response",                                  \
         "Send View Request",                                          \
         "Send View Update Request",                                   \
         "Send View Update Response",                                  \
