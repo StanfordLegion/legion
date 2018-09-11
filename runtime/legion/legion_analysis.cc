@@ -354,13 +354,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_issue_copy(ApEvent &result, RegionNode *node,
+    void PhysicalTraceInfo::record_issue_copy(ApEvent &result,
+                                 IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
                                  ApEvent precondition,
-                                 PredEvent predicate_guard,
-                                 IndexTreeNode *intersect,
-                                 IndexSpaceExpression *mask,
                                  ReductionOpID redop,
                                  bool reduction_fold) const
     //--------------------------------------------------------------------------
@@ -370,21 +368,19 @@ namespace Legion {
       assert(tpl != NULL);
       assert(tpl->is_recording());
 #endif
-      tpl->record_issue_copy(op, result, node, src_fields, dst_fields,
-        precondition, predicate_guard, intersect, mask, redop, reduction_fold);
+      tpl->record_issue_copy(op, result, expr, src_fields, dst_fields,
+                             precondition, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalTraceInfo::record_issue_fill(ApEvent &result, RegionNode *node,
+    void PhysicalTraceInfo::record_issue_fill(ApEvent &result,
+                                     IndexSpaceExpression *expr,
                                      const std::vector<CopySrcDstField> &fields,
-                                     const void *fill_buffer, size_t fill_size,
-                                     ApEvent precondition,
-                                     PredEvent predicate_guard,
+                                     const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                      UniqueID fill_uid,
 #endif
-                                     IndexTreeNode *intersect,
-                                     IndexSpaceExpression *mask) const
+                                     ApEvent precondition) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -392,12 +388,11 @@ namespace Legion {
       assert(tpl != NULL);
       assert(tpl->is_recording());
 #endif
-      tpl->record_issue_fill(op, result, node, fields, fill_buffer, fill_size,
-          precondition, predicate_guard,
+      tpl->record_issue_fill(op, result, expr, fields, fill_value, fill_size,
 #ifdef LEGION_SPY
-          fill_uid,
+                             fill_uid,
 #endif
-          intersect, mask);
+                             precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -2332,7 +2327,12 @@ namespace Legion {
         IndexSpaceExpression *fill_expr = fills[0]->expr;
         FillView *fill_view = fills[0]->source;
         const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                     fill_view, precondition);
+                                                     fill_view->value->value,
+                                                   fill_view->value->value_size,
+#ifdef LEGION_SPY
+                                                     fill_view->fill_op_uid,
+#endif
+                                                     precondition);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -2368,7 +2368,12 @@ namespace Legion {
           IndexSpaceExpression *fill_expr = (it->second.size() == 1) ?
             *(it->second.begin()) : forest->union_index_spaces(it->second);
           const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
-                                                       it->first, precondition);
+                                                       it->first->value->value,
+                                                  it->first->value->value_size,
+#ifdef LEGION_SPY
+                                                       it->first->fill_op_uid,
+#endif
+                                                       precondition);
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,

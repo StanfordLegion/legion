@@ -130,25 +130,21 @@ namespace Legion {
                                const std::set<ApEvent> &events) const;
       void record_op_sync_event(ApEvent &result) const;
     public:
-      void record_issue_copy(ApEvent &result, RegionNode *node,
+      void record_issue_copy(ApEvent &result,
+                             IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
                              ApEvent precondition,
-                             PredEvent predicate_guard,
-                             IndexTreeNode *intersect,
-                             IndexSpaceExpression *mask,
                              ReductionOpID redop,
                              bool reduction_fold) const;
-      void record_issue_fill(ApEvent &result, RegionNode *node,
+      void record_issue_fill(ApEvent &result,
+                             IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
-                             const void *fill_buffer, size_t fill_size,
-                             ApEvent precondition,
-                             PredEvent predicate_guard,
+                             const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                              UniqueID fill_uid,
 #endif
-                             IndexTreeNode *intersect,
-                             IndexSpaceExpression *mask) const;
+                             ApEvent precondition) const;
       void record_empty_copy(DeferredView *view,
                              const FieldMask &copy_mask,
                              MaterializedView *dst) const;
@@ -422,8 +418,9 @@ namespace Legion {
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
-               CopyAcrossHelper *helper)
-          : expr(exp), src_mask(mask), across_helper(helper) { }
+               CopyAcrossHelper *helper, PredEvent guard)
+          : expr(exp), src_mask(mask), across_helper(helper), 
+            predicate_guard(guard) { }
         virtual ~Update(void) { }
       public:
         virtual void record_source_expressions(
@@ -439,18 +436,21 @@ namespace Legion {
         IndexSpaceExpression *const expr;
         const FieldMask src_mask;
         CopyAcrossHelper *const across_helper;
+        const PredEvent predicate_guard;
       };
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
         CopyUpdate(InstanceView *src, const FieldMask &mask,
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
-                   CopyAcrossHelper *helper = NULL)
-          : Update(expr, mask, helper), source(src), redop(red) { }
+                   CopyAcrossHelper *helper = NULL,
+                   PredEvent guard = PredEvent::NO_PRED_EVENT)
+          : Update(expr, mask, helper, guard), source(src), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
         CopyUpdate(const CopyUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+          : Update(rhs.expr, rhs.src_mask, 
+                   rhs.across_helper, rhs.predicate_guard), 
             source(rhs.source), redop(rhs.redop) { assert(false); }
         CopyUpdate& operator=(const CopyUpdate &rhs)
           { assert(false); return *this; }
@@ -472,12 +472,14 @@ namespace Legion {
       public:
         FillUpdate(FillView *src, const FieldMask &mask,
                    IndexSpaceExpression *expr,
-                   CopyAcrossHelper *helper = NULL)
-          : Update(expr, mask, helper), source(src) { }
+                   CopyAcrossHelper *helper = NULL,
+                   PredEvent guard = PredEvent::NO_PRED_EVENT)
+          : Update(expr, mask, helper, guard), source(src) { }
         virtual ~FillUpdate(void) { }
       private:
         FillUpdate(const FillUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper,
+                   rhs.predicate_guard),
             source(rhs.source) { assert(false); }
         FillUpdate& operator=(const FillUpdate &rhs)
           { assert(false); return *this; }
@@ -499,13 +501,15 @@ namespace Legion {
         ReduceUpdate(const std::vector<ReductionView*> &srcs,
                      unsigned srcf, unsigned dstf, 
                      IndexSpaceExpression *expr,
-                     CopyAcrossHelper *helper = NULL)
-          : Update(expr, init_mask(srcf), helper), sources(srcs), 
+                     CopyAcrossHelper *helper = NULL,
+                     PredEvent guard = PredEvent::NO_PRED_EVENT)
+          : Update(expr, init_mask(srcf), helper, guard), sources(srcs), 
             src_fidx(srcf), dst_fidx(dstf) { }
         virtual ~ReduceUpdate(void) { }
       private:
         ReduceUpdate(const ReduceUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper,
+                   rhs.predicate_guard), 
             sources(rhs.sources), src_fidx(rhs.src_fidx), 
             dst_fidx(rhs.dst_fidx) { assert(false); }
         ReduceUpdate& operator=(const ReduceUpdate &rhs)

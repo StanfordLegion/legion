@@ -4798,7 +4798,11 @@ namespace Legion {
     ApEvent PendingIndexSpaceExpression::issue_fill(
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition)
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
@@ -4806,7 +4810,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      return result->issue_fill(trace_info, dst_fields, src_view, precondition);
+      return result->issue_fill(trace_info, dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                fill_uid,
+#endif
+                                precondition);
     }
 
     //--------------------------------------------------------------------------

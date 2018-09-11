@@ -685,7 +685,11 @@ namespace Legion {
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition) = 0;
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -709,12 +713,18 @@ namespace Legion {
       }
     protected:
       template<int DIM, typename T>
-      inline ApEvent issue_fill_internal(const Realm::IndexSpace<DIM,T> &space,
+      inline ApEvent issue_fill_internal(RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition);
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition);
       template<int DIM, typename T>
-      inline ApEvent issue_copy_internal(const Realm::IndexSpace<DIM,T> &space,
+      inline ApEvent issue_copy_internal(RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -823,7 +833,11 @@ namespace Legion {
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition);
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -987,7 +1001,11 @@ namespace Legion {
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition);
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1043,7 +1061,11 @@ namespace Legion {
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition);
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1609,7 +1631,11 @@ namespace Legion {
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
-                                 FillView *src_view, ApEvent precondition);
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+#endif
+                                 ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,

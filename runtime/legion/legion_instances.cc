@@ -1962,7 +1962,6 @@ namespace Legion {
       return (total_field_bytes * instance_domain->get_volume());
     }
 
-#if 0
     //--------------------------------------------------------------------------
     PhysicalManager* InstanceBuilder::create_physical_instance(
                                                        RegionTreeForest *forest)
@@ -2122,15 +2121,11 @@ namespace Legion {
             }
             PhysicalTraceInfo fake_info(NULL);
 #ifdef LEGION_SPY
-            ApEvent filled =
-              instance_domain->issue_fill(&fake_info, ancestor,dsts,fill_buffer,
-                                          reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT, 0/*uid*/);
+            ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
+                  fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, ready);
 #else
-            ApEvent filled =
-              instance_domain->issue_fill(&fake_info, ancestor,dsts,fill_buffer,
-                                          reduction_op->sizeof_rhs, ready,
-                                          PredEvent::NO_PRED_EVENT);
+            ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
+                  fill_buffer, reduction_op->sizeof_rhs, ready);
 #endif
             // We can free the buffer after we've issued the fill
             free(fill_buffer);
@@ -2152,7 +2147,6 @@ namespace Legion {
 #endif
       return result;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void InstanceBuilder::handle_profiling_response(
