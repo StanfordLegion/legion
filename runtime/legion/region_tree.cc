@@ -1467,8 +1467,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::initialize_current_context(RegionTreeContext ctx,
-                  const RegionRequirement &req, const InstanceSet &sources,
-                  ApEvent term_event, InnerContext *context,unsigned init_index,
+                  const RegionRequirement &req, const bool restricted,
+                  const InstanceSet &sources, ApEvent term_event, 
+                  InnerContext *context,unsigned init_index,
                   std::map<PhysicalManager*,InstanceView*> &top_views,
                   std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -1481,8 +1482,21 @@ namespace Legion {
       RegionUsage usage(req);
       FieldMask user_mask = 
         top_node->column_source->get_field_mask(req.privilege_fields);
-      // Now we update the physical state
-      std::vector<LogicalView*> corresponding(sources.size());
+      // Do the normal versioning analysis since this will deal with
+      // any aliasing of physical instances in the region requirements
+      VersionInfo init_version_info;
+      // Make a user event to track when all effects are applied
+      RtUserEvent mapped_event = Runtime::create_rt_user_event();
+      init_version_info.initialize_mapping(mapped_event);
+      applied_events.insert(mapped_event);
+      // Perform the version analysis and make it ready
+      top_node->perform_versioning_analysis(ctx.get_id(), context,
+                                            init_version_info);
+      std::set<RtEvent> eq_ready_events;
+      init_version_info.make_ready(req, user_mask, 
+                                   eq_ready_events, applied_events);
+      // Now get the top-views for all the physical instances
+      std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
       // Build our set of corresponding views
       if (IS_REDUCE(req))
@@ -1533,9 +1547,22 @@ namespace Legion {
             corresponding[idx] = finder->second;
         }
       }
-      // Now we can register all these instances
-      top_node->initialize_state(ctx.get_id(), term_event, usage, user_mask, 
-                 sources, context, init_index, corresponding, applied_events); 
+      // Wait for the equivalence classes to be ready
+      if (!eq_ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(eq_ready_events);
+        if (wait_on.exists())
+          wait_on.wait();
+      }
+      // Iterate over the equivalence classes and initialize them
+      const std::set<EquivalenceSet*> &eq_sets = 
+        init_version_info.get_equivalence_sets();
+      const UniqueID context_uid = context->get_unique_id();
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->initialize_set(term_event, usage, user_mask, restricted,
+            sources, corresponding, context_uid, init_index, applied_events);
+      init_version_info.finalize_mapping();
     }
 
     //--------------------------------------------------------------------------
@@ -1779,10 +1806,28 @@ namespace Legion {
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
       // Iterate over all the equivalence classes and perform the analysis
-      for (std::set<EquivalenceSet*>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->update_set(usage, user_mask, targets, target_views, 
-                          input_aggregator, output_aggregator, local_applied);
+      // Only need to check for uninitialized data for reads or reduces
+      if (HAS_READ(usage) || IS_REDUCE(usage))
+      {
+        FieldMask initialized = user_mask;
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+          (*it)->update_set(usage, user_mask, targets, target_views, 
+            input_aggregator, output_aggregator, local_applied, &initialized);
+        if (initialized != user_mask)
+        {
+          const FieldMask uninitialized = user_mask - initialized;
+          region_node->report_uninitialized_usage(op, index, uninitialized);
+        }
+      }
+      else
+      {
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+          (*it)->update_set(usage, user_mask, targets, target_views, 
+                            input_aggregator, output_aggregator, local_applied);
+      }
+
       // Issue any input copies that need to be performed
       if (input_aggregator.has_updates())
         input_aggregator.issue_updates(trace_info);
@@ -1979,6 +2024,7 @@ namespace Legion {
       }
       CopyFillAggregator across_aggregator(this, op, dst_index,
                                            map_applied, true/*track*/);
+      FieldMask initialized = src_mask;
       if (perfect)
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -1990,9 +2036,9 @@ namespace Legion {
           if (overlap->is_empty())
             continue;
           (*it)->issue_across_copies(usage, src_mask, dst_targets, 
-                                     target_views, overlap, 
-                                     across_aggregator, guard, dst_req.redop);
-        }
+                                     target_views, overlap, across_aggregator,
+                                     guard, dst_req.redop, initialized);
+        } 
       }
       else
       {
@@ -2013,11 +2059,16 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(usage, src_mask, dst_targets, target_views,
-                                     overlap, across_aggregator, guard,
-                                     dst_req.redop, &src_indexes,
-                                     &dst_indexes, &across_helpers);
+          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
+                                     target_views, overlap, across_aggregator,
+                                     guard, dst_req.redop, initialized,
+                                     &src_indexes,&dst_indexes,&across_helpers);
         }
+      }
+      if (initialized != src_mask)
+      {
+        const FieldMask uninitialized = src_mask - initialized;
+        src_node->report_uninitialized_usage(op, src_index, uninitialized);
       }
 #ifdef DEBUG_LEGION
       assert(across_aggregator.has_updates());
@@ -2051,7 +2102,7 @@ namespace Legion {
         new FillView::FillViewValue(value, value_size);
       FillView *fill_view = 
         new FillView(this, did, runtime->address_space,
-                     fill_node, fill_value, true/*register now*/
+                     fill_value, true/*register now*/
 #ifdef LEGION_SPY
                      , fill_op_uid
 #endif
@@ -2166,7 +2217,7 @@ namespace Legion {
     int RegionTreeForest::physical_convert_mapping(Operation *op,
                                   const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
-                                  InstanceSet &result, RegionTreeID &bad_tree,
+                                  InstanceSet &result, FieldSpace &bad_space,
                                   std::vector<FieldID> &missing_fields,
                                   std::map<PhysicalManager*,
                                        std::pair<unsigned,bool> > *acquired,
@@ -2179,7 +2230,6 @@ namespace Legion {
       FieldSpaceNode *node = get_node(req.parent.get_field_space());
       // Get the field mask for the fields we need
       FieldMask needed_fields = node->get_field_mask(req.privilege_fields);
-      const RegionTreeID local_tree = req.parent.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2193,10 +2243,13 @@ namespace Legion {
           has_composite = true;
           continue;
         }
-        // Check to see if the tree IDs are the same
-        if (local_tree != manager->region_node->handle.get_tree_id())
+        // Check to see if the field spaces are the same
+        if (node != manager->field_space_node)
         {
-          bad_tree = manager->region_node->handle.get_tree_id();
+#ifdef DEBUG_LEGION
+          assert(node->handle != manager->field_space_node->handle);
+#endif
+          bad_space = manager->field_space_node->handle;
           return -1;
         }
         // See if we should be checking the acquired sets
@@ -2253,7 +2306,7 @@ namespace Legion {
     bool RegionTreeForest::physical_convert_postmapping(Operation *op,
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
-                                     InstanceSet &result,RegionTreeID &bad_tree,
+                                     InstanceSet &result, FieldSpace &bad_space,
                                      std::map<PhysicalManager*,
                                           std::pair<unsigned,bool> > *acquired,
                                      std::vector<PhysicalManager*> &unacquired,
@@ -2267,7 +2320,6 @@ namespace Legion {
       // Get the field mask for the fields we need
       FieldMask optional_fields = 
                 reg_node->column_source->get_field_mask(req.privilege_fields);
-      const RegionTreeID local_tree = reg_node->handle.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2282,9 +2334,13 @@ namespace Legion {
           continue;
         }
         // Check to see if the tree IDs are the same
-        if (local_tree != manager->region_node->handle.get_tree_id())
+        if (reg_node->column_source != manager->field_space_node)
         {
-          bad_tree = manager->region_node->handle.get_tree_id();
+#ifdef DEBUG_LEGION
+          assert(reg_node->column_source->handle != 
+                  manager->field_space_node->handle);
+#endif
+          bad_space = manager->field_space_node->handle;
           return -1;
         }
         // See if we should be checking the acquired sets
@@ -4771,6 +4827,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    size_t PendingIndexSpaceExpression::get_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->get_volume();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingIndexSpaceExpression::pack_expression(
                                          Serializer &rez, AddressSpaceID target)
     //--------------------------------------------------------------------------
@@ -4835,6 +4903,20 @@ namespace Legion {
 #endif
       return result->issue_copy(trace_info, dst_fields, src_fields, 
                                 precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    Realm::InstanceLayoutGeneric* PendingIndexSpaceExpression::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->create_layout(ilc, constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -9188,6 +9270,8 @@ namespace Legion {
       if (destroyed)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DESTROY_FIELD_SPACE,
             "Duplicate deletion of Field Space %d", handle.id)
+      // Release any instances that are based on this field space
+      context->runtime->release_field_space_instances(handle);
       destroyed = true;
       // If we're the owner, we can just remove the application valid
       // reference, otherwise if we're remote we do that
@@ -9503,7 +9587,7 @@ namespace Legion {
       InstanceManager *result = new InstanceManager(context, did, 
                                          context->runtime->address_space,
                                          memory, inst, node->row_source, 
-                                         false/*own*/, node, layout, 
+                                         node->column_source, layout, 
                                          pointer_constraint,
                                          true/*register now*/, ready_event,
                                          true/*external instance*/,
@@ -14016,12 +14100,6 @@ namespace Legion {
       }
       // Invalidate our version managers
       invalidate_version_managers();
-      // If we're the root then release our tree instances
-      if (parent == NULL)
-      {
-        context->runtime->release_tree_instances(handle.get_tree_id());
-        column_source->remove_nested_valid_ref(did);
-      }
       row_source->remove_nested_valid_ref(did);
       // Mark that it is destroyed
       destroyed = true;
@@ -14355,20 +14433,6 @@ namespace Legion {
       partitions.insert(partitions.end(), 
                         unique_partitions.begin(), unique_partitions.end());
     }
-
-    //--------------------------------------------------------------------------
-    void RegionNode::initialize_state(ContextID ctx, ApEvent term_event,
-                                const RegionUsage &usage,
-                                const FieldMask &user_mask,
-                                const InstanceSet &targets,
-                                InnerContext *context, unsigned init_index,
-                                const std::vector<LogicalView*> &corresponding,
-                                std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      get_current_version_manager(ctx).initialize_state(term_event, usage, 
-        user_mask, targets, context, init_index, corresponding, applied_events);
-    } 
 
     //--------------------------------------------------------------------------
     void RegionNode::send_semantic_request(AddressSpaceID target,

@@ -1868,23 +1868,23 @@ namespace Legion {
                         get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
-        RegionTreeID bad_tree = 0;
+        FieldSpace bad_space;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
         int composite_index = runtime->forest->physical_convert_mapping(
             this, regions[*it], finder->second, 
-            chosen_instances, bad_tree, missing_fields,
+            chosen_instances, bad_space, missing_fields,
             runtime->unsafe_mapper ? NULL : get_acquired_instances_ref(),
             unacquired, !runtime->unsafe_mapper);
-        if (bad_tree > 0)
+        if (bad_space.exists())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper provided an instance from "
-                        "region tree %d for use in satisfying region "
+                        "field space %d for use in satisfying region "
                         "requirement %d of task %s (ID %lld) whose region "
-                        "is from region tree %d.", mapper->get_mapper_name(),
-                        bad_tree, *it, get_task_name(), get_unique_id(), 
-                        regions[*it].region.get_tree_id())
+                        "is from field_space %d.", mapper->get_mapper_name(),
+                        bad_space.get_id(), *it,get_task_name(),get_unique_id(),
+                        regions[*it].region.get_field_space().get_id())
         if (!missing_fields.empty())
         {
           for (std::vector<FieldID>::const_iterator fit = 
@@ -2782,7 +2782,7 @@ namespace Legion {
           continue;
         // Do the conversion
         InstanceSet &result = physical_instances[idx];
-        RegionTreeID bad_tree = 0;
+        FieldSpace bad_space;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
         bool free_acquired = false;
@@ -2807,19 +2807,19 @@ namespace Legion {
         }
         int composite_idx = 
           runtime->forest->physical_convert_mapping(this, regions[idx],
-                output.chosen_instances[idx], result, bad_tree, missing_fields,
+                output.chosen_instances[idx], result, bad_space, missing_fields,
                 acquired, unacquired, !runtime->unsafe_mapper);
         if (free_acquired)
           delete acquired;
-        if (bad_tree > 0)
+        if (bad_space.exists())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper specified an instance from region "
-                        "tree %d for use with region requirement %d of task "
-                        "%s (ID %lld) whose region is from tree %d.",
-                        "map_task", mapper->get_mapper_name(), bad_tree,
+                        "mapper %s. Mapper specified an instance from field "
+                        "space %d for use with region requirement %d of task "
+                        "%s (ID %lld) whose region is from field space %d.",
+                        "map_task",mapper->get_mapper_name(),bad_space.get_id(),
                         idx, get_task_name(), get_unique_id(),
-                        regions[idx].region.get_tree_id())
+                        regions[idx].region.get_field_space().get_id())
         if (!missing_fields.empty())
         {
           for (std::vector<FieldID>::const_iterator it = 
@@ -3492,23 +3492,23 @@ namespace Legion {
         }
         // Convert the post-mapping  
         InstanceSet result;
-        RegionTreeID bad_tree = 0;
+        FieldSpace bad_space;
         std::vector<PhysicalManager*> unacquired;
         bool had_composite = 
           runtime->forest->physical_convert_postmapping(this, req,
-                              output.chosen_instances[idx], result, bad_tree,
+                              output.chosen_instances[idx], result, bad_space,
                               runtime->unsafe_mapper ? NULL : 
                                 get_acquired_instances_ref(),
                               unacquired, !runtime->unsafe_mapper);
-        if (bad_tree > 0)
+        if (bad_space.exists())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'postmap_task' invocation "
-                        "on mapper %s. Mapper provided an instance from region "
-                        "tree %d for use in satisfying region requirement %d "
-                        "of task %s (ID %lld) whose region is from region tree "
-                        "%d.", mapper->get_mapper_name(), bad_tree, idx,
-                        get_task_name(), get_unique_id(), 
-                        regions[idx].region.get_tree_id())
+                        "on mapper %s. Mapper provided an instance from field "
+                        "space %d for use in satisfying region requirement %d "
+                        "of task %s (ID %lld) whose region is from field sapce "
+                        "%d.", mapper->get_mapper_name(), bad_space.get_id(), 
+                        idx, get_task_name(), get_unique_id(), 
+                        regions[idx].region.get_field_space().get_id())
         if (!unacquired.empty())
         {
           std::map<PhysicalManager*,std::pair<unsigned,bool> > 

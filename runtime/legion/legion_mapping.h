@@ -59,7 +59,7 @@ namespace Legion {
       //  instance is virtual
       void get_fields(std::set<FieldID> &fields) const;
     public:
-      LogicalRegion get_logical_region(void) const;
+      FieldSpace get_field_space(void) const;
       LayoutConstraintID get_layout_id(void) const;
     public:
       // See if our instance still exists or if it has been

@@ -36,8 +36,7 @@ namespace Legion {
     class LogicalView : public DistributedCollectable {
     public:
       LogicalView(RegionTreeForest *ctx, DistributedID did,
-                  AddressSpaceID owner_proc, 
-                  RegionTreeNode *node, bool register_now);
+                  AddressSpaceID owner_proc, bool register_now);
       virtual ~LogicalView(void);
     public:
       inline bool is_instance_view(void) const;
@@ -83,7 +82,6 @@ namespace Legion {
       static inline bool is_phi_did(DistributedID did);
     public:
       RegionTreeForest *const context;
-      RegionTreeNode *const logical_node;
     protected:
       mutable LocalLock view_lock;
     };
@@ -104,8 +102,7 @@ namespace Legion {
     public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
-                   RegionTreeNode *node, UniqueID owner_context, 
-                   bool register_now); 
+                   UniqueID owner_context, bool register_now); 
       virtual ~InstanceView(void);
     public:
       inline bool is_logical_owner(void) const
@@ -115,16 +112,7 @@ namespace Legion {
       virtual PhysicalManager* get_manager(void) const = 0;
       virtual Memory get_location(void) const = 0;
       virtual bool has_space(const FieldMask &space_mask) const = 0;
-    public:
-      virtual void find_copy_preconditions(bool reading,
-                                           const FieldMask &copy_mask,
-                                           IndexSpaceExpression *copy_expr,
-                                           EventFieldExprs &preconditions) = 0;
-      virtual void add_copy_user(bool reading, ApEvent done_event, 
-                                 const FieldMask &copy_mask,
-                                 IndexSpaceExpression *copy_expr,
-                                 UniqueID op_id, unsigned index,
-                                 std::set<RtEvent> &applied_events) = 0;
+    public: 
 #if 0
       // Entry point functions for doing physical dependence analysis
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
@@ -176,6 +164,7 @@ namespace Legion {
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index) = 0;
       virtual ApEvent register_user(const RegionUsage &usage,
@@ -186,6 +175,15 @@ namespace Legion {
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info) = 0;
+      virtual void find_copy_preconditions(bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions) = 0;
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events) = 0;
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -268,8 +266,7 @@ namespace Legion {
     public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, 
-                       AddressSpaceID logical_owner, RegionTreeNode *node, 
-                       InstanceManager *manager,
+                       AddressSpaceID logical_owner, InstanceManager *manager,
                        UniqueID owner_context, bool register_now);
       MaterializedView(const MaterializedView &rhs);
       virtual ~MaterializedView(void);
@@ -302,16 +299,7 @@ namespace Legion {
       virtual bool has_manager(void) const { return true; }
       virtual PhysicalManager* get_manager(void) const { return manager; }
       virtual Memory get_location(void) const;
-    public:
-      virtual void find_copy_preconditions(bool reading,
-                                           const FieldMask &copy_mask,
-                                           IndexSpaceExpression *copy_expr,
-                                           EventFieldExprs &preconditions);
-      virtual void add_copy_user(bool reading, ApEvent done_event, 
-                                 const FieldMask &copy_mask,
-                                 IndexSpaceExpression *copy_expr,
-                                 UniqueID op_id, unsigned index,
-                                 std::set<RtEvent> &applied_events);
+    public: 
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -500,6 +488,7 @@ namespace Legion {
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index);
       virtual ApEvent register_user(const RegionUsage &usage,
@@ -510,6 +499,15 @@ namespace Legion {
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info);
+      virtual void find_copy_preconditions(bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions);
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -796,9 +794,8 @@ namespace Legion {
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc,
-                    AddressSpaceID logical_owner, RegionTreeNode *node, 
-                    ReductionManager *manager, UniqueID owner_context,
-                    bool register_now);
+                    AddressSpaceID logical_owner, ReductionManager *manager,
+                    UniqueID owner_context, bool register_now);
       ReductionView(const ReductionView &rhs);
       virtual ~ReductionView(void);
     public:
@@ -831,16 +828,7 @@ namespace Legion {
       virtual Memory get_location(void) const;
       virtual bool has_space(const FieldMask &space_mask) const
         { return false; }
-    public:
-      virtual void find_copy_preconditions(bool reading,
-                                           const FieldMask &copy_mask,
-                                           IndexSpaceExpression *copy_expr,
-                                           EventFieldExprs &preconditions);
-      virtual void add_copy_user(bool reading, ApEvent done_event, 
-                                 const FieldMask &copy_mask,
-                                 IndexSpaceExpression *copy_expr,
-                                 UniqueID op_id, unsigned index,
-                                 std::set<RtEvent> &applied_events);
+    public: 
 #if 0
       virtual void find_copy_preconditions(ReductionOpID redop, bool reading,
                                            bool single_copy/*only for writing*/,
@@ -891,6 +879,7 @@ namespace Legion {
       virtual void add_initial_user(ApEvent term_event,
                                     const RegionUsage &usage,
                                     const FieldMask &user_mask,
+                                    IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index);
       virtual ApEvent register_user(const RegionUsage &usage,
@@ -901,6 +890,15 @@ namespace Legion {
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info);
+      virtual void find_copy_preconditions(bool reading,
+                                           const FieldMask &copy_mask,
+                                           IndexSpaceExpression *copy_expr,
+                                           EventFieldExprs &preconditions);
+      virtual void add_copy_user(bool reading, ApEvent done_event, 
+                                 const FieldMask &copy_mask,
+                                 IndexSpaceExpression *copy_expr,
+                                 UniqueID op_id, unsigned index,
+                                 std::set<RtEvent> &applied_events);
     protected:
       void find_reducing_preconditions(const FieldMask &user_mask,
                                        ApEvent term_event,
@@ -979,8 +977,7 @@ namespace Legion {
     class DeferredView : public LogicalView {
     public:
       DeferredView(RegionTreeForest *ctx, DistributedID did,
-                   AddressSpaceID owner_space,
-                   RegionTreeNode *node, bool register_now);
+                   AddressSpaceID owner_space, bool register_now);
       virtual ~DeferredView(void);
     public:
       // Deferred views never have managers
@@ -1057,7 +1054,7 @@ namespace Legion {
       };
     public:
       FillView(RegionTreeForest *ctx, DistributedID did,
-               AddressSpaceID owner_proc, RegionTreeNode *node, 
+               AddressSpaceID owner_proc,
                FillViewValue *value, bool register_now
 #ifdef LEGION_SPY
                , UniqueID fill_op_uid
@@ -1166,8 +1163,7 @@ namespace Legion {
       };
     public:
       PhiView(RegionTreeForest *ctx, DistributedID did,
-              AddressSpaceID owner_proc,
-              RegionTreeNode *node, PredEvent true_guard,
+              AddressSpaceID owner_proc, PredEvent true_guard,
               PredEvent false_guard, InnerContext *owner,
               bool register_now);
       PhiView(const PhiView &rhs);

@@ -151,6 +151,36 @@ namespace Legion {
       return result;
     }
 
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
+                                    const Realm::IndexSpace<DIM,T> &space,
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint) const
+    //--------------------------------------------------------------------------
+    {
+      int dim_order[DIM];
+      // Construct the dimension ordering
+      unsigned next_dim = 0;
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
+      {
+        // Skip the field dimension we already handled it
+        if ((*it) == DIM_F)
+          continue;
+        if ((*it) > DIM_F)
+          assert(false); // TODO: handle split dimensions
+        if ((*it) >= DIM) // Skip dimensions bigger than ours
+          continue;
+        dim_order[next_dim++] = *it;
+      }
+#ifdef DEBUG_LEGION
+      assert(next_dim == DIM); // should have filled them all in
+#endif
+      return Realm::InstanceLayoutGeneric::choose_instance_layout(space,
+                                                            ilc, dim_order);
+    }
+
     /////////////////////////////////////////////////////////////
     // Index Space Operations 
     /////////////////////////////////////////////////////////////
@@ -238,6 +268,18 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       return temp.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    size_t IndexSpaceOperationT<DIM,T>::get_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> temp;
+      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      return temp.volume();
     }
 
     //--------------------------------------------------------------------------
@@ -363,6 +405,20 @@ namespace Legion {
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceOperationT<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists())
+        space_ready.wait();
+      return create_layout_internal(local_space, ilc, constraint);
     }
 
     //--------------------------------------------------------------------------
@@ -715,6 +771,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    size_t RemoteExpression<DIM,T>::get_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      return realm_index_space.volume();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void RemoteExpression<DIM,T>::pack_expression(Serializer &rez,
                                                   AddressSpaceID target)
     //--------------------------------------------------------------------------
@@ -836,6 +900,19 @@ namespace Legion {
       else
         return issue_copy_internal(context, realm_index_space, trace_info, 
                 dst_fields, src_fields, precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* RemoteExpression<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+        realm_index_space_ready.wait();
+      return create_layout_internal(realm_index_space, ilc, constraint);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2987,38 +3064,7 @@ namespace Legion {
         return (sizeof(Realm::Rect<DIM,T>) == field_size);
       else
         return (sizeof(Realm::Point<DIM,T>) == field_size);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint)
-    //--------------------------------------------------------------------------
-    {
-      Realm::IndexSpace<DIM,T> local_is;
-      get_realm_index_space(local_is, true/*tight*/);
-      int dim_order[DIM];
-      // Construct the dimension ordering
-      unsigned next_dim = 0;
-      for (std::vector<DimensionKind>::const_iterator it = 
-            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
-      {
-        // Skip the field dimension we already handled it
-        if ((*it) == DIM_F)
-          continue;
-        if ((*it) > DIM_F)
-          assert(false); // TODO: handle split dimensions
-        if ((*it) >= DIM) // Skip dimensions bigger than ours
-          continue;
-        dim_order[next_dim++] = *it;
-      }
-#ifdef DEBUG_LEGION
-      assert(next_dim == DIM); // should have filled them all in
-#endif
-      return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,
-                                                            ilc, dim_order);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -3150,6 +3196,20 @@ namespace Legion {
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_is;
+      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
+      if (space_ready.exists())
+        space_ready.wait();
+      return create_layout_internal(local_is, ilc, constraint); 
     }
     
     //--------------------------------------------------------------------------

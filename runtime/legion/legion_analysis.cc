@@ -3303,6 +3303,106 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::initialize_set(ApEvent term_event,
+                                        const RegionUsage &usage,
+                                        const FieldMask &user_mask,
+                                        const bool restricted,
+                                        const InstanceSet &sources,
+                                const std::vector<InstanceView*> &corresponding,
+                                        UniqueID context_uid, unsigned index,
+                                        std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner());
+      assert(sources.size() == corresponding.size());
+#endif
+      WrapperReferenceMutator mutator(applied_events);
+      AutoLock eq(eq_lock);
+      if (IS_REDUCE(usage))
+      {
+#ifdef DEBUG_LEGION
+        // Reduction-only should always be restricted for now
+        // Could change if we started issuing reduction close
+        // operations at the end of a context
+        assert(restricted);
+#endif
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const FieldMask &view_mask = sources[idx].get_valid_fields();
+          InstanceView *view = corresponding[idx];
+#ifdef DEBUG_LEGION
+          assert(view->is_reduction_view());
+#endif
+          ReductionView *red_view = view->as_reduction_view();
+          int fidx = view_mask.find_first_set();
+          while (fidx >= 0)
+          {
+            reduction_instances[fidx].push_back(red_view);
+            red_view->add_nested_valid_ref(did, &mutator);
+            fidx = view_mask.find_next_set(fidx+1);
+          }
+          // Always restrict reduction-only users since we know the data
+          // is going to need to be flushed anyway
+          FieldMaskSet<LogicalView>::iterator finder = 
+            restricted_instances.find(red_view);
+          if (finder == restricted_instances.end())
+          {
+            restricted_instances.insert(red_view, view_mask);
+            red_view->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            finder.merge(view_mask);
+          // Record the user for the instance
+          view->add_initial_user(term_event, usage, view_mask, 
+                                 set_expr, context_uid, index);
+        }
+        // Update the reduction fields
+        reduction_fields |= user_mask;
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          const FieldMask &view_mask = sources[idx].get_valid_fields();
+          InstanceView *view = corresponding[idx];
+#ifdef DEBUG_LEGION
+          assert(!view->is_reduction_view());
+#endif
+          FieldMaskSet<LogicalView>::iterator finder = 
+            valid_instances.find(view);
+          if (finder == valid_instances.end())
+          {
+            valid_instances.insert(view, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
+          }
+          else
+            finder.merge(view_mask);
+          // If this is restricted then record it
+          if (restricted)
+          {
+            finder = restricted_instances.find(view);
+            if (finder == restricted_instances.end())
+            {
+              restricted_instances.insert(view, view_mask);
+              view->add_nested_valid_ref(did, &mutator);
+            }
+            else
+              finder.merge(view_mask);
+          }
+          // Record the user for the instance
+          view->add_initial_user(term_event, usage, view_mask, 
+                                 set_expr, context_uid, index);
+        }
+      }
+      // Update any restricted fields 
+      if (restricted)
+        restricted_fields |= user_mask;
+      // Set the version numbers too
+      version_numbers[init_version] |= user_mask;
+    }
+
+    //--------------------------------------------------------------------------
     bool EquivalenceSet::find_valid_instances(FieldMaskSet<LogicalView> &insts,
                                               const FieldMask &user_mask) const
     //--------------------------------------------------------------------------
@@ -3469,7 +3569,8 @@ namespace Legion {
                                 const std::vector<InstanceView*> &target_views,
                                 CopyFillAggregator &input_aggregator,
                                 CopyFillAggregator &output_aggregator,
-                                std::set<RtEvent> &applied_events)
+                                std::set<RtEvent> &applied_events,
+                                FieldMask *initialized/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3477,6 +3578,13 @@ namespace Legion {
 #endif
       WrapperReferenceMutator mutator(applied_events);
       AutoLock eq(eq_lock);
+      // Check for any uninitialized data
+      if (initialized != NULL)
+      {
+        FieldMask &initialized_fields = *initialized;
+        if (!!initialized_fields)
+          initialized_fields &= valid_instances.get_valid_mask(); 
+      }
       if (IS_REDUCE(usage))
       {
         // Reduction-only
@@ -3660,6 +3768,7 @@ namespace Legion {
                 const std::vector<InstanceView*> &target_views,
                 IndexSpaceExpression *overlap, CopyFillAggregator &aggregator, 
                 PredEvent pred_guard, ReductionOpID redop,
+                FieldMask &initialized_fields,
                 const std::vector<unsigned> *src_indexes,
                 const std::vector<unsigned> *dst_indexes,
                 const std::vector<CopyAcrossHelper> *across_helpers) const
@@ -3669,6 +3778,8 @@ namespace Legion {
       assert(target_instances.size() == target_views.size());
 #endif
       AutoLock eq(eq_lock,1,false/*exclusive*/);
+      // Check for any uninitialized fields
+      initialized_fields &= valid_instances.get_valid_mask();
       if (pred_guard.exists())
         assert(false);
       if (across_helpers != NULL)
@@ -4772,54 +4883,6 @@ namespace Legion {
       has_equivalence_sets = false;
     }
 
-#if 0
-    //--------------------------------------------------------------------------
-    void VersionManager::initialize_state(ApEvent term_event,
-                                          const RegionUsage &usage,
-                                          const FieldMask &user_mask,
-                                          const InstanceSet &targets,
-                                          InnerContext *context,
-                                          unsigned init_index,
-                                 const std::vector<LogicalView*> &corresponding,
-                                          std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // See if we have been assigned
-      if (context != current_context)
-      {
-#ifdef DEBUG_LEGION
-        assert(current_version_infos.empty() || 
-                (current_version_infos.size() == 1));
-        assert(previous_version_infos.empty());
-#endif
-        const AddressSpaceID local_space = 
-          node->context->runtime->address_space;
-        owner_space = context->get_version_owner(node, local_space);
-        is_owner = (owner_space == local_space);
-        current_context = context;
-      }
-      // Make a new version state and initialize it, then insert it
-      VersionState *init_state = create_new_version_state(init_version);
-      init_state->initialize(term_event, usage, user_mask, targets, context, 
-                             init_index, corresponding, applied_events);
-      // We do need the lock because sometimes these are virtual
-      // mapping results comping back
-      AutoLock m_lock(manager_lock);
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-      LegionMap<VersionID,ManagerVersions>::aligned::iterator finder = 
-          current_version_infos.find(init_version);
-      if (finder == current_version_infos.end())
-        current_version_infos[init_version].insert(init_state, user_mask);
-      else
-        finder->second.insert(init_state, user_mask);
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
                                                      VersionInfo &version_info)
@@ -5109,8 +5172,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(manager != NULL);
 #endif
-      FieldSpaceNode *field_node = manager->region_node->column_source; 
-      unsigned index = field_node->get_field_index(fid);
+      unsigned index = manager->field_space_node->get_field_index(fid);
       return valid_fields.is_set(index);
     }
 

@@ -37,21 +37,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LogicalView::LogicalView(RegionTreeForest *ctx, DistributedID did,
-                             AddressSpaceID own_addr,
-                             RegionTreeNode *node, bool register_now)
+                             AddressSpaceID own_addr, bool register_now)
       : DistributedCollectable(ctx->runtime, did, own_addr, register_now), 
-        context(ctx), logical_node(node)
+        context(ctx)
     //--------------------------------------------------------------------------
     {
-      logical_node->add_base_gc_ref(LOGICAL_VIEW_REF);
     }
 
     //--------------------------------------------------------------------------
     LogicalView::~LogicalView(void)
     //--------------------------------------------------------------------------
     {
-      if (logical_node->remove_base_gc_ref(LOGICAL_VIEW_REF))
-        delete logical_node;
     }
 
     //--------------------------------------------------------------------------
@@ -99,9 +95,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID owner_sp,
-                               AddressSpaceID log_own, RegionTreeNode *node, 
+                               AddressSpaceID log_own,
                                UniqueID own_ctx, bool register_now)
-      : LogicalView(ctx, did, owner_sp, node, register_now), 
+      : LogicalView(ctx, did, owner_sp, register_now), 
         owner_context(own_ctx), logical_owner(log_own)
     //--------------------------------------------------------------------------
     {
@@ -206,11 +202,10 @@ namespace Legion {
     MaterializedView::MaterializedView(
                                RegionTreeForest *ctx, DistributedID did,
                                AddressSpaceID own_addr,
-                               AddressSpaceID log_own, RegionTreeNode *node, 
-                               InstanceManager *man,
+                               AddressSpaceID log_own, InstanceManager *man,
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
-                     log_own, node, own_ctx, register_now), manager(man)
+                     log_own, own_ctx, register_now), manager(man)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -228,7 +223,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MaterializedView::MaterializedView(const MaterializedView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -1337,16 +1332,14 @@ namespace Legion {
     void MaterializedView::add_initial_user(ApEvent term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
+                                            IndexSpaceExpression *expr,
                                             const UniqueID op_id,
                                             const unsigned index)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index, 
-                                    logical_node->get_index_space_expression());
+      PhysicalUser *user = 
+        new PhysicalUser(usage, INVALID_COLOR, op_id, index, expr); 
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -1425,16 +1418,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        if (logical_node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(logical_node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(logical_node->as_partition_node()->handle);
-        }
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
@@ -2930,7 +2913,7 @@ namespace Legion {
     {
       // Compute the field set
       std::vector<FieldID> atomic_fields;
-      logical_node->column_source->get_field_set(mask, atomic_fields);
+      manager->field_space_node->get_field_set(mask, atomic_fields);
       // If we are the owner we can do this here
       if (is_owner())
       {
@@ -3107,21 +3090,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      bool is_region;
-      derez.deserialize(is_region);
-      RegionTreeNode *target_node;
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        target_node = runtime->forest->get_node(handle);
-      }
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
@@ -3142,13 +3110,12 @@ namespace Legion {
       if (runtime->find_pending_collectable_location(did, location))
         view = new(location) MaterializedView(runtime->forest,
                                               did, owner_space, 
-                                              logical_owner, 
-                                              target_node, inst_manager,
+                                              logical_owner, inst_manager,
                                               context_uid,
                                               false/*register now*/);
       else
         view = new MaterializedView(runtime->forest, did, owner_space,
-                                    logical_owner, target_node, inst_manager, 
+                                    logical_owner, inst_manager, 
                                     context_uid, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
@@ -8051,11 +8018,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(RegionTreeForest *ctx, DistributedID did,
                                  AddressSpaceID own_sp,
-                                 AddressSpaceID log_own, RegionTreeNode *node, 
+                                 AddressSpaceID log_own,
                                  ReductionManager *man, UniqueID own_ctx, 
                                  bool register_now)
       : InstanceView(ctx, encode_reduction_did(did), own_sp, log_own, 
-                     node, own_ctx, register_now), 
+                     own_ctx, register_now), 
         manager(man), remote_request_event(RtEvent::NO_RT_EVENT)
     //--------------------------------------------------------------------------
     {
@@ -8072,7 +8039,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReductionView::ReductionView(const ReductionView &rhs)
-      : InstanceView(NULL, 0, 0, 0, NULL, 0, false), manager(NULL)
+      : InstanceView(NULL, 0, 0, 0, 0, false), manager(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8835,17 +8802,15 @@ namespace Legion {
     void ReductionView::add_initial_user(ApEvent term_event, 
                                          const RegionUsage &usage,
                                          const FieldMask &user_mask,
+                                         IndexSpaceExpression *expr,
                                          const UniqueID op_id,
                                          const unsigned index)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(logical_node->is_region());
-#endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
-      PhysicalUser *user = new PhysicalUser(usage, INVALID_COLOR, op_id, index,
-                                    logical_node->get_index_space_expression());
+      PhysicalUser *user = 
+        new PhysicalUser(usage, INVALID_COLOR, op_id, index, expr);
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor
@@ -8974,7 +8939,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(logical_node->is_region()); // Always regions at the top
 #endif
       // Don't take the lock, it's alright to have duplicate sends
       Serializer rez;
@@ -8982,7 +8946,6 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(manager->did);
-        rez.serialize(logical_node->as_region_node()->handle);
         rez.serialize(owner_space);
         rez.serialize(logical_owner);
         rez.serialize(owner_context);
@@ -9015,8 +8978,6 @@ namespace Legion {
       derez.deserialize(did);
       DistributedID manager_did;
       derez.deserialize(manager_did);
-      LogicalRegion handle;
-      derez.deserialize(handle);
       AddressSpaceID owner_space;
       derez.deserialize(owner_space);
       AddressSpaceID logical_owner;
@@ -9024,7 +8985,6 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
 
-      RegionNode *target_node = runtime->forest->get_node(handle);
       RtEvent man_ready;
       PhysicalManager *phy_man = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
@@ -9037,13 +8997,12 @@ namespace Legion {
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        view = new(location) ReductionView(runtime->forest,
-                                           did, owner_space, logical_owner,
-                                           target_node, red_manager,
+        view = new(location) ReductionView(runtime->forest, did, owner_space, 
+                                           logical_owner, red_manager,
                                            context_uid, false/*register now*/);
       else
         view = new ReductionView(runtime->forest, did, owner_space,
-                                 logical_owner, target_node, red_manager, 
+                                 logical_owner, red_manager, 
                                  context_uid, false/*register now*/);
       // Only register after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
@@ -9196,6 +9155,7 @@ namespace Legion {
       Runtime::trigger_event(done_event); 
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReductionView::process_remote_update(Deserializer &derez,
                                               AddressSpaceID source,
@@ -9225,9 +9185,6 @@ namespace Legion {
         bool reading;
         derez.deserialize(reading);
         PhysicalUser *user = NULL;
-#ifdef DEBUG_LEGION
-        assert(logical_node->is_region());
-#endif
         // We don't use field versions for doing interference 
         // tests on reductions so no need to record it
         if (reading)
@@ -9289,6 +9246,7 @@ namespace Legion {
       // Now we can trigger our done event
       Runtime::trigger_event(done_event);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReductionView::process_remote_invalidate(const FieldMask &invalid_mask,

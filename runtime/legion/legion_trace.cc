@@ -2258,7 +2258,6 @@ namespace Legion {
 
       return true;
     }
-#endif
 
     //--------------------------------------------------------------------------
     bool PhysicalTemplate::check_replayable(void) const
@@ -2284,6 +2283,7 @@ namespace Legion {
       }
       return true;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(Operation *op)
@@ -3304,6 +3304,7 @@ namespace Legion {
       dedup_summary_ops.swap(summary_ops);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     /*static*/ inline std::string PhysicalTemplate::view_to_string(
                                                        const InstanceView *view)
@@ -3340,6 +3341,7 @@ namespace Legion {
          << ")";
       return ss.str();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
@@ -3900,6 +3902,7 @@ namespace Legion {
       parent_indices.push_back(parent_idx);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_ready_event(Operation *op,
                                                   unsigned region_idx,
@@ -3979,10 +3982,8 @@ namespace Legion {
         free(fill_buffer);
       }
 
-#if 0
       update_valid_view(IS_REDUCE(req), HAS_READ(req), HAS_WRITE(req),
                         view, fields, logical_ctx, physical_ctx);
-#endif
 
       std::map<TraceLocalID, unsigned>::iterator finder =
         memo_entries.find(op_key);
@@ -4000,6 +4001,7 @@ namespace Legion {
         record_last_user(inst_req.instance, region_node, *it, 
                          finder->second, inst_req.read);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)

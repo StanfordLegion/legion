@@ -198,9 +198,9 @@ namespace Legion {
           continue;
         InstanceSet instance_set;
         std::vector<PhysicalManager*> unacquired;  
-        RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
+        FieldSpace bad_space; std::vector<FieldID> missing_fields;
         runtime->forest->physical_convert_mapping(owner_task, 
-            created_requirements[idx], instances, instance_set, bad_tree, 
+            created_requirements[idx], instances, instance_set, bad_space, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
         runtime->forest->log_mapping_decision(unique_op_id,
             original_size + idx, created_requirements[idx], instance_set);
@@ -5812,8 +5812,17 @@ namespace Legion {
         // not a leaf and it wasn't virtual mapped
         if (!virtual_mapped[idx])
         {
+          // The parent region requirement is restricted if it is
+          // simultaneous or it is reduce-only. Simultaneous is 
+          // restricted because of normal Legion coherence semantics.
+          // Reduce-only is restricted because we don't issue close
+          // operations at the end of a context for reduce-only cases
+          // right now so by making it restricted things are eagerly
+          // flushed out to the parent task's instance.
+          const bool restricted = 
+            IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
           runtime->forest->initialize_current_context(tree_context,
-              clone_requirements[idx], physical_instances[idx],
+              clone_requirements[idx], restricted, physical_instances[idx],
               unmap_events[idx], this, idx, top_views, applied_events);
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());

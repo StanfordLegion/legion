@@ -530,18 +530,13 @@ namespace Legion {
       // Logger call for physical instances
       static inline void log_physical_instance(ApEvent inst_event,
                                                IDType inst_id, IDType mem_id,
+                                               FieldSpace handle,
+                                               IndexSpaceExprID expr_id,
                                                ReductionOpID redop)
       {
-        log_spy.print("Physical Instance " IDFMT " " IDFMT " " IDFMT " %d", 
-		      inst_event.id, inst_id, mem_id, redop);
-      }
-
-      static inline void log_physical_instance_region(ApEvent inst_event, 
-                                                      LogicalRegion handle)
-      {
-        log_spy.print("Physical Instance Region " IDFMT " %d %d %d",
-                      inst_event.id, handle.get_index_space().get_id(), 
-                      handle.get_field_space().get_id(), handle.get_tree_id());
+        log_spy.print("Physical Instance " IDFMT " " IDFMT " " IDFMT 
+                      " %d %d %lld", inst_event.id, inst_id, mem_id, redop, 
+                      handle.get_id(), expr_id);
       }
 
       static inline void log_physical_instance_field(ApEvent inst_event,

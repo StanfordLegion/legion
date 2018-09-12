@@ -730,6 +730,14 @@ namespace Legion {
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
         { return !(mask * restricted_fields); }
+      void initialize_set(ApEvent term_event,
+                          const RegionUsage &usage,
+                          const FieldMask &user_mask,
+                          const bool restricted,
+                          const InstanceSet &sources,
+            const std::vector<InstanceView*> &corresponding,
+                          UniqueID ctx_uid, unsigned index,
+                          std::set<RtEvent> &applied_events);
       bool find_valid_instances(FieldMaskSet<LogicalView> &insts,
                                 const FieldMask &user_mask) const;
       bool filter_valid_instances(FieldMaskSet<LogicalView> &insts,
@@ -743,7 +751,8 @@ namespace Legion {
                       const std::vector<InstanceView*> &target_views,
                       CopyFillAggregator &input_aggregator,
                       CopyFillAggregator &output_aggregator,
-                      std::set<RtEvent> &applied_events);
+                      std::set<RtEvent> &applied_events,
+                      FieldMask *initialized = NULL);
       void acquire_restrictions(FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
@@ -756,7 +765,7 @@ namespace Legion {
               const FieldMask &src_mask, const InstanceSet &target_instances,
               const std::vector<InstanceView*> &target_views,
               IndexSpaceExpression *overlap, CopyFillAggregator &aggregator,
-              PredEvent pred_guard, ReductionOpID redop,
+              PredEvent pred_guard, ReductionOpID redop, FieldMask &initialized,
               const std::vector<unsigned> *src_indexes = NULL,
               const std::vector<unsigned> *dst_indexes = NULL,
               const std::vector<CopyAcrossHelper> *across_helpers = NULL) const;
@@ -882,14 +891,6 @@ namespace Legion {
       VersionManager& operator=(const VersionManager &rhs);
     public:
       void reset(void);
-    public:
-      void initialize_state(ApEvent term_event,
-                            const RegionUsage &usage,
-                            const FieldMask &user_mask,
-                            const InstanceSet &targets,
-                            InnerContext *context, unsigned init_index,
-                            const std::vector<LogicalView*> &corresponding,
-                            std::set<RtEvent> &applied_events);
     public:
       void perform_versioning_analysis(InnerContext *parent_ctx,
                                        VersionInfo &version_info);

@@ -307,8 +307,9 @@ namespace Legion {
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
       void initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, const InstanceSet &source,
-                    ApEvent term_event, InnerContext *context, unsigned index,
+                    const RegionRequirement &req, const bool restricted,
+                    const InstanceSet &sources, ApEvent term_event, 
+                    InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views,
                     std::set<RtEvent> &applied_events);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
@@ -395,7 +396,7 @@ namespace Legion {
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
-                               InstanceSet &result, RegionTreeID &bad_tree,
+                               InstanceSet &result, FieldSpace &bad_space,
                                std::vector<FieldID> &missing_fields,
                                std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
@@ -404,7 +405,7 @@ namespace Legion {
       bool physical_convert_postmapping(Operation *op,
                                const RegionRequirement &req,
                                const std::vector<MappingInstance> &chosen,
-                               InstanceSet &result, RegionTreeID &bad_tree,
+                               InstanceSet &result, FieldSpace &bad_space,
                                std::map<PhysicalManager*,
                                     std::pair<unsigned,bool> > *acquired,
                                std::vector<PhysicalManager*> &unacquired,
@@ -675,6 +676,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       // Should only be called on inherited types
       virtual void record_remote_instance(AddressSpaceID target) 
@@ -695,6 +697,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold) = 0;
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
     public:
@@ -711,6 +716,8 @@ namespace Legion {
         }
         return empty;
       }
+      inline size_t get_num_dims(void) const
+        { return NT_TemplateHelper::get_dim(type_tag); }
     protected:
       template<int DIM, typename T>
       inline ApEvent issue_fill_internal(RegionTreeForest *forest,
@@ -730,6 +737,11 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
+      template<int DIM, typename T>
+      inline Realm::InstanceLayoutGeneric* create_layout_internal(
+                                    const Realm::IndexSpace<DIM,T> &space,
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -768,6 +780,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual void record_remote_instance(AddressSpaceID target);
       virtual void add_expression_reference(void);
@@ -805,6 +818,7 @@ namespace Legion {
                                            bool need_tight_result) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
@@ -827,6 +841,7 @@ namespace Legion {
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
@@ -843,6 +858,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -996,6 +1014,7 @@ namespace Legion {
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
@@ -1011,6 +1030,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;
@@ -1056,6 +1078,7 @@ namespace Legion {
                                            bool need_tight_result);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
@@ -1071,6 +1094,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       void set_result(IndexSpaceExpression *result);
     public:
@@ -1418,9 +1444,6 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual bool check_field_size(size_t field_size, bool range) = 0;
     public:
-      virtual Realm::InstanceLayoutGeneric* create_layout(
-                           const Realm::InstanceLayoutConstraints &ilc,
-                           const OrderingConstraint &constraint) = 0;
       virtual PhysicalInstance create_file_instance(const char *file_name,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1612,9 +1635,6 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual bool check_field_size(size_t field_size, bool range);
     public:
-      virtual Realm::InstanceLayoutGeneric* create_layout(
-                           const Realm::InstanceLayoutConstraints &ilc,
-                           const OrderingConstraint &constraint);
       virtual PhysicalInstance create_file_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1641,6 +1661,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -2832,13 +2855,6 @@ namespace Legion {
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
                     std::vector<LogicalPartition> &partitions);
-      void initialize_state(ContextID ctx, ApEvent term_event,
-                            const RegionUsage &usage,
-                            const FieldMask &user_mask,
-                            const InstanceSet &targets,
-                            InnerContext *context, unsigned init_index,
-                            const std::vector<LogicalView*> &corresponding,
-                            std::set<RtEvent> &applied_events);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;

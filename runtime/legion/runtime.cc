@@ -1762,7 +1762,7 @@ namespace Legion {
           if (check_field_size)
           {
             const size_t actual_size = 
-              manager->region_node->column_source->get_field_size(fid);
+              manager->field_space_node->get_field_size(fid);
             if (actual_size != field_size)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
@@ -3906,7 +3906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::release_tree_instances(RegionTreeID tree_id)
+    void MemoryManager::release_field_space_instances(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, then there is nothing to do
@@ -3923,7 +3923,7 @@ namespace Legion {
         {
           // If the region for the instance is not for the tree then
           // we get to skip it
-          if (it->first->region_node->handle.get_tree_id() != tree_id)
+          if (it->first->field_space_node->handle != handle)
             continue;
           // If it's already been deleted, then there is nothing to do
           if (it->second.current_state == PENDING_COLLECTED_STATE)
@@ -4842,7 +4842,7 @@ namespace Legion {
           // Skip any unattached external instances too
           if (it->second.unattached_external)
             continue;
-          if (!it->first->meets_region_tree(regions))
+          if (!it->first->meets_field_space(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
@@ -4895,7 +4895,7 @@ namespace Legion {
           // Skip any unattached external instances too
           if (it->second.unattached_external)
             continue;
-          if (!it->first->meets_region_tree(regions))
+          if (!it->first->meets_field_space(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
@@ -15728,7 +15728,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::release_tree_instances(RegionTreeID tree_id)
+    void Runtime::release_field_space_instances(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       std::map<Memory,MemoryManager*> copy_managers;
@@ -15738,7 +15738,7 @@ namespace Legion {
       }
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             copy_managers.begin(); it != copy_managers.end(); it++)
-        it->second->release_tree_instances(tree_id);
+        it->second->release_field_space_instances(handle);
     }
 
     //--------------------------------------------------------------------------

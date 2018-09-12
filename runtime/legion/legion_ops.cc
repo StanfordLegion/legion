@@ -2719,24 +2719,24 @@ namespace Legion {
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
-      RegionTreeID bad_tree = 0;
+      FieldSpace bad_space;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
-                                chosen_instances, bad_tree, missing_fields,
+                                chosen_instances, bad_space, missing_fields,
                                 &acquired_instances, unacquired, 
                                 !runtime->unsafe_mapper);
-      if (bad_tree > 0)
+      if (bad_space.exists())
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_inline' "
-                      "on mapper %s. Mapper selected instance from region "
-                      "tree %d to satisfy a region requirement for an inline "
-                      "mapping in task %s (ID %lld) whose logical region is "
-                      "from region tree %d.", mapper->get_mapper_name(),
-                      bad_tree, parent_ctx->get_task_name(),
+                      "on mapper %s. Mapper selected instance from field "
+                      "space %d to satisfy a region requirement for an inline "
+                      "mapping in task %s (ID %lld) whose field_space is %d.", 
+                      mapper->get_mapper_name(),
+                      bad_space.get_id(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id(),
-                      requirement.region.get_tree_id())
+                      requirement.region.get_field_space().get_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
@@ -4335,24 +4335,24 @@ namespace Legion {
                                    InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
     {
-      RegionTreeID bad_tree = 0;
+      FieldSpace bad_space;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_idx = runtime->forest->physical_convert_mapping(this,
-                              req, output, targets, bad_tree, missing_fields,
+                              req, output, targets, bad_space, missing_fields,
                               &acquired_instances, unacquired, 
                               !runtime->unsafe_mapper);
-      if (bad_tree > 0)
+      if (bad_space.exists())
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper selected an instance from "
-                      "region tree %d to satisfy %s region requirement %d "
+                      "field space %d to satisfy %s region requirement %d "
                       "for explicit region-to_region copy in task %s (ID %lld) "
                       "but the logical region for this requirement is from "
-                      "region tree %d.", mapper->get_mapper_name(), bad_tree,
-                      IS_SRC ? "source" : "destination", idx, 
+                      "field space %d.", mapper->get_mapper_name(), 
+                      bad_space.get_id(), IS_SRC ? "source" : "destination",idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      req.region.get_tree_id())
+                      req.region.get_field_space().get_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
@@ -11158,24 +11158,24 @@ namespace Legion {
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
-      RegionTreeID bad_tree = 0;
+      FieldSpace bad_space;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
-                                mapped_instances, bad_tree, missing_fields,
+                                mapped_instances, bad_space, missing_fields,
                                 &acquired_instances, unacquired, 
                                 !runtime->unsafe_mapper);
-      if (bad_tree > 0)
+      if (bad_space.exists())
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_partition'"
-                      " on mapper %s. Mapper selected instance from region "
-                      "tree %d to satisfy a region requirement for a partition "
+                      " on mapper %s. Mapper selected instance from field "
+                      "space %d to satisfy a region requirement for a partition "
                       "mapping in task %s (ID %lld) whose logical region is "
-                      "from region tree %d.", mapper->get_mapper_name(),
-                      bad_tree, parent_ctx->get_task_name(), 
+                      "from field space %d.", mapper->get_mapper_name(),
+                      bad_space.get_id(), parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id(), 
-                      requirement.region.get_tree_id())
+                      requirement.region.get_field_space().get_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
