@@ -1262,12 +1262,6 @@ namespace Realm {
 
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
-      RemoteSparsityContribMessage::Message::add_handler_entries("Remote Sparsity Contrib AM");
-      RemoteSparsityRequestMessage::Message::add_handler_entries("Remote Sparsity Request AM");
-      SetContribCountMessage::Message::add_handler_entries("Set Contrib Count AM");
-      CancelOperationMessage::Message::add_handler_entries("Cancel Operation AM");
-      //TestMessage::add_handler_entries("Test AM");
-      //TestMessage2::add_handler_entries("Test 2 AM");
 
       nodes = new Node[max_node_id + 1];
 
