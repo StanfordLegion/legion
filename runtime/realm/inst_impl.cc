@@ -247,7 +247,7 @@ namespace Realm {
       log_inst.info() << "instance destroyed: inst=" << *this;
 
       // this does the right thing even though we're using an instance ID
-      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(get_location());
+      MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
       mem_impl->release_instance_storage(*this, wait_on);
     }
 
