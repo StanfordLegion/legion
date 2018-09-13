@@ -2,10 +2,27 @@ This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
 Version 18.09.0 (September ??, 2018)
+  * Legion
+    - Support for physical tracing, which can provide up to 7x improvement in
+        loops with very small tasks. Can be enabled in the mappers that
+        inherit from DefaultMapper using -dm:memoize 1
   * Realm
     - Assorted minor bug fixes
     - Support for development snapshots of GASNet-EX (using GASNet-1
         compatibility interfaces for now)
+  * Regent
+    - Full support for accessing sparse multi-dimensional regions
+    - Initial support for incremental compilation. Enable with
+        REGENT_INCREMENTAL=1
+    - Changes to make compilation entirely deterministic
+    - Multiple compilation speed improvements
+    - Support for CUDA scalar reductions
+    - Experimental support for parallel prefix operators, including CUDA
+  * Python
+    - Support for defining methods as tasks
+    - Support for passing futures to tasks and index tasks
+    - Support for explicit return types on extern tasks
+    - Improved support for Futures with encodings other than pickle
 
 Version 18.05.0 (May 31, 2018)
   * Legion
