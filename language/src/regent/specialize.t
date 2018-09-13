@@ -1682,6 +1682,21 @@ function specialize.stat_parallelize_with(cx, node)
   }
 end
 
+function specialize.stat_parallel_prefix(cx, node)
+  local lhs = specialize.expr_region_root(cx, node.lhs)
+  local rhs = specialize.expr_region_root(cx, node.rhs)
+  local op = node.op
+  local dir = specialize.expr(cx, node.dir)
+  return ast.specialized.stat.ParallelPrefix {
+    lhs = lhs,
+    rhs = rhs,
+    op = op,
+    dir = dir,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.stat(cx, node)
   if node:is(ast.unspecialized.stat.If) then
     return specialize.stat_if(cx, node)
@@ -1736,6 +1751,9 @@ function specialize.stat(cx, node)
 
   elseif node:is(ast.unspecialized.stat.ParallelizeWith) then
     return specialize.stat_parallelize_with(cx, node)
+
+  elseif node:is(ast.unspecialized.stat.ParallelPrefix) then
+    return specialize.stat_parallel_prefix(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

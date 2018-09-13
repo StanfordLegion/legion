@@ -256,7 +256,7 @@ function std.search_any_privilege(cx, region, field_path, visited)
     function(cx, region)
       for _, regions in cx.privileges:items() do
         if regions[region] and regions[region][field_path] then
-          return true
+          return region
         end
       end
       return false
@@ -4238,12 +4238,11 @@ local function write_header(header_filename)
   return registration_name, task_impl
 end
 
-function std.save_tasks(header_filename, filename, filetype,
-                       extra_setup_thunk, link_flags)
+function std.save_tasks(header_filename, filename, filetype, link_flags)
   assert(header_filename and filename)
   local task_wrappers = make_task_wrappers()
   local registration_name, task_impl = write_header(header_filename)
-  local _, names = std.setup(nil, extra_setup_thunk, task_wrappers, registration_name)
+  local _, names = std.setup(nil, nil, task_wrappers, registration_name)
   local use_cmake = os.getenv("USE_CMAKE") == "1"
   local lib_dir = os.getenv("LG_RT_DIR") .. "/../bindings/regent"
   if use_cmake then

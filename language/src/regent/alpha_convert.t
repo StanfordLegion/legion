@@ -306,6 +306,7 @@ local node_alpha_conversion = {
   [ast.specialized.stat.MustEpoch]       = update_block,
   [ast.specialized.stat.Block]           = update_block,
   [ast.specialized.stat.ParallelizeWith] = update_block_with_hints,
+  [ast.specialized.stat.ParallelPrefix]  = pass_through,
 
   [ast.specialized.stat.Var] = function(cx, node, continuation)
     local symbols = terralib.newlist()

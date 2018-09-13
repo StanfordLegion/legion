@@ -221,8 +221,20 @@ end
 
 local function zero(value_type) return terralib.cast(value_type, 0) end
 local function one(value_type) return terralib.cast(value_type, 1) end
-local function min_value(value_type) return terralib.cast(value_type, -math.huge) end
-local function max_value(value_type) return terralib.cast(value_type, math.huge) end
+local function min_value(value_type)
+  if type(rawget(value_type, "min")) == "function" then
+    return value_type:min()
+  else
+    return terralib.cast(value_type, -math.huge)
+  end
+end
+local function max_value(value_type)
+  if type(rawget(value_type, "max")) == "function" then
+    return value_type:max()
+  else
+    return terralib.cast(value_type, math.huge)
+  end
+end
 
 base.reduction_ops = terralib.newlist({
     {op = "+", name = "plus", init = zero},

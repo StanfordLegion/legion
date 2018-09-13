@@ -64,7 +64,7 @@ legion_cxx_tests = [
 ]
 
 if platform.system() != 'Darwin':
-    legion_cxx_tests = legion_cxx_tests + [
+    legion_cxx_tests += [
         # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
         ['test/attach_file_mini/attach_file_mini', []],
     ]
@@ -95,12 +95,15 @@ legion_python_cxx_tests = [
 ]
 
 legion_hdf_cxx_tests = [
-    # Examples
-    ['examples/attach_file/attach_file', []],
-
     # Tests
     ['test/hdf_attach_subregion_parallel/hdf_attach_subregion_parallel', ['-ll:cpu', '4']],
 ]
+
+if platform.system() != 'Darwin':
+    legion_hdf_cxx_tests += [
+        # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
+        ['examples/attach_file/attach_file', []],
+    ]
 
 def get_legion_cxx_perf_tests(nodes, cores_per_node):
     return [
