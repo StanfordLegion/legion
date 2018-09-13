@@ -141,6 +141,7 @@ namespace Realm {
       MachineNodeInfo *get_nodeinfo(int node) const;
       MachineNodeInfo *get_nodeinfo(Processor p) const;
       MachineNodeInfo *get_nodeinfo(Memory m) const;
+      void invalidate_query_caches();
     };
 
     template <typename T, typename T2>
@@ -186,10 +187,25 @@ namespace Realm {
       int latency_weight;
     };
 
-    class ProcessorQueryImpl {
+  namespace Config {
+    extern bool use_machine_query_cache;
+  };
+
+  enum QueryType {
+    QUERY_NEXT = 0,
+    QUERY_FIRST,
+    QUERY_RANDOM,
+  };
+
+   class ProcessorQueryImpl {
     public:
       ProcessorQueryImpl(const Machine& _machine);
-     
+
+      static unsigned int init, cache_invalid_count;
+      static bool global_valid_cache;
+      static std::map<Processor::Kind, std::vector<Processor> > _proc_cache;
+      static std::map<Processor::Kind, std::map<Memory, std::vector<Processor> > > _proc_cache_affinity;
+
     protected:
       // these things are refcounted and copied-on-write
       ProcessorQueryImpl(const ProcessorQueryImpl& copy_from);
@@ -206,9 +222,14 @@ namespace Realm {
       void add_predicate(ProcQueryPredicate *pred);
 
       Processor first_match(void) const;
-      Processor next_match(Processor after) const;
+      Processor next_match(Processor after);
       size_t count_matches(void) const;
       Processor random_match(void) const;
+
+      void set_cached_mem(Memory m) { cached_mem = m;
+	if (predicates.size() == 1) is_cached_mem = true; else is_cached_mem=false;};
+      void reset_cached_mem() { cached_mem = Memory::NO_MEMORY; is_cached_mem = false;};
+      Processor cache_next(Processor after);
 
     protected:
       int references;
@@ -218,6 +239,17 @@ namespace Realm {
       bool is_restricted_kind;
       Processor::Kind restricted_kind;
       std::vector<ProcQueryPredicate *> predicates;     
+      Memory cached_mem;
+      bool is_cached_mem, shared_cached_list, valid_cache;
+      std::vector<Processor>* cur_cached_list;
+      unsigned int invalid_count, cur_index;
+      // cached list of processors
+      std::vector<Processor>* cached_list() const;
+      bool cached_query(Processor p, Processor &pval);
+      bool cached_query(Processor &pval, QueryType q) const;
+      bool cached_query(size_t &count) const;
+      Processor mutated_cached_query(Processor p);
+      Processor next(Processor after);
     };            
 
     typedef QueryPredicate<Memory, MachineMemInfo> MemoryQueryPredicate;
@@ -285,7 +317,10 @@ namespace Realm {
     class MemoryQueryImpl {
     public:
       MemoryQueryImpl(const Machine& _machine);
-     
+      static unsigned int init, cache_invalid_count;
+      static bool global_valid_cache;
+      static std::map<Memory::Kind, std::vector<Memory> > _mem_cache;
+
     protected:
       // these things are refcounted and copied-on-write
       MemoryQueryImpl(const MemoryQueryImpl& copy_from);
@@ -305,6 +340,11 @@ namespace Realm {
       Memory next_match(Memory after) const;
       size_t count_matches(void) const;
       Memory random_match(void) const;
+      Memory cache_next(Memory after);
+      bool cached_query(Memory p, Memory &pval);
+      bool cached_query(Memory &pval, QueryType q) const;
+      bool cached_query(size_t &count) const;
+      Memory mutated_cached_query(Memory p);
 
     protected:
       int references;
@@ -313,7 +353,12 @@ namespace Realm {
       int restricted_node_id;
       bool is_restricted_kind;
       Memory::Kind restricted_kind;
+      bool   shared_cached_list, valid_cache;
+      std::vector<Memory>* cur_cached_list;
+      unsigned int invalid_count, cur_index;
       std::vector<MemoryQueryPredicate *> predicates;     
+      std::vector<Memory>* cached_list() const;
+      Memory next(Memory after);
     };            
 
     extern MachineImpl *machine_singleton;
