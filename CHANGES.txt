@@ -1,6 +1,12 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 18.09.0 (September ??, 2018)
+  * Realm
+    - Assorted minor bug fixes
+    - Support for development snapshots of GASNet-EX (using GASNet-1
+        compatibility interfaces for now)
+
 Version 18.05.0 (May 31, 2018)
   * Legion
     - Migrated all node-local Legion reservations to use Realm
