@@ -117,6 +117,10 @@ namespace Realm {
 	return ready_event;
       }
 
+      // set this handle before we do anything that can result in a
+      //  profiling callback containing this instance handle
+      inst = impl->me;
+
       impl->metadata.layout = ilg;
       
       if (!prs.empty()) {
@@ -177,7 +181,6 @@ namespace Realm {
 	}
       }
 
-      inst = impl->me;
       log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
       log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       return ready_event;
