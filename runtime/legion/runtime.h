@@ -2218,6 +2218,10 @@ namespace Legion {
       void send_view_update_response(AddressSpaceID target, Serializer &rez);
       void send_view_remote_update(AddressSpaceID target, Serializer &rez);
       void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
+      void send_view_register_user(AddressSpaceID target, Serializer &rez);
+      void send_view_find_copy_preconditions_request(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 

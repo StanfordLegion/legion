@@ -185,8 +185,8 @@ namespace Legion {
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
       PhysicalUser(IndexSpaceExpression *expr);
-      PhysicalUser(const RegionUsage &u, LegionColor child, 
-                   UniqueID op_id, unsigned index, IndexSpaceExpression *expr);
+      PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
+                   UniqueID op_id, unsigned index);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -197,10 +197,10 @@ namespace Legion {
                                RegionTreeForest *forest, AddressSpaceID source);
     public:
       RegionUsage usage;
-      LegionColor child;
+      IndexSpaceExpression *const expr;
+      const size_t expr_volume;
       UniqueID op_id;
       unsigned index; // region requirement index
-      IndexSpaceExpression *const expr;
     };  
 
     /**
@@ -567,10 +567,13 @@ namespace Legion {
                              const unsigned dst_fidx,
                              IndexSpaceExpression *expr,
                              CopyAcrossHelper *across_helper = NULL);
+      // Record preconditions coming back from analysis on views
+      void record_preconditions(InstanceView *view, bool reading,
+                                EventFieldExprs &preconditions);
       inline bool has_updates(void) const
         { return !sources.empty() || !reductions.empty(); }
-      void issue_updates(const PhysicalTraceInfo &trace_info,
-                         ApEvent precondition = ApEvent::NO_AP_EVENT);
+      void issue_updates(const PhysicalTraceInfo &trace_info, 
+                         ApEvent precondition);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
@@ -600,6 +603,9 @@ namespace Legion {
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned reductions;
       std::set<LogicalView*> all_views; // used for reference counting
+    protected:
+      mutable LocalLock pre_lock; 
+      std::map<InstanceView*,EventFieldExprs> dst_pre, src_pre;
     protected:
       // Runtime mapping effects that we create
       std::set<RtEvent> &effects;

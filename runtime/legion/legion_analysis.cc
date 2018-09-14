@@ -70,7 +70,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(IndexSpaceExpression *e)
-      : expr(e)
+      : expr(e), expr_volume(expr->get_volume())
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -80,9 +80,9 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(const RegionUsage &u, const LegionColor c,
-                               UniqueID id, unsigned x, IndexSpaceExpression *e)
-      : usage(u), child(c), op_id(id), index(x), expr(e)
+    PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
+                               UniqueID id, unsigned x)
+      : usage(u), expr(e), expr_volume(expr->get_volume()), op_id(id), index(x)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -93,7 +93,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
-      : expr(NULL)
+      : expr(NULL), expr_volume(0)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -125,7 +125,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       expr->pack_expression(rez, target);
-      rez.serialize(child);
       rez.serialize(usage.privilege);
       rez.serialize(usage.prop);
       rez.serialize(usage.redop);
@@ -144,7 +143,6 @@ namespace Legion {
       assert(expr != NULL);
 #endif
       PhysicalUser *result = new PhysicalUser(expr);
-      derez.deserialize(result->child);
       derez.deserialize(result->usage.privilege);
       derez.deserialize(result->usage.prop);
       derez.deserialize(result->usage.redop);
@@ -2008,6 +2006,39 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_preconditions(InstanceView *view, 
+                                   bool reading, EventFieldExprs &preconditions)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!preconditions.empty());
+#endif
+      AutoLock p_lock(pre_lock);
+      EventFieldExprs &pre = reading ? src_pre[view] : dst_pre[view]; 
+      for (EventFieldExprs::iterator eit = preconditions.begin();
+            eit != preconditions.end(); eit++)
+      {
+        EventFieldExprs::iterator event_finder = pre.find(eit->first);
+        if (event_finder != pre.end())
+        {
+          // Need to do the merge manually 
+          for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                eit->second.begin(); it != eit->second.end(); it++)
+          {
+            FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+              event_finder->second.find(it->first);
+            if (finder == event_finder->second.end())
+              event_finder->second.insert(it->first, it->second);
+            else
+              finder.merge(it->second);
+          }
+        }
+        else // We can just swap this over
+          pre[eit->first].swap(eit->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
                                            ApEvent precondition)
     //--------------------------------------------------------------------------
@@ -2070,18 +2101,21 @@ namespace Legion {
         }
       }
       // Next compute the event preconditions for these accesses
-      std::map<InstanceView*,EventFieldExprs> dst_pre, src_pre;
+      std::set<RtEvent> preconditions_ready; 
+      const UniqueID op_id = op->get_unique_op_id();
       for (InstanceFieldExprs::const_iterator dit = 
             dst_exprs.begin(); dit != dst_exprs.end(); dit++)
       {
-        EventFieldExprs &preconditions = dst_pre[dit->first];
         if (dit->second.size() == 1)
         {
           // No need to do any kind of sorts here
           IndexSpaceExpression *copy_expr = dit->second.begin()->first;
           const FieldMask &copy_mask = dit->second.get_valid_mask();
-          dit->first->find_copy_preconditions(false/*reading*/,
-                                      copy_mask, copy_expr, preconditions); 
+          RtEvent pre_ready = dit->first->find_copy_preconditions(
+                                false/*reading*/, copy_mask, copy_expr,
+                                op_id, index, *this, trace_info);
+          if (pre_ready.exists())
+            preconditions_ready.insert(pre_ready);
         }
         else
         {
@@ -2096,22 +2130,27 @@ namespace Legion {
             IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
               *(it->elements.begin()) : 
               forest->union_index_spaces(it->elements);
-            dit->first->find_copy_preconditions(false/*reading*/,
-                                        copy_mask, copy_expr, preconditions);
+            RtEvent pre_ready = dit->first->find_copy_preconditions(
+                                  false/*reading*/, copy_mask, copy_expr,
+                                  op_id, index, *this, trace_info);
+            if (pre_ready.exists())
+              preconditions_ready.insert(pre_ready);
           }
         }
       }
       for (InstanceFieldExprs::const_iterator sit = 
             src_exprs.begin(); sit != src_exprs.end(); sit++)
       {
-        EventFieldExprs &preconditions = src_pre[sit->first];
         if (sit->second.size() == 1)
         {
           // No need to do any kind of sorts here
           IndexSpaceExpression *copy_expr = sit->second.begin()->first;
           const FieldMask &copy_mask = sit->second.get_valid_mask();
-          sit->first->find_copy_preconditions(true/*reading*/,
-                                      copy_mask, copy_expr, preconditions);
+          RtEvent pre_ready = sit->first->find_copy_preconditions(
+                                true/*reading*/, copy_mask, copy_expr,
+                                op_id, index, *this, trace_info);
+          if (pre_ready.exists())
+            preconditions_ready.insert(pre_ready);
         }
         else
         {
@@ -2126,10 +2165,20 @@ namespace Legion {
             IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
               *(it->elements.begin()) : 
               forest->union_index_spaces(it->elements);
-            sit->first->find_copy_preconditions(true/*reading*/,
-                                        copy_mask, copy_expr, preconditions);
+            RtEvent pre_ready = sit->first->find_copy_preconditions(
+                                  true/*reading*/, copy_mask, copy_expr,
+                                  op_id, index, *this, trace_info);
+            if (pre_ready.exists())
+              preconditions_ready.insert(pre_ready);
           }
         }
+      }
+      // If necessary wait until all we have all the preconditions
+      if (!preconditions_ready.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(preconditions_ready);
+        if (wait_on.exists())
+          wait_on.wait();
       }
       // Iterate over the destinations and compute updates that have the
       // same preconditions on different fields
@@ -2338,7 +2387,7 @@ namespace Legion {
         {
           target->add_copy_user(false/*reading*/,
                                 result, fill_mask, fill_expr,
-                                op_id, index, effects); 
+                                op_id, index, effects, trace_info); 
           if (track_events)
             events.insert(result);
         }
@@ -2378,7 +2427,7 @@ namespace Legion {
           {
             target->add_copy_user(false/*reading*/,
                                   result, fill_mask, fill_expr,
-                                  op_id, index, effects);
+                                  op_id, index, effects, trace_info);
             if (track_events)
               events.insert(result);
           }
@@ -2424,10 +2473,10 @@ namespace Legion {
           {
             source->add_copy_user(true/*reading*/,
                                   result, copy_mask, copy_expr,
-                                  op_id, index, effects);
+                                  op_id, index, effects, trace_info);
             target->add_copy_user(false/*reading*/,
                                   result, copy_mask, copy_expr,
-                                  op_id, index, effects);
+                                  op_id, index, effects, trace_info);
             if (track_events)
               events.insert(result);
           }
@@ -2465,10 +2514,10 @@ namespace Legion {
             {
               it->first->add_copy_user(true/*reading*/,
                                     result, copy_mask, copy_expr,
-                                    op_id, index, effects);
+                                    op_id, index, effects, trace_info);
               target->add_copy_user(false/*reading*/,
                                     result, copy_mask, copy_expr,
-                                    op_id, index, effects);
+                                    op_id, index, effects, trace_info);
               if (track_events)
                 events.insert(result);
             }
@@ -2554,8 +2603,8 @@ namespace Legion {
                 if (result.exists())
                 {
                   src_view->add_copy_user(true/*reading*/,
-                                          result, src_mask,
-                                          update->expr, op_id, index, effects);
+                                          result, src_mask, update->expr, 
+                                          op_id, index, effects, trace_info);
                   result_events.insert(result);
                 }
               }
@@ -2629,8 +2678,8 @@ namespace Legion {
               if (result.exists())
               {
                 // Record the source user
-                git->first.second->add_copy_user(true/*reading*/, 
-                    result, src_mask, reduce_expr, op_id, index, effects);
+                git->first.second->add_copy_user(true/*reading*/, result, 
+                    src_mask, reduce_expr, op_id, index, effects, trace_info);
                 for (unsigned idx = 0; idx < git->second.size(); idx++)
                   result_events[git->second[idx]].insert(result);
               }
@@ -2670,7 +2719,7 @@ namespace Legion {
           FieldMask reduce_mask;
           reduce_mask.set_bit(update->dst_fidx);
           target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
-                                reduce_expr, op_id, index, effects);
+                                reduce_expr, op_id, index, effects, trace_info);
         }
         else
         {
@@ -2694,7 +2743,7 @@ namespace Legion {
             IndexSpaceExpression *reduce_expr = reduce_sets.begin()->first;
             const FieldMask &reduce_mask = reduce_sets.get_valid_mask();
             target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
-                                  reduce_expr, op_id, index, effects);
+                            reduce_expr, op_id, index, effects, trace_info);
           }
           else
           {
@@ -2708,7 +2757,7 @@ namespace Legion {
                 *(it->elements.begin()) : 
                 forest->union_index_spaces(it->elements);
               target->add_copy_user(false/*reading*/, git->first, it->set_mask,
-                                    reduce_expr, op_id, index, effects);
+                               reduce_expr, op_id, index, effects, trace_info);
             }
           }
         }
@@ -3327,29 +3376,29 @@ namespace Legion {
         // operations at the end of a context
         assert(restricted);
 #endif
+        // Since these are restricted, we'll make these the actual
+        // target logical instances and record them as restricted
+        // instead of recording them as reduction instances
         for (unsigned idx = 0; idx < sources.size(); idx++)
         {
           const FieldMask &view_mask = sources[idx].get_valid_fields();
           InstanceView *view = corresponding[idx];
-#ifdef DEBUG_LEGION
-          assert(view->is_reduction_view());
-#endif
-          ReductionView *red_view = view->as_reduction_view();
-          int fidx = view_mask.find_first_set();
-          while (fidx >= 0)
+          FieldMaskSet<LogicalView>::iterator finder = 
+            valid_instances.find(view);
+          if (finder == valid_instances.end())
           {
-            reduction_instances[fidx].push_back(red_view);
-            red_view->add_nested_valid_ref(did, &mutator);
-            fidx = view_mask.find_next_set(fidx+1);
+            valid_instances.insert(view, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
           }
+          else
+            finder.merge(view_mask);
           // Always restrict reduction-only users since we know the data
           // is going to need to be flushed anyway
-          FieldMaskSet<LogicalView>::iterator finder = 
-            restricted_instances.find(red_view);
+          finder = restricted_instances.find(view);
           if (finder == restricted_instances.end())
           {
-            restricted_instances.insert(red_view, view_mask);
-            red_view->add_nested_valid_ref(did, &mutator);
+            restricted_instances.insert(view, view_mask);
+            view->add_nested_valid_ref(did, &mutator);
           }
           else
             finder.merge(view_mask);
@@ -3357,8 +3406,6 @@ namespace Legion {
           view->add_initial_user(term_event, usage, view_mask, 
                                  set_expr, context_uid, index);
         }
-        // Update the reduction fields
-        reduction_fields |= user_mask;
       }
       else
       {

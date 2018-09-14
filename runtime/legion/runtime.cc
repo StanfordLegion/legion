@@ -4842,7 +4842,7 @@ namespace Legion {
           // Skip any unattached external instances too
           if (it->second.unattached_external)
             continue;
-          if (!it->first->meets_field_space(regions))
+          if (!it->first->meets_region_tree(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
@@ -4895,7 +4895,7 @@ namespace Legion {
           // Skip any unattached external instances too
           if (it->second.unattached_external)
             continue;
-          if (!it->first->meets_field_space(regions))
+          if (!it->first->meets_region_tree(regions))
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);

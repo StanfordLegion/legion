@@ -373,18 +373,16 @@ namespace Legion {
       // Update the set of atomic locks for this operation
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       // Get the restrict precondition for this operation
-      virtual ApEvent get_restrict_precondition(
-                                          const PhysicalTraceInfo &info) const;
-      static ApEvent merge_restrict_preconditions(const PhysicalTraceInfo &info,
+      static ApEvent merge_sync_preconditions(const PhysicalTraceInfo &info,
                                 const std::vector<Grant> &grants,
                                 const std::vector<PhaseBarrier> &wait_barriers);
-      // Record the restrict postcondition
-      virtual void record_restrict_postcondition(ApEvent postcondition);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
       virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
+      // Compute the initial precondition for this operation
+      virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
     protected:
       void filter_copy_request_kinds(MapperManager *mapper,
           const std::set<ProfilingMeasurementID> &requests,
@@ -788,6 +786,7 @@ namespace Legion {
         { return this->get_completion_event(); }
       virtual Operation::OpKind get_memoizable_kind(void) const
         { return this->get_operation_kind(); }
+      virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
     protected:
       void invoke_memoize_operation(MapperID mapper_id);
       void set_memoize(bool memoize);
@@ -859,7 +858,6 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -883,7 +881,6 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::map<Reservation,bool> atomic_locks;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> mapped_preconditions;
     protected:
       MapperManager *mapper;
     protected:
@@ -946,9 +943,6 @@ namespace Legion {
                    get_acquired_instances_ref(void);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual ApEvent get_restrict_precondition(
-                                  const PhysicalTraceInfo &info) const;
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -997,7 +991,6 @@ namespace Legion {
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::vector<std::map<Reservation,bool> > atomic_locks;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restrict_postconditions;
     public:
       PredEvent                   predication_guard;
     protected:
@@ -1469,8 +1462,6 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual ApEvent get_restrict_precondition(
-                              const PhysicalTraceInfo &info) const;
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -1554,8 +1545,6 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual ApEvent get_restrict_precondition(
-                              const PhysicalTraceInfo &info) const;
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
@@ -2411,7 +2400,6 @@ namespace Legion {
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                    get_acquired_instances_ref(void);
       virtual void record_reference_mutation_effect(RtEvent event);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
       // Report a profiling result for this operation
@@ -2432,7 +2420,6 @@ namespace Legion {
       unsigned parent_req_index;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restricted_postconditions;
       DepPartThunk *thunk;
     protected:
       MapperManager *mapper;
@@ -2535,8 +2522,6 @@ namespace Legion {
     public:
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
-      virtual ApEvent get_restrict_precondition(
-                         const PhysicalTraceInfo &info) const;
     public:
       void check_fill_privilege(void);
       void compute_parent_index(void);

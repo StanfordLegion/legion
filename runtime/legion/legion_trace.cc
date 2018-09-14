@@ -1790,6 +1790,7 @@ namespace Legion {
         runtime->forest->physical_register_only(requirements[idx],
                                                 version_infos[idx],
                                                 this, idx,
+                                                ApEvent::NO_AP_EVENT,
                                                 completion_event,
                                                 map_applied_conditions,
                                                 instances[idx],

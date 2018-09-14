@@ -198,9 +198,9 @@ namespace Legion {
           continue;
         InstanceSet instance_set;
         std::vector<PhysicalManager*> unacquired;  
-        FieldSpace bad_space; std::vector<FieldID> missing_fields;
+        RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
         runtime->forest->physical_convert_mapping(owner_task, 
-            created_requirements[idx], instances, instance_set, bad_space, 
+            created_requirements[idx], instances, instance_set, bad_tree, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
         runtime->forest->log_mapping_decision(unique_op_id,
             original_size + idx, created_requirements[idx], instance_set);

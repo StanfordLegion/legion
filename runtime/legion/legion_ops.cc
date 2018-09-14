@@ -503,15 +503,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent Operation::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return ApEvent::NO_AP_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ApEvent Operation::merge_restrict_preconditions(
+    /*static*/ ApEvent Operation::merge_sync_preconditions(
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<Grant> &grants, 
                                  const std::vector<PhaseBarrier> &wait_barriers)
@@ -531,14 +523,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::record_restrict_postcondition(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      // Should only be called for inherited types
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     void Operation:: add_copy_profiling_request(
                                            Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
@@ -553,6 +537,13 @@ namespace Legion {
     {
       // Should only be called for inherited types
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent Operation::compute_init_precondition(const PhysicalTraceInfo &info)
+    //--------------------------------------------------------------------------
+    {
+      return execution_fence_event;
     }
 
     //--------------------------------------------------------------------------
@@ -2135,7 +2126,6 @@ namespace Legion {
       acquired_instances.clear();
       atomic_locks.clear();
       map_applied_conditions.clear();
-      mapped_preconditions.clear();
       profiling_requests.clear();
       if (mapper_data != NULL)
       {
@@ -2231,6 +2221,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const PhysicalTraceInfo trace_info(this);
+      // If we have any wait preconditions from phase barriers or 
+      // grants then we use them to compute a precondition for doing
+      // any copies or anything else for this operation
+      ApEvent init_precondition = execution_fence_event;
+      if (!wait_barriers.empty() || !grants.empty())
+      {
+        ApEvent sync_precondition = 
+          merge_sync_preconditions(trace_info, grants, wait_barriers);
+        if (sync_precondition.exists())
+        {
+          if (init_precondition.exists())
+            init_precondition = Runtime::merge_events(&trace_info, 
+                                  init_precondition, sync_precondition); 
+          else
+            init_precondition = sync_precondition;
+        }
+      }
       InstanceSet mapped_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
@@ -2241,6 +2248,7 @@ namespace Legion {
         effects_done = runtime->forest->physical_register_only(
                                                 requirement, version_info,
                                                 this, 0/*idx*/, 
+                                                init_precondition,
                                                 termination_event,
                                                 map_applied_conditions,
                                                 mapped_instances, 
@@ -2264,6 +2272,7 @@ namespace Legion {
         effects_done = runtime->forest->physical_register_only(
                                                 requirement, version_info,
                                                 this, 0/*idx*/,
+                                                init_precondition,
                                                 termination_event, 
                                                 map_applied_conditions,
                                                 mapped_instances,
@@ -2284,39 +2293,17 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
 #endif
-      }
-      // If we have any wait preconditions from phase barriers or 
-      // grants then we can add them to the mapping preconditions
-      if (!wait_barriers.empty() || !grants.empty())
-      {
-        for (std::vector<PhaseBarrier>::const_iterator it = 
-              wait_barriers.begin(); it != wait_barriers.end(); it++)
-        {
-          ApEvent e = Runtime::get_previous_phase(*it); 
-          mapped_preconditions.insert(e);
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_phase_barrier_wait(unique_op_id, e);
-        }
-        for (std::vector<Grant>::const_iterator it = grants.begin();
-              it != grants.end(); it++)
-        {
-          ApEvent e = it->impl->acquire_grant();
-          mapped_preconditions.insert(e);
-        }
-      }
+      } 
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
-      if (!mapped_preconditions.empty())
+      if (effects_done.exists())
       {
-        // If we have restricted postconditions, tell the physical instance
-        // that it has an event to wait for before it is unmapped
-        ApEvent wait_for = Runtime::merge_events(&trace_info, 
-                                                 mapped_preconditions);
-        region.impl->reset_references(mapped_instances, 
-                                      termination_event, wait_for);
+        region.impl->reset_references(mapped_instances, termination_event,
+          Runtime::merge_events(&trace_info, init_precondition, effects_done));
       }
-      else // The normal path here
-        region.impl->reset_references(mapped_instances, termination_event);
+      else
+        region.impl->reset_references(mapped_instances, termination_event,
+                                      init_precondition);
       ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
       if (mapped_instances.size() > 1)
       {
@@ -2476,13 +2463,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    void MapOp::record_restrict_postcondition(ApEvent restrict_postcondition)
-    //--------------------------------------------------------------------------
-    {
-      mapped_preconditions.insert(restrict_postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -2719,24 +2699,24 @@ namespace Legion {
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
-      FieldSpace bad_space;
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
-                                chosen_instances, bad_space, missing_fields,
+                                chosen_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
                                 !runtime->unsafe_mapper);
-      if (bad_space.exists())
+      if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_inline' "
-                      "on mapper %s. Mapper selected instance from field "
-                      "space %d to satisfy a region requirement for an inline "
-                      "mapping in task %s (ID %lld) whose field_space is %d.", 
+                      "on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for an inline "
+                      "mapping in task %s (ID %lld) whose region tree is %d.", 
                       mapper->get_mapper_name(),
-                      bad_space.get_id(), parent_ctx->get_task_name(),
+                      bad_tree, parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id(),
-                      requirement.region.get_field_space().get_id())
+                      requirement.region.get_tree_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
@@ -3288,7 +3268,6 @@ namespace Legion {
       acquired_instances.clear();
       atomic_locks.clear();
       map_applied_conditions.clear();
-      restrict_postconditions.clear();
       profiling_requests.clear();
       if (mapper_data != NULL)
       {
@@ -3681,7 +3660,7 @@ namespace Legion {
       }
       // Now we can carry out the mapping requested by the mapper
       // and issue the across copies, first set up the sync precondition
-      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      ApEvent init_precondition = compute_init_precondition(trace_info);
       // Register the source and destination regions
       std::set<ApEvent> copy_complete_events;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -3711,6 +3690,23 @@ namespace Legion {
           runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                 src_requirements[idx],
                                                 src_targets);
+        ApEvent local_init_precondition = init_precondition;
+        // See if we have any atomic locks we have to acquire
+        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
+        {
+          // Issue the acquires and releases for the reservations
+          // necessary for performing this across operation
+          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
+          for (std::map<Reservation,bool>::const_iterator it = 
+                local_locks.begin(); it != local_locks.end(); it++)
+          {
+            local_init_precondition = 
+              Runtime::acquire_ap_reservation(it->first, it->second,
+                                              local_init_precondition);
+            // We can also issue the release here too
+            Runtime::release_reservation(it->first, local_completion);
+          }
+        }
         // If we have a compsite reference, we need to map it
         // as a virtual region
         if (src_composite >= 0)
@@ -3725,7 +3721,9 @@ namespace Legion {
           set_mapping_state(idx);
           runtime->forest->physical_register_only(src_requirements[idx],
                                                   src_versions[idx],
-                                                  this, idx, local_completion,
+                                                  this, idx, 
+                                                  local_init_precondition,
+                                                  local_completion,
                                                   map_applied_conditions,
                                                   src_targets,
                                                   trace_info
@@ -3751,6 +3749,7 @@ namespace Legion {
                                                 dst_requirements[idx],
                                                 dst_versions[idx], this, 
                                                 idx + src_requirements.size(),
+                                                local_init_precondition,
                                                 local_completion,
                                                 map_applied_conditions,
                                                 dst_targets,
@@ -3767,24 +3766,7 @@ namespace Legion {
              idx + src_requirements.size(), dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
         if (is_reduce_req)
-          dst_requirements[idx].privilege = REDUCE;
-        ApEvent local_sync_precondition = sync_precondition;
-        // See if we have any atomic locks we have to acquire
-        if ((idx < atomic_locks.size()) && !atomic_locks[idx].empty())
-        {
-          // Issue the acquires and releases for the reservations
-          // necessary for performing this across operation
-          const std::map<Reservation,bool> &local_locks = atomic_locks[idx];
-          for (std::map<Reservation,bool>::const_iterator it = 
-                local_locks.begin(); it != local_locks.end(); it++)
-          {
-            local_sync_precondition = 
-              Runtime::acquire_ap_reservation(it->first, it->second,
-                                              local_sync_precondition);
-            // We can also issue the release here too
-            Runtime::release_reservation(it->first, local_completion);
-          }
-        }
+          dst_requirements[idx].privilege = REDUCE; 
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
         // Trigger our local completion event contingent upon 
@@ -3795,7 +3777,7 @@ namespace Legion {
                                 src_versions[idx], dst_targets,
                                 local_completion, this, idx,
                                 idx + src_requirements.size(),
-                                local_sync_precondition, predication_guard, 
+                                local_init_precondition, predication_guard, 
                                 map_applied_conditions, trace_info);
         Runtime::trigger_event(local_completion, across_done);
         if (is_recording())
@@ -3953,21 +3935,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent CopyOp::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return merge_restrict_preconditions(info, grants, wait_barriers);
-    }
-
-    //--------------------------------------------------------------------------
-    void CopyOp::record_restrict_postcondition(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      restrict_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4335,24 +4302,24 @@ namespace Legion {
                                    InstanceSet &targets, bool is_reduce)
     //--------------------------------------------------------------------------
     {
-      FieldSpace bad_space;
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_idx = runtime->forest->physical_convert_mapping(this,
-                              req, output, targets, bad_space, missing_fields,
+                              req, output, targets, bad_tree, missing_fields,
                               &acquired_instances, unacquired, 
                               !runtime->unsafe_mapper);
-      if (bad_space.exists())
+      if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper selected an instance from "
-                      "field space %d to satisfy %s region requirement %d "
+                      "region tree %d to satisfy %s region requirement %d "
                       "for explicit region-to_region copy in task %s (ID %lld) "
                       "but the logical region for this requirement is from "
-                      "field space %d.", mapper->get_mapper_name(), 
-                      bad_space.get_id(), IS_SRC ? "source" : "destination",idx,
+                      "region tree %d.", mapper->get_mapper_name(), 
+                      bad_tree, IS_SRC ? "source" : "destination",idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
-                      req.region.get_field_space().get_id())
+                      req.region.get_tree_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
@@ -6712,6 +6679,7 @@ namespace Legion {
       ApEvent effects_done = runtime->forest->physical_register_only(
                                               requirement, version_info,
                                               this, 0/*idx*/,
+                                              ApEvent::NO_AP_EVENT,
                                               close_event,
                                               map_applied_conditions,
                                               target_instances, 
@@ -7255,9 +7223,9 @@ namespace Legion {
         if (ready.exists())
           acquire_preconditions.insert(ready);
       }
-      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
-      if (sync_precondition.exists())
-        acquire_preconditions.insert(sync_precondition);
+      ApEvent init_precondition = compute_init_precondition(trace_info);
+      if (init_precondition.exists())
+        acquire_preconditions.insert(init_precondition);
       ApEvent acquire_complete = 
         Runtime::merge_events(&trace_info, acquire_preconditions);
       if (runtime->legion_spy_enabled)
@@ -7331,14 +7299,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent AcquireOp::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return merge_restrict_preconditions(info, grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -7913,8 +7873,10 @@ namespace Legion {
       // Invoke the mapper before doing anything else 
       invoke_mapper();
       InstanceSet restricted_instances;
+      ApEvent init_precondition = compute_init_precondition(trace_info); 
       runtime->forest->release_restrictions(requirement, version_info,
-                                            this, 0/*idx*/, completion_event,
+                                            this, 0/*idx*/, init_precondition,
+                                            completion_event,
                                             map_applied_conditions,
                                             restricted_instances, trace_info
 #ifdef DEBUG_LEGION
@@ -7933,9 +7895,8 @@ namespace Legion {
         if (ready.exists())
           release_preconditions.insert(ready);
       }
-      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
-      if (sync_precondition.exists())
-        release_preconditions.insert(sync_precondition);
+      if (init_precondition.exists())
+        release_preconditions.insert(init_precondition);
       ApEvent release_complete = 
         Runtime::merge_events(&trace_info, release_preconditions);
       if (runtime->legion_spy_enabled)
@@ -8028,14 +7989,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent ReleaseOp::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return merge_restrict_preconditions(info, grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -11038,6 +10991,7 @@ namespace Legion {
       // Then we can register our mapped_instances
       runtime->forest->physical_register_only(requirement, version_info,
                                               this, 0/*idx*/,
+                                              ApEvent::NO_AP_EVENT,
                                               completion_event,
                                               map_applied_conditions,
                                               mapped_instances,
@@ -11056,12 +11010,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-      if (!restricted_postconditions.empty())
-      {
-        restricted_postconditions.insert(done_event);
-        done_event = 
-          Runtime::merge_events(&trace_info, restricted_postconditions);
-      }
 #ifdef LEGION_SPY
       if (runtime->legion_spy_enabled)
         LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -11158,24 +11106,24 @@ namespace Legion {
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
-      FieldSpace bad_space;
+      RegionTreeID bad_tree = 0;
       std::vector<FieldID> missing_fields;
       std::vector<PhysicalManager*> unacquired;
       int composite_index = runtime->forest->physical_convert_mapping(this,
                                 requirement, output.chosen_instances, 
-                                mapped_instances, bad_space, missing_fields,
+                                mapped_instances, bad_tree, missing_fields,
                                 &acquired_instances, unacquired, 
                                 !runtime->unsafe_mapper);
-      if (bad_space.exists())
+      if (bad_tree > 0)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_partition'"
-                      " on mapper %s. Mapper selected instance from field "
-                      "space %d to satisfy a region requirement for a partition "
+                      " on mapper %s. Mapper selected instance from region "
+                      "tree %d to satisfy a region requirement for a partition "
                       "mapping in task %s (ID %lld) whose logical region is "
-                      "from field space %d.", mapper->get_mapper_name(),
-                      bad_space.get_id(), parent_ctx->get_task_name(), 
+                      "from region tree %d.", mapper->get_mapper_name(),
+                      bad_tree, parent_ctx->get_task_name(), 
                       parent_ctx->get_unique_id(), 
-                      requirement.region.get_field_space().get_id())
+                      requirement.region.get_tree_id())
       if (!missing_fields.empty())
       {
         for (std::vector<FieldID>::const_iterator it = missing_fields.begin();
@@ -11458,7 +11406,6 @@ namespace Legion {
       privilege_path = RegionTreePath();
       map_applied_conditions.clear();
       acquired_instances.clear();
-      restricted_postconditions.clear();
       // We deactivate all of our point operations
       for (std::vector<PointDepPartOp*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
@@ -11523,14 +11470,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    void DependentPartitionOp::record_restrict_postcondition(
-                                                          ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      restricted_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -12038,11 +11977,11 @@ namespace Legion {
         assert(value != NULL);
 #endif
         // This is NULL for now until we implement tracing for fills
-        ApEvent sync_precondition = compute_sync_precondition(NULL);
+        ApEvent init_precondition = compute_init_precondition(trace_info);
         ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        value, value_size, version_info, 
-                                       sync_precondition,map_applied_conditions,
+                                       init_precondition,map_applied_conditions,
                                        true_guard, trace_info);
         if (runtime->legion_spy_enabled)
         {
@@ -12106,11 +12045,11 @@ namespace Legion {
       void *result = malloc(result_size);
       memcpy(result, future.impl->get_untyped_result(), result_size);
       // This is NULL for now until we implement tracing for fills
-      ApEvent sync_precondition = compute_sync_precondition(NULL);
+      ApEvent init_precondition = compute_init_precondition(trace_info);
       ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        result, result_size, version_info,
-                                       sync_precondition,map_applied_conditions,
+                                       init_precondition,map_applied_conditions,
                                        true_guard, trace_info);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
@@ -12155,14 +12094,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       commit_operation(true/*deactivate*/);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent FillOp::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return merge_restrict_preconditions(info, grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------

@@ -1731,6 +1731,7 @@ namespace Legion {
                                            const RegionRequirement &req,
                                            VersionInfo &version_info,
                                            Operation *op, unsigned index,
+                                           ApEvent precondition, 
                                            ApEvent term_event,
                                            std::set<RtEvent> &map_applied,
                                            InstanceSet &targets,
@@ -1780,18 +1781,18 @@ namespace Legion {
         // Note that by using a set we deduplicate and put the
         // locks in the order to be taken to avoid deadlocks
         targets.find_read_only_reservations(read_only_locks);
-        RtEvent precondition;
+        RtEvent locks_acquired;
         for (std::set<Reservation>::const_iterator it = 
               read_only_locks.begin(); it != read_only_locks.end(); it++)
         {
           RtEvent next = Runtime::acquire_rt_reservation(*it,
-                            true/*exclusive*/, precondition);
-          precondition = next;
+                            true/*exclusive*/, locks_acquired);
+          locks_acquired = next;
         }
         context->convert_target_views(targets, target_views);
         // Have to wait for all the locks to be acquired
-        if (precondition.exists())
-          precondition.wait();
+        if (locks_acquired.exists())
+          locks_acquired.wait();
       }
       else
         context->convert_target_views(targets, target_views);
@@ -1830,7 +1831,7 @@ namespace Legion {
 
       // Issue any input copies that need to be performed
       if (input_aggregator.has_updates())
-        input_aggregator.issue_updates(trace_info);
+        input_aggregator.issue_updates(trace_info, precondition);
       // Register users for all our instances
       IndexSpaceExpression *expr = region_node->get_index_space_expression();
       // We can skip this if the term event is a 
@@ -1839,16 +1840,29 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          ApEvent ready = target_views[idx]->register_user(usage, user_mask, 
+          const FieldMask &inst_mask = targets[idx].get_valid_fields();
+          ApEvent ready = target_views[idx]->register_user(usage, inst_mask, 
                   expr, op_id, index, term_event, local_applied, trace_info);
           // Record the event as the precondition for the task
           targets[idx].set_ready_event(ready);
         }
       }
+      // find any atomic locks we need to take for these instances
+      if (IS_ATOMIC(usage) && !IS_REDUCE(usage))
+      {
+        const bool exclusive = IS_WRITE(usage);
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          const FieldMask &inst_mask = targets[idx].get_valid_fields();
+          MaterializedView *mat_view = 
+            target_views[idx]->as_materialized_view();
+          mat_view->find_atomic_reservations(inst_mask, op, exclusive);
+        }
+      }
       // Perform any output copies (e.g. for restriction) that need to be done
       if (output_aggregator.has_updates())
       {
-        output_aggregator.issue_updates(trace_info);
+        output_aggregator.issue_updates(trace_info, term_event);
         return output_aggregator.summarize(trace_info);
       }
       else
@@ -1873,6 +1887,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
+      // should be exclusive
+      assert(IS_EXCLUSIVE(req));
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
@@ -1915,6 +1931,7 @@ namespace Legion {
                                            const RegionRequirement &req,
                                            VersionInfo &version_info,
                                            Operation *op, unsigned index,
+                                           ApEvent precondition,
                                            ApEvent term_event,
                                            std::set<RtEvent> &map_applied,
                                            InstanceSet &restricted_instances,
@@ -1928,6 +1945,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
+      assert(IS_EXCLUSIVE(req));
 #endif
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
@@ -1946,7 +1964,7 @@ namespace Legion {
       const UniqueID op_id = op->get_unique_op_id();
       // Issue any release copies/fills that need to be done
       if (release_aggregator.has_updates())
-        release_aggregator.issue_updates(trace_info);
+        release_aggregator.issue_updates(trace_info, precondition);
       // Now add users for all the instances
       const RegionUsage usage(req);
 #ifdef DEBUG_LEGION
@@ -2175,7 +2193,7 @@ namespace Legion {
                              true/*add restriction*/);
       if (output_aggregator.has_updates())
       {
-        output_aggregator.issue_updates(trace_info);
+        output_aggregator.issue_updates(trace_info, ApEvent::NO_AP_EVENT);
         return output_aggregator.summarize(trace_info);
       }
       else
@@ -2217,7 +2235,7 @@ namespace Legion {
     int RegionTreeForest::physical_convert_mapping(Operation *op,
                                   const RegionRequirement &req,
                                   const std::vector<MappingInstance> &chosen,
-                                  InstanceSet &result, FieldSpace &bad_space,
+                                  InstanceSet &result, RegionTreeID &bad_tree,
                                   std::vector<FieldID> &missing_fields,
                                   std::map<PhysicalManager*,
                                        std::pair<unsigned,bool> > *acquired,
@@ -2230,6 +2248,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(req.parent.get_field_space());
       // Get the field mask for the fields we need
       FieldMask needed_fields = node->get_field_mask(req.privilege_fields);
+      const RegionTreeID req_tid = req.parent.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2243,13 +2262,10 @@ namespace Legion {
           has_composite = true;
           continue;
         }
-        // Check to see if the field spaces are the same
-        if (node != manager->field_space_node)
+        // Check to see if the region trees are the same
+        if (req_tid != manager->tree_id)
         {
-#ifdef DEBUG_LEGION
-          assert(node->handle != manager->field_space_node->handle);
-#endif
-          bad_space = manager->field_space_node->handle;
+          bad_tree = manager->tree_id;
           return -1;
         }
         // See if we should be checking the acquired sets
@@ -2306,7 +2322,7 @@ namespace Legion {
     bool RegionTreeForest::physical_convert_postmapping(Operation *op,
                                      const RegionRequirement &req,
                                      const std::vector<MappingInstance> &chosen,
-                                     InstanceSet &result, FieldSpace &bad_space,
+                                     InstanceSet &result,RegionTreeID &bad_tree,
                                      std::map<PhysicalManager*,
                                           std::pair<unsigned,bool> > *acquired,
                                      std::vector<PhysicalManager*> &unacquired,
@@ -2320,6 +2336,7 @@ namespace Legion {
       // Get the field mask for the fields we need
       FieldMask optional_fields = 
                 reg_node->column_source->get_field_mask(req.privilege_fields);
+      const RegionTreeID reg_tree = req.region.get_tree_id();
       // Iterate over each one of the chosen instances
       bool has_composite = false;
       for (std::vector<MappingInstance>::const_iterator it = chosen.begin();
@@ -2334,13 +2351,9 @@ namespace Legion {
           continue;
         }
         // Check to see if the tree IDs are the same
-        if (reg_node->column_source != manager->field_space_node)
+        if (reg_tree != manager->tree_id)
         {
-#ifdef DEBUG_LEGION
-          assert(reg_node->column_source->handle != 
-                  manager->field_space_node->handle);
-#endif
-          bad_space = manager->field_space_node->handle;
+          bad_tree = manager->tree_id;
           return -1;
         }
         // See if we should be checking the acquired sets
@@ -9587,8 +9600,9 @@ namespace Legion {
       InstanceManager *result = new InstanceManager(context, did, 
                                          context->runtime->address_space,
                                          memory, inst, node->row_source, 
-                                         node->column_source, layout, 
-                                         pointer_constraint,
+                                         node->column_source, 
+                                         node->handle.get_tree_id(),
+                                         layout, pointer_constraint,
                                          true/*register now*/, ready_event,
                                          true/*external instance*/,
                                          Reservation::create_reservation());

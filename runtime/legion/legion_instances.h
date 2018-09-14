@@ -112,7 +112,8 @@ namespace Legion {
                       LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
                       FieldSpaceNode *node, PhysicalInstance inst, 
-                      IndexSpaceExpression *index_domain, bool register_now);
+                      IndexSpaceExpression *index_domain, 
+                      RegionTreeID tree_id, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -174,7 +175,7 @@ namespace Legion {
       void register_active_context(InnerContext *context);
       void unregister_active_context(InnerContext *context);
     public:
-      bool meets_field_space(const std::vector<LogicalRegion> &regions) const;
+      bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
                          bool tight_region_bounds = false) const;
       bool entails(LayoutConstraints *constraints) const;
@@ -213,6 +214,7 @@ namespace Legion {
       LayoutDescription *const layout;
       const PhysicalInstance instance;
       IndexSpaceExpression *instance_domain;
+      const RegionTreeID tree_id;
       const PointerConstraint pointer_constraint;
     protected:
       std::set<InnerContext*> active_contexts;
@@ -252,7 +254,8 @@ namespace Legion {
                       AddressSpaceID owner_space,
                       MemoryManager *memory, PhysicalInstance inst, 
                       IndexSpaceExpression *instance_domain,
-                      FieldSpaceNode *node, LayoutDescription *desc, 
+                      FieldSpaceNode *node, RegionTreeID tree_id,
+                      LayoutDescription *desc, 
                       const PointerConstraint &constraint,
                       bool register_now, ApEvent use_event,
                       bool external_instance,
@@ -312,7 +315,8 @@ namespace Legion {
                        LayoutDescription *description,
                        const PointerConstraint &constraint,
                        IndexSpaceExpression *inst_domain,
-                       FieldSpaceNode *field_node, ReductionOpID redop, 
+                       FieldSpaceNode *field_node, 
+                       RegionTreeID tree_id, ReductionOpID redop, 
                        const ReductionOp *op, ApEvent use_event,
                        bool register_now);
       virtual ~ReductionManager(void);
@@ -342,22 +346,11 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
-      // This method is very important, it helps us prevent duplicate
-      // applications of a reduction to a target physical instance
-      //Domain compute_reduction_domain(PhysicalInstance target,
-      //                const Domain &copy_domain, ApEvent copy_domain_pre);
-    public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const ApEvent use_event;
     protected:
       mutable LocalLock manager_lock;
-#if 0
-    protected:
-      // Need to deduplicate reductions to target instances
-      std::map<PhysicalInstance,std::vector<Domain> > reduction_domains;
-      std::vector<Realm::IndexSpace> created_index_spaces;
-#endif
     };
 
     /**
@@ -375,7 +368,8 @@ namespace Legion {
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
                            IndexSpaceExpression *inst_domain,
-                           FieldSpaceNode *node, ReductionOpID redop, 
+                           FieldSpaceNode *node, 
+                           RegionTreeID tree_id, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
                            ApEvent use_event, bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
@@ -414,7 +408,8 @@ namespace Legion {
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
                            IndexSpaceExpression *inst_dom,
-                           FieldSpaceNode *node, ReductionOpID redop, 
+                           FieldSpaceNode *node, 
+                           RegionTreeID tree_id, ReductionOpID redop, 
                            const ReductionOp *op, ApEvent use_event,
                            bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
@@ -479,8 +474,8 @@ namespace Legion {
                       MemoryManager *memory, UniqueID cid)
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
           creator_id(cid), instance(PhysicalInstance::NO_INST), 
-          field_space_node(NULL), instance_domain(NULL), redop_id(0), 
-          reduction_op(NULL), valid(false) { }
+          field_space_node(NULL), instance_domain(NULL), tree_id(0),
+          redop_id(0), reduction_op(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -511,6 +506,7 @@ namespace Legion {
     protected:
       FieldSpaceNode *field_space_node;
       IndexSpaceExpression *instance_domain;
+      RegionTreeID tree_id;
       // Mapping from logical field order to layout order
       std::vector<unsigned> mask_index_map;
       std::vector<size_t> field_sizes;

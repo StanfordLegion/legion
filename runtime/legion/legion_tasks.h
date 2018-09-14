@@ -278,8 +278,6 @@ namespace Legion {
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
-      virtual ApEvent get_restrict_precondition(
-                                    const PhysicalTraceInfo &info) const;
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
@@ -350,6 +348,8 @@ namespace Legion {
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
       // A map of any locks that we need to take for this task
       std::map<Reservation,bool/*exclusive*/>   atomic_locks;
+      // Post condition effects for copies out
+      std::set<ApEvent>                         effects_postconditions;
     protected:
       std::vector<unsigned>                     parent_req_indexes; 
     protected:
@@ -535,7 +535,7 @@ namespace Legion {
       bool                                  perform_postmap;
     protected:
       // Events that must be triggered before we are done mapping
-      std::set<RtEvent>                     map_applied_conditions;
+      std::set<RtEvent>                     map_applied_conditions; 
     protected:
       TaskContext*                          execution_context;
     protected:
@@ -671,7 +671,6 @@ namespace Legion {
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
@@ -750,7 +749,6 @@ namespace Legion {
     protected:
       std::map<PhysicalManager*,
         std::pair<unsigned/*ref count*/,bool/*created*/> > acquired_instances;
-      std::set<ApEvent> restrict_postconditions;
     };
 
     /**
@@ -802,7 +800,6 @@ namespace Legion {
       virtual void perform_inlining(void);
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
-      virtual void record_restrict_postcondition(ApEvent postcondition);
     public:
       virtual void handle_future(const void *res, 
                                  size_t res_size, bool owned);
@@ -828,7 +825,6 @@ namespace Legion {
       friend class SliceTask;
       SliceTask                   *slice_owner;
       ApUserEvent                 point_termination;
-      std::set<ApEvent>           restrict_postconditions;
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     };
@@ -949,7 +945,6 @@ namespace Legion {
       std::deque<SliceTask*> origin_mapped_slices;
     protected:
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> completion_preconditions;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
     protected:
       // Whether we have to do intra-task alias analysis
@@ -1104,7 +1099,7 @@ namespace Legion {
       std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
-      std::set<ApEvent> restrict_postconditions;
+      std::set<ApEvent> effects_postconditions;
       std::set<RtEvent> commit_preconditions;
     };
 

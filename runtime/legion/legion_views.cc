@@ -357,850 +357,314 @@ namespace Legion {
                         outstanding_gc_events.end());
     } 
 
-#if 0
     //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_preconditions(ReductionOpID redop, 
-                                               bool reading, 
-                                               bool single_copy,
-                                               bool restrict_out,
-                                               const FieldMask &copy_mask,
-                                               IndexSpaceExpression *copy_expr,
-                                               VersionTracker *versions,
-                                               const UniqueID creator_op_id,
-                                               const unsigned index,
-                                               const AddressSpaceID source,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info,
-                                              bool can_filter)
+    void MaterializedView::add_initial_user(ApEvent term_event,
+                                            const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceExpression *user_expr,
+                                            const UniqueID op_id,
+                                            const unsigned index)
     //--------------------------------------------------------------------------
     {
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-      {
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(start_use_event);
-        if (finder == preconditions.end())
-          preconditions[start_use_event] = copy_mask;
-        else
-          finder->second |= copy_mask;
-      }
-      // If we can filter we can do the normal case, otherwise
-      // we do the above case where we don't filter
-      if (can_filter)
-        find_local_copy_preconditions<FieldMask>(
-                                      redop, reading, single_copy, restrict_out,
-                                      copy_mask, INVALID_COLOR, copy_expr, 
-                                      versions, creator_op_id, index, source, 
-                                      preconditions, applied_events,trace_info);
-      else
-        find_local_copy_preconditions_above<FieldMask>(
-                                      redop, reading, single_copy,
-                                      restrict_out, copy_mask, INVALID_COLOR, 
-                                      copy_expr, versions,creator_op_id,index,
-                                      source, preconditions, applied_events,
-                                      trace_info, false/*actually above*/);
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above<FieldMask>(redop, reading, 
-          single_copy, restrict_out, copy_mask, local_point, copy_expr,versions,
-          creator_op_id, index, source,preconditions,applied_events,trace_info);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    void MaterializedView::find_copy_preconditions_above(ReductionOpID redop,
-                                                         bool reading,
-                                                         bool single_copy,
-                                                         bool restrict_out,
-                                                const FieldMask &copy_mask,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID creator_op_id,
-                                                const unsigned index,
-                                                const AddressSpaceID source,
-                          typename LegionMap<ApEvent,T>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      find_local_copy_preconditions_above<T>(redop, reading, single_copy, 
-        restrict_out, copy_mask, child_color, user_expr, versions, 
-        creator_op_id, index, source, preconditions, applied_events,trace_info);
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_point = logical_node->get_color();
-        parent->find_copy_preconditions_above<T>(redop, reading, 
-          single_copy, restrict_out, copy_mask, local_point, user_expr,versions,
-          creator_op_id, index, source,preconditions,applied_events,trace_info);
-      }
-    }
-    
-    //--------------------------------------------------------------------------
-    template<typename T>
-    void MaterializedView::find_local_copy_preconditions(ReductionOpID redop,
-                                                         bool reading,
-                                                         bool single_copy,
-                                                         bool restrict_out,
-                                                const FieldMask &copy_mask,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID creator_op_id,
-                                                const unsigned index,
-                                                const AddressSpaceID source,
-                          typename LegionMap<ApEvent,T>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
-      if (!is_logical_owner())
-      {
-        // We are also reading if we are doing a reductions
-        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
-      }
-      FieldMask filter_mask;
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
-                                           filter_previous_users;
-      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
-      if (reading)
-      {
-        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-        FieldMask observed, non_dominated;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions<true/*track*/>(copy_mask, usage, child_color,
-                               user_expr, creator_op_id, index, preconditions,
-                               dead_events, filter_current_users,
-                               observed, non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = copy_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color,
-                                      user_expr, creator_op_id, index, 
-                                      preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
-        FieldMask observed, non_dominated, write_skip_mask;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Find any version updates as well our write skip mask
-        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0,
-            restrict_out, true/*base*/);
-        // Can only do the write-skip optimization if this is a single copy
-        if (single_copy && !!write_skip_mask)
-        {
-          // If we have a write skip mask we know we won't interfere with
-          // any users in the list of current users so we can skip them
-          const FieldMask current_mask = copy_mask - write_skip_mask;
-          if (!!current_mask)
-            find_current_preconditions<true/*track*/>(current_mask, usage, 
-                                       child_color, user_expr, creator_op_id,
-                                       index, preconditions, dead_events, 
-                                       filter_current_users,
-                                       observed, non_dominated, trace_info);
-        }
-        else // the normal case with no write-skip
-          find_current_preconditions<true/*track*/>(copy_mask, usage, 
-                                     child_color, user_expr, creator_op_id,
-                                     index, preconditions, dead_events, 
-                                     filter_current_users, 
-                                     observed, non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = copy_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color,
-                                      user_expr, creator_op_id, index, 
-                                      preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || 
-           !filter_previous_users.empty() || !filter_current_users.empty() ||
-           !advance_versions.empty() || !add_versions.empty()) &&
-          !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!filter_previous_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_previous_users.begin(); it != 
-                filter_previous_users.end(); it++)
-            filter_previous_user(it->first, it->second);
-        if (!filter_current_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_current_users.begin(); it !=
-                filter_current_users.end(); it++)
-            filter_current_user(it->first, it->second);
-        if (!advance_versions.empty() || !add_versions.empty())
-          apply_version_updates(filter_mask, advance_versions, 
-                                add_versions, source, applied_events);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    void MaterializedView::find_local_copy_preconditions_above(
-                                                ReductionOpID redop, 
-                                                bool reading,
-                                                bool single_copy,
-                                                bool restrict_out,
-                                                const FieldMask &copy_mask,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID creator_op_id,
-                                                const unsigned index,
-                                                const AddressSpaceID source,
-                          typename LegionMap<ApEvent,T>::aligned &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info,
-                                                  const bool actually_above)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      // If we are not the logical owner and we're not actually already above
-      // the base level, then we need to see if we are up to date 
-      // Otherwise we did this check at the base level and it went all
-      // the way up the tree so we are already good
-      if (!is_logical_owner() && !actually_above)
-      {
-        // We are also reading if we are doing reductions
-        perform_remote_valid_check(copy_mask, versions,reading || (redop != 0));
-      }
-      FieldMask filter_mask;
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users; 
-      LegionMap<VersionID,FieldMask>::aligned advance_versions, add_versions;
-      if (reading)
-      {
-        RegionUsage usage(READ_ONLY, EXCLUSIVE, 0);
-        FieldMask observed, non_dominated;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions<false/*track*/>(copy_mask, usage, 
-                                   child_color, user_expr, creator_op_id, 
-                                   index, preconditions, dead_events, 
-                                   filter_current_users,observed,
-                                   non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(copy_mask, usage, child_color,
-                                    user_expr, creator_op_id, index, 
-                                    preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        RegionUsage usage((redop > 0) ? REDUCE : WRITE_DISCARD,EXCLUSIVE,redop);
-        FieldMask observed, non_dominated, write_skip_mask;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Find any version updates as well our write skip mask
-        find_copy_version_updates(copy_mask, versions, write_skip_mask, 
-            filter_mask, advance_versions, add_versions, redop > 0,
-            restrict_out, false/*base*/);
-        // Can only do the write skip optimization if this is a single copy
-        if (single_copy && !!write_skip_mask)
-        {
-          // If we have a write skip mask we know we won't interfere with
-          // any users in the list of current users so we can skip them
-          const FieldMask current_mask = copy_mask - write_skip_mask;
-          if (!!current_mask)
-            find_current_preconditions<false/*track*/>(current_mask, usage, 
-                                       child_color, user_expr, creator_op_id,
-                                       index, preconditions, dead_events, 
-                                       filter_current_users, observed, 
-                                       non_dominated, trace_info);
-        }
-        else // the normal case with no write-skip
-          find_current_preconditions<false/*track*/>(copy_mask, usage, 
-                                     child_color, user_expr, creator_op_id,
-                                     index, preconditions, dead_events, 
-                                     filter_current_users, observed, 
-                                     non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(copy_mask, usage, child_color,
-                                    user_expr, creator_op_id, index, 
-                                    preconditions, dead_events, trace_info);
-      }
 #ifdef DEBUG_LEGION
-      assert(filter_current_users.empty());
+      assert(is_logical_owner());
 #endif
-      if (!dead_events.empty() || 
-          !advance_versions.empty() || !add_versions.empty())
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!advance_versions.empty() || !add_versions.empty())
-          apply_version_updates(filter_mask, advance_versions, 
-                                add_versions, source, applied_events);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_copy_user(ReductionOpID redop, ApEvent copy_term,
-                                         VersionTracker *versions,
-                                         IndexSpaceExpression *copy_expr,
-                                         const UniqueID creator_op_id,
-                                         const unsigned index,
-                                         const FieldMask &copy_mask, 
-                                         bool reading, bool restrict_out,
-                                         const AddressSpaceID source,
-                                         std::set<RtEvent> &applied_events,
-                                         const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      RegionUsage usage;
-      usage.redop = redop;
-      usage.prop = EXCLUSIVE;
-      if (reading)
-        usage.privilege = READ_ONLY;
-      else if (redop > 0)
-        usage.privilege = REDUCE;
-      else
-        usage.privilege = READ_WRITE;
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_copy_user_above(usage, copy_term, local_color, copy_expr, 
-                                versions, creator_op_id, index, restrict_out,
-                                copy_mask, source, applied_events, trace_info);
-      }
-      add_local_copy_user(usage, copy_term, true/*base*/, restrict_out,
-          INVALID_COLOR, copy_expr, versions, creator_op_id, index, 
-          copy_mask, source, applied_events, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_copy_user_above(const RegionUsage &usage, 
-                                               ApEvent copy_term, 
-                                               const LegionColor child_color,
-                                               IndexSpaceExpression *user_expr,
-                                               VersionTracker *versions,
-                                               const UniqueID creator_op_id,
-                                               const unsigned index,
-                                               const bool restrict_out,
-                                               const FieldMask &copy_mask,
-                                               const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_copy_user_above(usage, copy_term, local_color, user_expr,
-                                  versions, creator_op_id, index, restrict_out, 
-                                  copy_mask, source, applied_events, trace_info);
-      }
-      add_local_copy_user(usage, copy_term, false/*base*/, restrict_out,
-                      child_color, user_expr, versions, creator_op_id, 
-                      index, copy_mask, source, applied_events, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_local_copy_user(const RegionUsage &usage, 
-                                               ApEvent copy_term,
-                                               bool base_user,bool restrict_out,
-                                               const LegionColor child_color,
-                                               IndexSpaceExpression *user_expr,
-                                               VersionTracker *versions,
-                                               const UniqueID creator_op_id,
-                                               const unsigned index,
-                                               const FieldMask &copy_mask,
-                                               const AddressSpaceID source,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (!is_logical_owner())
-      {
-        // If we are not the owner we have to send the user back to the owner
-        RtUserEvent remote_update_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(remote_update_event);
-          rez.serialize<bool>(true); // is copy
-          rez.serialize<bool>(restrict_out);
-          rez.serialize(usage);
-          rez.serialize(copy_mask);
-          rez.serialize(child_color);
-          user_expr->pack_expression(rez, logical_owner);
-          rez.serialize(creator_op_id);
-          rez.serialize(index);
-          rez.serialize(copy_term);
-          // Figure out which version infos we need
-          LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions field_versions;
-          // We don't need to worry about split fields here, that
-          // will be taken care of on the handler side, just pack
-          // up the version infos as they are currently stored
-          versions->get_field_versions(logical_node, false/*split prev*/,
-                                       copy_mask, field_versions);
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions.begin(); it != field_versions.end(); it++)
-          {
-            FieldMask overlap = it->second & copy_mask;
-            if (!overlap)
-              continue;
-            needed_versions[it->first] = overlap;
-          }
-          rez.serialize<size_t>(needed_versions.size());
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                needed_versions.begin(); it != needed_versions.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          FieldMask local_split;
-          versions->get_split_mask(logical_node, copy_mask, local_split);
-          rez.serialize(local_split);
-          rez.serialize<bool>(base_user);
-        }
-        runtime->send_view_remote_update(logical_owner, rez);
-        // Tell the operation it has to wait for this event
-        // to trigger before it can be considered mapped
-        applied_events.insert(remote_update_event);
-      }
-      PhysicalUser *user = new PhysicalUser(usage, child_color, 
-                                    creator_op_id, index, user_expr);
+      // No need to take the lock since we are just initializing
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index); 
       user->add_reference();
-      bool issue_collect = false;
-      {
-        AutoLock v_lock(view_lock);
-        add_current_user(user, copy_term, copy_mask); 
-        if (trace_info.recording)
-        {
-#ifdef DEBUG_LEGION
-          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-          trace_info.tpl->record_outstanding_gc_event(this, copy_term);
-        }
-        else
-        {
-          if (base_user)
-            issue_collect = (outstanding_gc_events.find(copy_term) ==
-                              outstanding_gc_events.end());
-          outstanding_gc_events.insert(copy_term);
-        }
-        // See if we need to check for read only invalidates
-        // Don't worry about writing copies, their invalidations
-        // will be sent if they update the version number
-        if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-          perform_read_invalidations(copy_mask, versions, 
-                                     source, applied_events);
-      }
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(copy_term, &mutator);
-      }
+      add_current_user(user, term_event, user_mask);
+      initial_user_events.insert(term_event);
+      // Don't need to actual launch a collection task, destructor
+      // will handle this case
+      outstanding_gc_events.insert(term_event);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent MaterializedView::find_user_precondition(
-                          const RegionUsage &usage, ApEvent term_event,
-                          const FieldMask &user_mask, Operation *op,
-                          const unsigned index, VersionTracker *versions,
-                          std::set<RtEvent> &applied_events,
-                          const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> wait_on_events;
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        wait_on_events.insert(start_use_event);
-      UniqueID op_id = op->get_unique_op_id();
-      IndexSpaceExpression *user_expr = 
-        logical_node->get_index_space_expression();
-      // Find our local preconditions
-      find_local_user_preconditions(usage, term_event, INVALID_COLOR, 
-          user_expr, versions, op_id, index, user_mask, 
-          wait_on_events, applied_events, trace_info);
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->find_user_preconditions_above(usage, term_event, local_color, 
-                              user_expr, versions, op_id, index, user_mask, 
-                              wait_on_events, applied_events, trace_info);
-      }
-      return Runtime::merge_events(&trace_info, wait_on_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_user_preconditions_above(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
+    ApEvent MaterializedView::register_user(const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceExpression *user_expr,
+                                            const UniqueID op_id,
+                                            const unsigned index,
+                                            ApEvent term_event,
+                                            std::set<RtEvent> &applied_events,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      // Do the precondition analysis on the way up
-      find_local_user_preconditions_above(usage, term_event, child_color, 
-                          user_expr, versions, op_id, index, user_mask, 
-                          preconditions, applied_events, trace_info);
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->find_user_preconditions_above(usage, term_event, local_color, 
-                              user_expr, versions, op_id, index, user_mask, 
-                              preconditions, applied_events, trace_info);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_user_preconditions(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner, we need to see if we are up to date 
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
-        assert(!IS_REDUCE(usage)); // no user reductions currently, might change
+        // Don't support tracing for this case yet
+        assert(!trace_info.recording);
 #endif
-        // Only writing if we are overwriting, otherwise we are also reading
-        perform_remote_valid_check(user_mask, versions, 
-                                   !HAS_WRITE_DISCARD(usage));
-      }
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users, 
-                                           filter_previous_users;
-      if (IS_READ_ONLY(usage))
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
-                                   user_expr, term_event, op_id, index, 
-                                   preconditions, dead_events, 
-                                   filter_current_users, observed,
-                                   non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = user_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color, 
-                                      user_expr, term_event, op_id, index,
-                                      preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<true/*track*/>(user_mask, usage, child_color,
-                                   user_expr, term_event, op_id, index, 
-                                   preconditions, dead_events, 
-                                   filter_current_users, observed,
-                                   non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, filter_previous_users);
-        const FieldMask previous_mask = user_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(previous_mask, usage, child_color, 
-                                      user_expr, term_event, op_id, index,
-                                      preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || 
-           !filter_previous_users.empty() || !filter_current_users.empty()) &&
-          !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!filter_previous_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_previous_users.begin(); it != 
-                filter_previous_users.end(); it++)
-            filter_previous_user(it->first, it->second);
-        if (!filter_current_users.empty())
-          for (LegionMap<ApEvent,FieldMask>::aligned::const_iterator it = 
-                filter_current_users.begin(); it !=
-                filter_current_users.end(); it++)
-            filter_current_user(it->first, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_local_user_preconditions_above(
-                                                const RegionUsage &usage,
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info,
-                                                const bool actually_above)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      // If we are not the logical owner and we are not actually above the
-      // base level, then we need to see if we are up to date 
-      // If we are actually above then we already did this check at the
-      // base level and went all the way up the tree so there is no need
-      // to do it again here
-      if (!is_logical_owner() && !actually_above)
-      {
-#ifdef DEBUG_LEGION
-        assert(!IS_REDUCE(usage)); // no reductions for now, might change
-#endif
-        // We are reading if we are not overwriting
-        perform_remote_valid_check(user_mask, versions, 
-                                   !HAS_WRITE_DISCARD(usage));
-      }
-      std::set<ApEvent> dead_events;
-      LegionMap<ApEvent,FieldMask>::aligned filter_current_users;
-      if (IS_READ_ONLY(usage))
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<false/*track*/>(user_mask, usage, 
-                                   child_color, user_expr,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(user_mask, usage, child_color, 
-                                    user_expr, term_event, op_id, index,
-                                    preconditions, dead_events, trace_info);
-      }
-      else
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions<false/*track*/>(user_mask, usage, 
-                                   child_color, user_expr,
-                                   term_event, op_id, index, preconditions, 
-                                   dead_events, filter_current_users, 
-                                   observed, non_dominated, trace_info);
-        // No domination above
-        find_previous_preconditions(user_mask, usage, child_color, 
-                                    user_expr, term_event, op_id, index,
-                                    preconditions, dead_events, trace_info);
-      }
-#ifdef DEBUG_LEGION
-      assert(filter_current_users.empty());
-#endif
-      if (!dead_events.empty())
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user(const RegionUsage &usage,ApEvent term_event,
-                                    const FieldMask &user_mask, Operation *op,
-                                    const unsigned index, AddressSpaceID source,
-                                    VersionTracker *versions,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      UniqueID op_id = op->get_unique_op_id();
-      bool need_version_update = false;
-      if (IS_WRITE(usage))
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, true/*base*/,
-                                       user_mask, advance_versions);
-        need_version_update = update_version_numbers(user_mask,advance_versions,
-                                                     source, applied_events);
-      }
-      IndexSpaceExpression *user_expr = 
-        logical_node->get_index_space_expression();
-      // Go up the tree if necessary 
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, user_expr,
-            versions, op_id, index, user_mask, need_version_update, 
-            source, applied_events, trace_info);
-      }
-      // Add our local user
-      const bool issue_collect = add_local_user(usage, term_event, 
-                   INVALID_COLOR, user_expr, true/*base*/, versions,
-                   op_id, index, user_mask, source, applied_events, trace_info);
-      // Launch the garbage collection task, if it doesn't exist
-      // then the user wasn't registered anyway, see add_local_user
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
-      }
-      if (IS_ATOMIC(usage))
-        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user_above(const RegionUsage &usage,
-                                          ApEvent term_event,
-                                          const LegionColor child_color,
-                                          IndexSpaceExpression *user_expr,
-                                          VersionTracker *versions,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const FieldMask &user_mask,
-                                          const bool need_version_update,
-                                          const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events,
-                                          const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      bool need_update_above = false;
-      if (need_version_update)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, false/*base*/,
-                                       user_mask, advance_versions);
-        need_update_above = update_version_numbers(user_mask, advance_versions,
-                                                   source, applied_events);
-      }
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above(usage, term_event, local_color, user_expr,
-            versions, op_id, index, user_mask, need_update_above, 
-            source, applied_events, trace_info);
-      }
-      add_local_user(usage, term_event, child_color, user_expr, false/*base*/,
-        versions, op_id, index, user_mask, source, applied_events, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::add_local_user(const RegionUsage &usage,
-                                          ApEvent term_event,
-                                          const LegionColor child_color,
-                                          IndexSpaceExpression *user_expr,
-                                          const bool base_user,
-                                          VersionTracker *versions,
-                                          const UniqueID op_id,
-                                          const unsigned index,
-                                          const FieldMask &user_mask,
-                                          const AddressSpaceID source,
-                                          std::set<RtEvent> &applied_events,
-                                          const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (!term_event.exists())
-        return false;
-      if (!is_logical_owner())
-      {
-        // If we are no the owner, we have to send the user back
-        RtUserEvent remote_update_event = Runtime::create_rt_user_event();
+        // If we're not the logical owner send a message there 
+        // to do the analysis and provide a user event to trigger
+        // with the precondition
+        ApUserEvent ready_event = Runtime::create_ap_user_event();
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
-          rez.serialize(remote_update_event);
-          rez.serialize<bool>(false); // is copy
-          rez.serialize<bool>(false); // restrict out
           rez.serialize(usage);
           rez.serialize(user_mask);
-          rez.serialize(child_color);
           user_expr->pack_expression(rez, logical_owner);
           rez.serialize(op_id);
           rez.serialize(index);
           rez.serialize(term_event);
-          // Figure out which version infos we need
-          LegionMap<VersionID,FieldMask>::aligned needed_versions;
-          FieldVersions field_versions;
-          // We don't need to worry about split fields here, that
-          // will be taken care of on the handler side, just pack
-          // up the version infos as they are currently stored
-          versions->get_field_versions(logical_node, false/*split previous*/,
-                                       user_mask, field_versions);
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                field_versions.begin(); it != field_versions.end(); it++)
-          {
-            FieldMask overlap = it->second & user_mask;
-            if (!overlap)
-              continue;
-            needed_versions[it->first] = overlap;
-          }
-          rez.serialize<size_t>(needed_versions.size());
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                needed_versions.begin(); it != needed_versions.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize(it->second);
-          }
-          FieldMask local_split;
-          versions->get_split_mask(logical_node, user_mask, local_split);
-          rez.serialize(local_split);
-          rez.serialize<bool>(base_user);
+          rez.serialize(ready_event);
+          rez.serialize(applied_event);
         }
-        runtime->send_view_remote_update(logical_owner, rez);
-        // Tell the operation it has to wait for this event to
-        // trigger before it can be considered mapped
-        applied_events.insert(remote_update_event);
+        runtime->send_view_register_user(logical_owner, rez);
+        applied_events.insert(applied_event);
+        return ready_event;
       }
-      PhysicalUser *new_user = 
-        new PhysicalUser(usage, child_color, op_id, index, user_expr);
+      else
+      {
+        std::set<ApEvent> wait_on_events;
+        ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          wait_on_events.insert(start_use_event);
+        // Find the preconditions
+        find_user_preconditions(usage, user_expr, user_mask, term_event, 
+                                op_id, index, wait_on_events, trace_info);
+        // Add our local user
+        const bool issue_collect = add_user(usage, user_expr, user_mask,
+                    term_event, op_id, index, applied_events, trace_info);
+        // Launch the garbage collection task, if it doesn't exist
+        // then the user wasn't registered anyway, see add_local_user
+        if (issue_collect)
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(term_event, &mutator);
+        }
+        // At this point tasks shouldn't be allowed to wait on themselves
+#ifdef DEBUG_LEGION
+        if (term_event.exists())
+          assert(wait_on_events.find(term_event) == wait_on_events.end());
+#endif
+        // Return the merge of the events
+        if (!wait_on_events.empty())
+          return Runtime::merge_events(&trace_info, wait_on_events);
+        else
+          return ApEvent::NO_AP_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent MaterializedView::find_copy_preconditions(bool reading,
+                                            const FieldMask &copy_mask,
+                                            IndexSpaceExpression *copy_expr,
+                                            UniqueID op_id, unsigned index,
+                                            CopyFillAggregator &aggregator,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_logical_owner())
+      {
+#ifdef DEBUG_LEGION
+        // Don't support tracing for this case yet
+        assert(!trace_info.recording);
+#endif
+        RtUserEvent ready_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<bool>(reading);
+          rez.serialize(copy_mask);
+          copy_expr->pack_expression(rez, logical_owner);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize(&aggregator);
+          rez.serialize(this);
+          rez.serialize(ready_event);
+        }
+        runtime->send_view_find_copy_preconditions_request(logical_owner, rez);
+        return ready_event;
+      }
+      else
+      {
+        EventFieldExprs preconditions;
+        const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+        find_copy_preconditions(usage, copy_expr, copy_mask, 
+                                op_id, index, preconditions, trace_info); 
+        // Return any preconditions we found to the aggregator
+        if (!preconditions.empty())
+          aggregator.record_preconditions(this, reading, preconditions);
+        // We're done with the analysis
+        return RtEvent::NO_RT_EVENT;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_copy_user(bool reading, ApEvent term_event,
+                                         const FieldMask &copy_mask,
+                                         IndexSpaceExpression *copy_expr,
+                                         UniqueID op_id, unsigned index,
+                                         std::set<RtEvent> &applied_events,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_logical_owner())
+      {
+#ifdef DEBUG_LEGION
+        // Don't support tracing for this case yet
+        assert(!trace_info.recording);
+#endif
+        RtUserEvent applied_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize<bool>(reading);
+          rez.serialize(term_event);
+          rez.serialize(copy_mask);
+          copy_expr->pack_expression(rez, logical_owner);
+          rez.serialize(op_id);
+          rez.serialize(index);
+          rez.serialize(applied_event);
+        }
+        runtime->send_view_add_copy_user(logical_owner, rez);
+        applied_events.insert(applied_event);
+      }
+      else
+      {
+        const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
+        const bool issue_collect = add_user(usage, copy_expr, copy_mask,
+                          term_event, op_id, index, applied_events, trace_info);
+        // Launch the garbage collection task, if it doesn't exist
+        // then the user wasn't registered anyway, see add_local_user
+        if (issue_collect)
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(term_event, &mutator);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_user_preconditions(const RegionUsage &usage,
+                                            IndexSpaceExpression *user_expr,
+                                            const FieldMask &user_mask,
+                                            ApEvent term_event,
+                                            UniqueID op_id, unsigned index,
+                                            std::set<ApEvent> &preconditions,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      std::set<ApEvent> dead_events;
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Perform the analysis with a read-only lock
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        FieldMask observed, non_dominated;
+        find_current_preconditions(usage, user_mask, user_expr, 
+                                   term_event, op_id, index, 
+                                   preconditions, dead_events, 
+                                   current_to_filter, observed,
+                                   non_dominated, trace_info);
+        const FieldMask dominated = observed - non_dominated;
+        if (!!dominated)
+          find_previous_filter_users(dominated, user_expr, previous_to_filter);
+        const FieldMask previous_mask = user_mask - dominated;
+        if (!!previous_mask)
+          find_previous_preconditions(usage, previous_mask, user_expr,
+                                      term_event, op_id, index,
+                                      preconditions, dead_events, trace_info);
+      }
+      if ((!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()) &&
+          !trace_info.recording)
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::find_copy_preconditions(const RegionUsage &usage,
+                                            IndexSpaceExpression *copy_expr,
+                                            const FieldMask &copy_mask,
+                                            UniqueID op_id, unsigned index,
+                                            EventFieldExprs &preconditions,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      FieldMask filter_mask;
+      std::set<ApEvent> dead_events;
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Do the first pass with a read-only lock on the events
+      {
+        FieldMask observed, non_dominated;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        find_current_preconditions(usage, copy_mask, copy_expr, op_id, index,
+                                   preconditions, dead_events,
+                                   current_to_filter, observed,
+                                   non_dominated, trace_info);
+        const FieldMask dominated = observed - non_dominated;
+        if (!!dominated)
+          find_previous_filter_users(dominated, copy_expr, previous_to_filter);
+        const FieldMask previous_mask = copy_mask - dominated;
+        if (!!previous_mask)
+          find_previous_preconditions(usage, previous_mask, copy_expr, op_id, 
+                              index, preconditions, dead_events, trace_info);
+      }
+      if ((!dead_events.empty() || !previous_to_filter.empty() || 
+            !current_to_filter.empty()) && !trace_info.recording)
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool MaterializedView::add_user(const RegionUsage &usage,
+                                    IndexSpaceExpression *user_expr,
+                                    const FieldMask &user_mask,
+                                    ApEvent term_event, 
+                                    UniqueID op_id, unsigned index,
+                                    std::set<RtEvent> &applied_events,
+                                    const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
+      PhysicalUser *new_user = new PhysicalUser(usage, user_expr, op_id, index);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user
       AutoLock v_lock(view_lock);
       // Finally add our user and return if we need to issue a GC meta-task
       add_current_user(new_user, term_event, user_mask);
-      // See if we need to check for read only invalidates
-      // Don't worry about read-write, the invalidations will
-      // be sent automatically if the version number is advanced
-      if (!valid_remote_instances.empty() && IS_READ_ONLY(usage))
-        perform_read_invalidations(user_mask, versions, source, applied_events);
+      // If we're tracing we defer adding these events until the trace
+      // capture is complete so we can get a full set of preconditions
       if (trace_info.recording)
       {
 #ifdef DEBUG_LEGION
@@ -1210,142 +674,13 @@ namespace Legion {
         return false;
       }
       else if (outstanding_gc_events.find(term_event) == 
-               outstanding_gc_events.end())
+                outstanding_gc_events.end())
       {
         outstanding_gc_events.insert(term_event);
-        return (child_color == INVALID_COLOR);
+        return true;
       }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent MaterializedView::add_user_fused(const RegionUsage &usage, 
-                                           ApEvent term_event,
-                                           const FieldMask &user_mask, 
-                                           Operation *op,const unsigned index,
-                                           VersionTracker *versions,
-                                           const AddressSpaceID source,
-                                           std::set<RtEvent> &applied_events,
-                                           const PhysicalTraceInfo &trace_info,
-                                           bool update_versions/*=true*/)
-    //--------------------------------------------------------------------------
-    {
-      std::set<ApEvent> wait_on_events;
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        wait_on_events.insert(start_use_event);
-      UniqueID op_id = op->get_unique_op_id();
-      IndexSpaceExpression *user_expr = 
-        logical_node->get_index_space_expression();
-      // Find our local preconditions
-      find_local_user_preconditions(usage, term_event, INVALID_COLOR, 
-                     user_expr, versions, op_id, index, user_mask, 
-                     wait_on_events, applied_events, trace_info);
-      bool need_version_update = false;
-      if (IS_WRITE(usage) && update_versions)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, true/*base*/,
-                                       user_mask, advance_versions);
-        need_version_update = update_version_numbers(user_mask,advance_versions,
-                                                     source, applied_events);
-      }
-      // Go up the tree if necessary
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color, 
-                              user_expr, versions, op_id, index, 
-                              user_mask, source, wait_on_events, 
-                              applied_events, trace_info,
-                              need_version_update);
-      }
-      // Add our local user
-      const bool issue_collect = add_local_user(usage, term_event, 
-                   INVALID_COLOR, user_expr, true/*base*/, versions, op_id, 
-                   index, user_mask, source, applied_events, trace_info);
-      // Launch the garbage collection task, if it doesn't exist
-      // then the user wasn't registered anyway, see add_local_user
-      if (issue_collect)
-      {
-        WrapperReferenceMutator mutator(applied_events);
-        defer_collect_user(term_event, &mutator);
-      }
-      // At this point tasks shouldn't be allowed to wait on themselves
-#ifdef DEBUG_LEGION
-      if (term_event.exists())
-        assert(wait_on_events.find(term_event) == wait_on_events.end());
-#endif
-      if (IS_ATOMIC(usage))
-        find_atomic_reservations(user_mask, op, IS_WRITE(usage));
-
-      // Return the merge of the events
-      return Runtime::merge_events(&trace_info, wait_on_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_user_above_fused(const RegionUsage &usage, 
-                                                ApEvent term_event,
-                                                const LegionColor child_color,
-                                                IndexSpaceExpression *user_expr,
-                                                VersionTracker *versions,
-                                                const UniqueID op_id,
-                                                const unsigned index,
-                                                const FieldMask &user_mask,
-                                                const AddressSpaceID source,
-                                              std::set<ApEvent> &preconditions,
-                                              std::set<RtEvent> &applied_events,
-                                            const PhysicalTraceInfo &trace_info,
-                                                const bool need_version_update)
-    //--------------------------------------------------------------------------
-    {
-      // Do the precondition analysis on the way up
-      find_local_user_preconditions_above(usage, term_event, child_color, 
-                          user_expr, versions, op_id, index, user_mask, 
-                          preconditions, applied_events, trace_info);
-      bool need_update_above = false;
-      if (need_version_update)
-      {
-        FieldVersions advance_versions;
-        versions->get_advance_versions(logical_node, false/*base*/, 
-                                       user_mask, advance_versions);
-        need_update_above = update_version_numbers(user_mask, advance_versions,
-                                                   source, applied_events);
-      }
-      // Go up the tree if we have to
-      if ((parent != NULL) && !versions->is_upper_bound_node(logical_node))
-      {
-        const LegionColor local_color = logical_node->get_color();
-        parent->add_user_above_fused(usage, term_event, local_color, user_expr,
-                              versions, op_id, index, user_mask, source,
-                              preconditions, applied_events, trace_info,
-                              need_update_above);
-      }
-      // Add the user on the way back down
-      add_local_user(usage, term_event, child_color, user_expr, false/*base*/,
-         versions, op_id, index, user_mask, source, applied_events, trace_info);
-      // No need to launch a collect user task, the child takes care of that
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_initial_user(ApEvent term_event,
-                                            const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            IndexSpaceExpression *expr,
-                                            const UniqueID op_id,
-                                            const unsigned index)
-    //--------------------------------------------------------------------------
-    {
-      // No need to take the lock since we are just initializing
-      PhysicalUser *user = 
-        new PhysicalUser(usage, INVALID_COLOR, op_id, index, expr); 
-      user->add_reference();
-      add_current_user(user, term_event, user_mask);
-      initial_user_events.insert(term_event);
-      // Don't need to actual launch a collection task, destructor
-      // will handle this case
-      outstanding_gc_events.insert(term_event);
+      else
+        return false;
     }
  
     //--------------------------------------------------------------------------
@@ -1437,399 +772,6 @@ namespace Legion {
         outstanding_gc_events.insert(*it);
     }    
 
-#if 0
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_invalid_fields(FieldMask &to_filter,
-                                                 VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      // If we're not the parent then keep going up
-      if ((parent != NULL) && !version_info.is_upper_bound_node(logical_node))
-        parent->filter_invalid_fields(to_filter, version_info);
-      // If we still have fields to filter, then do that now
-      if (!!to_filter)
-      {
-        // If we're not the owner then make sure that we are up to date
-        if (!is_logical_owner())
-          perform_remote_valid_check(to_filter, &version_info, true/*reading*/);
-        // Get the version numbers that we need 
-        FieldVersions needed_versions;
-        version_info.get_field_versions(logical_node, false/*split prev*/,
-                                        to_filter, needed_versions);
-        // Need the lock in read only mode while touching current versions
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        for (FieldVersions::iterator it = needed_versions.begin();
-              it != needed_versions.end(); it++)
-        {
-          std::map<VersionID,FieldMask>::const_iterator finder =  
-            current_versions.find(it->first);
-          if (finder != current_versions.end())
-          {
-            const FieldMask to_remove = it->second - finder->second;
-            if (!!to_remove)
-            {
-              to_filter -= to_remove;
-              if (!to_filter)
-                return;
-            }
-          }
-          else
-          {
-            // None of the fields are at the right version number
-            to_filter -= it->second;
-            if (!to_filter)
-              return;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_version_updates(const FieldMask &copy_mask,
-                                                     VersionTracker *versions,
-                                                     FieldMask &write_skip_mask,
-                                                     FieldMask &filter_mask,
-                              LegionMap<VersionID,FieldMask>::aligned &advance,
-                              LegionMap<VersionID,FieldMask>::aligned &add_only,
-                                bool is_reduction, bool restrict_out, bool base)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      // These are updates for a copy, so we are never going to the
-      // next version number, we only go to the current versions
-      FieldVersions update_versions;
-      // If we're doing a restrict out copy, the version we are updating
-      // is the advance version, otherwise it is the current version
-      // before the operation. We want split previous here because we
-      // haven't actually done the write yet, so if we're writing then
-      // we're just copying the previous version over.
-      if (restrict_out)
-        versions->get_advance_versions(logical_node, base, 
-                                       copy_mask, update_versions);
-      else
-        versions->get_field_versions(logical_node, true/*split previous*/,
-                                     copy_mask, update_versions);
-      FieldMask split_mask;
-      versions->get_split_mask(logical_node, copy_mask, split_mask);
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            update_versions.begin(); it != update_versions.end(); it++)
-      {
-        FieldMask overlap = it->second & copy_mask;
-        if (!overlap)
-          continue;
-        if (it->first == 0)
-        {
-          filter_mask |= overlap;
-          add_only[it->first] = overlap;
-          continue;
-        }
-        // We're trying to get this to current version number, check to
-        // see if we're already at one of the most common values of
-        // either the previous version number or the current one
-        // otherwise we will have to add this to the set to filter later
-        const VersionID previous_number = it->first - 1;
-        const VersionID next_number = it->first;
-        LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-          current_versions.find(previous_number);
-        if (finder != current_versions.end())
-        {
-          const FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            advance[previous_number] = intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-          // Bump the iterator to the next entry, hopefully 
-          // it is the next version number, but if not we'll figure it out
-          finder++;
-        }
-        else
-          finder = current_versions.find(next_number);
-        // Check if the finder is good and the right version number
-        if ((finder != current_versions.end()) && 
-            (finder->first == next_number))
-        {
-          const FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            // This is a write skip field since we're already
-            // at the version number at this view, but we're only
-            // really at the version number if we're not reducing
-            // We can't count split fields here because they might
-            // contain users from many versions
-#ifndef LEGION_SPY 
-            if (!is_reduction)
-            {
-              if (!!split_mask)
-                write_skip_mask |= (intersect - split_mask);
-              else
-                write_skip_mask |= intersect;
-            }
-#endif
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-        }
-        // If we still have fields, then record we need to filter them
-        filter_mask |= overlap;
-        // Record the version number and fields to add after the filter
-        add_only[next_number] = overlap;
-      }
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::apply_version_updates(FieldMask &filter_mask,
-                      const LegionMap<VersionID,FieldMask>::aligned &advance,
-                      const LegionMap<VersionID,FieldMask>::aligned &add_only,
-                      AddressSpaceID source, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      // If we have remote instances, we need to check to see 
-      // if we need to send any invalidations
-      if (!valid_remote_instances.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(is_logical_owner());
-#endif
-        // Keep track of any invalidations that we have to apply 
-        // make a copy here before filter gets destroyed by the call
-        FieldMask invalidate_mask = filter_mask;
-        if (!!filter_mask)
-        {
-          // See if any of them are already up to date so we don't have
-          // to send invalidations, this is expensive enough that it is
-          // worth the extra analysis cost here to just do it
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                add_only.begin(); it != add_only.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-              current_versions.find(it->first);
-            if (finder == current_versions.end())
-              continue;
-            FieldMask overlap = finder->second & it->second;
-            if (!!overlap)
-              invalidate_mask -= overlap;
-          }
-          filter_and_add(filter_mask, add_only);
-        }
-        if (!advance.empty())
-        {
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                advance.begin(); it != advance.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-              current_versions.find(it->first);
-            // Someone else could already have advanced this
-            if (finder == current_versions.end())
-              continue;
-            FieldMask overlap = finder->second & it->second;
-            if (!overlap)
-              continue;
-            finder->second -= overlap;
-            if (!finder->second)
-              current_versions.erase(finder);
-            current_versions[it->first+1] |= overlap;
-            invalidate_mask |= overlap;
-          }
-        }
-        if (!!invalidate_mask)
-          send_invalidations(invalidate_mask, source, applied_events);
-      }
-      else
-      {
-        // This is the common path
-        if (!!filter_mask)
-          filter_and_add(filter_mask, add_only);
-        if (!advance.empty())
-        {
-          for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-                advance.begin(); it != advance.end(); it++)
-          {
-            LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-              current_versions.find(it->first);
-            // Someone else could already have advanced this
-            if (finder == current_versions.end())
-              continue;
-            finder->second -= it->second;
-            if (!finder->second)
-              current_versions.erase(finder);
-            current_versions[it->first+1] |= it->second;
-          }
-        }
-      }
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_and_add(FieldMask &filter_mask,
-                    const LegionMap<VersionID,FieldMask>::aligned &add_versions)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<VersionID> to_delete; 
-      for (LegionMap<VersionID,FieldMask>::aligned::iterator it = 
-            current_versions.begin(); it != current_versions.end(); it++)
-      {
-        FieldMask overlap = it->second & filter_mask;
-        if (!overlap)
-          continue;
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        filter_mask -= overlap;
-        if (!filter_mask)
-          break;
-      }
-      // Delete the old entries
-      if (!to_delete.empty())
-      {
-        for (std::vector<VersionID>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-          current_versions.erase(*it);
-      }
-      // Then add the new entries
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            add_versions.begin(); it != add_versions.end(); it++)
-        current_versions[it->first] |= it->second;
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    bool MaterializedView::update_version_numbers(const FieldMask &user_mask,
-                                           const FieldVersions &target_versions,
-                                           const AddressSpaceID source,
-                                           std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask filter_mask, invalidate_mask;
-      LegionMap<VersionID,FieldMask>::aligned update_versions;
-      bool need_check_above = false;
-      // Need the lock in exclusive mode to do the update
-      AutoLock v_lock(view_lock);
-      // If we are logical owner and we have remote valid instances
-      // we need to track which version numbers get updated so we can
-      // send invalidates
-      const bool need_invalidates = is_logical_owner() && 
-          !valid_remote_instances.empty() && !(user_mask * remote_valid_mask);
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            target_versions.begin(); it != target_versions.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(it->first > 0);
-#endif
-        FieldMask overlap = it->second & user_mask;
-        if (!overlap)
-          continue;
-        // We are always trying to advance the version numbers here
-        // since these are writing users and are therefore going from
-        // the current version number to the next one. We'll check for
-        // the most common cases here, and only filter if we don't find them.
-        const VersionID previous_number = it->first - 1; 
-        const VersionID next_number = it->first; 
-        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-          current_versions.find(previous_number);
-        if (finder != current_versions.end())
-        {
-          FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            need_check_above = true;
-            finder->second -= intersect;
-            if (need_invalidates)
-              invalidate_mask |= intersect;
-            if (!finder->second)
-            {
-              current_versions.erase(finder);
-              // We just deleted the iterator so we need a new one
-              finder = current_versions.find(next_number);
-            }
-            else // We didn't delete the iterator so trying bumping it
-              finder++;
-            if (finder != current_versions.end())
-            {
-              if (finder->first != next_number) 
-              {
-                current_versions[next_number] = intersect;
-                // Set it to end since we know there is no point in checking
-                finder = current_versions.end();
-              }
-              else // finder points to the right place
-                finder->second |= intersect;
-            }
-            else // no valid iterator so just put in the value
-              current_versions[next_number] = intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-          else // Try the next element, hopefully it is version number+1
-            finder++;
-        }
-        else
-          finder = current_versions.find(next_number);
-        // Check if the finder is good and the right version number
-        if ((finder != current_versions.end()) && 
-            (finder->first == next_number))
-        {
-          FieldMask intersect = overlap & finder->second;
-          if (!!intersect)
-          {
-            finder->second |= intersect;
-            overlap -= intersect;
-            if (!overlap)
-              continue;
-          }
-        }
-        // If we still have fields, then record we need to filter them
-        filter_mask |= overlap;
-        // Record the version number and fields to add after the filter
-        update_versions[next_number] = overlap;
-        if (need_invalidates)
-          invalidate_mask |= overlap;
-      }
-      // If we need to filter, let's do that now
-      if (!!filter_mask)
-      {
-        need_check_above = true;
-        filter_and_add(filter_mask, update_versions);  
-      }
-#ifdef DEBUG_LEGION
-      sanity_check_versions();
-#endif
-      if (!!invalidate_mask)
-        send_invalidations(invalidate_mask, source, applied_events);
-      return need_check_above;
-    }
-#endif
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void MaterializedView::sanity_check_versions(void)
-    //--------------------------------------------------------------------------
-    {
-      FieldMask version_mask;
-      for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-            current_versions.begin(); it != current_versions.end(); it++)
-      {
-        assert(version_mask * it->second);
-        version_mask |= it->second;
-      }
-    }
-#endif
-
     //--------------------------------------------------------------------------
     void MaterializedView::add_current_user(PhysicalUser *user, 
                                             ApEvent term_event,
@@ -1839,32 +781,11 @@ namespace Legion {
       // Must be called while holding the lock
       // Reference should already have been added
       EventUsers &event_users = current_epoch_users[term_event];
-      if (event_users.single)
-      {
-        if (event_users.users.single_user == NULL)
-        {
-          // make it the entry
-          event_users.users.single_user = user;
-          event_users.user_mask = user_mask;
-        }
-        else
-        {
-          // convert to multi
-          LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                           new LegionMap<PhysicalUser*,FieldMask>::aligned();
-          (*new_map)[event_users.users.single_user] = event_users.user_mask;
-          (*new_map)[user] = user_mask;
-          event_users.user_mask |= user_mask;
-          event_users.users.multi_users = new_map;
-          event_users.single = false;
-        }
-      }
+      EventUsers::iterator finder = event_users.find(user);
+      if (finder == event_users.end())
+        event_users.insert(user, user_mask);
       else
-      {
-        // Add it to the set 
-        (*event_users.users.multi_users)[user] = user_mask;
-        event_users.user_mask |= user_mask;
-      }
+        finder.merge(user_mask);
     }
 
     //--------------------------------------------------------------------------
@@ -1881,50 +802,24 @@ namespace Legion {
         outstanding_gc_events.find(term_event); 
       if (event_finder != outstanding_gc_events.end())
       {
-        LegionMap<ApEvent,EventUsers>::aligned::iterator current_finder = 
+        EventFieldUsers::iterator current_finder = 
           current_epoch_users.find(term_event);
         if (current_finder != current_epoch_users.end())
         {
-          EventUsers &event_users = current_finder->second;
-          if (event_users.single)
-          {
-            if (event_users.users.single_user->remove_reference())
-              delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              if (it->first->remove_reference())
-                delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
+          for (EventUsers::const_iterator it = current_finder->second.begin();
+                it != current_finder->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
           current_epoch_users.erase(current_finder);
         }
         LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
           previous_epoch_users.find(term_event);
         if (previous_finder != previous_epoch_users.end())
         {
-          EventUsers &event_users = previous_finder->second; 
-          if (event_users.single)
-          {
-            if (event_users.users.single_user->remove_reference())
-              delete (event_users.users.single_user);
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator
-                  it = event_users.users.multi_users->begin(); it !=
-                  event_users.users.multi_users->end(); it++)
-            {
-              if (it->first->remove_reference())
-                delete (it->first);
-            }
-            delete event_users.users.multi_users;
-          }
+          for (EventUsers::const_iterator it = previous_finder->second.begin();
+                it != previous_finder->second.end(); it++)
+            if (it->first->remove_reference())
+              delete it->first;
           previous_epoch_users.erase(previous_finder);
         }
         outstanding_gc_events.erase(event_finder);
@@ -1933,502 +828,126 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::filter_local_users(const FieldMask &filter_mask,
-                      LegionMap<ApEvent,EventUsers>::aligned &local_epoch_users)
+    void MaterializedView::filter_current_users(
+                                               const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
-      std::vector<ApEvent> to_delete;
-      for (LegionMap<ApEvent,EventUsers>::aligned::iterator lit = 
-           local_epoch_users.begin(); lit != local_epoch_users.end(); lit++)
+      // Lock needs to be held by caller 
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
       {
-        const FieldMask overlap = lit->second.user_mask & filter_mask;
-        if (!overlap)
+        EventFieldUsers::iterator event_finder = 
+          current_epoch_users.find(fit->first);
+        // If it's already been pruned out then either it was filtered
+        // because it finished or someone else moved it already, either
+        // way we don't need to do anything about it
+        if (event_finder == current_epoch_users.end())
           continue;
-        EventUsers &local_users = lit->second;
-        local_users.user_mask -= overlap;
-        if (!local_users.user_mask)
+        EventFieldUsers::iterator target_finder = 
+          previous_epoch_users.find(fit->first);
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
         {
-          // Total removal of the entry
-          to_delete.push_back(lit->first);
-          if (local_users.single)
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again, either way there is
+          // nothing for us to do here if it was already moved
+          if (finder == event_finder->second.end())
+            continue;
+          const FieldMask overlap = finder->second & it->second;
+          if (!overlap)
+            continue;
+          finder.filter(overlap);
+          bool needs_reference = true;
+          if (!finder->second)
           {
-            PhysicalUser *user = local_users.users.single_user;
-            if (user->remove_reference())
-              delete (user);
+            // Have the reference flow back with the user
+            needs_reference = false;
+            event_finder->second.erase(finder);
+          }
+          // Now add the user to the previous set
+          if (target_finder == previous_epoch_users.end())
+          {
+            if (needs_reference)
+              it->first->add_reference();
+            previous_epoch_users[fit->first].insert(it->first, overlap);
+            target_finder = previous_epoch_users.find(fit->first);
           }
           else
           {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  it = local_users.users.multi_users->begin(); it !=
-                  local_users.users.multi_users->end(); it++)
+            finder = target_finder->second.find(it->first);
+            if (finder == target_finder->second.end())
             {
-              if (it->first->remove_reference())
-                delete (it->first);
+              if (needs_reference)
+                it->first->add_reference();
+              target_finder->second.insert(it->first, overlap);
             }
-            // Delete the map too
-            delete local_users.users.multi_users;
-          }
-        }
-        else if (!local_users.single) // only need to filter for non-single
-        {
-          // Partial removal of the entry
-          std::vector<PhysicalUser*> to_erase;
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                local_users.users.multi_users->begin(); it !=
-                local_users.users.multi_users->end(); it++)
-          {
-            it->second -= overlap;
-            if (!it->second)
-              to_erase.push_back(it->first);
-          }
-          if (!to_erase.empty())
-          {
-            for (std::vector<PhysicalUser*>::const_iterator it = 
-                  to_erase.begin(); it != to_erase.end(); it++)
+            else
             {
-              local_users.users.multi_users->erase(*it);
-              if ((*it)->remove_reference())
-                delete (*it);
-            }
-            // See if we can shrink this back down
-            if (local_users.users.multi_users->size() == 1)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
-                            local_users.users.multi_users->begin();     
-#ifdef DEBUG_LEGION
-              // This summary mask should dominate
-              assert(!(first_it->second - local_users.user_mask));
-#endif
-              PhysicalUser *user = first_it->first;
-              local_users.user_mask = first_it->second;
-              delete local_users.users.multi_users;
-              local_users.users.single_user = user;
-              local_users.single = true;
+              finder.merge(overlap);
+              // Remove any extra references we might be trying to send back
+              if (!needs_reference && it->first->remove_reference())
+                delete it->first;
             }
           }
         }
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<ApEvent>::const_iterator it = to_delete.begin();
-              it != to_delete.end(); it++)
-          local_epoch_users.erase(*it);
+        if (event_finder->second.empty())
+          current_epoch_users.erase(event_finder);
       }
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::filter_current_user(ApEvent user_event, 
-                                               const FieldMask &filter_mask)
+    void MaterializedView::filter_previous_users(
+                                               const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL);
-      LegionMap<ApEvent,EventUsers>::aligned::iterator cit = 
-        current_epoch_users.find(user_event);
-      // Some else might already have moved it back or it could have
-      // been garbage collected already
-      if (cit == current_epoch_users.end())
-        return;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (cit->first.has_triggered_faultignorant())
+      // Lock needs to be held by caller
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
       {
-        EventUsers &current_users = cit->second;
-        if (current_users.single)
+        EventFieldUsers::iterator event_finder = 
+          previous_epoch_users.find(fit->first);
+        // Might already have been pruned out
+        if (event_finder == previous_epoch_users.end())
+          continue;
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
         {
-          if (current_users.users.single_user->remove_reference())
-            delete (current_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                current_users.users.multi_users->begin(); it !=
-                current_users.users.multi_users->end(); it++)
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again
+          if (finder == event_finder->second.end())
+            continue;
+          finder.filter(it->second);
+          if (!finder->second)
           {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          delete current_users.users.multi_users;
-        }
-        current_epoch_users.erase(cit);
-        return;
-      }
-#endif
-      EventUsers &current_users = cit->second;
-      FieldMask summary_overlap = current_users.user_mask & filter_mask;
-      if (!summary_overlap)
-        return;
-      current_users.user_mask -= summary_overlap;
-      EventUsers &prev_users = previous_epoch_users[cit->first];
-      if (current_users.single)
-      {
-        PhysicalUser *user = current_users.users.single_user;
-        if (prev_users.single)
-        {
-          // Single, see if something exists there yet
-          if (prev_users.users.single_user == NULL)
-          {
-            prev_users.users.single_user = user; 
-            prev_users.user_mask = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference(); // add a reference
-          }
-          else if (prev_users.users.single_user == user)
-          {
-            // Same user, update the fields 
-            prev_users.user_mask |= summary_overlap;
-            if (!current_users.user_mask)
-            {
-              current_epoch_users.erase(cit);
-              user->remove_reference(); // remove unnecessary reference
-            }
-          }
-          else
-          {
-            // Go to multi mode
-            LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                          new LegionMap<PhysicalUser*,FieldMask>::aligned();
-            (*new_map)[prev_users.users.single_user] = prev_users.user_mask;
-            (*new_map)[user] = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference();
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = new_map;
-            prev_users.single = false;
+            if (finder->first->remove_reference())
+              delete finder->first;
+            event_finder->second.erase(finder);
           }
         }
-        else
-        {
-          // Already multi
-          prev_users.user_mask |= summary_overlap;
-          // See if we can find it in the multi-set
-          LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-            prev_users.users.multi_users->find(user);
-          if (finder == prev_users.users.multi_users->end())
-          {
-            // Couldn't find it
-            (*prev_users.users.multi_users)[user] = summary_overlap;
-            if (!current_users.user_mask) // reference flows back
-              current_epoch_users.erase(cit);
-            else
-              user->add_reference();
-          }
-          else
-          {
-            // Found it, update it 
-            finder->second |= summary_overlap;
-            if (!current_users.user_mask)
-            {
-              current_epoch_users.erase(cit);
-              user->remove_reference(); // remove redundant reference
-            }
-          }
-        }
-      }
-      else
-      {
-        // Many things, filter them and move them back
-        if (!current_users.user_mask)
-        {
-          // Moving the whole set back, see what the previous looks like
-          if (prev_users.single)
-          {
-            if (prev_users.users.single_user != NULL)
-            {
-              // Merge the one user into this map so we can move 
-              // the whole map back
-              PhysicalUser *user = prev_users.users.single_user;  
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder =
-                current_users.users.multi_users->find(user);
-              if (finder == current_users.users.multi_users->end())
-              {
-                // Add it reference is already there
-                (*current_users.users.multi_users)[user] = 
-                  prev_users.user_mask;
-              }
-              else
-              {
-                // Already there, update it and remove duplicate reference
-                finder->second |= prev_users.user_mask;
-                user->remove_reference();
-              }
-            }
-            // Now just move the map back
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = current_users.users.multi_users;
-            prev_users.single = false;
-          }
-          else
-          {
-            // merge the two sets
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator
-                  it = current_users.users.multi_users->begin();
-                  it != current_users.users.multi_users->end(); it++)
-            {
-              // See if we can find it
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                prev_users.users.multi_users->find(it->first);
-              if (finder == prev_users.users.multi_users->end())
-              {
-                // Didn't find it, just move it back, reference moves back
-                prev_users.users.multi_users->insert(*it);
-              }
-              else
-              {
-                finder->second |= it->second; 
-                // Remove the duplicate reference
-                it->first->remove_reference();
-              }
-            }
-            prev_users.user_mask |= summary_overlap;
-            // Now delete the set
-            delete current_users.users.multi_users;
-          }
-          current_epoch_users.erase(cit);
-        }
-        else
-        {
-          // Only send back filtered users
-          std::vector<PhysicalUser*> to_delete;
-          if (prev_users.single)
-          {
-            // Make a new map to send back  
-            LegionMap<PhysicalUser*,FieldMask>::aligned *new_map = 
-                          new LegionMap<PhysicalUser*,FieldMask>::aligned();
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                  current_users.users.multi_users->begin(); it !=
-                  current_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = summary_overlap & it->second;
-              if (!overlap)
-                continue;
-              // Can move without checking
-              (*new_map)[it->first] = overlap;
-              it->second -= overlap;
-              if (!it->second)
-                to_delete.push_back(it->first); // reference flows back
-              else
-                it->first->add_reference(); // need new reference
-            }
-            // Also capture the existing previous user if there is one
-            if (prev_users.users.single_user != NULL)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                new_map->find(prev_users.users.single_user);
-              if (finder == new_map->end())
-              {
-                (*new_map)[prev_users.users.single_user] = 
-                  prev_users.user_mask;
-              }
-              else
-              {
-                finder->second |= prev_users.user_mask;
-                // Remove redundant reference
-                finder->first->remove_reference();
-              }
-            }
-            // Make the new map the previous set
-            prev_users.user_mask |= summary_overlap;
-            prev_users.users.multi_users = new_map;
-            prev_users.single = false;
-          }
-          else
-          {
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it =
-                  current_users.users.multi_users->begin(); it !=
-                  current_users.users.multi_users->end(); it++)
-            {
-              FieldMask overlap = summary_overlap & it->second; 
-              if (!overlap)
-                continue;
-              it->second -= overlap;
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator finder = 
-                prev_users.users.multi_users->find(it->first);
-              // See if it already exists
-              if (finder == prev_users.users.multi_users->end())
-              {
-                // Doesn't exist yet, so add it 
-                (*prev_users.users.multi_users)[it->first] = overlap;
-                if (!it->second) // reference flows back
-                  to_delete.push_back(it->first);
-                else
-                  it->first->add_reference();
-              }
-              else
-              {
-                // Already exists so update it
-                finder->second |= overlap;
-                if (!it->second)
-                {
-                  to_delete.push_back(it->first);
-                  // Remove redundant reference
-                  it->first->remove_reference();
-                }
-              }
-            }
-            prev_users.user_mask |= summary_overlap;
-          }
-          // See if we can collapse this map back down
-          if (!to_delete.empty())
-          {
-            for (std::vector<PhysicalUser*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              current_users.users.multi_users->erase(*it);
-            }
-            if (current_users.users.multi_users->size() == 1)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned::iterator 
-                first_it = current_users.users.multi_users->begin();
-#ifdef DEBUG_LEGION
-              // Should dominate as an upper bound
-              assert(!(first_it->second - current_users.user_mask));
-#endif
-              PhysicalUser *user = first_it->first;
-              current_users.user_mask = first_it->second;
-              delete current_users.users.multi_users;
-              current_users.users.single_user = user;   
-              current_users.single = true;
-            }
-          }
-        }
+        if (event_finder->second.empty())
+          previous_epoch_users.erase(event_finder);
       }
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::filter_previous_user(ApEvent user_event,
-                                                const FieldMask &filter_mask)
-    //--------------------------------------------------------------------------
-    {
-      // lock better be held by caller
-      DETAILED_PROFILER(context->runtime,
-                        MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL);
-      LegionMap<ApEvent,EventUsers>::aligned::iterator pit = 
-        previous_epoch_users.find(user_event);
-      // This might already have been filtered or garbage collected
-      if (pit == previous_epoch_users.end())
-        return;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      if (pit->first.has_triggered_faultignorant())
-      {
-        EventUsers &previous_users = pit->second;
-        if (previous_users.single)
-        {
-          if (previous_users.users.single_user->remove_reference())
-            delete (previous_users.users.single_user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-                previous_users.users.multi_users->begin(); it !=
-                previous_users.users.multi_users->end(); it++)
-          {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          delete previous_users.users.multi_users;
-        }
-        previous_epoch_users.erase(pit);
-        return;
-      }
-#endif
-      EventUsers &previous_users = pit->second;
-      FieldMask summary_overlap = previous_users.user_mask & filter_mask;
-      if (!summary_overlap)
-        return;
-      previous_users.user_mask -= summary_overlap;
-      if (!previous_users.user_mask)
-      {
-        // We can delete the whole entry
-        if (previous_users.single)
-        {
-          PhysicalUser *user = previous_users.users.single_user;
-          if (user->remove_reference())
-            delete (user);
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = previous_users.users.multi_users->begin(); it !=
-                previous_users.users.multi_users->end(); it++)
-          {
-            if (it->first->remove_reference())
-              delete (it->first);
-          }
-          // Delete the map too
-          delete previous_users.users.multi_users;
-        }
-        previous_epoch_users.erase(pit);
-      }
-      else if (!previous_users.single) // only need to filter for non-single
-      {
-        // Filter out the users for the dominated fields
-        std::vector<PhysicalUser*> to_delete;
-        for (LegionMap<PhysicalUser*,FieldMask>::aligned::iterator it = 
-              previous_users.users.multi_users->begin(); it !=
-              previous_users.users.multi_users->end(); it++)
-        {
-          it->second -= summary_overlap; 
-          if (!it->second)
-            to_delete.push_back(it->first);
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<PhysicalUser*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            previous_users.users.multi_users->erase(*it);
-            if ((*it)->remove_reference())
-              delete (*it);
-          }
-          // See if we can shrink this back down
-          if (previous_users.users.multi_users->size() == 1)
-          {
-            LegionMap<PhysicalUser*,FieldMask>::aligned::iterator first_it =
-                          previous_users.users.multi_users->begin();     
-#ifdef DEBUG_LEGION
-            // This summary mask should dominate
-            assert(!(first_it->second - previous_users.user_mask));
-#endif
-            PhysicalUser *user = first_it->first;
-            previous_users.user_mask = first_it->second;
-            delete previous_users.users.multi_users;
-            previous_users.users.single_user = user;
-            previous_users.single = true;
-          }
-        }
-      }
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    template<bool TRACK_DOM>
     void MaterializedView::find_current_preconditions(
-                                               const FieldMask &user_mask,
                                                const RegionUsage &usage,
-                                               const LegionColor child_color,
+                                               const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                ApEvent term_event,
                                                const UniqueID op_id,
                                                const unsigned index,
                                                std::set<ApEvent> &preconditions,
                                                std::set<ApEvent> &dead_events,
-                           LegionMap<ApEvent,FieldMask>::aligned &filter_events,
+                                               EventFieldUsers &filter_users,
                                                FieldMask &observed,
                                                FieldMask &non_dominated,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator cit = 
-           current_epoch_users.begin(); cit != current_epoch_users.end(); cit++)
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
       {
         if (cit->first == term_event)
           continue;
@@ -2446,51 +965,52 @@ namespace Legion {
           continue;
 #endif
         const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.user_mask & user_mask;
+        const FieldMask overlap = event_users.get_valid_mask() & user_mask;
         if (!overlap)
           continue;
-        else if (TRACK_DOM)
-          observed |= overlap;
-        if (event_users.single)
+        EventFieldUsers::iterator to_filter = filter_users.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
         {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          observed |= user_overlap;
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition(it->first, usage, op_id, index, 
+                                     user_expr, &overlap_expr))
           {
             preconditions.insert(cit->first);
-            if (TRACK_DOM)
-              filter_events[cit->first] = overlap;
-          }
-          else if (TRACK_DOM)
-            non_dominated |= overlap;
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = user_mask & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
+            if (overlap_expr->get_volume() == it->first->expr_volume)
             {
-              preconditions.insert(cit->first);
-              if (TRACK_DOM)
-                filter_events[cit->first] |= user_overlap;
+
+              if (to_filter == filter_users.end())
+              {
+                filter_users[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_users.find(cit->first);
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(to_filter->second.find(it->first) == 
+                        to_filter->second.end());
+#endif
+                to_filter->second.insert(it->first, user_overlap);
+              }
             }
-            else if (TRACK_DOM)
+            else
               non_dominated |= user_overlap;
           }
+          else
+            non_dominated |= user_overlap;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_previous_preconditions(
-                                               const FieldMask &user_mask,
                                                const RegionUsage &usage,
-                                               const LegionColor child_color,
+                                               const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                ApEvent term_event,
                                                const UniqueID op_id,
@@ -2501,9 +1021,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
       {
         if (pit->first == term_event)
           continue;
@@ -2521,50 +1040,38 @@ namespace Legion {
           continue;
 #endif
         const EventUsers &event_users = pit->second;
-        if (user_mask * event_users.user_mask)
+        if (user_mask * event_users.get_valid_mask())
           continue;
-        if (event_users.single)
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
         {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+          if (user_mask * it->second)
+            continue;
+          if (has_local_precondition(it->first, usage,
+                                     op_id, index, user_expr))
             preconditions.insert(pit->first);
         }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            if (user_mask * it->second)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
-              preconditions.insert(pit->first);
-          }
-        }
       }
     }
 
     //--------------------------------------------------------------------------
-    template<bool TRACK_DOM>
     void MaterializedView::find_current_preconditions(
-                                               const FieldMask &user_mask,
                                                const RegionUsage &usage,
-                                               const LegionColor child_color,
+                                               const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                const UniqueID op_id,
                                                const unsigned index,
-                           LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                               EventFieldExprs &preconditions,
                                                std::set<ApEvent> &dead_events,
-                           LegionMap<ApEvent,FieldMask>::aligned &filter_events,
+                                               EventFieldUsers &filter_events,
                                                FieldMask &observed,
                                                FieldMask &non_dominated,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator cit = 
-           current_epoch_users.begin(); cit != current_epoch_users.end(); cit++)
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
       {
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
         // We're about to do a bunch of expensive tests, 
@@ -2577,71 +1084,64 @@ namespace Legion {
         }
 #endif
         const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.user_mask & user_mask;
+        FieldMask overlap = event_users.get_valid_mask() & user_mask;
         if (!overlap)
           continue;
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(cit->first);
+        EventFieldExprs::iterator finder = preconditions.find(cit->first);
 #ifndef LEGION_SPY
         if (!trace_info.recording && finder != preconditions.end())
         {
-          overlap -= finder->second;
+          overlap -= finder->second.get_valid_mask();
           if (!overlap)
             continue;
         }
 #endif
-        if (TRACK_DOM)
-          observed |= overlap;
-        if (event_users.single)
+        EventFieldUsers::iterator to_filter = filter_events.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
         {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          observed |= user_overlap;
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition(it->first, usage, op_id, index, 
+                                     user_expr, &overlap_expr))
           {
             if (finder == preconditions.end())
-              preconditions[cit->first] = overlap;
-            else
-              finder->second |= overlap;
-            if (TRACK_DOM)
-              filter_events[cit->first] = overlap;
-          }
-          else if (TRACK_DOM)
-            non_dominated |= overlap;
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = user_mask & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
             {
-              if (finder == preconditions.end())
-                preconditions[cit->first] = user_overlap;
-              else
-                finder->second |= user_overlap;
-              if (TRACK_DOM)
-                filter_events[cit->first] |= user_overlap;
+              preconditions[cit->first].insert(overlap_expr, user_overlap);
+              finder = preconditions.find(cit->first);
             }
-            else if (TRACK_DOM)
+            else
+              finder->second.insert(overlap_expr, user_overlap);
+            if (overlap_expr->get_volume() == it->first->expr_volume)
+            {
+              if (to_filter == filter_events.end())
+              {
+                filter_events[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_events.find(cit->first);
+              }
+              else
+                to_filter->second.insert(it->first, user_overlap);
+            }
+            else
               non_dominated |= user_overlap;
           }
+          else
+            non_dominated |= user_overlap;
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_previous_preconditions(
-                                               const FieldMask &user_mask,
                                                const RegionUsage &usage,
-                                               const LegionColor child_color,
+                                               const FieldMask &user_mask,
                                                IndexSpaceExpression *user_expr,
                                                const UniqueID op_id,
                                                const unsigned index,
-                         LegionMap<ApEvent,FieldMask>::aligned &preconditions,
+                                               EventFieldExprs &preconditions,
                                                std::set<ApEvent> &dead_events,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -2662,93 +1162,10 @@ namespace Legion {
         }
 #endif
         const EventUsers &event_users = pit->second;
-        FieldMask overlap = user_mask & event_users.user_mask;
+        FieldMask overlap = user_mask & event_users.get_valid_mask();
         if (!overlap)
           continue;
-        LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
-          preconditions.find(pit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second;
-          if (!overlap)
-            continue;
-        }
-#endif
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
-          {
-            if (finder == preconditions.end())
-              preconditions[pit->first] = overlap;
-            else
-              finder->second |= overlap;
-          }
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = overlap & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
-            {
-              if (finder == preconditions.end())
-              {
-                preconditions[pit->first] = user_overlap;
-                // Needed for when we go around the loop again
-                finder = preconditions.find(pit->first);
-              }
-              else
-                finder->second |= user_overlap;
-            }
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<bool TRACK_DOM>
-    void MaterializedView::find_current_preconditions(
-                                               const FieldMask &user_mask,
-                                               const RegionUsage &usage,
-                                               const LegionColor child_color,
-                                               IndexSpaceExpression *user_expr,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                           LegionMap<ApEvent,WriteSet>::aligned &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                           LegionMap<ApEvent,FieldMask>::aligned &filter_events,
-                                               FieldMask &observed,
-                                               FieldMask &non_dominated,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator cit = 
-           current_epoch_users.begin(); cit != current_epoch_users.end(); cit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.user_mask & user_mask;
-        if (!overlap)
-          continue;
-        LegionMap<ApEvent,WriteSet>::aligned::iterator finder = 
-          preconditions.find(cit->first);
+        EventFieldExprs::iterator finder = preconditions.find(pit->first);
 #ifndef LEGION_SPY
         if (!trace_info.recording && finder != preconditions.end())
         {
@@ -2757,133 +1174,24 @@ namespace Legion {
             continue;
         }
 #endif
-        if (TRACK_DOM)
-          observed |= overlap;
-        if (event_users.single)
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
         {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
-          {
-            IndexSpaceExpression *overlap_expr =
-              context->intersect_index_spaces(user_expr, 
-                  event_users.users.single_user->expr);
-            if (finder == preconditions.end())
-              preconditions[cit->first].insert(overlap_expr, overlap);
-            else
-              finder->second.insert(overlap_expr, overlap);
-            if (TRACK_DOM)
-              filter_events[cit->first] = overlap;
-          }
-          else if (TRACK_DOM)
-            non_dominated |= overlap;
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = user_mask & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
-            {
-              IndexSpaceExpression *overlap_expr =
-                context->intersect_index_spaces(user_expr, it->first->expr);
-              if (finder == preconditions.end())
-                preconditions[cit->first].insert(overlap_expr, user_overlap);
-              else
-                finder->second.insert(overlap_expr, user_overlap);
-              if (TRACK_DOM)
-                filter_events[cit->first] |= user_overlap;
-            }
-            else if (TRACK_DOM)
-              non_dominated |= user_overlap;
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_preconditions(
-                                               const FieldMask &user_mask,
-                                               const RegionUsage &usage,
-                                               const LegionColor child_color,
-                                               IndexSpaceExpression *user_expr,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                           LegionMap<ApEvent,WriteSet>::aligned &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = pit->second;
-        FieldMask overlap = user_mask & event_users.user_mask;
-        if (!overlap)
-          continue;
-        LegionMap<ApEvent,WriteSet>::aligned::iterator finder = 
-          preconditions.find(pit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second.get_valid_mask();
-          if (!overlap)
+          const FieldMask user_overlap = overlap & it->second;
+          if (!user_overlap)
             continue;
-        }
-#endif
-        if (event_users.single)
-        {
-          if (has_local_precondition(event_users.users.single_user, usage,
-                                     child_color, op_id, index, user_expr))
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition(it->first, usage, op_id, index, 
+                                     user_expr, &overlap_expr))
           {
-            IndexSpaceExpression *overlap_expr =
-              context->intersect_index_spaces(user_expr, 
-                  event_users.users.single_user->expr);
             if (finder == preconditions.end())
-              preconditions[pit->first].insert(overlap_expr, overlap);
-            else
-              finder->second.insert(overlap_expr, overlap);
-          }
-        }
-        else
-        {
-          for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                it = event_users.users.multi_users->begin(); it !=
-                event_users.users.multi_users->end(); it++)
-          {
-            const FieldMask user_overlap = overlap & it->second;
-            if (!user_overlap)
-              continue;
-            if (has_local_precondition(it->first, usage, child_color, 
-                                       op_id, index, user_expr))
             {
-              IndexSpaceExpression *overlap_expr =
-                context->intersect_index_spaces(user_expr, it->first->expr);
-              if (finder == preconditions.end())
-              {
-                preconditions[pit->first].insert(overlap_expr, user_overlap);
-                // Needed for when we go around the loop again
-                finder = preconditions.find(pit->first);
-              }
-              else
-                finder->second.insert(overlap_expr, user_overlap);
+              preconditions[pit->first].insert(overlap_expr, user_overlap);
+              // Needed for when we go around the loop again
+              finder = preconditions.find(pit->first);
             }
+            else
+              finder->second.insert(overlap_expr, user_overlap);
           }
         }
       }
@@ -2891,20 +1199,41 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_previous_filter_users(const FieldMask &dom_mask,
-                            LegionMap<ApEvent,FieldMask>::aligned &filter_users)
+                                              IndexSpaceExpression *filter_expr,
+                                                  EventFieldUsers &filter_users)
     //--------------------------------------------------------------------------
     {
       // Lock better be held by caller
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-           previous_epoch_users.begin(); it != previous_epoch_users.end(); it++)
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
       {
-        FieldMask overlap = it->second.user_mask & dom_mask;
-        if (!overlap)
+        FieldMask event_overlap = pit->second.get_valid_mask() & dom_mask;
+        if (!event_overlap)
           continue;
-        filter_users[it->first] = overlap;
+        EventFieldUsers::iterator to_filter = filter_users.find(pit->first);
+        for (EventUsers::const_iterator it = pit->second.begin();
+              it != pit->second.end(); it++)
+        {
+          const FieldMask user_overlap = it->second & event_overlap;
+          if (!user_overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(it->first->expr, filter_expr);
+          if (expr_overlap->is_empty())
+            continue;
+          else if (expr_overlap->get_volume() == it->first->expr_volume)
+          {
+            if (to_filter == filter_users.end())
+            {
+              filter_users[pit->first].insert(it->first, user_overlap);
+              to_filter = filter_users.find(pit->first);
+            }
+            else
+              to_filter->second.insert(it->first, user_overlap);
+          }
+        }
       }
     }
-#endif
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_atomic_reservations(const FieldMask &mask,
@@ -3119,708 +1448,6 @@ namespace Legion {
                                     context_uid, false/*register now*/);
       // Register only after construction
       view->register_with_runtime(NULL/*remote registration not needed*/);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void MaterializedView::perform_remote_valid_check(
-                  const FieldMask &check_mask, VersionTracker *versions,
-                  bool reading, std::set<RtEvent> *wait_on)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      FieldMask need_valid_update;
-      std::set<RtEvent> local_wait_on;
-      RtUserEvent request_event;
-      if (reading)
-      {
-        // If we are reading we need to check to see if we are at
-        // the right version number and whether we have done the read
-        // request yet for our given version number
-        FieldVersions field_versions;
-        versions->get_field_versions(logical_node, true/*split prev*/,
-                                     check_mask, field_versions);
-        FieldMask split_mask;
-        versions->get_split_mask(logical_node, check_mask, split_mask);
-        const bool has_split_mask = !!split_mask;
-        need_valid_update = check_mask;
-        AutoLock v_lock(view_lock);
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              field_versions.begin(); it != field_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & check_mask;
-          if (!overlap)
-            continue;
-          // See if we can find it as the current version number
-          LegionMap<VersionID,FieldMask>::aligned::const_iterator finder = 
-            current_versions.find(it->first);
-          if (finder != current_versions.end())
-          {
-            const FieldMask version_overlap = overlap & finder->second;
-            if (!!version_overlap)
-            {
-              need_valid_update -= version_overlap;
-              if (!need_valid_update)
-                break;
-            }
-          }
-          // If we have a split mask, it's also alright if the current
-          // versions are at the next version number
-          if (has_split_mask)
-          {
-            const FieldMask split_overlap = overlap & split_mask;
-            if (!split_overlap)
-              continue;
-            finder = current_versions.find(it->first + 1);
-            if (finder != current_versions.end())
-            {
-              const FieldMask version_overlap = split_overlap & finder->second;
-              if (!!version_overlap)
-              {
-                need_valid_update -= version_overlap;
-                if (!need_valid_update)
-                  break;
-              }
-            }
-          }
-        }
-        // Also look for any pending requests that overlap since they
-        // will bring the result up to date for us too
-        if (!remote_update_requests.empty())
-        {
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it =
-                remote_update_requests.begin(); it != 
-                remote_update_requests.end(); it++)
-          {
-            if (it->second * check_mask)
-              continue;
-            local_wait_on.insert(it->first);
-            need_valid_update -= it->second;
-          }
-        }
-        // Figure out what we need to send
-        if (!!need_valid_update)
-        {
-          request_event = Runtime::create_rt_user_event();
-          remote_update_requests[request_event] = need_valid_update;
-        }
-      }
-      else
-      {
-        // If we're writing all we need to do is check that we are valid,
-        // if we're not valid we have to send a request
-        AutoLock v_lock(view_lock);
-        need_valid_update = check_mask - remote_valid_mask;
-        if (!remote_update_requests.empty())
-        {
-          // See which fields we already have requests for
-          for (LegionMap<RtEvent,FieldMask>::aligned::const_iterator it = 
-                remote_update_requests.begin(); it != 
-                remote_update_requests.end(); it++)
-          {
-            FieldMask overlap = check_mask & it->second;
-            if (!overlap)
-              continue;
-            if (wait_on != NULL)
-              wait_on->insert(it->first);
-            else
-              local_wait_on.insert(it->first);
-            need_valid_update -= overlap;
-          }
-        }
-        if (!!need_valid_update)
-        {
-          request_event = Runtime::create_rt_user_event();
-          remote_update_requests[request_event] = need_valid_update;
-          // We also have to filter out the current and previous epoch 
-          // user lists so that when we get the update then we know we
-          // won't have polluting users in the list to start
-          filter_local_users(need_valid_update, current_epoch_users);
-          filter_local_users(need_valid_update, previous_epoch_users);
-        }
-      }
-      // If we have a request event, send the request now
-      if (request_event.exists())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(request_event);
-          rez.serialize(need_valid_update);
-        }
-        context->runtime->send_view_update_request(logical_owner, rez);
-        local_wait_on.insert(request_event);
-      }
-      // If we have a parent, see if it needs to send requests too so 
-      // we can get as many in flight as possible in parallel
-      if (parent != NULL)
-      {
-        if (wait_on != NULL)
-          parent->perform_remote_valid_check(check_mask, versions,
-                                             reading, wait_on);
-        else
-          parent->perform_remote_valid_check(check_mask, versions,
-                                             reading, &local_wait_on);
-      }
-      // If we have any events to wait on do the right thing with them
-      if (!local_wait_on.empty())
-      {
-        if (wait_on == NULL)
-        {
-          // If we are the base caller, then we do the wait
-          RtEvent wait_for = Runtime::merge_events(local_wait_on);
-          wait_for.wait();
-        }
-        else // Otherwise add the events to the set to wait on
-          wait_on->insert(local_wait_on.begin(), local_wait_on.end());
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::perform_read_invalidations(
-                 const FieldMask &check_mask, VersionTracker *versions,
-                 const AddressSpaceID source, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      // Quick test for intersection here to see if we are done early
-      if (check_mask * remote_valid_mask)
-        return;
-      FieldMask invalidate_mask;
-      // Check to see if we have a split mask, any fields which are
-      // not split have to be invalidated since we're directly reading
-      // the current version number (we know we're reading the current
-      // version number or else something else is broken). In the
-      // case of split version numbers the advance of the version
-      // number already invalidated the remote leases so we don't
-      // have to worry about it.
-      FieldMask split_mask;
-      versions->get_split_mask(logical_node, check_mask, split_mask);
-      if (!!split_mask)
-      {
-        const FieldMask invalidate_mask = check_mask - split_mask;
-        if (!!invalidate_mask)
-          send_invalidations(invalidate_mask, source, applied_events);
-      }
-      else // Reading at the base invalidates all remote leases
-        send_invalidations(check_mask, source, applied_events);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::send_invalidations(const FieldMask &invalidate_mask,
-              const AddressSpaceID can_skip, std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the view lock in exclusive mode
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      // No overlapping fields means we are done
-      if (invalidate_mask * remote_valid_mask)
-        return;
-      std::vector<AddressSpaceID> to_delete;
-      bool has_skip = false;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
-            valid_remote_instances.begin(); it != 
-            valid_remote_instances.end(); it++)
-      {
-        // If the update was from this node we don't need to send
-        // an invalidate because clearly it is still up to date
-        if (it->first == can_skip)
-        {
-          has_skip = true;
-          continue;
-        }
-        FieldMask overlap = it->second & invalidate_mask;
-        if (!overlap)
-          continue;
-        RtUserEvent invalidate_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(overlap);
-          rez.serialize(invalidate_event);
-        }
-        context->runtime->send_view_remote_invalidate(it->first, rez);
-        applied_events.insert(invalidate_event);
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<AddressSpaceID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          valid_remote_instances.erase(*it);
-      }
-      // Filter the remote valid mask and add back in any fields that
-      // were skipped
-      remote_valid_mask -= invalidate_mask;
-      if (has_skip)
-        remote_valid_mask |= valid_remote_instances[can_skip];
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_update_request(AddressSpaceID source,
-                                    RtUserEvent done_event, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
-      Serializer rez;
-      {
-        RezCheck z(rez);
-        rez.serialize(did);
-        rez.serialize(done_event);
-        rez.serialize(request_mask);
-        // Hold the view lock when building up the information to send back
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        // Package up the information to send back
-        // First figure out which views to send back
-        LegionMap<VersionID,FieldMask>::aligned response_versions;
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              current_versions.begin(); it != current_versions.end(); it++)
-        {
-          FieldMask overlap = it->second & request_mask;
-          if (!overlap)
-            continue;
-          response_versions[it->first] = overlap;
-        }
-        rez.serialize<size_t>(response_versions.size());
-        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
-              response_versions.begin(); it != response_versions.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-        std::vector<ApEvent> current_events, previous_events;
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-             current_epoch_users.begin(); it != current_epoch_users.end(); it++)
-        {
-          if (it->second.user_mask * request_mask)
-            continue;
-          current_events.push_back(it->first);
-        }
-        for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator it = 
-              previous_epoch_users.begin(); it != 
-              previous_epoch_users.end(); it++)
-        {
-          if (it->second.user_mask * request_mask)
-            continue;
-          previous_events.push_back(it->first);
-        }
-        rez.serialize<size_t>(current_events.size());
-        for (std::vector<ApEvent>::const_iterator it = current_events.begin();
-              it != current_events.end(); it++)
-        {
-          rez.serialize(*it);
-          const EventUsers &users = current_epoch_users[*it];
-          if (users.single)
-          {
-            rez.serialize<size_t>(1);
-            users.users.single_user->pack_user(rez, source);
-            rez.serialize(users.user_mask);
-          }
-          else
-          {
-            // Figure out how many to send
-            std::vector<PhysicalUser*> to_send;
-            LegionVector<FieldMask>::aligned send_masks;
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  uit = users.users.multi_users->begin(); uit !=
-                  users.users.multi_users->end(); uit++)
-            {
-              const FieldMask user_mask = uit->second & request_mask;
-              if (!user_mask)
-                continue;
-              to_send.push_back(uit->first);
-              send_masks.push_back(user_mask);
-            }
-            rez.serialize<size_t>(to_send.size());
-            for (unsigned idx = 0; idx < to_send.size(); idx++)
-            {
-              to_send[idx]->pack_user(rez, source);
-              rez.serialize(send_masks[idx]);
-            }
-          }
-        }
-        rez.serialize<size_t>(previous_events.size());
-        for (std::vector<ApEvent>::const_iterator it = previous_events.begin();
-              it != previous_events.end(); it++)
-        {
-          rez.serialize(*it);
-          const EventUsers &users = previous_epoch_users[*it];
-          if (users.single)
-          {
-            rez.serialize<size_t>(1);
-            users.users.single_user->pack_user(rez, source);
-            rez.serialize(users.user_mask);
-          }
-          else
-          {
-            // Figure out how many to send
-            std::vector<PhysicalUser*> to_send;
-            LegionVector<FieldMask>::aligned send_masks;
-            for (LegionMap<PhysicalUser*,FieldMask>::aligned::const_iterator 
-                  uit = users.users.multi_users->begin(); uit !=
-                  users.users.multi_users->end(); uit++)
-            {
-              const FieldMask user_mask = uit->second & request_mask;
-              if (!user_mask)
-                continue;
-              to_send.push_back(uit->first);
-              send_masks.push_back(user_mask);
-            }
-            rez.serialize<size_t>(to_send.size());
-            for (unsigned idx = 0; idx < to_send.size(); idx++)
-            {
-              to_send[idx]->pack_user(rez, source);
-              rez.serialize(send_masks[idx]);
-            }
-          }
-        }
-      }
-      // Send the message back to get it on the wire before an 
-      // invalidate might be issued
-      runtime->send_view_update_response(source, rez);
-      // Retake the lock in exlcusive mode to update our
-      // set of remote instances
-      AutoLock v_lock(view_lock);
-      valid_remote_instances[source] |= request_mask;
-      remote_valid_mask |= request_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_update_response(Deserializer &derez,
-                                                   RtUserEvent done_event,
-                                                   AddressSpaceID source,
-                                                   RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-#endif
-      FieldMask response_mask;
-      derez.deserialize(response_mask);
-      std::set<ApEvent> collect_events;
-      // Take the lock in exclusive mode and update all our state
-      {
-        AutoLock v_lock(view_lock);
-        LegionMap<VersionID,FieldMask>::aligned version_updates;
-        size_t num_versions;
-        derez.deserialize(num_versions);
-        for (unsigned idx = 0; idx < num_versions; idx++)
-        {
-          VersionID vid;
-          derez.deserialize(vid);
-          derez.deserialize(version_updates[vid]);
-        }
-        filter_and_add(response_mask, version_updates);
-        // Current users
-        size_t num_current;
-        derez.deserialize(num_current);
-        for (unsigned idx = 0; idx < num_current; idx++)
-        {
-          ApEvent current_event;
-          derez.deserialize(current_event);
-          size_t num_users;
-          derez.deserialize(num_users);
-          // See if we already have a users for this event
-          LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
-            current_epoch_users.find(current_event);
-          if (finder != current_epoch_users.end())
-          {
-            // Convert to multi users if we haven't already 
-            EventUsers &current_users = finder->second;
-            if (current_users.single)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned *new_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              (*new_users)[current_users.users.single_user] = 
-                current_users.user_mask;
-              current_users.users.multi_users = new_users;
-              current_users.single = false;
-            }
-            LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(current_users.users.multi_users);
-            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            {
-              PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/,forest,source);
-              FieldMask &new_mask = local[new_user];
-              derez.deserialize(new_mask);
-              current_users.user_mask |= new_mask;
-            }
-          }
-          else
-          {
-            EventUsers &current_users = current_epoch_users[current_event];
-            if (num_users == 1)
-            {
-              current_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/,forest,source);
-              derez.deserialize(current_users.user_mask);
-            }
-            else
-            {
-              current_users.single = false;
-              current_users.users.multi_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(current_users.users.multi_users);
-              for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-              {
-                PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/, 
-                                            forest, source);
-                FieldMask &new_mask = local[new_user];
-                derez.deserialize(new_mask);
-                current_users.user_mask |= new_mask;
-              }
-            }
-            // Didn't have it before so update the collect events
-            if (outstanding_gc_events.find(current_event) == 
-                  outstanding_gc_events.end())
-            {
-              outstanding_gc_events.insert(current_event);
-              collect_events.insert(current_event);
-            }
-          }
-        }
-        // Previous users
-        size_t num_previous;
-        derez.deserialize(num_previous);
-        for (unsigned idx = 0; idx < num_previous; idx++)
-        {
-          ApEvent previous_event;
-          derez.deserialize(previous_event);
-          size_t num_users;
-          derez.deserialize(num_users);
-          // See if we already have a users for this event
-          LegionMap<ApEvent,EventUsers>::aligned::iterator finder = 
-            previous_epoch_users.find(previous_event);
-          if (finder != previous_epoch_users.end())
-          {
-            // Convert to multi users if we haven't already 
-            EventUsers &previous_users = finder->second;
-            if (previous_users.single)
-            {
-              LegionMap<PhysicalUser*,FieldMask>::aligned *new_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              (*new_users)[previous_users.users.single_user] = 
-                previous_users.user_mask;
-              previous_users.users.multi_users = new_users;
-              previous_users.single = false;
-            }
-            LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(previous_users.users.multi_users);
-            for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-            {
-              PhysicalUser *new_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/,forest,source);
-              FieldMask &new_mask = local[new_user];
-              derez.deserialize(new_mask);
-              previous_users.user_mask |= new_mask;
-            }
-          }
-          else
-          {
-            EventUsers &previous_users = previous_epoch_users[previous_event];
-            if (num_users == 1)
-            {
-              previous_users.users.single_user = 
-                PhysicalUser::unpack_user(derez, true/*add ref*/,forest,source);
-              derez.deserialize(previous_users.user_mask);
-            }
-            else
-            {
-              previous_users.single = false;
-              previous_users.users.multi_users = 
-                new LegionMap<PhysicalUser*,FieldMask>::aligned();
-              LegionMap<PhysicalUser*,FieldMask>::aligned &local = 
-                *(previous_users.users.multi_users);
-              for (unsigned idx2 = 0; idx2 < num_users; idx2++)
-              {
-                PhysicalUser *new_user = 
-                  PhysicalUser::unpack_user(derez, true/*add ref*/, 
-                                            forest, source);
-                FieldMask &new_mask = local[new_user];
-                derez.deserialize(new_mask);
-                previous_users.user_mask |= new_mask;
-              }
-            }
-            // Didn't have it before so update the collect events
-            if (outstanding_gc_events.find(previous_event) == 
-                  outstanding_gc_events.end())
-            {
-              outstanding_gc_events.insert(previous_event);
-              collect_events.insert(previous_event);
-            }
-          }
-        }
-        // Update our remote valid mask
-        remote_valid_mask |= response_mask;
-        // Prune out the request event
-#ifdef DEBUG_LEGION
-        assert(remote_update_requests.find(done_event) != 
-                remote_update_requests.end());
-#endif
-        remote_update_requests.erase(done_event);
-      }
-      
-      if (!collect_events.empty())
-      {
-        std::set<RtEvent> applied_events;
-        WrapperReferenceMutator mutator(applied_events);
-        for (std::set<ApEvent>::const_iterator it = collect_events.begin();
-              it != collect_events.end(); it++)
-          defer_collect_user(*it, &mutator);
-        if (!applied_events.empty())
-        {
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(applied_events));
-          return;
-        }
-        // Otherwise fall through to the normal trigger path
-      }
-      // Trigger our request saying everything is up to date
-      // Issue any defferred collections that we might have
-      Runtime::trigger_event(done_event);
-    }
-
-#if 0
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_remote_update(Deserializer &derez,
-                                                 AddressSpaceID source,
-                                                 RegionTreeForest *forest)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      RtUserEvent update_event;
-      derez.deserialize(update_event);
-      bool is_copy;
-      derez.deserialize(is_copy);
-      bool restrict_out;
-      derez.deserialize(restrict_out);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      FieldMask user_mask;
-      derez.deserialize(user_mask);
-      LegionColor child_color;
-      derez.deserialize(child_color);
-      IndexSpaceExpression *user_expr = 
-        IndexSpaceExpression::unpack_expression(derez, forest, source);
-      UniqueID op_id;
-      derez.deserialize(op_id);
-      unsigned index;
-      derez.deserialize(index);
-      ApEvent term_event;
-      derez.deserialize(term_event);
-      size_t num_versions;
-      derez.deserialize(num_versions);
-      FieldVersions field_versions;
-      for (unsigned idx = 0; idx < num_versions; idx++)
-      {
-        VersionID vid;
-        derez.deserialize(vid);
-        derez.deserialize(field_versions[vid]);
-      }
-      FieldMask split_mask;
-      derez.deserialize(split_mask);
-      bool base_user;
-      derez.deserialize(base_user);
-      
-      // Make a dummy version info for doing the analysis calls
-      // and put our split mask in it
-      VersionInfo dummy_version_info;
-      dummy_version_info.resize(logical_node->get_depth());
-      dummy_version_info.record_split_fields(logical_node, split_mask);
-
-      std::set<RtEvent> applied_conditions;
-      PhysicalTraceInfo trace_info(NULL/*op*/);
-      if (is_copy)
-      {
-        // Do analysis and register the user
-        LegionMap<ApEvent,FieldMask>::aligned dummy_preconditions;
-        // Do different things depending on whether we are a base
-        // user or a user being registered above in the tree
-        if (base_user)
-          // Always safe to assume single copy here since we don't
-          // actually use the results and assuming single copy means
-          // that fewer users will potentially be filtered
-          find_local_copy_preconditions<FieldMask>(usage.redop, 
-              IS_READ_ONLY(usage), true/*single copy*/, restrict_out, user_mask,
-              child_color, user_expr, &dummy_version_info, op_id, index, source, 
-              dummy_preconditions, applied_conditions, trace_info);
-        else
-          find_local_copy_preconditions_above<FieldMask>(usage.redop, 
-              IS_READ_ONLY(usage), true/*single copy*/, restrict_out, user_mask,
-              child_color, user_expr, &dummy_version_info, op_id, index, source,
-              dummy_preconditions, applied_conditions, trace_info);
-        add_local_copy_user(usage, term_event, base_user, restrict_out, 
-                            child_color, user_expr, &dummy_version_info, 
-                            op_id, index, user_mask, source, 
-                            applied_conditions, trace_info);
-      }
-      else
-      {
-        // Do analysis and register the user
-        std::set<ApEvent> dummy_preconditions;
-        // We do different things depending on whether we are the base
-        // user or whether we are being registered above in the tree
-        if (base_user)
-          find_local_user_preconditions(usage, term_event, child_color,
-                                        user_expr, &dummy_version_info, op_id,
-                                        index,user_mask, dummy_preconditions, 
-                                        applied_conditions, trace_info);
-        else
-          find_local_user_preconditions_above(usage, term_event, child_color,
-                                        user_expr, &dummy_version_info, op_id,
-                                        index,user_mask, dummy_preconditions, 
-                                        applied_conditions, trace_info);
-        if (IS_WRITE(usage))
-          update_version_numbers(user_mask, field_versions,
-                                 source, applied_conditions);
-        if (add_local_user(usage, term_event, child_color, user_expr, 
-                           base_user, &dummy_version_info, op_id, index, 
-                           user_mask, source, applied_conditions, trace_info))
-        {
-          WrapperReferenceMutator mutator(applied_conditions);
-          defer_collect_user(term_event, &mutator);
-        }
-      }
-      // Chain the update events
-      if (!applied_conditions.empty())
-        Runtime::trigger_event(update_event,
-                               Runtime::merge_events(applied_conditions));
-      else
-        Runtime::trigger_event(update_event);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::process_remote_invalidate(
-                          const FieldMask &invalid_mask, RtUserEvent done_event)
-    //--------------------------------------------------------------------------
-    {
-      {
-        AutoLock v_lock(view_lock);
-        remote_valid_mask -= invalid_mask;
-      }
-      Runtime::trigger_event(done_event);
     }
 
 #if 0
@@ -8802,15 +6429,17 @@ namespace Legion {
     void ReductionView::add_initial_user(ApEvent term_event, 
                                          const RegionUsage &usage,
                                          const FieldMask &user_mask,
-                                         IndexSpaceExpression *expr,
+                                         IndexSpaceExpression *user_expr,
                                          const UniqueID op_id,
                                          const unsigned index)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
-      PhysicalUser *user = 
-        new PhysicalUser(usage, INVALID_COLOR, op_id, index, expr);
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index);
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor

@@ -828,6 +828,7 @@ namespace Legion {
       }
       early_mapped_regions.clear();
       atomic_locks.clear(); 
+      effects_postconditions.clear();
       parent_req_indexes.clear();
     }
 
@@ -1240,14 +1241,6 @@ namespace Legion {
       }
       else
         atomic_locks[lock] = exclusive;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent TaskOp::get_restrict_precondition(
-                                            const PhysicalTraceInfo &info) const
-    //--------------------------------------------------------------------------
-    {
-      return merge_restrict_preconditions(info, grants, wait_barriers);
     }
 
     //--------------------------------------------------------------------------
@@ -1798,6 +1791,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, EARLY_MAP_REGIONS_CALL);
       const PhysicalTraceInfo trace_info(this, false/*initialize*/);
+      ApEvent init_precondition = compute_init_precondition(trace_info);;
       // A little bit of suckinesss here, it's unclear if we have
       // our version infos with the proper versioning information
       // so we might need to "page" it in now.  We'll overlap it as
@@ -1868,23 +1862,23 @@ namespace Legion {
                         get_task_name(), get_unique_id(),
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
-        FieldSpace bad_space;
+        RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
         int composite_index = runtime->forest->physical_convert_mapping(
             this, regions[*it], finder->second, 
-            chosen_instances, bad_space, missing_fields,
+            chosen_instances, bad_tree, missing_fields,
             runtime->unsafe_mapper ? NULL : get_acquired_instances_ref(),
             unacquired, !runtime->unsafe_mapper);
-        if (bad_space.exists())
+        if (bad_tree > 0)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'premap_task' invocation "
                         "on mapper %s. Mapper provided an instance from "
-                        "field space %d for use in satisfying region "
+                        "region tree %d for use in satisfying region "
                         "requirement %d of task %s (ID %lld) whose region "
-                        "is from field_space %d.", mapper->get_mapper_name(),
-                        bad_space.get_id(), *it,get_task_name(),get_unique_id(),
-                        regions[*it].region.get_field_space().get_id())
+                        "is from region tree %d.", mapper->get_mapper_name(),
+                        bad_tree, *it,get_task_name(),get_unique_id(),
+                        regions[*it].region.get_tree_id())
         if (!missing_fields.empty())
         {
           for (std::vector<FieldID>::const_iterator fit = 
@@ -1983,13 +1977,16 @@ namespace Legion {
         // Passed all the error checking tests so register it
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
-        runtime->forest->physical_register_only(regions[*it], version_info, 
-                              this, *it, completion_event,
+        ApEvent effects_done = 
+          runtime->forest->physical_register_only(regions[*it], version_info, 
+                              this, *it, init_precondition, completion_event,
                               applied_conditions, chosen_instances, trace_info
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
                               );
+        if (effects_done.exists())
+          effects_postconditions.insert(effects_done);
         version_info.finalize_mapping();
       }
     }
@@ -2782,7 +2779,7 @@ namespace Legion {
           continue;
         // Do the conversion
         InstanceSet &result = physical_instances[idx];
-        FieldSpace bad_space;
+        RegionTreeID bad_tree = 0;
         std::vector<FieldID> missing_fields;
         std::vector<PhysicalManager*> unacquired;
         bool free_acquired = false;
@@ -2807,19 +2804,19 @@ namespace Legion {
         }
         int composite_idx = 
           runtime->forest->physical_convert_mapping(this, regions[idx],
-                output.chosen_instances[idx], result, bad_space, missing_fields,
+                output.chosen_instances[idx], result, bad_tree, missing_fields,
                 acquired, unacquired, !runtime->unsafe_mapper);
         if (free_acquired)
           delete acquired;
-        if (bad_space.exists())
+        if (bad_tree > 0)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of '%s' on "
-                        "mapper %s. Mapper specified an instance from field "
-                        "space %d for use with region requirement %d of task "
-                        "%s (ID %lld) whose region is from field space %d.",
-                        "map_task",mapper->get_mapper_name(),bad_space.get_id(),
+                        "mapper %s. Mapper specified an instance from region "
+                        "tree %d for use with region requirement %d of task "
+                        "%s (ID %lld) whose region is from region tree %d.",
+                        "map_task",mapper->get_mapper_name(), bad_tree,
                         idx, get_task_name(), get_unique_id(),
-                        regions[idx].region.get_field_space().get_id())
+                        regions[idx].region.get_tree_id())
         if (!missing_fields.empty())
         {
           for (std::vector<FieldID>::const_iterator it = 
@@ -3304,6 +3301,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
       const PhysicalTraceInfo trace_info(this);
+      ApEvent init_precondition = compute_init_precondition(trace_info);
 #ifdef LEGION_SPY
       {
         ApEvent local_completion = get_completion_event();
@@ -3369,9 +3367,11 @@ namespace Legion {
         // that sould result in a copy
         set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
-        runtime->forest->physical_register_only(regions[idx], 
+        ApEvent effects = 
+          runtime->forest->physical_register_only(regions[idx], 
                                     get_version_info(idx), 
-                                    this, idx, local_termination_event, 
+                                    this, idx, init_precondition,
+                                    local_termination_event, 
                                     map_applied_conditions,
                                     physical_instances[idx],
                                     trace_info,
@@ -3380,6 +3380,8 @@ namespace Legion {
                                     unique_op_id,
 #endif
                                     !multiple_requirements/*read only locks*/);
+        if (effects.exists())
+          effects_postconditions.insert(effects);
       }
       // Release any read-only reservations that we're holding
       if (!read_only_reservations.empty())
@@ -3492,23 +3494,23 @@ namespace Legion {
         }
         // Convert the post-mapping  
         InstanceSet result;
-        FieldSpace bad_space;
+        RegionTreeID bad_tree = 0;
         std::vector<PhysicalManager*> unacquired;
         bool had_composite = 
           runtime->forest->physical_convert_postmapping(this, req,
-                              output.chosen_instances[idx], result, bad_space,
+                              output.chosen_instances[idx], result, bad_tree,
                               runtime->unsafe_mapper ? NULL : 
                                 get_acquired_instances_ref(),
                               unacquired, !runtime->unsafe_mapper);
-        if (bad_space.exists())
+        if (bad_tree > 0)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from 'postmap_task' invocation "
-                        "on mapper %s. Mapper provided an instance from field "
-                        "space %d for use in satisfying region requirement %d "
-                        "of task %s (ID %lld) whose region is from field sapce "
-                        "%d.", mapper->get_mapper_name(), bad_space.get_id(), 
+                        "on mapper %s. Mapper provided an instance from region "
+                        "tree %d for use in satisfying region requirement %d "
+                        "of task %s (ID %lld) whose region is from region tree "
+                        "%d.", mapper->get_mapper_name(), bad_tree,
                         idx, get_task_name(), get_unique_id(), 
-                        regions[idx].region.get_field_space().get_id())
+                        regions[idx].region.get_tree_id())
         if (!unacquired.empty())
         {
           std::map<PhysicalManager*,std::pair<unsigned,bool> > 
@@ -3579,14 +3581,18 @@ namespace Legion {
         // invalidate the other valid instances
         const PrivilegeMode mode = regions[idx].privilege;
         regions[idx].privilege = READ_ONLY; 
-        runtime->forest->physical_register_only(regions[idx], 
-                          get_version_info(idx), this, idx,
-                          ApEvent::NO_AP_EVENT/*done immediately*/, 
-                          map_applied_conditions, result, trace_info
+        ApEvent effects_done = 
+          runtime->forest->physical_register_only(regions[idx], 
+                            get_version_info(idx), this, idx,
+                            completion_event/*wait for task to be done*/,
+                            ApEvent::NO_AP_EVENT/*done immediately*/, 
+                            map_applied_conditions, result, trace_info
 #ifdef DEBUG_LEGION
-                          , get_logging_name(), unique_op_id
+                            , get_logging_name(), unique_op_id
 #endif
-                          );
+                            );
+        if (effects_done.exists())
+          effects_postconditions.insert(effects_done);
         regions[idx].privilege = mode; 
       }
     } 
@@ -4487,7 +4493,6 @@ namespace Legion {
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances); 
       acquired_instances.clear();
-      restrict_postconditions.clear();
       runtime->free_individual_task(this);
     }
 
@@ -4761,13 +4766,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndividualTask::record_restrict_postcondition(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      restrict_postconditions.insert(postcondition);
-    }
-
-    //--------------------------------------------------------------------------
     void IndividualTask::resolve_false(bool speculated, bool launched)
     //--------------------------------------------------------------------------
     {
@@ -4861,10 +4859,12 @@ namespace Legion {
       if (!arrive_barriers.empty() || !grants.empty())
       {
         ApEvent done_event = get_task_completion();
-        if (!restrict_postconditions.empty())
+        if (!effects_postconditions.empty())
         {
-          restrict_postconditions.insert(done_event);
-          done_event = Runtime::merge_events(NULL, restrict_postconditions);
+          const PhysicalTraceInfo trace_info(this);
+          effects_postconditions.insert(done_event);
+          done_event = 
+            Runtime::merge_events(&trace_info, effects_postconditions);
         }
         for (unsigned idx = 0; idx < grants.size(); idx++)
           grants[idx].impl->register_operation(done_event);
@@ -4911,8 +4911,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_remote())
-        return false;
-      if (!restrict_postconditions.empty())
         return false;
       if (runtime->program_order_execution)
         return false;
@@ -5513,7 +5511,6 @@ namespace Legion {
             this->slice_owner->get_unique_op_id(),
             this->get_unique_op_id());
       deactivate_single();
-      restrict_postconditions.clear();
       if (!remote_instances.empty())
       {
         UniqueID local_uid = get_unique_id();
@@ -5637,11 +5634,12 @@ namespace Legion {
         if (!map_applied_conditions.empty())
         {
           RtEvent done = Runtime::merge_events(map_applied_conditions);
-          if (!restrict_postconditions.empty())
+          if (!effects_postconditions.empty())
           {
-            ApEvent restrict_post = 
-              Runtime::merge_events(NULL, restrict_postconditions);
-            slice_owner->record_child_mapped(done, restrict_post);
+            const PhysicalTraceInfo trace_info(this);
+            ApEvent effects_done = 
+              Runtime::merge_events(&trace_info, effects_postconditions);
+            slice_owner->record_child_mapped(done, effects_done);
           }
           else
             slice_owner->record_child_mapped(done, ApEvent::NO_AP_EVENT);
@@ -5650,12 +5648,13 @@ namespace Legion {
         else
         {
           // Tell our owner that we mapped
-          if (!restrict_postconditions.empty())
+          if (!effects_postconditions.empty())
           {
-            ApEvent restrict_post = 
-              Runtime::merge_events(NULL, restrict_postconditions);
+            const PhysicalTraceInfo trace_info(this);
+            ApEvent effects_done = 
+              Runtime::merge_events(&trace_info, effects_postconditions);
             slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT, 
-                                             restrict_post);
+                                             effects_done);
           }
           else
             slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
@@ -5730,13 +5729,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return slice_owner->get_acquired_instances_ref();
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::record_restrict_postcondition(ApEvent postcondition)
-    //--------------------------------------------------------------------------
-    {
-      restrict_postconditions.insert(postcondition);
     }
 
     //--------------------------------------------------------------------------
@@ -5880,11 +5872,12 @@ namespace Legion {
       if (!map_applied_conditions.empty())
       {
         RtEvent done = Runtime::merge_events(map_applied_conditions);
-        if (!restrict_postconditions.empty())
+        if (!effects_postconditions.empty())
         {
-          ApEvent restrict_post = 
-            Runtime::merge_events(NULL, restrict_postconditions);
-          slice_owner->record_child_mapped(done, restrict_post);
+          const PhysicalTraceInfo trace_info(this);
+          ApEvent effects_done = 
+            Runtime::merge_events(&trace_info, effects_postconditions);
+          slice_owner->record_child_mapped(done, effects_done);
         }
         else
           slice_owner->record_child_mapped(done, ApEvent::NO_AP_EVENT);
@@ -5892,12 +5885,13 @@ namespace Legion {
       }
       else
       {
-        if (!restrict_postconditions.empty())
+        if (!effects_postconditions.empty())
         {
-          ApEvent restrict_post = 
-            Runtime::merge_events(NULL, restrict_postconditions);
+          const PhysicalTraceInfo trace_info(this);
+          ApEvent effects_done = 
+            Runtime::merge_events(&trace_info, effects_postconditions);
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,  
-                                           restrict_post);
+                                           effects_done);
         }
         else
           slice_owner->record_child_mapped(RtEvent::NO_RT_EVENT,
@@ -6092,7 +6086,6 @@ namespace Legion {
       // Remove our reference to the reduction future
       reduction_future = Future();
       map_applied_conditions.clear();
-      completion_preconditions.clear();
       version_infos.clear();
 #ifdef DEBUG_LEGION
       interfering_requirements.clear();
@@ -6689,9 +6682,11 @@ namespace Legion {
         future_map.impl->complete_all_futures();
       if (must_epoch != NULL)
         must_epoch->notify_subop_complete(this);
-      if (!completion_preconditions.empty())
+      if (!effects_postconditions.empty())
       {
-        ApEvent done = Runtime::merge_events(NULL, completion_preconditions);
+        const PhysicalTraceInfo trace_info(this);
+        ApEvent done = 
+          Runtime::merge_events(&trace_info, effects_postconditions);
         request_early_complete(done);
       }
       complete_operation();
@@ -6919,7 +6914,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void IndexTask::return_slice_mapped(unsigned points, long long denom,
-                               RtEvent applied_condition, ApEvent restrict_post)
+                                RtEvent applied_condition, ApEvent effects_done)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_RETURN_SLICE_MAPPED_CALL);
@@ -6933,8 +6928,8 @@ namespace Legion {
         slice_fraction.add(Fraction<long long>(1,denom));
         if (applied_condition.exists())
           map_applied_conditions.insert(applied_condition);
-        if (restrict_post.exists())
-          completion_preconditions.insert(restrict_post);
+        if (effects_done.exists())
+          effects_postconditions.insert(effects_done);
         // Already know that mapped points is the same as total points
         if (slice_fraction.is_whole())
         {
@@ -6987,7 +6982,7 @@ namespace Legion {
 #ifndef LEGION_SPY
         if (!slice_postcondition.has_triggered())
 #endif
-          completion_preconditions.insert(slice_postcondition);
+          effects_postconditions.insert(slice_postcondition);
 #ifdef DEBUG_LEGION
         assert(!complete_received);
         assert(complete_points <= total_points);
@@ -7360,7 +7355,6 @@ namespace Legion {
         release_acquired_instances(acquired_instances);
       acquired_instances.clear();
       map_applied_conditions.clear();
-      restrict_postconditions.clear();
       commit_preconditions.clear();
       created_regions.clear();
       created_fields.clear();
@@ -7934,7 +7928,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::record_child_mapped(RtEvent child_complete,
-                                        ApEvent restrict_postcondition)
+                                        ApEvent effects_done)
     //--------------------------------------------------------------------------
     {
       bool needs_trigger = false;
@@ -7942,8 +7936,8 @@ namespace Legion {
         AutoLock o_lock(op_lock);
         if (child_complete.exists())
           map_applied_conditions.insert(child_complete);
-        if (restrict_postcondition.exists())
-          restrict_postconditions.insert(restrict_postcondition);
+        if (effects_done.exists())
+          effects_postconditions.insert(effects_done);
 #ifdef DEBUG_LEGION
         assert(num_unmapped_points > 0);
 #endif
@@ -8059,12 +8053,13 @@ namespace Legion {
         }
         index_owner->check_point_requirements(local_requirements);
 #endif
-        if (!restrict_postconditions.empty())
+        if (!effects_postconditions.empty())
         {
-          ApEvent restrict_post = 
-            Runtime::merge_events(NULL, restrict_postconditions);
+          const PhysicalTraceInfo trace_info(this);
+          ApEvent effects_done = 
+            Runtime::merge_events(&trace_info, effects_postconditions);
           index_owner->return_slice_mapped(points.size(), denominator,
-                                     applied_condition, restrict_post);
+                                           applied_condition, effects_done);
         }
         else
           index_owner->return_slice_mapped(points.size(), denominator, 
@@ -8147,11 +8142,12 @@ namespace Legion {
       rez.serialize(points.size());
       rez.serialize(denominator);
       rez.serialize(applied_condition);
-      if (!restrict_postconditions.empty())
+      if (!effects_postconditions.empty())
       {
-        ApEvent restrict_post =
-          Runtime::merge_events(NULL, restrict_postconditions);
-        rez.serialize(restrict_post);
+        const PhysicalTraceInfo trace_info(this);
+        ApEvent effects_done =
+          Runtime::merge_events(&trace_info, effects_postconditions);
+        rez.serialize(effects_done);
       }
       else
         rez.serialize(ApEvent::NO_AP_EVENT);
