@@ -2221,6 +2221,8 @@ namespace Legion {
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
       void send_view_find_copy_preconditions_request(AddressSpaceID target,
                                                      Serializer &rez);
+      void send_view_find_copy_preconditions_response(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
@@ -2410,6 +2412,12 @@ namespace Legion {
       void handle_view_remote_update(Deserializer &derez,
                                      AddressSpaceID source);
       void handle_view_remote_invalidate(Deserializer &derez);
+      void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
+      void handle_view_copy_pre_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_view_copy_pre_response(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);

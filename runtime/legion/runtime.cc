@@ -6039,6 +6039,27 @@ namespace Legion {
               runtime->handle_view_remote_invalidate(derez);
               break;
             }
+          case SEND_VIEW_REGISTER_USER:
+            {
+              runtime->handle_view_register_user(derez, remote_address_space);
+              break;
+            }
+          case SEND_VIEW_FIND_COPY_PRE_REQUEST:
+            {
+              runtime->handle_view_copy_pre_request(derez,remote_address_space);
+              break;
+            }
+          case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
+            {
+              runtime->handle_view_copy_pre_response(derez,
+                                                    remote_address_space);
+              break;
+            }
+          case SEND_VIEW_ADD_COPY_USER:
+            {
+              runtime->handle_view_add_copy_user(derez, remote_address_space);
+              break;
+            }
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -13871,6 +13892,40 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_register_user(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REGISTER_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_find_copy_preconditions_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_FIND_COPY_PRE_REQUEST,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_find_copy_preconditions_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,SEND_VIEW_FIND_COPY_PRE_RESPONSE,
+                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_add_copy_user(AddressSpaceID target,Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_ADD_COPY_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14935,6 +14990,38 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceView::handle_view_remote_invalidate(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_register_user(Deserializer &derez,
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_register_user(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_copy_pre_request(Deserializer &derez,
+                                               AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_copy_pre_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_copy_pre_response(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_copy_pre_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_add_copy_user(Deserializer &derez,
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_add_copy_user(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
