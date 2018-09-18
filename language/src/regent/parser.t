@@ -1402,7 +1402,7 @@ parser.expr = parsing.Pratt()
   :infix("&", 15, parser.expr_binary_left)
   :infix("|", 12, parser.expr_binary_left)
   :infix("and", 10, parser.expr_binary_left)
-  :infix("or", 10, parser.expr_binary_left)
+  :infix("or", 8, parser.expr_binary_left)
   :prefix(parsing.default, parser.expr_simple)
 
 function parser.expr_lhs(p)
