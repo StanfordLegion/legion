@@ -11,6 +11,8 @@ Version 18.09.0 (September ??, 2018)
     - Support for development snapshots of GASNet-EX (using GASNet-1
         compatibility interfaces for now)
   * Regent
+    - Changed precendence of logical operators (and, or) to match that of
+        Lua and Terra (or is now lower-precendence than and)
     - Full support for accessing sparse multi-dimensional regions
     - Initial support for incremental compilation. Enable with
         REGENT_INCREMENTAL=1
