@@ -1925,7 +1925,7 @@ std.rect_type = terralib.memoize(function(index_type)
   end)
 
   st.metamethods.__ne = macro(function(a, b)
-    return `([a].lo ~= [b].lo and [a].hi ~= [b].hi)
+    return `([a].lo ~= [b].lo or [a].hi ~= [b].hi)
   end)
 
   function st.metamethods.__cast(from, to, expr)
