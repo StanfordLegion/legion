@@ -359,7 +359,7 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
 
     cmake_exe = None
     try:
-        cmake_version = subprocess.check_output(['cmake', '--version'])
+        cmake_version = subprocess.check_output(['cmake', '--version']).decode('utf-8')
     except:
         pass # Can't find CMake, continue to download
     else:
