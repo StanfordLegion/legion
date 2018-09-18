@@ -4160,12 +4160,16 @@ function codegen.expr_partition_equal(cx, node)
     end
   else
     local dim = region_type:ispace().dim
-    local blockify = terralib.newsymbol(
-      c["legion_blockify_" .. tostring(dim) .. "d_t"], "blockify")
+    local transform = terralib.newsymbol(
+      c["legion_transform_" .. tostring(dim) .. "x" .. tostring(dim) .. "_t"], "transform")
+    local extent = terralib.newsymbol(
+      c["legion_rect_" .. tostring(dim) .. "d_t"], "extent")
     local domain_get_rect =
       c["legion_domain_get_rect_" .. tostring(dim) .. "d"]
-    local create_index_partition =
-      c["legion_index_partition_create_blockify_" .. tostring(dim) .. "d"]
+    local create_domain_transform =
+      c["legion_domain_transform_from_" .. tostring(dim) .. "x" .. tostring(dim)]
+    local create_domain =
+      c["legion_domain_from_rect_" .. tostring(dim) .. "d"]
 
     actions = quote
       [actions]
@@ -4176,19 +4180,33 @@ function codegen.expr_partition_equal(cx, node)
         [cx.runtime], [colors.value].impl)
       var color_rect = [domain_get_rect](color_domain)
 
-      var [blockify]
+      var [transform]
+      var [extent]
       [data.range(dim):map(
          function(i)
            local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
            local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
            return quote
-             [blockify].block_size.x[ [i] ] = ([block] + [colors] - 1) / [colors]
-             [blockify].offset.x[ [i] ] = region_rect.lo.x[ [i] ]
+             var block_size = ([block] + [colors] - 1) / [colors]
+             for j = 0, dim do
+               if i == j then
+                 [transform].trans[i][j] = block_size
+               else
+                 [transform].trans[i][j] = 0
+               end
+             end
+
+             [extent].lo.x[ [i] ] = region_rect.lo.x[ [i] ]
+             [extent].hi.x[ [i] ] = region_rect.lo.x[ [i] ] + block_size - 1
            end
          end)]
-      var [ip] = [create_index_partition](
+      var dtransform = [create_domain_transform]([transform])
+      var dextent = [create_domain]([extent])
+      var [ip] = c.legion_index_partition_create_by_restriction(
         [cx.runtime], [cx.context], [region.value].impl.index_space,
-        [blockify], -1 --[[ AUTO_GENERATE_ID ]])
+        [colors.value].impl,
+        dtransform, dextent, c.DISJOINT_KIND,
+        -1 --[[ AUTO_GENERATE_ID ]])
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
