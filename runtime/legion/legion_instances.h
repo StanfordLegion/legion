@@ -227,10 +227,16 @@ namespace Legion {
      */
     class CopyAcrossHelper {
     public:
-      CopyAcrossHelper(const FieldMask &full)
-        : full_mask(full) { }
+      CopyAcrossHelper(const FieldMask &full,
+                       const std::vector<unsigned> &src,
+                       const std::vector<unsigned> &dst)
+        : full_mask(full), src_indexes(src), dst_indexes(dst) { }
     public:
       const FieldMask &full_mask;
+      const std::vector<unsigned> &src_indexes;
+      const std::vector<unsigned> &dst_indexes;
+      std::map<unsigned,unsigned> forward_map;
+      std::map<unsigned,unsigned> backward_map;
     public:
       void compute_across_offsets(const FieldMask &src_mask,
                    std::vector<CopySrcDstField> &dst_fields);

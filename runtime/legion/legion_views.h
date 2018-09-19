@@ -175,27 +175,6 @@ namespace Legion {
                                const FieldMask &reduce_mask, 
                        std::vector<CopySrcDstField> &src_fields) = 0;
     public:
-      virtual void process_update_request(AddressSpaceID source,
-                               RtUserEvent done_event, Deserializer &derez) = 0;
-      virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event,
-                                           AddressSpaceID source,
-                                           RegionTreeForest *forest) = 0;
-      virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source,
-                                         RegionTreeForest *forest) = 0;
-      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             RtUserEvent done_event) = 0;
-    public:
-      static void handle_view_update_request(Deserializer &derez, 
-          Runtime *runtime, AddressSpaceID source); 
-      static void handle_view_update_response(Deserializer &derez, 
-          Runtime *runtime, AddressSpaceID source);
-      static void handle_view_remote_update(Deserializer &derez, Runtime *rt,
-                                            AddressSpaceID source);
-      static void handle_view_remote_invalidate(Deserializer &derez,  
-                                                Runtime *rt);
-    public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_copy_pre_request(Deserializer &derez,
@@ -398,18 +377,6 @@ namespace Legion {
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
-      virtual void process_update_request(AddressSpaceID source,
-                               RtUserEvent done_event, Deserializer &derez);
-      virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event,
-                                           AddressSpaceID source,
-                                           RegionTreeForest *forest);
-      virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source,
-                                         RegionTreeForest *forest);
-      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             RtUserEvent done_event);
-    public:
       InstanceManager *const manager;
     protected:
       // Keep track of the locks used for managing atomic coherence
@@ -560,18 +527,6 @@ namespace Legion {
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
     public:
-      virtual void process_update_request(AddressSpaceID source,
-                               RtUserEvent done_event, Deserializer &derez);
-      virtual void process_update_response(Deserializer &derez,
-                                           RtUserEvent done_event,
-                                           AddressSpaceID source,
-                                           RegionTreeForest *forest);
-      virtual void process_remote_update(Deserializer &derez,
-                                         AddressSpaceID source,
-                                         RegionTreeForest *forest);
-      virtual void process_remote_invalidate(const FieldMask &invalid_mask,
-                                             RtUserEvent done_event);
-    public:
       ReductionOpID get_redop(void) const;
     public:
       ReductionManager *const manager;
@@ -629,22 +584,6 @@ namespace Legion {
                            const FieldMask src_mask,
                            IndexSpaceExpression *expr,
                            CopyAcrossHelper *helper) = 0;
-#if 0
-      virtual void issue_deferred_copies(const TraversalInfo &info,
-                                         MaterializedView *dst,
-                                         FieldMask copy_mask,
-                                         const RestrictInfo &restrict_info,
-                                         bool restrict_out) = 0;
-      virtual void issue_deferred_copies(DeferredCopier &copier,
-                                         const FieldMask &local_copy_mask,
-                                         const WriteMasks &write_masks,
-                                         WriteSet &performed_writes,
-                                         PredEvent pred_guard) = 0;
-      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
-                                         IndexSpaceExpression *write_mask,
-                                         IndexSpaceExpression *&write_performed,
-                                         PredEvent pred_guard) = 0;
-#endif
     };
 
     /**
@@ -697,39 +636,6 @@ namespace Legion {
                            const FieldMask src_mask,
                            IndexSpaceExpression *expr,
                            CopyAcrossHelper *helper);
-#if 0
-      virtual void issue_deferred_copies(const TraversalInfo &info,
-                                         MaterializedView *dst,
-                                         FieldMask copy_mask,
-                                         const RestrictInfo &restrict_info,
-                                         bool restrict_out);
-      virtual void issue_deferred_copies(DeferredCopier &copier,
-                                         const FieldMask &local_copy_mask,
-                                         const WriteMasks &write_masks,
-                                         WriteSet &performed_writes,
-                                         PredEvent pred_guard);
-      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
-                                         IndexSpaceExpression *write_mask,
-                                         IndexSpaceExpression *&write_performed,
-                                         PredEvent pred_guard);
-#endif
-    protected:
-#if 0
-      void issue_update_fills(DeferredCopier &copier,
-                              const FieldMask &fill_mask,
-                              IndexSpaceExpression *mask,
-                              WriteSet &performed_writes,
-                              PredEvent pred_guard) const;
-      void issue_internal_fills(const TraversalInfo &info,
-                                MaterializedView *dst,
-                                const FieldMask &fill_mask,
-            const LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                PredEvent pred_guard,
-                                CopyAcrossHelper *helper = NULL,
-                                IndexSpaceExpression *mask = NULL,
-                                WriteSet *perf = NULL) const;
-#endif
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
                                         AddressSpaceID source);
@@ -805,31 +711,6 @@ namespace Legion {
                            const FieldMask src_mask,
                            IndexSpaceExpression *expr,
                            CopyAcrossHelper *helper);
-#if 0
-      virtual void issue_deferred_copies(const TraversalInfo &info,
-                                         MaterializedView *dst,
-                                         FieldMask copy_mask,
-                                         const RestrictInfo &restrict_info,
-                                         bool restrict_out);
-      virtual void issue_deferred_copies(DeferredCopier &copier,
-                                         const FieldMask &local_copy_mask,
-                                         const WriteMasks &write_masks,
-                                         WriteSet &performed_writes,
-                                         PredEvent pred_guard);
-      virtual bool issue_deferred_copies_single(DeferredSingleCopier &copier,
-                                         IndexSpaceExpression *write_mask,
-                                         IndexSpaceExpression *&write_performed,
-                                         PredEvent pred_guard);
-#endif
-    public:
-      virtual InnerContext* get_owner_context(void) const
-        { assert(false); return NULL; }
-      virtual void perform_ready_check(FieldMask mask)
-        { assert(false); }
-      virtual void find_valid_views(const FieldMask &update_mask,
-                  LegionMap<LogicalView*,FieldMask>::aligned &valid_views, 
-                                    bool needs_lock = true)
-        { assert(false); }
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask);
       void record_false_view(LogicalView *view, const FieldMask &view_mask);

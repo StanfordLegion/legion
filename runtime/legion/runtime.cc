@@ -6019,26 +6019,6 @@ namespace Legion {
               runtime->handle_view_request(derez, remote_address_space);
               break;
             }
-          case SEND_VIEW_UPDATE_REQUEST:
-            {
-              runtime->handle_view_update_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_VIEW_UPDATE_RESPONSE:
-            {
-              runtime->handle_view_update_response(derez, remote_address_space);
-              break;
-            }
-          case SEND_VIEW_REMOTE_UPDATE:
-            {
-              runtime->handle_view_remote_update(derez, remote_address_space);
-              break;
-            }
-          case SEND_VIEW_REMOTE_INVALIDATE:
-            {
-              runtime->handle_view_remote_invalidate(derez);
-              break;
-            }
           case SEND_VIEW_REGISTER_USER:
             {
               runtime->handle_view_register_user(derez, remote_address_space);
@@ -6265,6 +6245,36 @@ namespace Legion {
           case SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE:
             {
               runtime->handle_equivalence_set_create_remote_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_VALID_REQUEST:
+            {
+              runtime->handle_equivalence_set_valid_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_VALID_RESPONSE:
+            {
+              runtime->handle_equivalence_set_valid_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_UPDATE_REQUEST:
+            {
+              runtime->handle_equivalence_set_update_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_UPDATE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_update_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST:
+            {
+              runtime->handle_equivalence_set_invalidate_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_invalidate_response(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -13856,42 +13866,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_update_request(AddressSpaceID target,
-                                           Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_REQUEST,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_update_response(AddressSpaceID target,
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
-                  UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_update(AddressSpaceID target, 
-                                          Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_UPDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_invalidate(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_INVALIDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_view_register_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14251,6 +14225,66 @@ namespace Legion {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
           VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_valid_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_VALID_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_valid_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_VALID_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_update_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_update_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_invalidate_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_invalidate_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14962,37 +14996,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_response(Deserializer &derez,
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_update(Deserializer &derez,
-                                            AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_remote_update(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_remote_invalidate(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_view_register_user(Deserializer &derez,
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15358,6 +15361,49 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_create_remote_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_valid_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_valid_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_valid_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_valid_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_update_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_update_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_update_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_update_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_invalidate_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_invalidate_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_invalidate_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_invalidate_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

@@ -617,10 +617,6 @@ namespace Legion {
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
       SEND_VIEW_REQUEST,
-      SEND_VIEW_UPDATE_REQUEST,
-      SEND_VIEW_UPDATE_RESPONSE,
-      SEND_VIEW_REMOTE_UPDATE,
-      SEND_VIEW_REMOTE_INVALIDATE,
       SEND_VIEW_REGISTER_USER,
       SEND_VIEW_FIND_COPY_PRE_REQUEST,
       SEND_VIEW_FIND_COPY_PRE_RESPONSE,
@@ -662,6 +658,12 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
       SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
       SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
+      SEND_EQUIVALENCE_SET_VALID_REQUEST,
+      SEND_EQUIVALENCE_SET_VALID_RESPONSE,
+      SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
+      SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
+      SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
+      SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -755,10 +757,6 @@ namespace Legion {
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
         "Send View Request",                                          \
-        "Send View Update Request",                                   \
-        "Send View Update Response",                                  \
-        "Send View Remote Update",                                    \
-        "Send View Remote Invalidate",                                \
         "Send View Register User",                                    \
         "Send View Find Copy Preconditions Request",                  \
         "Send View Find Copy Preconditions Response",                 \
@@ -800,6 +798,12 @@ namespace Legion {
         "Send Equivalence Set Ray Trace Response",                    \
         "Send Equivalence Set Remote Create Request",                 \
         "Send Equivalence Set Remote Create Response",                \
+        "Send Equivalence Set Valid Request",                         \
+        "Send Equivalence Set Valid Response",                        \
+        "Send Equivalence Set Update Request",                        \
+        "Send Equivalence Set Update Response",                       \
+        "Send Equivalence Set Invalidate Request",                    \
+        "Send Equivalence Set Invalidate Response",                   \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \

@@ -2214,10 +2214,6 @@ namespace Legion {
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
-      void send_view_update_request(AddressSpaceID target, Serializer &rez);
-      void send_view_update_response(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
       void send_view_register_user(AddressSpaceID target, Serializer &rez);
       void send_view_find_copy_preconditions_request(AddressSpaceID target,
                                                      Serializer &rez);
@@ -2283,6 +2279,18 @@ namespace Legion {
                                                       Serializer &rez);
       void send_equivalence_set_create_remote_response(AddressSpaceID target,
                                                        Serializer &rez);
+      void send_equivalence_set_valid_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_valid_response(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_update_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_update_response(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_invalidate_request(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_equivalence_set_invalidate_response(AddressSpaceID target,
+                                                    Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_update_request(AddressSpaceID target, 
                                              Serializer &rez);
@@ -2405,13 +2413,6 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
-      void handle_view_update_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_view_update_response(Deserializer &derez,
-                                       AddressSpaceID source);
-      void handle_view_remote_update(Deserializer &derez,
-                                     AddressSpaceID source);
-      void handle_view_remote_invalidate(Deserializer &derez);
       void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
       void handle_view_copy_pre_request(Deserializer &derez,
                                         AddressSpaceID source);
@@ -2478,6 +2479,12 @@ namespace Legion {
       void handle_equivalence_set_create_remote_request(Deserializer &derez,
                                                         AddressSpaceID source);
       void handle_equivalence_set_create_remote_response(Deserializer &derez);
+      void handle_equivalence_set_valid_request(Deserializer &derez);
+      void handle_equivalence_set_valid_response(Deserializer &derez);
+      void handle_equivalence_set_update_request(Deserializer &derez);
+      void handle_equivalence_set_update_response(Deserializer &derez);
+      void handle_equivalence_set_invalidate_request(Deserializer &derez);
+      void handle_equivalence_set_invalidate_response(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,

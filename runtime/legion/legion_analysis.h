@@ -706,6 +706,20 @@ namespace Legion {
       public:
         const AddressSpaceID target;
       };
+      // Pending requests for updates
+      struct PendingRequest : public LegionHeapify<PendingRequest> {
+      public:
+        PendingRequest(RtUserEvent ready, RtUserEvent applied, ReductionOpID r) 
+          : ready_event(ready), applied_event(applied), redop(r),
+            remaining_count(0) { }
+      public:
+        const RtUserEvent ready_event;
+        const RtUserEvent applied_event;
+        const ReductionOpID redop;
+        std::set<RtEvent> applied_events;
+        FieldMask owner_mask;
+        int remaining_count;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space, 
@@ -728,10 +742,12 @@ namespace Legion {
                                          IndexSpaceExpression *expr, 
                                          AddressSpaceID source); 
       void perform_versioning_analysis(VersionInfo &version_info);
-      void request_valid_copy(const FieldMask &field_mask,
+      void request_valid_copy(FieldMask request_mask,
                               const RegionUsage usage,
-                              std::set<RtEvent> &read_events, 
-                              std::set<RtEvent> &applied_events);
+                              std::set<RtEvent> &ready_events, 
+                              std::set<RtEvent> &applied_events,
+                              AddressSpaceID request_space,
+                              PendingRequest *pending_request = NULL);
     public:
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
@@ -811,6 +827,62 @@ namespace Legion {
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
+    protected:
+      void update_exclusive_copies(FieldMask &to_update,
+                                   AddressSpaceID request_space,
+                                   PendingRequest *pending_request,
+                                   unsigned &pending_updates);
+      void update_reduction_copies(FieldMask &to_update,
+                                   AddressSpaceID request_space,
+                                   PendingRequest *pending_request,
+                                   unsigned &pending_updates,
+                                   ReductionOpID redop);
+      void record_exclusive_copy(AddressSpaceID request_space,
+                                 const FieldMask &request_mask);
+      void record_shared_copy(AddressSpaceID request_space,
+                              const FieldMask &request_mask);
+      void record_single_reduce(AddressSpaceID request_space,
+                                const FieldMask &request_mask,
+                                ReductionOpID redop);
+      // For filtering exclusive and single redop
+      void filter_single_copies(FieldMask &to_filter, 
+                                FieldMask &single_fields,
+          LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
+                                AddressSpaceID request_space,
+                                PendingRequest *pending_request,
+                                unsigned &pending_updates);
+      // For filtering shared and multi redop
+      void filter_multi_copies(FieldMask &to_filter,
+                               FieldMask &multi_fields,
+         LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies,
+                               AddressSpaceID request_space,
+                               PendingRequest *pending_request,
+                               unsigned &pending_updates);
+      void filter_redop_modes(FieldMask to_filter);
+      void request_update(AddressSpaceID valid_space, 
+                          AddressSpaceID invalid_space,
+                          const FieldMask &update_mask,
+                          PendingRequest *pending_request,
+                          unsigned &pending_updates,
+                          bool invalidate,
+                          ReductionOpID skip_redop = 0,
+                          bool needs_lock = false);
+      void request_invalidate(AddressSpaceID target,
+                              AddressSpaceID source,
+                              const FieldMask &invalidate_mask,
+                              PendingRequest *pending_request,
+                              unsigned &pending_updates,
+                              bool meta_only,
+                              bool needs_lock = false);
+      void record_pending_updates(PendingRequest *pending_request,
+                                  unsigned pending_updates,
+                                  bool needs_lock);
+      void record_invalidation(PendingRequest *pending_request,
+                               bool needs_lock = false);
+      void finalize_pending_request(PendingRequest *pending_request);
+#ifdef DEBUG_LEGION
+      void sanity_check(void) const;
+#endif
     public:
       static void handle_refinement(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
@@ -828,6 +900,12 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_remote_response(Deserializer &derez, 
                                                 Runtime *runtime);
+      static void handle_valid_request(Deserializer &derez, Runtime *rt);
+      static void handle_valid_response(Deserializer &derez, Runtime *rt);
+      static void handle_update_request(Deserializer &derez, Runtime *rt);
+      static void handle_update_response(Deserializer &derez, Runtime *rt);
+      static void handle_invalidate_request(Deserializer &derez, Runtime *rt);
+      static void handle_invalidate_response(Deserializer &derez, Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
     protected:
@@ -838,7 +916,7 @@ namespace Legion {
       std::map<unsigned/*field idx*/,
                std::vector<ReductionView*> >              reduction_instances;
       FieldMask                                           reduction_fields;
-      FieldMaskSet<LogicalView>                           restricted_instances;
+      FieldMaskSet<InstanceView>                          restricted_instances;
       FieldMask                                           restricted_fields;
       // This is the current version number of the equivalence set
       // Each field should appear in exactly one mask
@@ -854,6 +932,8 @@ namespace Legion {
       std::map<RtEvent,unsigned> mapping_guards;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
+      // Track if we have an oustanding refinement task
+      bool outstanding_refinement_task;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
@@ -870,10 +950,20 @@ namespace Legion {
       FieldMask exclusive_fields;
       // Track which fields we hold in shared mode
       FieldMask shared_fields;
+      // Track which fields we hold in single reduction mode
+      FieldMask single_redop_fields;
+      // Track the which fields we hold in multiple reduction mode
+      FieldMask multi_redop_fields;
+      // Track the reduction modes for fields
+      LegionMap<ReductionOpID,FieldMask>::aligned redop_modes;
       // These members are only valid on the owner node
       // Track which nodes have shared copies of fields
       LegionMap<AddressSpaceID,FieldMask>::aligned exclusive_copies;
       LegionMap<AddressSpaceID,FieldMask>::aligned shared_copies;
+      LegionMap<AddressSpaceID,FieldMask>::aligned single_reduction_copies;
+      LegionMap<AddressSpaceID,FieldMask>::aligned multi_reduction_copies;
+      // Requests that are pending from this node 
+      FieldMaskSet<PendingRequest> outstanding_requests;
     public:
       static const VersionID init_version = 1;
     };

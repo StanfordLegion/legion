@@ -98,6 +98,70 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    FieldMask CopyAcrossHelper::convert_src_to_dst(const FieldMask &src_mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask dst_mask;
+      if (!src_mask)
+        return dst_mask;
+      if (forward_map.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_indexes.size() == dst_indexes.size());
+#endif
+        for (unsigned idx = 0; idx < src_indexes.size(); idx++)
+        {
+#ifdef DEBUG_LEGION
+          assert(forward_map.find(src_indexes[idx]) == forward_map.end());
+#endif
+          forward_map[src_indexes[idx]] = dst_indexes[idx];
+        }
+      }
+      int index = src_mask.find_first_set();
+      while (index >= 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(forward_map.find(index) != forward_map.end());
+#endif
+        dst_mask.set_bit(forward_map[index]);
+        index = src_mask.find_next_set(index+1);
+      }
+      return dst_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldMask CopyAcrossHelper::convert_dst_to_src(const FieldMask &dst_mask)
+    //--------------------------------------------------------------------------
+    {
+      FieldMask src_mask;
+      if (!dst_mask)
+        return src_mask;
+      if (backward_map.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_indexes.size() == dst_indexes.size());
+#endif
+        for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
+        {
+#ifdef DEBUG_LEGION
+          assert(backward_map.find(dst_indexes[idx]) == backward_map.end());
+#endif
+          backward_map[dst_indexes[idx]] = src_indexes[idx];
+        }
+      }
+      int index = dst_mask.find_first_set();
+      while (index >= 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(backward_map.find(index) != backward_map.end());
+#endif
+        src_mask.set_bit(backward_map[index]);
+        index = dst_mask.find_next_set(index+1);
+      }
+      return src_mask;
+    }
+
     /////////////////////////////////////////////////////////////
     // Layout Description 
     /////////////////////////////////////////////////////////////

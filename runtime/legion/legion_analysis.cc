@@ -232,7 +232,8 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         (*it)->request_valid_copy(ready_mask, RegionUsage(req), 
-                                  ready_events, applied_events);
+                                  ready_events, applied_events,
+                                  (*it)->local_space);
     }
 
     //--------------------------------------------------------------------------
@@ -2778,10 +2779,16 @@ namespace Legion {
                  AddressSpaceID owner, IndexSpaceExpression *expr, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
         eq_lock(gc_lock), eq_state(is_owner() ? MAPPING_STATE : INVALID_STATE),
-        unrefined_remainder(NULL)
+        outstanding_refinement_task(false), unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
+      if (is_owner())
+      {
+        // If we're the owner, we hold everything in exclusive mode
+        exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        exclusive_copies[owner_space] = exclusive_fields;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2797,6 +2804,9 @@ namespace Legion {
     EquivalenceSet::~EquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!outstanding_refinement_task);
+#endif
       if (set_expr->remove_expression_reference())
         delete set_expr;
       if (!subsets.empty())
@@ -2940,6 +2950,47 @@ namespace Legion {
       // should never be called
       assert(false);
     } 
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::clone_from(EquivalenceSet *parent)
+    //--------------------------------------------------------------------------
+    {
+      // No need to hold a lock on the parent since we know that
+      // no one else will be modifying these data structures
+      this->valid_instances = parent->valid_instances;
+      this->reduction_instances = parent->reduction_instances;
+      this->reduction_fields = parent->reduction_fields;
+      this->restricted_instances = parent->restricted_instances;
+      this->restricted_fields = parent->restricted_fields;
+      this->version_numbers = parent->version_numbers;
+      // Now add references to all the views
+      // No need for a mutator here since all the views already
+      // have valid references being held by the parent equivalence set
+      if (!valid_instances.empty())
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it =
+              valid_instances.begin(); it != valid_instances.end(); it++)
+          it->first->add_nested_valid_ref(did);
+      }
+      if (!reduction_instances.empty())
+      {
+        for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              rit = reduction_instances.begin(); 
+              rit != reduction_instances.end(); rit++)
+        {
+          for (std::vector<ReductionView*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            (*it)->add_nested_valid_ref(did);
+        }
+      }
+      if (!restricted_instances.empty())
+      {
+        for (FieldMaskSet<InstanceView>::const_iterator it = 
+              restricted_instances.begin(); it != 
+              restricted_instances.end(); it++)
+          it->first->add_nested_valid_ref(did);
+      }
+    }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::add_mapping_guard(RtEvent mapped_event, bool need_lock)
@@ -3352,6 +3403,1318 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::request_valid_copy(FieldMask request_mask,
+                                            const RegionUsage usage,
+                                            std::set<RtEvent> &ready_events, 
+                                            std::set<RtEvent> &applied_events,
+                                            AddressSpaceID request_space,
+                                            PendingRequest *pending_request)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
+      if (!is_owner())
+      {
+#ifdef DEBUG_LEGION
+        assert(pending_request == NULL);
+#endif
+        // Check to see which fields we need to request
+        if (IS_REDUCE(usage))
+        {
+#ifdef DEBUG_LEGION
+          assert(usage.redop != 0);
+#endif
+          // Check to see if we are single or multiple reduce with
+          // the right reduction operator
+          FieldMask valid_mask = 
+                      request_mask & (single_redop_fields | multi_redop_fields);
+          if (!!valid_mask)
+          {
+            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
+              finder = redop_modes.find(usage.redop);
+            if (finder != redop_modes.end())
+            {
+              valid_mask &= finder->second;
+              if (!!valid_mask)
+                request_mask -= valid_mask;
+            }
+          }
+        }
+        else if (IS_READ_ONLY(usage))
+        {
+          // For read-only we'll be happy with exclusive or read-only
+          const FieldMask valid_mask = 
+                        request_mask & (exclusive_fields | shared_fields);
+          if (!!valid_mask)
+            request_mask -= valid_mask;
+        }
+        else
+        {
+          // for write privileges then we need to be exclusive
+          const FieldMask valid_mask = request_mask & exclusive_fields;
+          if (!!valid_mask)
+            request_mask -= valid_mask;
+        }
+        // If not all our fields are valid send a request to the owner
+        if (!!request_mask)
+        {
+          // Check to see if there are already any pending requests
+          // that we need to check against
+          if (!outstanding_requests.empty() &&
+              !(request_mask * outstanding_requests.get_valid_mask()))
+          {
+            for (FieldMaskSet<PendingRequest>::const_iterator it = 
+                  outstanding_requests.begin(); it != 
+                  outstanding_requests.end(); it++)
+            {
+              const FieldMask overlap = request_mask & it->second;
+              if (!overlap)
+                continue;
+              ready_events.insert(it->first->ready_event);
+              applied_events.insert(it->first->applied_event);
+              request_mask -= overlap;
+              if (!request_mask)
+                break;
+            }
+          }
+          // If we still have fields to request then issue our request
+          if (!!request_mask)
+          {
+            RtUserEvent ready = Runtime::create_rt_user_event();
+            RtUserEvent applied = Runtime::create_rt_user_event(); 
+            PendingRequest *request = 
+              new PendingRequest(ready, applied, usage.redop);
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(request_mask);
+              rez.serialize(usage);
+              rez.serialize(request);
+            }
+            runtime->send_equivalence_set_valid_request(owner_space, rez);
+            outstanding_requests.insert(request, request_mask);
+            ready_events.insert(ready);
+            applied_events.insert(applied);
+          }
+        }
+      }
+      else
+      {
+        // If the request is local then check to see which fields are already
+        // valid, if its remote this check was already done on the remote node
+        const FieldMask orig_mask = request_mask;
+        if (request_space == owner_space)
+        {
+          if (!outstanding_requests.empty() && 
+              !(request_mask * outstanding_requests.get_valid_mask()))
+          {
+            for (FieldMaskSet<PendingRequest>::const_iterator it = 
+                  outstanding_requests.begin(); it != 
+                  outstanding_requests.end(); it++)
+            {
+              const FieldMask overlap = request_mask & it->second;
+              if (!overlap)
+                continue;
+              ready_events.insert(it->first->ready_event);
+              applied_events.insert(it->first->applied_event);
+              request_mask -= overlap;
+              if (!request_mask)
+                break;
+            }
+          }
+          // First see which ones we already have outstanding requests for
+          if (!!request_mask)
+          {
+            if (IS_REDUCE(usage))
+            {
+              // Check to see if we have it in a reduction mode
+              FieldMask redop_mask;
+              if (!(request_mask * single_redop_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = single_reduction_copies.find(owner_space);
+                if (finder != single_reduction_copies.end())
+                  redop_mask |= finder->second & request_mask;
+              }
+              if (!(request_mask * multi_redop_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = multi_reduction_copies.find(owner_space);
+                if (finder != multi_reduction_copies.end())
+                  redop_mask |= finder->second & request_mask;
+              }
+              if (!!redop_mask)
+              {
+                // Has to be in the right reduction mode too
+                LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
+                  redop_finder = redop_modes.find(usage.redop);
+                if (redop_finder != redop_modes.end())
+                  request_mask -= (redop_finder->second & redop_mask);
+              }
+            }
+            else 
+            {
+              // Check to see if we have it in exclusive mode
+              if (!(request_mask * exclusive_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = exclusive_copies.find(owner_space);
+                if (finder != exclusive_copies.end())
+                  request_mask -= finder->second;
+              }
+              // Read-only can also be in shared mode
+              if (IS_READ_ONLY(usage) && !!request_mask)
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = shared_copies.find(owner_space);
+                if (finder != shared_copies.end())
+                  request_mask -= finder->second;
+              }
+            }
+            if (!!request_mask)
+            {
+#ifdef DEBUG_LEGION
+              assert(pending_request == NULL);
+#endif
+              RtUserEvent ready = Runtime::create_rt_user_event();
+              RtUserEvent applied = Runtime::create_rt_user_event(); 
+              pending_request = 
+                new PendingRequest(ready, applied, usage.redop);
+              outstanding_requests.insert(pending_request, request_mask); 
+            }
+          }
+        }
+        // If we still have fields that aren't valid then we need to 
+        // send messages to remote nodes for updates and invalidations
+        if (!!request_mask)
+        {
+#ifdef DEBUG_LEGION
+          assert(pending_request != NULL);
+#endif
+          unsigned pending_updates = 0;
+          if (IS_REDUCE(usage))
+          {
+            FieldMask same_redop_mask;
+            // If we're in single or multi reduce mode with the same reduction 
+            // operation then we can go to multi-reduce mode for the requester
+            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator 
+              redop_finder = redop_modes.find(usage.redop);
+            if (redop_finder != redop_modes.end())
+            {
+              same_redop_mask = redop_finder->second & request_mask;
+              if (!!same_redop_mask)
+              {
+                // Remove these fields from the request mask
+                request_mask -= same_redop_mask;
+                update_reduction_copies(same_redop_mask, request_space, 
+                        pending_request, pending_updates, usage.redop);
+              }
+            }
+            // See if we still have request fields
+            if (!!request_mask)
+            {
+              FieldMask filter_mask = request_mask;
+              // No matter what mode we're in now we're going to single-reduce
+              // Issue updates from all exclusive and reduction copies
+              // and send invalidations to any shared copies
+              // Keep track of which fields we've issue updates from for
+              // when we get to any shared nodes in case we need to issue
+              // an update from one of them as well
+              filter_single_copies(filter_mask, exclusive_fields, 
+                                   exclusive_copies, request_space, 
+                                   pending_request, pending_updates);
+              filter_multi_copies(filter_mask, shared_fields, shared_copies,
+                            request_space, pending_request, pending_updates);
+              const FieldMask redop_overlap = filter_mask & 
+                                  (single_redop_fields | multi_redop_fields);
+              if (!!redop_overlap)
+              {
+                filter_single_copies(filter_mask, single_redop_fields, 
+                    single_reduction_copies, request_space, 
+                    pending_request, pending_updates);
+                filter_multi_copies(filter_mask, multi_redop_fields,
+                    multi_reduction_copies, request_space,
+                    pending_request, pending_updates);
+                filter_redop_modes(redop_overlap);
+              }
+#ifdef DEBUG_LEGION
+              assert(!filter_mask); // should have seen them all
+#endif
+              // Now put everything in single reduce mode
+              record_single_reduce(request_space, request_mask, usage.redop); 
+            }
+          }
+          else
+          {
+            // Any reduction modes are going to exclusive regardless of
+            // whether we are reading or writing 
+            const FieldMask redop_overlap = request_mask &
+                              (single_redop_fields | multi_redop_fields);
+            if (!!redop_overlap)
+            {
+              FieldMask filter_mask = redop_overlap;
+              filter_single_copies(filter_mask, single_redop_fields,
+                                   single_reduction_copies, request_space,
+                                   pending_request, pending_updates);
+              filter_multi_copies(filter_mask, multi_redop_fields,
+                                  multi_reduction_copies, request_space,
+                                  pending_request, pending_updates);
+              record_exclusive_copy(request_space, redop_overlap);
+              request_mask -= redop_overlap;
+            }
+            if (!!request_mask)
+            {
+              if (IS_READ_ONLY(usage))
+              {
+                // Filter anything in exclusive mode going to shared mode
+                filter_single_copies(request_mask, exclusive_fields,
+                                     exclusive_copies, request_space,
+                                     pending_request, pending_updates);
+                // If we still have fields we can record a new shared user
+                if (!!request_mask)
+                  record_shared_copy(request_space, request_mask);
+              }
+              else
+              {
+                // Must be in shared or exclusive mode going to exclusive mode
+                const FieldMask shared_overlap = shared_fields & request_mask;
+                if (!!shared_overlap)
+                {
+                  filter_multi_copies(request_mask, shared_fields,shared_copies,
+                              request_space, pending_request, pending_updates);
+                  record_exclusive_copy(request_space, shared_overlap);
+                }
+                if (!!request_mask)
+                  update_exclusive_copies(request_mask, request_space,
+                                          pending_request, pending_updates);
+              }
+            }
+          }
+          // Now either make a new request if this was from the owner
+          // or send back an update message to the requester with
+          // the expected number of updates
+          if (request_space != local_space)
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(did);
+              rez.serialize(pending_request);
+              rez.serialize(pending_updates);
+              // Since we're sening this back to a remote node then
+              // we need to determine the owner mask
+              FieldMask owner_mask;
+              if (usage.redop > 0)
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = single_reduction_copies.find(request_space);
+                if (finder != single_reduction_copies.end())
+                  owner_mask = finder->second & orig_mask;
+              }
+              else
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = exclusive_copies.find(request_space);
+                if (finder != exclusive_copies.end())
+                  owner_mask = finder->second & orig_mask;
+              }
+              rez.serialize(owner_mask);
+            }
+            runtime->send_equivalence_set_valid_response(request_space, rez);
+          }
+          else
+            record_pending_updates(pending_request, pending_updates, false);
+        }
+      }
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_exclusive_copies(FieldMask &to_update,
+                                               AddressSpaceID request_space,
+                                               PendingRequest *pending_request,
+                                               unsigned &pending_updates)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!(to_update - exclusive_fields)); // should all be exclusive
+#endif
+      // Scan through the exclusive copies, send any updates
+      FieldMask to_add;
+      std::vector<AddressSpaceID> to_delete;
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
+            exclusive_copies.begin(); it != exclusive_copies.end(); it++)
+      {
+        const FieldMask overlap = to_update & it->second;
+        if (!overlap)
+          continue;
+        // If it's already valid then there's nothing to do
+        if (it->first == request_space)
+          continue;
+        request_update(it->first, request_space, overlap, 
+                       pending_request, pending_updates, true/*invalidate*/);
+        to_add |= overlap;
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
+        to_update -= overlap;
+        if (!to_update)
+          break;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<AddressSpaceID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          exclusive_copies.erase(*it);
+      }
+      if (!!to_add)
+      {
+        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+          exclusive_copies.find(request_space);
+        if (finder == exclusive_copies.end())
+          exclusive_copies[request_space] = to_add;
+        else
+          finder->second |= to_add;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_reduction_copies(FieldMask &to_update,
+                                                AddressSpaceID request_space,
+                                                PendingRequest *pending_request,
+                                                unsigned &pending_updates,
+                                                ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(redop != 0);
+#endif
+      // Check to the multi-case first
+      FieldMask multi_overlap = to_update & multi_redop_fields;
+      if (!!multi_overlap)
+      {
+        to_update -= multi_overlap;
+        // Add it to the set, none of the fields should be valid currently
+        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+          multi_reduction_copies.find(request_space);
+        if (finder != multi_reduction_copies.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second * multi_overlap);
+#endif
+          finder->second |= multi_overlap; 
+        }
+        else
+          multi_reduction_copies[request_space] = multi_overlap;
+        // Request updates for all the fields
+        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+              it = multi_reduction_copies.begin(); 
+              it != multi_reduction_copies.end(); it++)
+        {
+          if (it->first == request_space)
+            continue;
+          const FieldMask overlap = multi_overlap & it->second;
+          if (!overlap)
+            continue;
+          request_update(it->first, request_space, overlap, pending_request,
+                         pending_updates, false/*invalidate*/, redop);
+          multi_overlap -= overlap;
+          if (!multi_overlap)
+            break;
+        }
+      }
+      // If we still have fields left then do the single case
+      if (!!to_update)
+      {
+#ifdef DEBUG_LEGION
+        assert(!(to_update - single_redop_fields));
+#endif
+        // All these fields are about to become multi-reduction fields
+        single_redop_fields -= to_update;
+        multi_redop_fields |= to_update;
+        // Add it to the set, none of the fields should be valid currently
+        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+          multi_reduction_copies.find(request_space);
+        if (finder != multi_reduction_copies.end())
+        {
+#ifdef DEBUG_LEGION
+          assert(finder->second * to_update);
+#endif
+          finder->second |= to_update; 
+        }
+        else
+          multi_reduction_copies[request_space] = to_update;
+        // Filter any single reduction nodes to multi-nodes
+        std::vector<AddressSpaceID> to_delete;
+        for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
+              single_reduction_copies.begin(); it != 
+              single_reduction_copies.end(); it++)
+        {
+          const FieldMask overlap = to_update & it->second;
+          if (!overlap)
+            continue;
+#ifdef DEBUG_LEGION
+          assert(it->first != request_space);
+#endif
+          request_update(it->first, request_space, overlap, pending_request, 
+                         pending_updates, false/*invalidate*/, redop);
+          it->second -= overlap;
+          if (!it->second)
+            to_delete.push_back(it->first);
+          // Move it to multi reduction
+          LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+            multi_reduction_copies.find(it->first);
+          if (finder != multi_reduction_copies.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(finder->second * overlap);
+#endif
+            finder->second |= overlap;
+          }
+          else
+            multi_reduction_copies[it->first] = overlap;
+          // Fields should only appear once for single reductions
+          to_update -= overlap;
+          if (!to_update)
+            break;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_exclusive_copy(AddressSpaceID request_space,
+                                               const FieldMask &request_mask)
+    //--------------------------------------------------------------------------
+    {
+      exclusive_copies[request_space] |= request_mask; 
+      exclusive_fields |= request_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_shared_copy(AddressSpaceID request_space,
+                                            const FieldMask &request_mask)
+    //--------------------------------------------------------------------------
+    {
+      shared_copies[request_space] |= request_mask;
+      shared_fields |= request_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_single_reduce(AddressSpaceID request_space,
+                                              const FieldMask &request_mask,
+                                              ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      single_reduction_copies[request_space] |= request_mask;
+      single_redop_fields |= request_mask;
+      redop_modes[redop] |= request_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_single_copies(FieldMask &to_filter, 
+                                              FieldMask &single_fields,
+              LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
+                                              AddressSpaceID request_space,
+                                              PendingRequest *pending_request,
+                                              unsigned &pending_updates)
+    //--------------------------------------------------------------------------
+    {
+      if (!to_filter)
+        return;
+      FieldMask single_overlap = to_filter & single_fields;
+      if (!single_overlap)
+        return;
+      single_fields -= single_overlap;
+      to_filter -= single_overlap;
+      std::vector<AddressSpaceID> to_delete;
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
+            single_copies.begin(); it != single_copies.end(); it++)
+      {
+        const FieldMask overlap = single_overlap & it->second;
+        if (!overlap)
+          continue;
+        if (it->first == request_space)
+          // Just send an invalidate, when the response goes back
+          // it will restore it to being valid
+          request_invalidate(request_space, request_space, overlap, 
+              pending_request, pending_updates, true/*meta only*/);
+        else
+          request_update(it->first, request_space, overlap, pending_request, 
+                         pending_updates, true/*invalidate*/);
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
+        single_overlap -= overlap;
+        if (!single_overlap)
+          break;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<AddressSpaceID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          single_copies.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_multi_copies(FieldMask &to_filter,
+                                             FieldMask &multi_fields,
+                LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies,
+                                             AddressSpaceID request_space,
+                                             PendingRequest *pending_request,
+                                             unsigned &pending_updates)
+    //--------------------------------------------------------------------------
+    {
+      if (!to_filter)
+        return;
+      const FieldMask multi_overlap = to_filter & multi_fields;
+      if (!multi_overlap)
+        return;
+      FieldMask update_mask = multi_overlap;
+      // Handle the same node case now to avoid unnecessary communication
+      LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator finder = 
+        multi_copies.find(request_space);
+      if (finder != multi_copies.end())
+      {
+        const FieldMask overlap = update_mask & finder->second;
+        if (!!overlap)
+        {
+          request_invalidate(request_space, request_space, overlap,
+              pending_request, pending_updates, true/*meta only*/);
+          update_mask -= overlap;
+        }
+      }
+      std::vector<AddressSpaceID> to_delete;
+      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
+            multi_copies.begin(); it != multi_copies.end(); it++)
+      {
+        const FieldMask overlap = multi_overlap & it->second;
+        if (!overlap)
+          continue;
+        // We already handled the same node case above
+        if (it->first != request_space)
+        {
+          // See if we need an update
+          const FieldMask update = update_mask & overlap;
+          if (!!update)
+          {
+            request_update(it->first, request_space, update, pending_request,
+                           pending_updates, true/*invalidate*/);
+            update_mask -= update;
+            const FieldMask invalidate = overlap - update;
+            if (!!invalidate)
+              request_invalidate(it->first, request_space, invalidate,
+                  pending_request, pending_updates, false/*meta only*/);
+          }
+          else
+            request_invalidate(it->first, request_space, overlap,
+                pending_request, pending_updates, false/*meta only*/);
+        }
+        it->second -= overlap;
+        if (!it->second) 
+          to_delete.push_back(it->first); 
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<AddressSpaceID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          multi_copies.erase(*it);
+      }
+      multi_fields -= multi_overlap;
+      to_filter -= multi_overlap;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::filter_redop_modes(FieldMask to_filter)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<ReductionOpID> to_delete;
+      for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
+            redop_modes.begin(); it != redop_modes.end(); it++)
+      {
+        const FieldMask overlap = to_filter & it->second;
+        if (!overlap)
+          continue;
+        it->second -= overlap;
+        if (!it->second)
+          to_delete.push_back(it->first);
+        to_filter -= overlap;
+        if (!to_filter)
+          break;
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<ReductionOpID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          redop_modes.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::request_update(AddressSpaceID valid_space, 
+                                        AddressSpaceID invalid_space,
+                                        const FieldMask &update_mask,
+                                        PendingRequest *pending_request,
+                                        unsigned &pending_updates,
+                                        bool invalidate,
+                                        ReductionOpID skip_redop,
+                                        bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        request_update(valid_space, invalid_space, update_mask, pending_request,
+                       pending_updates, invalidate, skip_redop, false);
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(valid_space != invalid_space);
+#endif
+      // Increment the number of updates that the requestor should expect
+      pending_updates++;
+      if (valid_space != local_space)
+      {
+        // Send the request to the valid node  
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(invalid_space);
+          rez.serialize(update_mask);
+          rez.serialize(pending_request);
+          rez.serialize<bool>(invalidate);
+          rez.serialize(skip_redop);
+        }
+        runtime->send_equivalence_set_update_request(valid_space, rez);
+      }
+      else
+      {
+        // We're on the valid node 
+#ifdef DEBUG_LEGION
+        assert(invalid_space != local_space);
+#endif
+        // Pack up the message
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          // Pack the valid instances
+          if (!valid_instances.empty() &&
+              !(valid_instances.get_valid_mask() * update_mask))
+          {
+            if (valid_instances.size() == 1)
+            {
+              rez.serialize<size_t>(1);
+              FieldMaskSet<LogicalView>::iterator it = 
+                valid_instances.begin();
+              rez.serialize(it->first->did);
+              const FieldMask overlap = it->second & update_mask;
+              rez.serialize(overlap);
+              if (invalidate)
+              {
+                it.filter(overlap);
+                if (!it->second)
+                {
+                  if (it->first->remove_nested_valid_ref(did))
+                    delete it->first;
+                  valid_instances.erase(it);
+                }
+              }
+            }
+            else
+            {
+              std::vector<DistributedID> dids;
+              LegionVector<FieldMask>::aligned masks;
+              std::vector<LogicalView*> to_delete;
+              for (FieldMaskSet<LogicalView>::iterator it = 
+                    valid_instances.begin(); it != valid_instances.end(); it++)
+              {
+                const FieldMask overlap = update_mask & it->second;
+                if (!overlap)
+                  continue;
+                dids.push_back(it->first->did);
+                masks.push_back(overlap);
+                if (invalidate)
+                {
+                  it.filter(overlap);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+              }
+              rez.serialize<size_t>(dids.size());
+              for (unsigned idx = 0; idx < dids.size(); idx++)
+              {
+                rez.serialize(dids[idx]);
+                rez.serialize(masks[idx]);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<LogicalView*>::const_iterator it = 
+                      to_delete.begin(); it != to_delete.end(); it++)
+                {
+                  valid_instances.erase(*it);
+                  if ((*it)->remove_nested_valid_ref(did))
+                    delete (*it);
+                }
+              }
+            }
+          }
+          else
+            rez.serialize<size_t>(0);
+          // Pack the reduction instances
+          if (!reduction_instances.empty())
+          {
+            const FieldMask redop_overlap = reduction_fields & update_mask;
+            if (!!redop_overlap)
+            {
+              rez.serialize<size_t>(redop_overlap.pop_count());
+              int fidx = redop_overlap.find_first_set();
+              while (fidx >= 0)
+              {
+                std::map<unsigned,std::vector<ReductionView*> >::iterator
+                  finder = reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+                assert(finder != reduction_instances.end());
+                assert(!finder->second.empty());
+#endif
+                if (skip_redop > 0)
+                {
+                  size_t send_size = finder->second.size(); 
+                  // Skip any reduction views with the same redop
+                  // at the end of the list (e.g. ones in the same epoch)
+                  while (finder->second[send_size-1]->get_redop() == skip_redop)
+                  {
+                    send_size--;
+                    if (send_size == 0)
+                      break;
+                  }
+                  rez.serialize<size_t>(send_size);
+                  for (unsigned idx = 0; idx < send_size; idx++)
+                    rez.serialize(finder->second[idx]->did);
+                }
+                else
+                {
+                  rez.serialize<size_t>(finder->second.size());
+                  for (std::vector<ReductionView*>::const_iterator it = 
+                       finder->second.begin(); it != finder->second.end(); it++)
+                    rez.serialize((*it)->did);
+                }
+                if (invalidate)
+                {
+                  for (std::vector<ReductionView*>::const_iterator it = 
+                       finder->second.begin(); it != finder->second.end(); it++)
+                    if ((*it)->remove_nested_valid_ref(did))
+                      delete (*it);
+                  reduction_instances.erase(finder);
+                }
+                fidx = redop_overlap.find_next_set(fidx+1);
+              }
+              if (invalidate)
+                reduction_fields -= redop_overlap;
+            }
+            else
+              rez.serialize<size_t>(0);
+          }
+          else
+            rez.serialize<size_t>(0);
+          // Pack the restricted instances
+          if (!restricted_instances.empty() && 
+              !(restricted_instances.get_valid_mask() * update_mask))
+          {
+            if (restricted_instances.size() == 1)
+            {
+              rez.serialize<size_t>(1);
+              FieldMaskSet<InstanceView>::iterator it = 
+                restricted_instances.begin();
+              rez.serialize(it->first->did);
+              const FieldMask overlap = it->second & update_mask;
+              rez.serialize(overlap);
+              if (invalidate)
+              {
+                it.filter(overlap);
+                if (!it->second)
+                {
+                  if (it->first->remove_nested_valid_ref(did))
+                    delete it->first;
+                  restricted_instances.erase(it);
+                }
+              }
+            }
+            else
+            {
+              std::vector<DistributedID> dids;
+              LegionVector<FieldMask>::aligned masks;
+              std::vector<InstanceView*> to_delete;
+              for (FieldMaskSet<InstanceView>::iterator it = 
+                    restricted_instances.begin(); it != 
+                    restricted_instances.end(); it++)
+              {
+                const FieldMask overlap = update_mask & it->second;
+                if (!overlap)
+                  continue;
+                dids.push_back(it->first->did);
+                masks.push_back(overlap);
+                if (invalidate)
+                {
+                  it.filter(overlap);
+                  if (!it->second)
+                    to_delete.push_back(it->first);
+                }
+              }
+              rez.serialize<size_t>(dids.size());
+              for (unsigned idx = 0; idx < dids.size(); idx++)
+              {
+                rez.serialize(dids[idx]);
+                rez.serialize(masks[idx]);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<InstanceView*>::const_iterator it = 
+                      to_delete.begin(); it != to_delete.end(); it++)
+                {
+                  restricted_instances.erase(*it);
+                  if ((*it)->remove_nested_valid_ref(did))
+                    delete (*it);
+                }
+              }
+            }
+            if (invalidate)
+              restricted_fields -= update_mask;
+          }
+          else
+            rez.serialize<size_t>(0);
+          // Pack the version numbers
+          std::vector<VersionID> versions;
+          LegionVector<FieldMask>::aligned masks;
+          std::vector<VersionID> to_delete;
+          for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
+                version_numbers.begin(); it != version_numbers.end(); it++)
+          {
+            const FieldMask overlap = update_mask & it->second;
+            if (!overlap)
+              continue;
+            versions.push_back(it->first);
+            masks.push_back(overlap);
+            if (invalidate)
+            {
+              it->second -= overlap;
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+          }
+          rez.serialize<size_t>(versions.size());
+          for (unsigned idx = 0; idx < versions.size(); idx++)
+          {
+            rez.serialize(versions[idx]);
+            rez.serialize(masks[idx]);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<VersionID>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+              version_numbers.erase(*it);
+          }
+        }
+        // Do any invalidation meta-updates before we send the message
+        if (!is_owner())
+        {
+          if (invalidate)
+          {
+            exclusive_fields -= update_mask;
+            shared_fields -= update_mask;
+            single_redop_fields -= update_mask;
+            multi_redop_fields -= update_mask;
+          }
+          else
+          {
+            // Any of our exclusive or single redop fields are now multi
+            const FieldMask exclusive_overlap = exclusive_fields & update_mask;
+            if (!!exclusive_overlap)
+            {
+              exclusive_fields -= exclusive_overlap;
+              shared_fields |= exclusive_overlap;
+            }
+            const FieldMask redop_overlap = single_redop_fields & update_mask;
+            if (!!redop_overlap)
+            {
+              single_redop_fields -= redop_overlap;
+              multi_redop_fields |= redop_overlap;
+            }
+          }
+        }
+        runtime->send_equivalence_set_update_response(invalid_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::request_invalidate(AddressSpaceID target,
+                                            AddressSpaceID source,
+                                            const FieldMask &invalidate_mask,
+                                            PendingRequest *pending_request,
+                                            unsigned &pending_updates,
+                                            bool meta_only, bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        request_invalidate(target, source, invalidate_mask, pending_request,
+                           pending_updates, meta_only, false/*needs lock*/);
+        return;
+      }
+      // Increment the number of updates that the requestor should expect
+      pending_updates++;
+      if (target != local_space)
+      {
+        // Send the request to the target node 
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(source);
+          rez.serialize(invalidate_mask);
+          rez.serialize(pending_request);
+          rez.serialize<bool>(meta_only);
+        }
+        runtime->send_equivalence_set_invalidate_request(target, rez);
+      }
+      else
+      {
+        // We're the local node so do the invalidation here
+        if (!meta_only)
+        {
+          if (!valid_instances.empty() && 
+              !(valid_instances.get_valid_mask() * invalidate_mask))
+          {
+            std::vector<LogicalView*> to_delete;
+            for (FieldMaskSet<LogicalView>::iterator it = 
+                  valid_instances.begin(); it != valid_instances.end(); it++)
+            {
+              const FieldMask overlap = it->second & invalidate_mask;
+              if (!overlap)
+                continue;
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<LogicalView*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+              {
+                valid_instances.erase(*it);
+                if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              }
+            }
+          }
+          if (!reduction_instances.empty())
+          {
+            const FieldMask redop_overlap = reduction_fields & invalidate_mask;
+            if (!!redop_overlap)
+            {
+              int fidx = redop_overlap.find_first_set();
+              while (fidx >= 0)
+              {
+                std::map<unsigned,std::vector<ReductionView*> >::iterator
+                  finder = reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+                assert(finder != reduction_instances.end());
+#endif
+                for (std::vector<ReductionView*>::const_iterator it = 
+                      finder->second.begin(); it != finder->second.end(); it++)
+                  if ((*it)->remove_nested_valid_ref(did))
+                    delete (*it);
+                reduction_instances.erase(finder);
+                fidx = redop_overlap.find_next_set(fidx+1);
+              }
+              reduction_fields -= redop_overlap;
+            }
+          }
+          if (!restricted_instances.empty() &&
+              !(restricted_instances.get_valid_mask() * invalidate_mask))
+          {
+            std::vector<InstanceView*> to_delete;
+            for (FieldMaskSet<InstanceView>::iterator it = 
+                  restricted_instances.begin(); it != 
+                  restricted_instances.end(); it++)
+            {
+              const FieldMask overlap = it->second & invalidate_mask;
+              if (!overlap)
+                continue;
+              it.filter(invalidate_mask);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+            for (std::vector<InstanceView*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              restricted_instances.erase(*it);
+              if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+          }
+          std::vector<VersionID> to_delete;
+          for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
+                version_numbers.begin(); it != version_numbers.end(); it++)
+          {
+            it->second -= invalidate_mask;
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<VersionID>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              version_numbers.erase(*it);
+          }
+        }
+        // We only need to invalidate meta-state on remote nodes
+        // since the update logic will handle it on the owner node
+        if (!is_owner())
+        {
+          exclusive_fields -= invalidate_mask;
+          shared_fields -= invalidate_mask;
+          single_redop_fields -= invalidate_mask;
+          multi_redop_fields -= invalidate_mask;
+        }
+        // Then send the response to the source node telling it that
+        // the invalidation was done successfully
+        if (source != local_space)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(pending_request);
+          }
+          runtime->send_equivalence_set_invalidate_response(source, rez);
+        }
+        else
+          record_invalidation(pending_request);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_pending_updates(PendingRequest *pending_request,
+                                                unsigned pending_updates,
+                                                bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        record_pending_updates(pending_request, pending_updates, false);
+        return;
+      }
+      pending_request->remaining_count += pending_updates;
+      if (pending_request->remaining_count == 0)
+        finalize_pending_request(pending_request);         
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_invalidation(PendingRequest *pending_request,
+                                             bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        record_invalidation(pending_request, false/*needs lock*/);
+        return;
+      }
+      pending_request->remaining_count -= 1;
+      if (pending_request->remaining_count == 0)
+        finalize_pending_request(pending_request);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_pending_request(
+                                                PendingRequest *pending_request)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      sanity_check();
+      assert(pending_request->remaining_count == 0);
+#endif
+      FieldMaskSet<PendingRequest>::iterator finder = 
+        outstanding_requests.find(pending_request);
+#ifdef DEBUG_LEGION
+      assert(finder != outstanding_requests.end());
+#endif
+      if (!is_owner())
+      {
+        const FieldMask &update_mask = finder->second;
+        // If we're not the owner then we have to update the state 
+        if (pending_request->redop > 0)
+        {
+          if (!!pending_request->owner_mask)
+          {
+#ifdef DEBUG_LEGION
+            assert(single_redop_fields * pending_request->owner_mask);
+#endif
+            single_redop_fields |= pending_request->owner_mask;
+            const FieldMask non_owner = 
+              update_mask - pending_request->owner_mask;
+            if (!!non_owner)
+            {
+#ifdef DEBUG_LEGION
+              assert(multi_redop_fields * non_owner);
+#endif
+              multi_redop_fields |= non_owner;
+            }
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(multi_redop_fields * update_mask);
+#endif
+            multi_redop_fields |= update_mask;
+          }
+          redop_modes[pending_request->redop] |= update_mask;
+        }
+        else
+        {
+          if (!!pending_request->owner_mask)
+          {
+#ifdef DEBUG_LEGION
+            assert(exclusive_fields * pending_request->owner_mask);
+#endif
+            exclusive_fields |= pending_request->owner_mask;
+            const FieldMask non_owner = 
+              update_mask - pending_request->owner_mask;
+            if (!!non_owner)
+            {
+#ifdef DEBUG_LEGION
+              assert(shared_fields * non_owner);
+#endif
+              shared_fields |= non_owner;
+            }
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(shared_fields * update_mask);
+#endif
+            shared_fields |= update_mask;
+          }
+        }
+      }
+#ifdef DEBUG_LEGION
+      sanity_check();
+#endif
+      if (!pending_request->applied_events.empty())
+        Runtime::trigger_event(pending_request->applied_event,
+            Runtime::merge_events(pending_request->applied_events));
+      else
+        Runtime::trigger_event(pending_request->applied_event);
+      Runtime::trigger_event(pending_request->ready_event);
+
+      outstanding_requests.erase(finder);
+      delete pending_request;
+    }
+
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::sanity_check(void) const
+    //--------------------------------------------------------------------------
+    {
+      // All the summary masks should be disjoint
+      assert(exclusive_fields * shared_fields);
+      assert(exclusive_fields * single_redop_fields);
+      assert(exclusive_fields * multi_redop_fields);
+      assert(shared_fields * single_redop_fields);
+      assert(shared_fields * multi_redop_fields);
+      assert(single_redop_fields * multi_redop_fields);
+      // Reduction modes should all be present
+      if (!!single_redop_fields || !! multi_redop_fields)
+      {
+        FieldMask summary;
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
+              it = redop_modes.begin(); it != redop_modes.end(); it++)
+        {
+          assert(!!it->second);
+          // fields should appear exactly once
+          assert(summary * it->second);
+          summary |= it->second;
+        }
+        const FieldMask combined = single_redop_fields | multi_redop_fields;
+        assert(summary == combined);
+      }
+      else
+        assert(redop_modes.empty());
+      if (is_owner())
+      {
+        // Summary masks should match their sets
+        if (!!exclusive_fields)
+        {
+          FieldMask summary;
+          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+                exclusive_copies.begin(); it != exclusive_copies.end(); it++)
+          {
+            assert(!!it->second);
+            // fields should appear exactly once
+            assert(summary * it->second);
+            summary |= it->second;
+          }
+          assert(summary == exclusive_fields);
+        }
+        else
+          assert(exclusive_copies.empty());
+        if (!!shared_fields)
+        {
+          FieldMask summary;
+          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+                shared_copies.begin(); it != shared_copies.end(); it++)
+          {
+            assert(!!it->second);
+            summary |= it->second;
+          }
+          assert(summary == shared_fields);
+        }
+        else
+          assert(shared_copies.empty());
+        if (!!single_redop_fields)
+        {
+          FieldMask summary;
+          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+                single_reduction_copies.begin(); it != 
+                single_reduction_copies.end(); it++)
+          {
+            assert(!!it->second);
+            // fields should appear exactly once
+            assert(summary * it->second);
+            summary |= it->second;
+          }
+          assert(summary == single_redop_fields);
+        }
+        else
+          assert(single_reduction_copies.empty());
+        if (!!multi_redop_fields)
+        {
+          FieldMask summary;
+          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
+                multi_reduction_copies.begin(); it != 
+                multi_reduction_copies.end(); it++)
+          {
+            assert(!!it->second);
+            summary |= it->second;
+          }
+          assert(summary == multi_redop_fields);
+        }
+        else
+          assert(multi_reduction_copies.empty()); 
+      }
+    }
+#endif
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::initialize_set(ApEvent term_event,
                                         const RegionUsage &usage,
                                         const FieldMask &user_mask,
@@ -3394,14 +4757,15 @@ namespace Legion {
             finder.merge(view_mask);
           // Always restrict reduction-only users since we know the data
           // is going to need to be flushed anyway
-          finder = restricted_instances.find(view);
-          if (finder == restricted_instances.end())
+          FieldMaskSet<InstanceView>::iterator restricted_finder = 
+            restricted_instances.find(view);
+          if (restricted_finder == restricted_instances.end())
           {
             restricted_instances.insert(view, view_mask);
             view->add_nested_valid_ref(did, &mutator);
           }
           else
-            finder.merge(view_mask);
+            restricted_finder.merge(view_mask);
           // Record the user for the instance
           view->add_initial_user(term_event, usage, view_mask, 
                                  set_expr, context_uid, index);
@@ -3428,14 +4792,15 @@ namespace Legion {
           // If this is restricted then record it
           if (restricted)
           {
-            finder = restricted_instances.find(view);
-            if (finder == restricted_instances.end())
+            FieldMaskSet<InstanceView>::iterator restricted_finder = 
+              restricted_instances.find(view);
+            if (restricted_finder == restricted_instances.end())
             {
               restricted_instances.insert(view, view_mask);
               view->add_nested_valid_ref(did, &mutator);
             }
             else
-              finder.merge(view_mask);
+              restricted_finder.merge(view_mask);
           }
           // Record the user for the instance
           view->add_initial_user(term_event, usage, view_mask, 
@@ -3747,7 +5112,7 @@ namespace Legion {
       acquire_mask &= restricted_fields;
       if (!acquire_mask)
         return;
-      for (FieldMaskSet<LogicalView>::const_iterator it = 
+      for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
         const FieldMask overlap = acquire_mask & it->second;
@@ -3777,7 +5142,7 @@ namespace Legion {
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
-      for (FieldMaskSet<LogicalView>::const_iterator it = 
+      for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
         const FieldMask overlap = it->second & release_mask;
@@ -4009,15 +5374,20 @@ namespace Legion {
         advance_version_numbers(mask);
         if (add_restriction)
         {
-          finder = restricted_instances.find(view);
-          if (finder == restricted_instances.end())
+#ifdef DEBUG_LEGION
+          assert(view->is_instance_view());
+#endif
+          InstanceView *inst_view = view->as_instance_view();
+          FieldMaskSet<InstanceView>::iterator restricted_finder = 
+            restricted_instances.find(inst_view);
+          if (restricted_finder == restricted_instances.end())
           {
             WrapperReferenceMutator mutator(ready_events);
             view->add_nested_valid_ref(did, &mutator);
-            restricted_instances.insert(view, mask);
+            restricted_instances.insert(inst_view, mask);
           }
           else
-            finder.merge(mask);
+            restricted_finder.merge(mask);
           restricted_fields |= mask; 
         }
       }
@@ -4043,15 +5413,20 @@ namespace Legion {
       if (remove_restriction)
       {
         restricted_fields -= mask;
-        finder = restricted_instances.find(view);
-        if (finder != restricted_instances.end())
+#ifdef DEBUG_LEGION
+        assert(view->is_instance_view());
+#endif
+        InstanceView *inst_view = view->as_instance_view();
+        FieldMaskSet<InstanceView>::iterator restricted_finder = 
+          restricted_instances.find(inst_view);
+        if (restricted_finder != restricted_instances.end())
         {
-          finder.filter(mask);
-          if (!finder->second)
+          restricted_finder.filter(mask);
+          if (!restricted_finder->second)
           {
             if (view->remove_nested_valid_ref(did))
               delete view;
-            restricted_instances.erase(view);
+            restricted_instances.erase(inst_view);
           }
         }
       }
@@ -4368,6 +5743,9 @@ namespace Legion {
     void EquivalenceSet::perform_refinements(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(outstanding_refinement_task);
+#endif
       std::vector<RefinementThunk*> to_perform;
       do 
       {
@@ -4422,19 +5800,50 @@ namespace Legion {
                   remote_subsets.begin(); it != remote_subsets.end(); it++)
               runtime->send_equivalence_set_subset_response(*it, rez);
           }
-          if (eq_state == PENDING_MAPPING_STATE)
-          {
+          // We should never end up back in the mapping state
+          // once we have been refined at all
 #ifdef DEBUG_LEGION
-            assert(transition_event.exists());
-#endif
-            Runtime::trigger_event(transition_event);
-            transition_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
-#ifdef DEBUG_LEGION
+          assert(eq_state == REFINEMENT_STATE);
           assert(!transition_event.exists());
 #endif
-          // No matter what we end up back in the mapping state
-          eq_state = MAPPING_STATE;
+          // Check to see if we no longer have any more refeinements
+          // to perform. If not, then we need to clear our data structures
+          // and remove any valid references that we might be holding
+          if (unrefined_remainder == NULL)
+          {
+            if (!valid_instances.empty())
+            {
+              for (FieldMaskSet<LogicalView>::const_iterator it = 
+                    valid_instances.begin(); it != valid_instances.end(); it++)
+                if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+            }
+            if (!reduction_instances.empty())
+            {
+              for (std::map<unsigned,std::vector<ReductionView*> >::
+                    const_iterator rit = reduction_instances.begin();
+                    rit != reduction_instances.end(); rit++)
+              {
+                for (std::vector<ReductionView*>::const_iterator it = 
+                      rit->second.begin(); it != rit->second.end(); it++)
+                  if ((*it)->remove_nested_valid_ref(did))
+                    delete (*it);
+              }
+              reduction_fields.clear();
+            }
+            if (!restricted_instances.empty())
+            {
+              for (FieldMaskSet<InstanceView>::const_iterator it = 
+                    restricted_instances.begin(); it != 
+                    restricted_instances.end(); it++)
+                if (it->first->remove_nested_valid_ref(did))
+                  delete it->first;
+              restricted_fields.clear();
+            }
+            version_numbers.clear();
+          }
+          // Mark that we no longer have a running refinement task
+          outstanding_refinement_task = false;
         }
         else // there are more refinements to do so we go around again
           to_perform.swap(pending_refinements);
@@ -4487,8 +5896,10 @@ namespace Legion {
           launch_refinement_task();
         }
       }
-      // Otherwise it is in a state where a refinement task is already 
-      // running or will be launched eventually to handle this
+      // Otherwise if we don't have an outstanding refinement task
+      // then we need to launch one now to handle this
+      else if (!outstanding_refinement_task)
+        launch_refinement_task();
     }
 
     //--------------------------------------------------------------------------
@@ -4499,7 +5910,10 @@ namespace Legion {
       assert(is_owner());
       assert(eq_state == REFINEMENT_STATE);
       assert(!pending_refinements.empty());
+      assert(!outstanding_refinement_task);
 #endif
+      // Mark that we now have an oustanding refinement task
+      outstanding_refinement_task = true;
       // Send invalidations to all the remote nodes. This will invalidate
       // their mapping privileges and also send back any remote meta data
       // to the local node 
@@ -4981,7 +6395,6 @@ namespace Legion {
       equivalence_sets.insert(set);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     void VersionManager::print_physical_state(RegionTreeNode *node,
                                               const FieldMask &capture_mask,
@@ -4991,9 +6404,9 @@ namespace Legion {
       logger->log("Equivalence Sets:");
       logger->down();
       // TODO: log equivalence sets
+      assert(false);
       logger->up();
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // RegionTreePath 

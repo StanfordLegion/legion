@@ -275,11 +275,16 @@ namespace Legion {
     size_t IndexSpaceOperationT<DIM,T>::get_volume(void)
     //--------------------------------------------------------------------------
     {
+      if (has_volume)
+        return volume;
       Realm::IndexSpace<DIM,T> temp;
       ApEvent ready = get_realm_index_space(temp, true/*tight*/);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      return temp.volume();
+      volume = temp.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
@@ -774,7 +779,15 @@ namespace Legion {
     size_t RemoteExpression<DIM,T>::get_volume(void)
     //--------------------------------------------------------------------------
     {
-      return realm_index_space.volume();
+      if (has_volume)
+        return volume;
+      if (realm_index_space_ready.exists() &&
+          !realm_index_space_ready.has_triggered())
+        realm_index_space_ready.wait();
+      volume = realm_index_space.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
@@ -1394,9 +1407,14 @@ namespace Legion {
     size_t IndexSpaceNodeT<DIM,T>::get_volume(void)
     //--------------------------------------------------------------------------
     {
+      if (has_volume)
+        return volume;
       Realm::IndexSpace<DIM,T> volume_space;
       get_realm_index_space(volume_space, true/*tight*/);
-      return volume_space.volume();
+      volume = volume_space.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
