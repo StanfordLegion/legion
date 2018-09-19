@@ -2125,7 +2125,7 @@ function std.index_type(base_type, displayname)
   if not st:is_opaque() then
     local mod_with_rect = terra(a : st, b : std.rect_type(st)) : st
       var sz = b:size()
-      return (a + sz) % sz
+      return (a - b.lo + sz) % sz + b.lo
     end
     mod_with_rect:setname("__mod_with_rect" .. "_" .. tostring(st))
     st.metamethods.__mod =
