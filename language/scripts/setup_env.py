@@ -225,8 +225,8 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-6.0.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-6.0.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-6.0.1.src')
-        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/6.0.1/llvm-6.0.1.src.tar.xz', '', insecure=insecure)
-        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/6.0.1/cfe-6.0.1.src.tar.xz', '', insecure=insecure)
+        download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
+        download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
     else:
         assert False
 
@@ -250,7 +250,7 @@ def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure
     assert(os.path.isdir(hdf_dir))
     hdf_tarball = os.path.join(hdf_dir, 'hdf5-1.10.1.tar.gz')
     hdf_source_dir = os.path.join(hdf_dir, 'hdf5-1.10.1')
-    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '73b77a23ca099ac47d8241f633bf67430007c430', insecure=insecure)
+    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '048a9d149fb99aaa1680a712963f5a78e9c43b588d0e79d55e06760ec377c172', insecure=insecure)
     if not cache:
         extract(hdf_dir, hdf_tarball, 'gz')
         build_hdf(hdf_source_dir, hdf_install_dir, thread_count, is_cray)
@@ -391,7 +391,7 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 
             cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=insecure)
+            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406', insecure=insecure)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
