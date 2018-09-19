@@ -80,7 +80,7 @@ namespace Legion {
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
       virtual ~VersionInfo(void);
-    protected:
+    public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
       inline bool has_version_info(void) const { return mapped_event.exists(); }
