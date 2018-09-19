@@ -6249,7 +6249,8 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_VALID_REQUEST:
             {
-              runtime->handle_equivalence_set_valid_request(derez);
+              runtime->handle_equivalence_set_valid_request(derez,
+                                                      remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_VALID_RESPONSE:
@@ -15364,10 +15365,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_valid_request(Deserializer &derez)
+    void Runtime::handle_equivalence_set_valid_request(Deserializer &derez,
+                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_valid_request(derez, this);
+      EquivalenceSet::handle_valid_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

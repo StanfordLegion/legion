@@ -282,6 +282,8 @@ namespace Legion {
       virtual VersionInfo& get_version_info(unsigned idx);
       virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
+      virtual ApEvent compute_sync_precondition(
+                                 const PhysicalTraceInfo *info) const;
     public:
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;

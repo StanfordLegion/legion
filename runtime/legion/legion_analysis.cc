@@ -4099,11 +4099,38 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(invalid_space != local_space);
 #endif
+        // Before we going packing things up and sending them off
+        // see if we need to defer this response until we get all
+        // of our own responses back, this can happen with some
+        // collapses for reduction modes
+        if (!outstanding_requests.empty() && 
+            !(outstanding_requests.get_valid_mask() * update_mask))
+        {
+          // We need the precise set of fields that we are
+          // going to depend on for this request
+          FieldMask needed_mask;
+          for (FieldMaskSet<PendingRequest>::const_iterator it = 
+                outstanding_requests.begin(); it != 
+                outstanding_requests.end(); it++)
+          {
+            const FieldMask overlap = it->second & update_mask;
+            if (!overlap)
+              continue;
+            needed_mask |= overlap;
+          }
+          // Defer this update
+          DeferredRequest *deferred = 
+            new DeferredRequest(invalid_space, pending_request, 
+                                update_mask, invalidate, skip_redop);
+          deferred_requests.insert(deferred, needed_mask);
+          return;
+        }
         // Pack up the message
         Serializer rez;
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(pending_request);
           // Pack the valid instances
           if (!valid_instances.empty() &&
               !(valid_instances.get_valid_mask() * update_mask))
@@ -4177,6 +4204,7 @@ namespace Legion {
               int fidx = redop_overlap.find_first_set();
               while (fidx >= 0)
               {
+                rez.serialize(fidx);
                 std::map<unsigned,std::vector<ReductionView*> >::iterator
                   finder = reduction_instances.find(fidx);
 #ifdef DEBUG_LEGION
@@ -4284,8 +4312,10 @@ namespace Legion {
                 }
               }
             }
-            if (invalidate)
-              restricted_fields -= update_mask;
+            const FieldMask restricted_mask = update_mask & restricted_fields;
+            rez.serialize(restricted_mask);
+            if (invalidate && !!restricted_mask)
+              restricted_fields -= restricted_mask;
           }
           else
             rez.serialize<size_t>(0);
@@ -4350,6 +4380,128 @@ namespace Legion {
         }
         runtime->send_equivalence_set_update_response(invalid_space, rez);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::process_update_response(
+                           PendingRequest *pending_request, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      std::set<RtEvent> wait_for;
+      std::vector<LogicalView*> need_references;
+      WrapperReferenceMutator mutator(pending_request->applied_events);
+
+      size_t num_valid;
+      derez.deserialize(num_valid);
+      for (unsigned idx = 0; idx < num_valid; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;
+        LogicalView *view = 
+          runtime->find_or_request_logical_view(view_did, ready);
+        FieldMask view_mask;
+        derez.deserialize(view_mask);
+        if (valid_instances.insert(view, view_mask))
+        {
+          // New view
+          if (ready.exists() && !ready.has_triggered())
+          {
+            wait_for.insert(ready);
+            need_references.push_back(view);
+          }
+          else
+            view->add_nested_valid_ref(did, &mutator);
+        }
+        else if (ready.exists() && !ready.has_triggered())
+          wait_for.insert(ready);
+      }
+      size_t num_reduc_fields;
+      derez.deserialize(num_reduc_fields);
+      for (unsigned idx1 = 0; idx1 < num_reduc_fields; idx1++)
+      {
+        int fidx;
+        derez.deserialize(fidx);
+        reduction_fields.set_bit(fidx);
+        std::vector<ReductionView*> &reduc_views = reduction_instances[fidx];
+        size_t num_views;
+        derez.deserialize(num_views);
+        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        {
+          DistributedID view_did;
+          derez.deserialize(view_did);
+          RtEvent ready;
+          LogicalView *view = 
+            runtime->find_or_request_logical_view(view_did, ready);
+          ReductionView *reduc_view = static_cast<ReductionView*>(view);
+          // Unpack these in order, as long as they zip then we can
+          // ignore them, once they stop zipping that is when we begin
+          // doing the merge and appending to the end of the list
+          if ((idx2 < reduc_views.size()) && (reduc_views[idx2] == reduc_view))
+            continue;
+          reduc_views.push_back(reduc_view);
+          if (ready.exists() && !ready.has_triggered())
+          {
+            wait_for.insert(ready);
+            need_references.push_back(view);
+          }
+          else
+            view->add_nested_valid_ref(did, &mutator);
+        }
+      }
+      size_t num_restricted;
+      derez.deserialize(num_restricted);
+      if (num_restricted > 0)
+      {
+        for (unsigned idx = 0; idx < num_restricted; idx++)
+        {
+          DistributedID view_did;
+          derez.deserialize(view_did);
+          RtEvent ready;
+          LogicalView *view = 
+            runtime->find_or_request_logical_view(view_did, ready);
+          FieldMask view_mask;
+          derez.deserialize(view_mask); 
+          if (restricted_instances.insert(
+                static_cast<InstanceView*>(view), view_mask))
+          {
+            // New view
+            if (ready.exists() && !ready.has_triggered())
+            {
+              wait_for.insert(ready);
+              need_references.push_back(view);
+            }
+            else
+              view->add_nested_valid_ref(did, &mutator);
+          }
+          else if (ready.exists() && !ready.has_triggered())
+            wait_for.insert(ready);
+        }
+        if (!!restricted_fields)
+        {
+          FieldMask restrict_mask;
+          derez.deserialize(restrict_mask);
+          restricted_fields |= restrict_mask;
+        }
+        else
+          derez.deserialize(restricted_fields);
+      }
+      if (!wait_for.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(wait_for);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      if (!need_references.empty())
+      {
+        for (std::vector<LogicalView*>::const_iterator it = 
+              need_references.begin(); it != need_references.end(); it++)
+          (*it)->add_nested_valid_ref(did, &mutator);
+      }
+      pending_request->remaining_count -= 1;
+      if (pending_request->remaining_count == 0)
+        finalize_pending_request(pending_request);
     }
 
     //--------------------------------------------------------------------------
@@ -4459,6 +4611,7 @@ namespace Legion {
               if ((*it)->remove_nested_valid_ref(did))
                 delete (*it);
             }
+            restricted_fields -= invalidate_mask;
           }
           std::vector<VersionID> to_delete;
           for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
@@ -4615,7 +4768,33 @@ namespace Legion {
       else
         Runtime::trigger_event(pending_request->applied_event);
       Runtime::trigger_event(pending_request->ready_event);
-
+      // See if there are any deferred requests that we need to handle
+      if (!deferred_requests.empty() &&
+          !(finder->second * deferred_requests.get_valid_mask()))
+      {
+        std::vector<DeferredRequest*> to_perform;
+        for (FieldMaskSet<DeferredRequest>::iterator it = 
+              deferred_requests.begin(); it != deferred_requests.end(); it++)
+        {
+          it.filter(finder->second);
+          if (!it->second)
+            to_perform.push_back(it->first);
+        }
+        if (!to_perform.empty())
+        {
+          for (std::vector<DeferredRequest*>::const_iterator it = 
+                to_perform.begin(); it != to_perform.end(); it++)
+          {
+            deferred_requests.erase(*it);
+            unsigned dummy_updates = 0;
+            request_update(local_space, (*it)->invalid_space,
+                           (*it)->update_mask, (*it)->pending_request,
+                           dummy_updates, (*it)->invalidate,
+                           (*it)->skip_redop, false/*needs lock*/);
+            delete (*it);
+          }
+        }
+      }
       outstanding_requests.erase(finder);
       delete pending_request;
     }
@@ -6283,6 +6462,158 @@ namespace Legion {
       EquivalenceSet *result = 
         runtime->find_or_request_equivalence_set(did, ready);
       thunk->record_refinement(result, ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_valid_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)  
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+
+      std::set<RtEvent> fake_ready, fake_applied;
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->request_valid_copy(request_mask, usage, fake_ready,
+                              fake_applied, source, pending_request);
+#ifdef DEBUG_LEGION
+      assert(fake_ready.empty());
+      assert(fake_applied.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_valid_response(Deserializer &derez,
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+      unsigned pending_updates;
+      derez.deserialize(pending_updates);
+      derez.deserialize(pending_request->owner_mask);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->record_pending_updates(pending_request, pending_updates, true);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_update_request(Deserializer &derez,
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      AddressSpaceID invalid_space;
+      derez.deserialize(invalid_space);
+      FieldMask update_mask;
+      derez.deserialize(update_mask);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+      bool invalidate;
+      derez.deserialize(invalidate);
+      ReductionOpID skip_redop;
+      derez.deserialize(skip_redop);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      unsigned dummy_updates = 0;
+      set->request_update(runtime->address_space, invalid_space,
+                          update_mask, pending_request, dummy_updates,
+                          invalidate, skip_redop, true/*needs lock*/);
+#ifdef DEBUG_LEGION
+      assert(dummy_updates == 1);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_update_response(Deserializer &derez,
+                                                           Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->process_update_response(pending_request, derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_invalidate_request(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      FieldMask invalidate_mask;
+      derez.deserialize(invalidate_mask);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+      bool meta_only;
+      derez.deserialize(meta_only);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      unsigned dummy_updates = 0;
+      set->request_invalidate(runtime->address_space, source, invalidate_mask,
+                pending_request, dummy_updates, meta_only, true/*needs lock*/);
+#ifdef DEBUG_LEGION
+      assert(dummy_updates == 1);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_invalidate_response(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      PendingRequest *pending_request;
+      derez.deserialize(pending_request);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      set->record_invalidation(pending_request, true/*needs lock*/);
     }
 
     /////////////////////////////////////////////////////////////

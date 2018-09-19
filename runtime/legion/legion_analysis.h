@@ -720,6 +720,20 @@ namespace Legion {
         FieldMask owner_mask;
         int remaining_count;
       };
+      // Deferred update reqeusts
+      struct DeferredRequest : public LegionHeapify<DeferredRequest> {
+      public:
+        DeferredRequest(AddressSpaceID invalid, PendingRequest *pending,
+                        const FieldMask &m, bool inval, ReductionOpID skip)
+          : invalid_space(invalid), pending_request(pending),
+            update_mask(m), skip_redop(skip), invalidate(inval) { }
+      public:
+        const AddressSpaceID invalid_space;
+        PendingRequest *const pending_request;
+        const FieldMask update_mask;
+        const ReductionOpID skip_redop;
+        const bool invalidate;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space, 
@@ -867,6 +881,8 @@ namespace Legion {
                           bool invalidate,
                           ReductionOpID skip_redop = 0,
                           bool needs_lock = false);
+      void process_update_response(PendingRequest *pending_request, 
+                                   Deserializer &derez);
       void request_invalidate(AddressSpaceID target,
                               AddressSpaceID source,
                               const FieldMask &invalidate_mask,
@@ -900,7 +916,8 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_create_remote_response(Deserializer &derez, 
                                                 Runtime *runtime);
-      static void handle_valid_request(Deserializer &derez, Runtime *rt);
+      static void handle_valid_request(Deserializer &derez, 
+                            Runtime *runtime, AddressSpaceID source);
       static void handle_valid_response(Deserializer &derez, Runtime *rt);
       static void handle_update_request(Deserializer &derez, Runtime *rt);
       static void handle_update_response(Deserializer &derez, Runtime *rt);
@@ -964,6 +981,8 @@ namespace Legion {
       LegionMap<AddressSpaceID,FieldMask>::aligned multi_reduction_copies;
       // Requests that are pending from this node 
       FieldMaskSet<PendingRequest> outstanding_requests;
+      // Deferred update requests
+      FieldMaskSet<DeferredRequest> deferred_requests;
     public:
       static const VersionID init_version = 1;
     };

@@ -1281,6 +1281,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent TaskOp::compute_sync_precondition(
+                                            const PhysicalTraceInfo *info) const
+    //--------------------------------------------------------------------------
+    {
+      ApEvent result;
+      if (!wait_barriers.empty() || !grants.empty())
+      {
+        std::set<ApEvent> sync_preconditions;
+        if (!wait_barriers.empty())
+        {
+          for (std::vector<PhaseBarrier>::const_iterator it = 
+                wait_barriers.begin(); it != wait_barriers.end(); it++)
+          {
+            ApEvent e = Runtime::get_previous_phase(it->phase_barrier);
+            sync_preconditions.insert(e);
+            if (runtime->legion_spy_enabled)
+              LegionSpy::log_phase_barrier_wait(unique_op_id, e);
+          }
+        }
+        if (!grants.empty())
+        {
+          for (std::vector<Grant>::const_iterator it = grants.begin();
+                it != grants.end(); it++)
+          {
+            ApEvent e = it->impl->acquire_grant();
+            sync_preconditions.insert(e);
+          }
+        }
+        // For some reason we don't trace these, not sure why
+        result = Runtime::merge_events(NULL, sync_preconditions);
+      }
+      if ((info != NULL) && info->recording)
+        info->record_op_sync_event(result);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void TaskOp::end_inline_task(const void *result, 
                                  size_t result_size, bool owned)
     //--------------------------------------------------------------------------

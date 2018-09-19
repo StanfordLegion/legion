@@ -2091,13 +2091,13 @@ namespace Legion {
       return Runtime::merge_events(NULL, all_events);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ bool PhysicalTemplate::check_logical_open(RegionTreeNode *node,
                                                          ContextID ctx,
                                                          FieldMask fields)
     //--------------------------------------------------------------------------
     {
+#if 0
       {
         const LogicalState &state = node->get_logical_state(ctx);
         state.filter_dirty_fields(fields);
@@ -2145,6 +2145,9 @@ namespace Legion {
           continue;
         fields -= overlap;
       }
+#else
+      assert(false);
+#endif
       return !fields;
     }
 
@@ -2154,6 +2157,7 @@ namespace Legion {
                            LegionMap<IndexSpaceNode*, FieldMask>::aligned projs)
     //--------------------------------------------------------------------------
     {
+#if 0
       const LogicalState &state = node->get_logical_state(ctx);
       for (LegionList<FieldState>::aligned::const_iterator fit =
            state.field_states.begin(); fit !=
@@ -2176,6 +2180,9 @@ namespace Legion {
           }
         }
       }
+#else
+      assert(false);
+#endif
       return projs.size() == 0;
     }
 
@@ -2183,6 +2190,7 @@ namespace Legion {
     bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
                      FieldMask>::aligned::iterator it =
            previous_open_nodes.begin(); it !=
@@ -2256,7 +2264,9 @@ namespace Legion {
         if (!found)
           return false;
       }
-
+#else
+      assert(false);
+#endif
       return true;
     }
 
@@ -2264,6 +2274,7 @@ namespace Legion {
     bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
     {
+#if 0
       if (untracked_fill_views.size() > 0)
         return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
@@ -2282,9 +2293,11 @@ namespace Legion {
         if (finder == valid_views.end() || !!(it->second - finder->second))
           return false;
       }
+#else
+      assert(false);
+#endif
       return true;
     }
-#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::register_operation(Operation *op)
@@ -3305,14 +3318,14 @@ namespace Legion {
       dedup_summary_ops.swap(summary_ops);
     }
 
-#if 0
     //--------------------------------------------------------------------------
     /*static*/ inline std::string PhysicalTemplate::view_to_string(
                                                        const InstanceView *view)
     //--------------------------------------------------------------------------
     {
-      assert(view->logical_node->is_region());
       std::stringstream ss;
+#if 0
+      assert(view->logical_node->is_region());
       LogicalRegion handle = view->logical_node->as_region_node()->handle;
       ss << "pointer: " << std::hex << view
          << ", instance: " << std::hex << view->get_manager()->get_instance().id
@@ -3324,6 +3337,9 @@ namespace Legion {
          << "," << handle.get_field_space().get_id()
          << "," << handle.get_tree_id()
          << ")";
+#else
+      assert(false);
+#endif
       return ss.str();
     }
 
@@ -3332,17 +3348,20 @@ namespace Legion {
                                                        const FillView *view)
     //--------------------------------------------------------------------------
     {
-      assert(view->logical_node->is_region());
       std::stringstream ss;
+#if 0
+      assert(view->logical_node->is_region());
       LogicalRegion handle = view->logical_node->as_region_node()->handle;
       ss << "pointer: " << std::hex << view
          << ", region: " << "(" << handle.get_index_space().get_id()
          << "," << handle.get_field_space().get_id()
          << "," << handle.get_tree_id()
          << ")";
+#else
+      assert(false);
+#endif
       return ss.str();
     }
-#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::dump_template(void)
