@@ -231,6 +231,17 @@ namespace Legion {
                        const std::vector<unsigned> &src,
                        const std::vector<unsigned> &dst)
         : full_mask(full), src_indexes(src), dst_indexes(dst) { }
+      CopyAcrossHelper(const CopyAcrossHelper &rhs)
+        : full_mask(rhs.full_mask), src_indexes(rhs.src_indexes),
+          dst_indexes(rhs.dst_indexes) { }
+    public:
+      inline CopyAcrossHelper& operator=(const CopyAcrossHelper &rhs)
+      {
+        full_mask = rhs.full_mask;
+        src_indexes = rhs.src_indexes;
+        dst_indexes = rhs.dst_indexes;
+        return *this;
+      }
     public:
       FieldMask &full_mask;
       std::vector<unsigned> &src_indexes;
