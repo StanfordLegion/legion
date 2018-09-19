@@ -232,9 +232,9 @@ namespace Legion {
                        const std::vector<unsigned> &dst)
         : full_mask(full), src_indexes(src), dst_indexes(dst) { }
     public:
-      const FieldMask &full_mask;
-      const std::vector<unsigned> &src_indexes;
-      const std::vector<unsigned> &dst_indexes;
+      FieldMask &full_mask;
+      std::vector<unsigned> &src_indexes;
+      std::vector<unsigned> &dst_indexes;
       std::map<unsigned,unsigned> forward_map;
       std::map<unsigned,unsigned> backward_map;
     public:
