@@ -5071,7 +5071,7 @@ namespace Legion {
           FieldMask local_mask;
           local_mask.set_bit(fidx);
           for (std::vector<ReductionView*>::const_reverse_iterator it = 
-                current->second.crbegin(); it != current->second.crend(); it++)
+                current->second.rbegin(); it != current->second.rend(); it++)
           {
             ReductionManager *manager = 
               (*it)->get_manager()->as_reduction_manager();
@@ -5114,7 +5114,7 @@ namespace Legion {
           {
             bool found = false;
             for (std::vector<ReductionView*>::const_reverse_iterator it = 
-                  current->second.crbegin(); it != current->second.crend();it++)
+                  current->second.rbegin(); it != current->second.rend(); it++)
             {
               ReductionManager *manager = 
                   (*it)->get_manager()->as_reduction_manager();

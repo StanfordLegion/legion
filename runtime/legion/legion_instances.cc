@@ -787,7 +787,6 @@ namespace Legion {
       assert(tree_id > 0); // only happens with VirtualManager
       assert(!regions.empty());
 #endif
-      const FieldSpace space = field_space_node->handle;
       std::set<IndexSpaceExpression*> region_exprs;
       for (std::vector<LogicalRegion>::const_iterator it = 
             regions.begin(); it != regions.end(); it++)
