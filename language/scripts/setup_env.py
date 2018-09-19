@@ -225,8 +225,8 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-6.0.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-6.0.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-6.0.1.src')
-        download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
-        download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
+        download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
+        download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
     else:
         assert False
 
