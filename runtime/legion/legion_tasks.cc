@@ -2518,8 +2518,9 @@ namespace Legion {
       if (is_replaying())
         return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
-      assert(regions.size() == version_infos.size());
+      assert(version_infos.empty());
 #endif
+      version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
       if (is_remote())
       {

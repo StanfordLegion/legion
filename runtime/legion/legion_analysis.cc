@@ -3058,10 +3058,10 @@ namespace Legion {
 #endif
           // Check to see if we have any valid meta-data that needs to be
           // sent back to the owner node
-          if (!valid_instances.empty() || !reduction_instances.empty())
+          if (!is_owner())
           {
             // TODO: Send back any valid data to the owner node
-
+            assert(false);
           }
           else
           {
@@ -3220,8 +3220,8 @@ namespace Legion {
             refinements_to_traverse[refinement] = expr;
             add_pending_refinement(refinement);
 #ifdef DEBUG_LEGION
-            assert(eq_state == PENDING_REFINEMENT_STATE);
-            assert(transition_event.exists());
+            assert((eq_state == PENDING_REFINEMENT_STATE) ||
+                   (eq_state == REFINEMENT_STATE));
 #endif
             refinement_done = transition_event;
             // Update the unrefined remainder

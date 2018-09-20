@@ -9294,8 +9294,6 @@ namespace Legion {
       if (destroyed)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DESTROY_FIELD_SPACE,
             "Duplicate deletion of Field Space %d", handle.id)
-      // Release any instances that are based on this field space
-      context->runtime->release_field_space_instances(handle);
       destroyed = true;
       // If we're the owner, we can just remove the application valid
       // reference, otherwise if we're remote we do that
@@ -12976,6 +12974,12 @@ namespace Legion {
       }
       // Invalidate our version managers
       invalidate_version_managers();
+      // If we're the root then release our tree instances
+      if (parent == NULL)
+      {
+        context->runtime->release_tree_instances(handle.get_tree_id());
+        column_source->remove_nested_valid_ref(did);
+      }
       row_source->remove_nested_valid_ref(did);
       // Mark that it is destroyed
       destroyed = true;

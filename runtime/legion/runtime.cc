@@ -3906,7 +3906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MemoryManager::release_field_space_instances(FieldSpace handle)
+    void MemoryManager::release_tree_instances(RegionTreeID tree_id)
     //--------------------------------------------------------------------------
     {
       // If we're not the owner, then there is nothing to do
@@ -3923,7 +3923,7 @@ namespace Legion {
         {
           // If the region for the instance is not for the tree then
           // we get to skip it
-          if (it->first->field_space_node->handle != handle)
+          if (it->first->tree_id != tree_id)
             continue;
           // If it's already been deleted, then there is nothing to do
           if (it->second.current_state == PENDING_COLLECTED_STATE)
@@ -15863,7 +15863,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::release_field_space_instances(FieldSpace handle)
+    void Runtime::release_tree_instances(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       std::map<Memory,MemoryManager*> copy_managers;
@@ -15873,7 +15873,7 @@ namespace Legion {
       }
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             copy_managers.begin(); it != copy_managers.end(); it++)
-        it->second->release_field_space_instances(handle);
+        it->second->release_tree_instances(tid);
     }
 
     //--------------------------------------------------------------------------
