@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 18.09.0 (September ??, 2018)
+Version 18.09.0 (September 19, 2018)
   * Legion
     - Support for physical tracing, which can provide up to 7x improvement in
         loops with very small tasks. Can be enabled in the mappers that
