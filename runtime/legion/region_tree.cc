@@ -1310,7 +1310,7 @@ namespace Legion {
       // context lock since the runtime guarantees that all dependence
       // analysis for a single context are performed in order
       {
-        FieldMask unopened_mask;
+        FieldMask unopened_mask = user_mask;
         parent_node->register_logical_user(ctx.get_id(), user, path, trace_info,
                                            projection_info, unopened_mask);
       }
