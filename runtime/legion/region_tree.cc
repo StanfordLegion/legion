@@ -2060,14 +2060,14 @@ namespace Legion {
       }
       else
       {
-        std::vector<CopyAcrossHelper> across_helpers;
+        std::vector<CopyAcrossHelper*> across_helpers;
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
           across_helpers.push_back(
-              CopyAcrossHelper(src_mask, src_indexes, dst_indexes));
+              new CopyAcrossHelper(src_mask, src_indexes, dst_indexes));
           InstanceManager *manager = 
             target_views[idx]->get_manager()->as_instance_manager();
-          manager->initialize_across_helper(&across_helpers.back(), 
+          manager->initialize_across_helper(across_helpers.back(), 
                                 dst_mask, src_indexes, dst_indexes);
         }
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -2083,6 +2083,8 @@ namespace Legion {
                                      guard, dst_req.redop, initialized,
                                      &src_indexes,&dst_indexes,&across_helpers);
         }
+        for (unsigned idx = 0; idx < across_helpers.size(); idx++)
+          delete across_helpers[idx];
       }
       if (initialized != src_mask)
       {

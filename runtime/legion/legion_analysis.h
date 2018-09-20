@@ -804,7 +804,7 @@ namespace Legion {
               PredEvent pred_guard, ReductionOpID redop, FieldMask &initialized,
               const std::vector<unsigned> *src_indexes = NULL,
               const std::vector<unsigned> *dst_indexes = NULL,
-              const std::vector<CopyAcrossHelper> *across_helpers = NULL) const;
+              const std::vector<CopyAcrossHelper*> *across_helpers = NULL)const;
       void overwrite_set(LogicalView *view, const FieldMask &mask,
                          CopyFillAggregator &output_aggregator, 
                          std::set<RtEvent> &ready_events,

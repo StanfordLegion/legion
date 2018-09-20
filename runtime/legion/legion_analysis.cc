@@ -5362,7 +5362,7 @@ namespace Legion {
                 FieldMask &initialized_fields,
                 const std::vector<unsigned> *src_indexes,
                 const std::vector<unsigned> *dst_indexes,
-                const std::vector<CopyAcrossHelper> *across_helpers) const
+                const std::vector<CopyAcrossHelper*> *across_helpers) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5417,8 +5417,7 @@ namespace Legion {
             src_views.insert(it->first, overlap);
           }
           aggregator.record_updates(target_views[idx], src_views,
-              src_mask, overlap, redop, 
-              const_cast<CopyAcrossHelper*>(&((*across_helpers)[idx])));
+              src_mask, overlap, redop, (*across_helpers)[idx]);
         }
         // Now check for any reductions that need to be applied
         FieldMask reduce_mask = reduction_fields & src_mask;
@@ -5447,9 +5446,8 @@ namespace Legion {
                 target_instances[idx].get_valid_fields();
               if (!target_mask.is_set(dst_fidx))
                 continue;
-              aggregator.record_reductions(target_views[idx],
-                  finder->second, src_fidx, dst_fidx, overlap,
-                  const_cast<CopyAcrossHelper*>(&((*across_helpers)[idx])));
+              aggregator.record_reductions(target_views[idx], finder->second,
+                        src_fidx, dst_fidx, overlap, (*across_helpers)[idx]);
             }
             src_fidx = reduce_mask.find_next_set(src_fidx+1);
           }
