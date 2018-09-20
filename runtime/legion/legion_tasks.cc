@@ -4734,7 +4734,6 @@ namespace Legion {
       }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
-      version_infos.resize(regions.size());
       ProjectionInfo projection_info;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {

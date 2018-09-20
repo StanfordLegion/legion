@@ -167,8 +167,10 @@ namespace Legion {
     VersionInfo::VersionInfo(const VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
-      // Should never be called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(equivalence_sets.empty());
+      assert(rhs.equivalence_sets.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -185,8 +187,10 @@ namespace Legion {
     VersionInfo& VersionInfo::operator=(const VersionInfo &rhs)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(equivalence_sets.empty());
+      assert(rhs.equivalence_sets.empty());
+#endif
       return *this;
     }
 
