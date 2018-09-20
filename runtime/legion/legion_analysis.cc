@@ -3193,7 +3193,7 @@ namespace Legion {
             assert((eq_state == PENDING_REFINED_STATE) ||
                    (eq_state == REFINING_STATE));
 #endif
-            if (transition_event.exists())
+            if (!transition_event.exists())
               transition_event = Runtime::create_rt_user_event();
             refinement_done = transition_event;
             // Update the unrefined remainder
@@ -3284,7 +3284,7 @@ namespace Legion {
           }
           // Wait until all the refinements are done before going on
           // to the next step
-          while ((eq_state == REFINING_STATE) || 
+          while ((eq_state == REFINING_STATE) ||
                   !pending_refinements.empty())
           {
             if (!transition_event.exists())
