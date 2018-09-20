@@ -4974,7 +4974,7 @@ namespace Legion {
       {
         FieldMaskSet<LogicalView>::const_iterator finder = 
           valid_instances.find(it->first);
-        if (finder != insts.end())
+        if (finder != valid_instances.end())
         {
           const FieldMask diff = it->second - finder->second;
           if (!!diff)
@@ -5627,6 +5627,10 @@ namespace Legion {
           continue;
         valid_views.insert(it->first, overlap);
       }
+      // Can happen with uninitialized data, we handle this case
+      // before calling this method
+      if (valid_views.empty())
+        return;
       if (target_instances.size() == 1)
         aggregator.record_updates(target_views[0], valid_views, 
                                   update_mask, update_expr);
