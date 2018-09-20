@@ -205,7 +205,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::record_equivalence_set(EquivalenceSet *set,bool need_lock)
+    void VersionInfo::record_equivalence_set(EquivalenceSet *set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION 
@@ -215,7 +215,7 @@ namespace Legion {
         equivalence_sets.insert(set);
       // If we added this element then need to add a mapping guard
       if (result.second)
-        set->add_mapping_guard(mapped_event, need_lock);
+        set->add_base_resource_ref(VERSION_INFO_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -248,7 +248,11 @@ namespace Legion {
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        {
           (*it)->remove_mapping_guard(mapped_event);
+          if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
+            delete (*it);
+        }
         equivalence_sets.clear();
       }
       mapped_event = RtEvent::NO_RT_EVENT;
@@ -2987,15 +2991,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::add_mapping_guard(RtEvent mapped_event, bool need_lock)
+    void EquivalenceSet::add_mapping_guard(RtEvent mapped_event)
     //--------------------------------------------------------------------------
     {
-      if (need_lock)
-      {
-        AutoLock eq(eq_lock);
-        add_mapping_guard(mapped_event, false/*need lock*/);
-        return;
-      }
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert((eq_state == MAPPING_STATE) || 
@@ -3085,6 +3083,7 @@ namespace Legion {
       std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse;
       std::map<RefinementThunk*,IndexSpaceExpression*> refinements_to_traverse;
       RtEvent refinement_done;
+      bool record_self = false;
       {
         RegionTreeForest *forest = runtime->forest;
         AutoLock eq(eq_lock);
@@ -3217,15 +3216,13 @@ namespace Legion {
               runtime->send_equivalence_set_ray_trace_response(source, rez);
               return recorded_event;
             }
-            else
-            {
-              // Local so we can update this directly
-              target->record_equivalence_set(this);
-              return RtEvent::NO_RT_EVENT;
-            }
+            else // Local so we can update this directly
+              record_self = true;
           }
         }
       }
+      if (record_self)
+        target->record_equivalence_set(this);
       // If we have a refinement to do then we need to wait for that
       // to be done before we continue our traversal
       if (refinement_done.exists() && !refinement_done.has_triggered())
@@ -3338,8 +3335,8 @@ namespace Legion {
         if (!subsets.empty())
           // Our set of subsets are now what we need
           to_recurse = subsets;
-        else // Otherwise we can record ourselves
-          version_info.record_equivalence_set(this, false/*need lock*/);
+        else // We're going to record ourself so add the mapping guard
+          add_mapping_guard(version_info.get_guard_event());
       }
       // If we have subsets then continue the traversal
       if (!to_recurse.empty())
@@ -3348,6 +3345,8 @@ namespace Legion {
               to_recurse.begin(); it != to_recurse.end(); it++)
           (*it)->perform_versioning_analysis(version_info);
       }
+      else // Otherwise we can record ourselves
+        version_info.record_equivalence_set(this);
     }
 
     //--------------------------------------------------------------------------
@@ -6670,7 +6669,11 @@ namespace Legion {
     void VersionManager::record_equivalence_set(EquivalenceSet *set)
     //--------------------------------------------------------------------------
     {
+      set->add_base_resource_ref(VERSION_MANAGER_REF);
       AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(equivalence_sets.find(set) == equivalence_sets.end());
+#endif
       equivalence_sets.insert(set);
     }
 

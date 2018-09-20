@@ -86,9 +86,10 @@ namespace Legion {
       inline bool has_version_info(void) const { return mapped_event.exists(); }
       inline const std::set<EquivalenceSet*>& get_equivalence_sets(void) const
         { return equivalence_sets; }
+      inline RtEvent get_guard_event(void) const { return mapped_event; }
     public:
       void initialize_mapping(RtEvent mapped_event);
-      void record_equivalence_set(EquivalenceSet *set, bool need_lock);
+      void record_equivalence_set(EquivalenceSet *set);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
           std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
       void finalize_mapping(void);
@@ -758,7 +759,7 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void clone_from(EquivalenceSet *parent);
-      void add_mapping_guard(RtEvent mapped_event, bool need_lock);
+      void add_mapping_guard(RtEvent mapped_event);
       void remove_mapping_guard(RtEvent mapped_event);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
                                          IndexSpaceExpression *expr, 
