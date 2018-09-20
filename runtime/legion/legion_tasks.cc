@@ -3417,7 +3417,7 @@ namespace Legion {
                                     get_logging_name(),
                                     unique_op_id,
 #endif
-                                    !multiple_requirements/*read only locks*/);
+                                    multiple_requirements/*read only locks*/);
         if (effects.exists())
           effects_postconditions.insert(effects);
       }

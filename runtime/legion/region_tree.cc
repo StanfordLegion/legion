@@ -1807,8 +1807,8 @@ namespace Legion {
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
       // Iterate over all the equivalence classes and perform the analysis
-      // Only need to check for uninitialized data for reads or reduces
-      if (HAS_READ(usage) || IS_REDUCE(usage))
+      // Only need to check for uninitialized data for things not discarding
+      if (!IS_DISCARD(usage))
       {
         FieldMask initialized = user_mask;
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -1860,13 +1860,30 @@ namespace Legion {
         }
       }
       // Perform any output copies (e.g. for restriction) that need to be done
+      ApEvent result;
       if (output_aggregator.has_updates())
       {
         output_aggregator.issue_updates(trace_info, term_event);
-        return output_aggregator.summarize(trace_info);
+        result = output_aggregator.summarize(trace_info);
       }
-      else
-        return ApEvent::NO_AP_EVENT;
+      if (!local_applied.empty())
+      {
+        const RtEvent done_event = Runtime::merge_events(local_applied);
+        if (!read_only_locks.empty())
+        {
+          for (std::set<Reservation>::const_iterator it = 
+                read_only_locks.begin(); it != read_only_locks.end(); it++)
+            it->release(done_event);
+        }
+        map_applied.insert(done_event);
+      }
+      else if (!read_only_locks.empty())
+      {
+        for (std::set<Reservation>::const_iterator it = 
+              read_only_locks.begin(); it != read_only_locks.end(); it++)
+          it->release();
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

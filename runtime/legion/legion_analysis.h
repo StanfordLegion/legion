@@ -655,14 +655,22 @@ namespace Legion {
       };
     protected:
       enum EqState {
-        PENDING_MAPPING_STATE, // still invalid/refining but mappings waiting
+        // Owner starts in the mapping state, goes to pending refinement
+        // once there are any refinements to be done which will wait for
+        // all mappings to finish and then goes to refined once any 
+        // refinements have been done
         MAPPING_STATE,
-        // Owner-only
-        PENDING_REFINEMENT_STATE, // still mapping but refinements waiting
-        REFINEMENT_STATE,
-        // Remote-only
-        PENDING_INVALID_STATE, // still mapping but invalidation waiting
+        PENDING_REFINED_STATE, // waiting for mappings to drain
+        REFINED_STATE, // subsets is stable and no refinements being performed
+        REFINING_STATE, // running the refinement task
+        // Remote copies start in the invalid state, go to pending valid
+        // while waiting for a lease on the current subsets, valid once they 
+        // get a lease, pending invalid once they get an invalid notification
+        // but have outsanding mappings, followed by invalid
         INVALID_STATE,
+        PENDING_VALID_STATE,
+        VALID_STATE,
+        PENDING_INVALID_STATE,
       };
     protected:
       class RefinementThunk : public Collectable {
@@ -841,6 +849,7 @@ namespace Legion {
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
+      void invalidate_remote_state(RtUserEvent to_trigger);
     protected:
       void update_exclusive_copies(FieldMask &to_update,
                                    AddressSpaceID request_space,
@@ -941,16 +950,13 @@ namespace Legion {
     protected:
       // Track the current state of this equivalence state
       EqState eq_state;
-      // Whenever we have to defer transitioning to the next state
-      // then we keep a user event to signal when the transition is done
-      RtUserEvent transition_event;
       // Track the mapping events of the current operations that
       // are using this equivalence class to map
       std::map<RtEvent,unsigned> mapping_guards;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
-      // Track if we have an oustanding refinement task
-      bool outstanding_refinement_task;
+      // Keep an event to track when the refinements are ready
+      RtUserEvent transition_event;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid

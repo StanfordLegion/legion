@@ -213,12 +213,9 @@ namespace Legion {
 #endif
       std::pair<std::set<EquivalenceSet*>::iterator,bool> result = 
         equivalence_sets.insert(set);
-      // If we added this element then need to add a reference to it
+      // If we added this element then need to add a mapping guard
       if (result.second)
-      {
-        set->add_base_resource_ref(VERSION_INFO_REF);
         set->add_mapping_guard(mapped_event, need_lock);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -251,11 +248,7 @@ namespace Legion {
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
           (*it)->remove_mapping_guard(mapped_event);
-          if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
-            delete (*it);
-        }
         equivalence_sets.clear();
       }
       mapped_event = RtEvent::NO_RT_EVENT;
@@ -2783,7 +2776,7 @@ namespace Legion {
                  AddressSpaceID owner, IndexSpaceExpression *expr, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
         eq_lock(gc_lock), eq_state(is_owner() ? MAPPING_STATE : INVALID_STATE),
-        outstanding_refinement_task(false), unrefined_remainder(NULL)
+        unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -2808,9 +2801,6 @@ namespace Legion {
     EquivalenceSet::~EquivalenceSet(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!outstanding_refinement_task);
-#endif
       if (set_expr->remove_expression_reference())
         delete set_expr;
       if (!subsets.empty())
@@ -3007,9 +2997,12 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
-      assert((eq_state == MAPPING_STATE) || 
-              (eq_state == PENDING_REFINEMENT_STATE) ||
-              (eq_state == PENDING_INVALID_STATE));
+      if (is_owner())
+        assert((eq_state == MAPPING_STATE) || 
+                (eq_state == PENDING_REFINED_STATE));
+      else
+        assert((eq_state == VALID_STATE) ||
+                (eq_state == PENDING_INVALID_STATE));
       assert(subsets.empty()); // should not have any subsets at this point
       assert(unrefined_remainder == NULL); // nor a remainder
 #endif
@@ -3029,9 +3022,12 @@ namespace Legion {
       std::map<RtEvent,unsigned>::iterator finder = 
         mapping_guards.find(mapped_event);
 #ifdef DEBUG_LEGION
-      assert((eq_state == MAPPING_STATE) || 
-              (eq_state == PENDING_REFINEMENT_STATE) ||
-              (eq_state == PENDING_INVALID_STATE));
+      if (is_owner())
+        assert((eq_state == MAPPING_STATE) || 
+                (eq_state == PENDING_REFINED_STATE));
+      else
+        assert((eq_state == VALID_STATE) ||
+                (eq_state == PENDING_INVALID_STATE));
       assert(finder != mapping_guards.end());
       assert(finder->second > 0);
 #endif
@@ -3039,44 +3035,23 @@ namespace Legion {
       if (finder->second == 0)
       {
         mapping_guards.erase(finder);
-        if (mapping_guards.empty() && (eq_state != MAPPING_STATE))
+        if (mapping_guards.empty())
         {
-          if (is_owner())
+          if (is_owner() && (eq_state == PENDING_REFINED_STATE))
           {
-#ifdef DEBUG_LEGION
-            assert(eq_state == PENDING_REFINEMENT_STATE);
-#endif
-            eq_state = REFINEMENT_STATE;
+            eq_state = REFINED_STATE;
             // Kick off the refinement task now that we're transitioning
             launch_refinement_task();
           }
-          else
+          else if (!is_owner() && (eq_state == PENDING_INVALID_STATE))
           {
-#ifdef DEBUG_LEGION
-            assert(eq_state == PENDING_INVALID_STATE);
-#endif
             eq_state = INVALID_STATE;
-          }
 #ifdef DEBUG_LEGION
-          assert(transition_event.exists());
+            assert(transition_event.exists());
 #endif
-          // Check to see if we have any valid meta-data that needs to be
-          // sent back to the owner node
-          if (!is_owner())
-          {
-            // TODO: Send back any valid data to the owner node
-            assert(false);
+            invalidate_remote_state(transition_event);
+            transition_event = RtUserEvent::NO_RT_USER_EVENT;
           }
-          else
-          {
-#ifdef DEBUG_LEGION
-            assert(version_numbers.empty());
-#endif
-            // We don't have any valid data so we can just invalidate
-            // ourself by triggering the transition event
-            Runtime::trigger_event(transition_event);  
-          }
-          transition_event = RtUserEvent::NO_RT_USER_EVENT;
         }
       }
     }
@@ -3113,23 +3088,12 @@ namespace Legion {
       {
         RegionTreeForest *forest = runtime->forest;
         AutoLock eq(eq_lock);
-        // Ray tracing can happen in parallel with mapping since it's a 
-        // read-only process with respect to the subsets, but it can't
-        // happen in parallel with any refinements
-        while ((eq_state == REFINEMENT_STATE) || 
-                (eq_state == PENDING_MAPPING_STATE))
+        // Ray tracing can run as long as we don't have an outstanding
+        // refining task that we need to wait for
+        while (eq_state == REFINING_STATE)
         {
-          if (eq_state == REFINEMENT_STATE)
-          {
-#ifdef DEBUG_LEGION
-            assert(!transition_event.exists());
-#endif
+          if (!transition_event.exists())
             transition_event = Runtime::create_rt_user_event();
-            eq_state = PENDING_MAPPING_STATE;
-          }
-#ifdef DEBUG_LEGION
-          assert(transition_event.exists());
-#endif
           RtEvent wait_on = transition_event;
           eq.release();
           wait_on.wait();
@@ -3172,9 +3136,10 @@ namespace Legion {
             if (!refinement_done.exists())
             {
 #ifdef DEBUG_LEGION
-              assert(eq_state == PENDING_REFINEMENT_STATE);
-              assert(transition_event.exists());
+              assert(eq_state == PENDING_REFINED_STATE);
 #endif
+              if (!transition_event.exists())
+                transition_event = Runtime::create_rt_user_event();
               refinement_done = transition_event;
             }
             expr = forest->subtract_index_spaces(expr, overlap);
@@ -3195,9 +3160,11 @@ namespace Legion {
             if (!refinement_done.exists())
             {
 #ifdef DEBUG_LEGION
-              assert(eq_state == PENDING_REFINEMENT_STATE);
-              assert(transition_event.exists());
+              assert((eq_state == PENDING_REFINED_STATE) ||
+                     (eq_state == REFINING_STATE));
 #endif
+              if (!transition_event.exists())
+                transition_event = Runtime::create_rt_user_event();
               refinement_done = transition_event;
             }
             unrefined_remainder = 
@@ -3224,9 +3191,11 @@ namespace Legion {
             refinements_to_traverse[refinement] = expr;
             add_pending_refinement(refinement);
 #ifdef DEBUG_LEGION
-            assert((eq_state == PENDING_REFINEMENT_STATE) ||
-                   (eq_state == REFINEMENT_STATE));
+            assert((eq_state == PENDING_REFINED_STATE) ||
+                   (eq_state == REFINING_STATE));
 #endif
+            if (transition_event.exists())
+              transition_event = Runtime::create_rt_user_event();
             refinement_done = transition_event;
             // Update the unrefined remainder
             unrefined_remainder = diff;
@@ -3315,39 +3284,14 @@ namespace Legion {
             // We can clear the unrefined remainder now
             unrefined_remainder = NULL;
             add_pending_refinement(refinement);
-#ifdef DEBUG_LEGION
-            // Should not be in the mapping state after this
-            // so we know the transition event applies to us
-            assert(eq_state != MAPPING_STATE);
-#endif
-            if (eq_state == PENDING_REFINEMENT_STATE)
-            {
-              // Have to wait to make sure that the refinement is at
-              // least in flight before going on to the next step
-              // since we need this refinement to do the mapping
-              RtEvent wait_on = transition_event;
-#ifdef DEBUG_LEGION
-              assert(wait_on.exists()); // should have an event here
-#endif
-              eq.release();
-              wait_on.wait();
-              eq.reacquire();
-            }
           }
-          while ((eq_state != MAPPING_STATE) && 
-                  (eq_state != PENDING_REFINEMENT_STATE))
+          // Wait until all the refinements are done before going on
+          // to the next step
+          while ((eq_state == REFINING_STATE) || 
+                  !pending_refinements.empty())
           {
-            if (eq_state == REFINEMENT_STATE)
-            {
-#ifdef DEBUG_LEGION
-              assert(!transition_event.exists());
-#endif
-              transition_event = Runtime::create_rt_user_event(); 
-              eq_state = PENDING_MAPPING_STATE; 
-            }
-#ifdef DEBUG_LEGION
-            assert(transition_event.exists());
-#endif
+            if (!transition_event.exists())
+              transition_event = Runtime::create_rt_user_event();
             RtEvent wait_on = transition_event;
             eq.release();
             wait_on.wait();
@@ -3357,7 +3301,7 @@ namespace Legion {
         else
         {
           // We're not the owner so see if we need to request a mapping state
-          while ((eq_state != MAPPING_STATE) && 
+          while ((eq_state != VALID_STATE) && 
                   (eq_state != PENDING_INVALID_STATE))
           {
             bool send_request = false;
@@ -3367,7 +3311,7 @@ namespace Legion {
               assert(!transition_event.exists());
 #endif
               transition_event = Runtime::create_rt_user_event(); 
-              eq_state = PENDING_MAPPING_STATE;
+              eq_state = PENDING_VALID_STATE;
               // Send the request for the update
               send_request = true;
             }
@@ -5924,9 +5868,7 @@ namespace Legion {
     void EquivalenceSet::perform_refinements(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(outstanding_refinement_task);
-#endif
+      RtUserEvent to_trigger;
       std::vector<RefinementThunk*> to_perform;
       do 
       {
@@ -5945,8 +5887,7 @@ namespace Legion {
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
         assert(is_owner());
-        assert((eq_state == REFINEMENT_STATE) || 
-                (eq_state == PENDING_MAPPING_STATE));
+        assert(eq_state == REFINING_STATE);
 #endif
         if (!to_add.empty())
           subsets.insert(subsets.end(), to_add.begin(), to_add.end());
@@ -5981,12 +5922,6 @@ namespace Legion {
                   remote_subsets.begin(); it != remote_subsets.end(); it++)
               runtime->send_equivalence_set_subset_response(*it, rez);
           }
-          // We should never end up back in the mapping state
-          // once we have been refined at all
-#ifdef DEBUG_LEGION
-          assert(eq_state == REFINEMENT_STATE);
-          assert(!transition_event.exists());
-#endif
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
           // and remove any valid references that we might be holding
@@ -6023,12 +5958,19 @@ namespace Legion {
             }
             version_numbers.clear();
           }
-          // Mark that we no longer have a running refinement task
-          outstanding_refinement_task = false;
+          // Go back to the refined state and trigger our done event
+          eq_state = REFINED_STATE;
+          if (transition_event.exists())
+          {
+            to_trigger = transition_event;
+            transition_event = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
         else // there are more refinements to do so we go around again
           to_perform.swap(pending_refinements);
       } while (!to_perform.empty());
+      if (to_trigger.exists())
+        Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -6062,24 +6004,18 @@ namespace Legion {
       if (eq_state == MAPPING_STATE)
       {
         // Check to see if we can transition right now
-        if (!mapping_guards.empty())
-        {
-          eq_state = PENDING_REFINEMENT_STATE;
-#ifdef DEBUG_LEGION
-          assert(!transition_event.exists());
-#endif
-          transition_event = Runtime::create_rt_user_event();
-        }
-        else
+        if (mapping_guards.empty())
         {
           // Transition straight to refinement
-          eq_state = REFINEMENT_STATE;
+          eq_state = REFINED_STATE;
           launch_refinement_task();
         }
+        else // go to the pending state
+          eq_state = PENDING_REFINED_STATE;
       }
       // Otherwise if we don't have an outstanding refinement task
       // then we need to launch one now to handle this
-      else if (!outstanding_refinement_task)
+      else if (eq_state == REFINED_STATE)
         launch_refinement_task();
     }
 
@@ -6089,12 +6025,11 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
-      assert(eq_state == REFINEMENT_STATE);
+      assert(eq_state == REFINED_STATE);
       assert(!pending_refinements.empty());
-      assert(!outstanding_refinement_task);
 #endif
-      // Mark that we now have an oustanding refinement task
-      outstanding_refinement_task = true;
+      // Mark that we're about to start refining
+      eq_state = REFINING_STATE;
       // Send invalidations to all the remote nodes. This will invalidate
       // their mapping privileges and also send back any remote meta data
       // to the local node 
@@ -6159,8 +6094,8 @@ namespace Legion {
       }
       // Add ourselves as a remote location for the subsets
       remote_subsets.insert(source);
-      // We can only send the 
-      if ((eq_state == MAPPING_STATE) || (eq_state == PENDING_REFINEMENT_STATE))
+      // We can only send the response if we're not doing any refinements 
+      if ((eq_state != REFINING_STATE) && pending_refinements.empty())
       {
         Serializer rez;
         {
@@ -6183,7 +6118,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_owner());
       assert(subsets.empty());
-      assert(eq_state == PENDING_MAPPING_STATE);
+      assert(eq_state == PENDING_VALID_STATE);
       assert(transition_event.exists());
       assert(!transition_event.has_triggered());
 #endif
@@ -6222,7 +6157,7 @@ namespace Legion {
             subsets.begin(); it != subsets.end(); it++)
         (*it)->add_nested_resource_ref(did);
       // Update the state
-      eq_state = MAPPING_STATE;
+      eq_state = VALID_STATE;
       // Trigger the transition state to wake up any waiters
       Runtime::trigger_event(transition_event);
       transition_event = RtUserEvent::NO_RT_USER_EVENT;
@@ -6235,43 +6170,50 @@ namespace Legion {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(!is_owner());
-      assert(eq_state == MAPPING_STATE);
+      assert(eq_state == VALID_STATE);
       assert(!transition_event.exists());
 #endif
       // Check to see if we have any mapping guards in place
       if (mapping_guards.empty())
       {
-        // Remove our references and clear the subsets
-        if (!subsets.empty())
-        {
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                subsets.begin(); it != subsets.end(); it++)
-            if ((*it)->remove_nested_resource_ref(did))
-              delete (*it);
-          subsets.clear();
-        }
-        // Pack up any state that needs to be sent back to the owner node
-        // so that it can do any refinements
-        if (!valid_instances.empty() || !reduction_instances.empty())
-        {
-          // TODO: send back our state to the owner node 
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(version_numbers.empty());
-#endif
-          // Nothing to send back so just trigger our event
-          Runtime::trigger_event(to_trigger);
-        }
         // Update the state to reflect that we are now invalid
         eq_state = INVALID_STATE;
+        invalidate_remote_state(to_trigger);
       }
       else
       {
         // Update the state and save the event to trigger
         eq_state = PENDING_INVALID_STATE;
         transition_event = to_trigger;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::invalidate_remote_state(RtUserEvent to_trigger)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_owner());
+      assert(to_trigger.exists());
+      assert(eq_state == INVALID_STATE);
+#endif
+      if (!subsets.empty())
+      {
+        // Easy case, just invalidate our local subsets and then
+        // we can trigger the event
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets.begin(); it != subsets.end(); it++)
+          if ((*it)->remove_nested_resource_ref(did))
+            delete (*it);
+        subsets.clear();
+        Runtime::trigger_event(to_trigger);
+      }
+      else
+      {
+        // We had a mapping lease so we need to send back any state
+        // to the owner node in order to be considered invalidated
+        // TODO
+        assert(false);
       }
     }
 
