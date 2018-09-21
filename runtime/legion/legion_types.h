@@ -313,7 +313,6 @@ namespace Legion {
       LG_DEFER_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
-      LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
@@ -386,7 +385,6 @@ namespace Legion {
         "Defer Task Distribution",                                \
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
-        "Defer Task Map and Launch",                              \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \

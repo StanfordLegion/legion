@@ -2837,6 +2837,9 @@ namespace Legion {
         exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         exclusive_copies[owner_space] = exclusive_fields;
       }
+#ifdef LEGION_GC
+      log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -2861,6 +2864,33 @@ namespace Legion {
           if ((*it)->remove_nested_resource_ref(did))
             delete (*it);
         subsets.clear();
+      }
+      if (!valid_instances.empty())
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+          if (it->first->remove_nested_valid_ref(did))
+            delete it->first;
+      }
+      if (!reduction_instances.empty())
+      {
+        for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              rit = reduction_instances.begin(); 
+              rit != reduction_instances.end(); rit++)
+        {
+          for (std::vector<ReductionView*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            if ((*it)->remove_nested_valid_ref(did))
+              delete (*it);
+        }
+      }
+      if (!restricted_instances.empty())
+      {
+        for (FieldMaskSet<InstanceView>::const_iterator it = 
+              restricted_instances.begin(); it != 
+              restricted_instances.end(); it++)
+          if (it->first->remove_nested_valid_ref(did))
+            delete it->first;
       }
     }
 

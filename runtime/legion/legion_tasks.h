@@ -973,17 +973,6 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = SLICE_TASK_ALLOC;
     public:
-      struct DeferMapAndLaunchArgs : public LgTaskArgs<DeferMapAndLaunchArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_MAP_AND_LAUNCH_TASK_ID;
-      public:
-        DeferMapAndLaunchArgs(SliceTask *t)
-          : LgTaskArgs<DeferMapAndLaunchArgs>(t->get_unique_op_id()),
-            proxy_this(t) { }
-      public:
-        SliceTask *proxy_this;
-      };
-    public:
       SliceTask(Runtime *rt);
       SliceTask(const SliceTask &rhs);
       virtual ~SliceTask(void);
@@ -1047,8 +1036,6 @@ namespace Legion {
       void pack_remote_complete(Serializer &rez, ApEvent slice_postcondition); 
       void pack_remote_commit(Serializer &rez);
     public:
-      RtEvent defer_map_and_launch(RtEvent precondition);
-    public:
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
@@ -1094,7 +1081,6 @@ namespace Legion {
       ApEvent index_complete;
       UniqueID remote_unique_id;
       bool origin_mapped;
-      bool need_versioning_analysis;
       UniqueID remote_owner_uid;
     protected:
       // Temporary storage for future results

@@ -20031,13 +20031,6 @@ namespace Legion {
             largs->proxy_this->launch_task();
             break;
           }
-        case LG_DEFER_MAP_AND_LAUNCH_TASK_ID:
-          {
-            const SliceTask::DeferMapAndLaunchArgs *margs = 
-              (const SliceTask::DeferMapAndLaunchArgs*)args;
-            margs->proxy_this->map_and_launch();
-            break;
-          }
         case LG_MISSPECULATE_TASK_ID:
           {
             const SingleTask::MisspeculationTaskArgs *targs = 

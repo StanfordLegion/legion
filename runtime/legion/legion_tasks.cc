@@ -7367,7 +7367,6 @@ namespace Legion {
       remote_owner_uid = 0;
       remote_unique_id = get_unique_id();
       origin_mapped = false;
-      need_versioning_analysis = true;
     }
 
     //--------------------------------------------------------------------------
@@ -7505,35 +7504,27 @@ namespace Legion {
       // not then do so now
       if (points.empty())
         enumerate_points();
-      // See if we have to do our versioning computation first
-      if (need_versioning_analysis)
-      {
-        // After this we won't need to do it again
-        need_versioning_analysis = false;
-        std::set<RtEvent> version_events;
-        for (unsigned idx = 0; idx < points.size(); idx++)
-        {
-          RtEvent versions_ready = points[idx]->perform_versioning_analysis();
-          if (versions_ready.exists())
-            version_events.insert(versions_ready);
-        }
-        if (!version_events.empty())
-        {
-          RtEvent version_ready_event = Runtime::merge_events(version_events);
-          if (version_ready_event.exists() && 
-              !version_ready_event.has_triggered())
-            return defer_perform_mapping(version_ready_event, epoch_owner);
-        }
-      }
-      std::set<RtEvent> mapped_events;
-      for (unsigned idx = 0; idx < points.size(); idx++)
-      {
-        RtEvent map_event = points[idx]->perform_mapping(epoch_owner);
-        if (map_event.exists())
-          mapped_events.insert(map_event);
-      }
-      // If we succeeded in mapping we are no longer stealable
+      // Once we start mapping then we are no longer stealable
       stealable = false;
+      std::set<RtEvent> mapped_events;
+      for (std::vector<PointTask*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
+      {
+        RtEvent versions_ready = (*it)->perform_versioning_analysis();
+        if (!versions_ready.exists() || versions_ready.has_triggered())
+        {
+          const RtEvent map_event = (*it)->perform_mapping(epoch_owner);
+          if (map_event.exists())
+            mapped_events.insert(map_event);
+        }
+        else
+        {
+          const RtEvent map_event = 
+            (*it)->defer_perform_mapping(versions_ready, epoch_owner);
+          if (map_event.exists())
+            mapped_events.insert(map_event);
+        }
+      }
       if (!mapped_events.empty())
         return Runtime::merge_events(mapped_events);
       return RtEvent::NO_RT_EVENT;
@@ -7567,51 +7558,32 @@ namespace Legion {
       // First enumerate all of our points if we haven't already done so
       if (points.empty())
         enumerate_points();
-      // See if we have to do our versioning computation first
-      if (need_versioning_analysis)
-      {
-        // After this we won't need to do it again
-        need_versioning_analysis = false;
-        std::set<RtEvent> version_events;
-        for (unsigned idx = 0; idx < points.size(); idx++)
-        {
-          RtEvent versions_ready = points[idx]->perform_versioning_analysis();
-          if (versions_ready.exists())
-            version_events.insert(versions_ready);
-        }
-        if (!version_events.empty())
-        {
-          RtEvent version_ready_event = Runtime::merge_events(version_events);
-          if (version_ready_event.exists() && 
-              !version_ready_event.has_triggered())
-          {
-            defer_map_and_launch(version_ready_event);
-            return;
-          }
-        }
-      }
       // Mark that this task is no longer stealable.  Once we start
       // executing things onto a specific processor slices cannot move.
       stealable = false;
 #ifdef DEBUG_LEGION
       assert(!points.empty());
 #endif
-      // Now try mapping and then launching all the points starting
-      // at the index of the last known good index
-      // Copy the points onto the stack to avoid them being
-      // cleaned up while we are still iterating through the loop
-      std::vector<PointTask*> local_points(points);
-      for (std::vector<PointTask*>::const_iterator it = local_points.begin();
-            it != local_points.end(); it++)
+      for (std::vector<PointTask*>::const_iterator it = 
+            points.begin(); it != points.end(); it++)
       {
-        PointTask *next_point = *it;
-        RtEvent map_event = next_point->perform_mapping();
-        // Once we call this function on the last point it
-        // is possible that this slice task object can be recycled
-        if (map_event.exists() && !map_event.has_triggered())
-          next_point->defer_launch_task(map_event);
+        RtEvent versions_ready = (*it)->perform_versioning_analysis();
+        if (versions_ready.exists())
+        {
+          // Defer everything
+          RtEvent map_event = 
+            (*it)->defer_perform_mapping(versions_ready, NULL/*epoch owner*/);
+          (*it)->defer_launch_task(map_event);
+        }
         else
-          next_point->launch_task();
+        {
+          // We can do the mapping now
+          RtEvent map_event = (*it)->perform_mapping();
+          if (map_event.exists() && !map_event.has_triggered())
+            (*it)->defer_launch_task(map_event);
+          else
+            (*it)->launch_task();
+        }
       }
     }
 
@@ -8266,15 +8238,6 @@ namespace Legion {
       rez.serialize(index_owner);
       RezCheck z(rez);
       rez.serialize(points.size());
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent SliceTask::defer_map_and_launch(RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      DeferMapAndLaunchArgs args(this);
-      return runtime->issue_runtime_meta_task(args,
-          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
