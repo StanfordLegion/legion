@@ -89,13 +89,15 @@ namespace Legion {
       inline RtEvent get_guard_event(void) const { return mapped_event; }
     public:
       void initialize_mapping(RtEvent mapped_event);
-      void record_equivalence_set(EquivalenceSet *set);
+      void record_equivalence_sets(VersionManager *owner,
+                                   const std::set<EquivalenceSet*> &sets);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
           std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
       void finalize_mapping(void);
     protected:
       RtEvent mapped_event;
       std::set<EquivalenceSet*> equivalence_sets;
+      VersionManager *owner;
     };
 
     /**
@@ -759,12 +761,13 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void clone_from(EquivalenceSet *parent);
-      void add_mapping_guard(RtEvent mapped_event);
+      bool acquire_mapping_guard(RtEvent mapped_event,
+                                 std::vector<EquivalenceSet*> &alt_sets,
+                                 bool recursed = false);
       void remove_mapping_guard(RtEvent mapped_event);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
                                          IndexSpaceExpression *expr, 
                                          AddressSpaceID source); 
-      void perform_versioning_analysis(VersionInfo &version_info);
       void request_valid_copy(FieldMask request_mask,
                               const RegionUsage usage,
                               std::set<RtEvent> &ready_events, 
@@ -1017,6 +1020,7 @@ namespace Legion {
       void perform_versioning_analysis(InnerContext *parent_ctx,
                                        VersionInfo &version_info);
       void record_equivalence_set(EquivalenceSet *set);
+      void update_equivalence_sets(const std::set<EquivalenceSet*> &alt_sets);
     public:
       void print_physical_state(RegionTreeNode *node,
                                 const FieldMask &capture_mask,

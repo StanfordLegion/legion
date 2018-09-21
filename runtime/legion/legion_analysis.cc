@@ -159,15 +159,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
+      : owner(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
+      : owner(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
 #endif
@@ -180,6 +183,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!mapped_event.exists());
       assert(equivalence_sets.empty());
+      assert(owner == NULL);
 #endif
     }
 
@@ -188,6 +192,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
 #endif
@@ -205,17 +210,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::record_equivalence_set(EquivalenceSet *set)
+    void VersionInfo::record_equivalence_sets(VersionManager *own,
+                                          const std::set<EquivalenceSet*> &sets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION 
       assert(mapped_event.exists());
+      assert(equivalence_sets.empty());
+      assert(owner == NULL);
 #endif
-      std::pair<std::set<EquivalenceSet*>::iterator,bool> result = 
-        equivalence_sets.insert(set);
-      // If we added this element then need to add a mapping guard
-      if (result.second)
-        set->add_base_resource_ref(VERSION_INFO_REF);
+      equivalence_sets = sets;
+      // Save the owner in case we need to update this later
+      owner = own;
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+        (*it)->add_base_resource_ref(VERSION_INFO_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -228,6 +237,43 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(mapped_event.exists());
 #endif
+      // First we need to go through and lock in the equivalence sets to
+      // confirm that they won't be refined while we're doing the mapping
+      std::vector<EquivalenceSet*> alt_sets;
+      for (std::set<EquivalenceSet*>::iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
+      {
+        if ((*it)->acquire_mapping_guard(mapped_event, alt_sets))
+        {
+#ifdef DEBUG_LEGION
+          assert(!alt_sets.empty());
+#endif
+          std::set<EquivalenceSet*>::iterator to_delete = it++;
+          if ((*to_delete)->remove_base_resource_ref(VERSION_INFO_REF))
+            delete (*to_delete);
+          equivalence_sets.erase(to_delete); 
+        }
+        else
+          it++;
+      }
+      if (!alt_sets.empty())
+      {
+        // Add references to the sets and put them in our equivalence sets
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              alt_sets.begin(); it != alt_sets.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(equivalence_sets.find(*it) == equivalence_sets.end());
+#endif
+          (*it)->add_base_resource_ref(VERSION_INFO_REF);
+          equivalence_sets.insert(*it);
+        }
+        // This means that refinement has changed for this region so update it
+#ifdef DEBUG_LEGION
+        assert(owner != NULL);
+#endif
+        owner->update_equivalence_sets(equivalence_sets);
+      }
       // We only need an exclusive mode for this operation if we're 
       // writing otherwise, we know we can do things with a shared copy
       for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -256,6 +302,7 @@ namespace Legion {
         equivalence_sets.clear();
       }
       mapped_event = RtEvent::NO_RT_EVENT;
+      owner = NULL;
     }
 
     /////////////////////////////////////////////////////////////
@@ -2991,25 +3038,111 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::add_mapping_guard(RtEvent mapped_event)
+    bool EquivalenceSet::acquire_mapping_guard(RtEvent mapped_event,
+               std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
+      std::vector<EquivalenceSet*> to_recurse;
+      {
+        AutoLock eq(eq_lock);
+        // We need to iterate until we get a valid lease while holding the lock
+        if (is_owner())
+        {
+          // If we have a unrefined remainder then we need that now
+          if (unrefined_remainder != NULL)
+          {
+            LocalRefinement *refinement = 
+              new LocalRefinement(unrefined_remainder, this);
+            // We can clear the unrefined remainder now
+            unrefined_remainder = NULL;
+            add_pending_refinement(refinement);
+          }
+          // Wait until all the refinements are done before going on
+          // to the next step
+          while ((eq_state == REFINING_STATE) ||
+                  !pending_refinements.empty())
+          {
+            if (!transition_event.exists())
+              transition_event = Runtime::create_rt_user_event();
+            RtEvent wait_on = transition_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
+          }
+        }
+        else
+        {
+          // We're not the owner so see if we need to request a mapping state
+          while ((eq_state != VALID_STATE) && 
+                  (eq_state != PENDING_INVALID_STATE))
+          {
+            bool send_request = false;
+            if (eq_state == INVALID_STATE)
+            {
 #ifdef DEBUG_LEGION
-      if (is_owner())
-        assert((eq_state == MAPPING_STATE) || 
-                (eq_state == PENDING_REFINED_STATE));
-      else
-        assert((eq_state == VALID_STATE) ||
-                (eq_state == PENDING_INVALID_STATE));
-      assert(subsets.empty()); // should not have any subsets at this point
-      assert(unrefined_remainder == NULL); // nor a remainder
+              assert(!transition_event.exists());
 #endif
-      std::map<RtEvent,unsigned>::iterator finder = 
-        mapping_guards.find(mapped_event);
-      if (finder == mapping_guards.end())
-        mapping_guards[mapped_event] = 1;
-      else
-        finder->second++;
+              transition_event = Runtime::create_rt_user_event(); 
+              eq_state = PENDING_VALID_STATE;
+              // Send the request for the update
+              send_request = true;
+            }
+#ifdef DEBUG_LEGION
+            assert(transition_event.exists());
+#endif
+            RtEvent wait_on = transition_event;
+            eq.release();
+            if (send_request)
+            {
+              Serializer rez;
+              {
+                RezCheck z(rez);
+                rez.serialize(did);
+              }
+              runtime->send_equivalence_set_subset_request(owner_space, rez);
+            }
+            wait_on.wait();
+            eq.reacquire();
+          }
+        }
+        // If we have subsets then we're going to need to recurse and
+        // traverse those as well since we need to get to the leaves
+        if (subsets.empty())
+        {
+          // We're going to record ourself so add the mapping guard
+#ifdef DEBUG_LEGION
+          if (is_owner())
+            assert((eq_state == MAPPING_STATE) || 
+                    (eq_state == PENDING_REFINED_STATE));
+          else
+            assert((eq_state == VALID_STATE) ||
+                    (eq_state == PENDING_INVALID_STATE));
+          assert(unrefined_remainder == NULL); // nor a remainder
+#endif
+          std::map<RtEvent,unsigned>::iterator finder = 
+            mapping_guards.find(mapped_event);
+          if (finder == mapping_guards.end())
+            mapping_guards[mapped_event] = 1;
+          else
+            finder->second++;
+        }
+        else // Our set of subsets are now what we need
+          to_recurse = subsets;
+      }
+      // If we have subsets then continue the traversal
+      if (!to_recurse.empty())
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              to_recurse.begin(); it != to_recurse.end(); it++)
+          (*it)->acquire_mapping_guard(mapped_event, 
+                                       alt_sets, true/*recursed*/);
+        // We've been refined so return true indicating that we changed
+        return true;
+      }
+      // If we recursed then record ourselves in the alt_sets 
+      else if (recursed)
+        alt_sets.push_back(this);
+      return false;
     }
 
     //--------------------------------------------------------------------------
@@ -3261,92 +3394,6 @@ namespace Legion {
         // Otherwise fall through and return a no-event
       }
       return RtEvent::NO_RT_EVENT;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_versioning_analysis(VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<EquivalenceSet*> to_recurse;
-      {
-        AutoLock eq(eq_lock);
-        // We need to iterate until we get a valid lease while holding the lock
-        if (is_owner())
-        {
-          // If we have a unrefined remainder then we need that now
-          if (unrefined_remainder != NULL)
-          {
-            LocalRefinement *refinement = 
-              new LocalRefinement(unrefined_remainder, this);
-            // We can clear the unrefined remainder now
-            unrefined_remainder = NULL;
-            add_pending_refinement(refinement);
-          }
-          // Wait until all the refinements are done before going on
-          // to the next step
-          while ((eq_state == REFINING_STATE) ||
-                  !pending_refinements.empty())
-          {
-            if (!transition_event.exists())
-              transition_event = Runtime::create_rt_user_event();
-            RtEvent wait_on = transition_event;
-            eq.release();
-            wait_on.wait();
-            eq.reacquire();
-          }
-        }
-        else
-        {
-          // We're not the owner so see if we need to request a mapping state
-          while ((eq_state != VALID_STATE) && 
-                  (eq_state != PENDING_INVALID_STATE))
-          {
-            bool send_request = false;
-            if (eq_state == INVALID_STATE)
-            {
-#ifdef DEBUG_LEGION
-              assert(!transition_event.exists());
-#endif
-              transition_event = Runtime::create_rt_user_event(); 
-              eq_state = PENDING_VALID_STATE;
-              // Send the request for the update
-              send_request = true;
-            }
-#ifdef DEBUG_LEGION
-            assert(transition_event.exists());
-#endif
-            RtEvent wait_on = transition_event;
-            eq.release();
-            if (send_request)
-            {
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-              }
-              runtime->send_equivalence_set_subset_request(owner_space, rez);
-            }
-            wait_on.wait();
-            eq.reacquire();
-          }
-        }
-        // If we have subsets then we're going to need to recurse and
-        // traverse those as well since we need to get to the leaves
-        if (!subsets.empty())
-          // Our set of subsets are now what we need
-          to_recurse = subsets;
-        else // We're going to record ourself so add the mapping guard
-          add_mapping_guard(version_info.get_guard_event());
-      }
-      // If we have subsets then continue the traversal
-      if (!to_recurse.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->perform_versioning_analysis(version_info);
-      }
-      else // Otherwise we can record ourselves
-        version_info.record_equivalence_set(this);
     }
 
     //--------------------------------------------------------------------------
@@ -6658,11 +6705,9 @@ namespace Legion {
       // Possibly duplicate writes, but that is alright
       if (!has_equivalence_sets)
         has_equivalence_sets = true;
-      // Now that we have the equivalence classes we can have them add
-      // themselves in case they have been refined and we need to traverse
-      for (std::set<EquivalenceSet*>::const_iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->perform_versioning_analysis(version_info); 
+      // Grab the lock in read-only mode in case any updates come in here later
+      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+      version_info.record_equivalence_sets(this, equivalence_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -6675,6 +6720,37 @@ namespace Legion {
       assert(equivalence_sets.find(set) == equivalence_sets.end());
 #endif
       equivalence_sets.insert(set);
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::update_equivalence_sets(
+                                      const std::set<EquivalenceSet*> &alt_sets)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      // Remove any sets from the old set that aren't in the new one
+      for (std::set<EquivalenceSet*>::iterator it = 
+            equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
+      {
+        if (alt_sets.find(*it) == alt_sets.end())
+        {
+          std::set<EquivalenceSet*>::iterator to_delete = it++;
+          if ((*to_delete)->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete (*to_delete);
+          equivalence_sets.erase(to_delete);
+        }
+        else
+          it++;
+      }
+      // Add in all the alt_sets and add references where necessary
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            alt_sets.begin(); it != alt_sets.end(); it++)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> result = 
+          equivalence_sets.insert(*it);
+        if (result.second)
+          (*it)->add_base_resource_ref(VERSION_MANAGER_REF);
+      }
     }
 
     //--------------------------------------------------------------------------
