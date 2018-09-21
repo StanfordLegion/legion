@@ -6013,6 +6013,7 @@ namespace Legion {
                     valid_instances.begin(); it != valid_instances.end(); it++)
                 if (it->first->remove_nested_valid_ref(did))
                   delete it->first;
+              valid_instances.clear();
             }
             if (!reduction_instances.empty())
             {
