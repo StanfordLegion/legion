@@ -3564,7 +3564,8 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_versions[idx],
                                                      preconditions,
-                                                     map_applied_conditions);
+                                                     map_applied_conditions,
+                                                     true/*defer*/);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3577,7 +3578,8 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      preconditions,
-                                                     map_applied_conditions);
+                                                     map_applied_conditions,
+                                                     true/*defer*/);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -3590,7 +3592,8 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
                                                  preconditions,
-                                                 map_applied_conditions);
+                                                 map_applied_conditions,
+                                                 true/*defer*/);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -3600,7 +3603,46 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_versions[idx],
                                                  preconditions,
-                                                 map_applied_conditions);
+                                                 map_applied_conditions,
+                                                 true/*defer*/);
+      }
+      // Since we have multiple region requirements we know that we have
+      // to defer doing these kinds of things
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        runtime->forest->make_versions_ready(src_requirements[idx],
+                                             src_versions[idx],
+                                             preconditions,
+                                             map_applied_conditions);
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        runtime->forest->make_versions_ready(dst_requirements[idx],
+                                             dst_versions[idx],
+                                             preconditions,
+                                             map_applied_conditions);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          runtime->forest->make_versions_ready(src_indirect_requirements[idx],
+                                               gather_versions[idx],
+                                               preconditions,
+                                               map_applied_conditions);
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          runtime->forest->make_versions_ready(dst_indirect_requirements[idx],
+                                               scatter_versions[idx],
+                                               preconditions,
+                                               map_applied_conditions);
       }
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));

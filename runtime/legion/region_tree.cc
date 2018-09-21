@@ -1406,7 +1406,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     std::set<RtEvent> &applied_events)
+                     std::set<RtEvent> &applied_events, bool defer_make_ready)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1424,7 +1424,24 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(),
                                                context, version_info);
-      // Now ask the version info to make them ready
+      if (!defer_make_ready)
+        version_info.make_ready(req, user_mask, ready_events, applied_events);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::make_versions_ready(const RegionRequirement &req,
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
+                     std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (IS_NO_ACCESS(req))
+        return;
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      FieldSpaceNode *field_space_node = get_node(req.region.get_field_space());
+      FieldMask user_mask = 
+        field_space_node->get_field_mask(req.privilege_fields);
       version_info.make_ready(req, user_mask, ready_events, applied_events);
     }
 

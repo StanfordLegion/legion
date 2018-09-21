@@ -302,7 +302,12 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       std::set<RtEvent> &applied_events);
+                                       std::set<RtEvent> &applied_events,
+                                       bool defer_make_ready = false);
+      void make_versions_ready(const RegionRequirement &req,
+                               VersionInfo &version_info,
+                               std::set<RtEvent> &ready_events,
+                               std::set<RtEvent> &applied_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:

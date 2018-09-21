@@ -2522,6 +2522,7 @@ namespace Legion {
 #endif
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
+      const bool multiple_reqs = (regions.size() > 1);
       if (is_remote())
       {
         // If we're remote and origin mapped, then we are already done
@@ -2535,7 +2536,7 @@ namespace Legion {
           if (version_info.has_version_info())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                            version_info, ready_events, map_applied_conditions);
+            version_info, ready_events, map_applied_conditions, multiple_reqs);
         }
       }
       else
@@ -2548,8 +2549,14 @@ namespace Legion {
           if (version_info.has_version_info())
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                           version_info, ready_events, map_applied_conditions);
+             version_info, ready_events, map_applied_conditions, multiple_reqs);
         }
+      }
+      if (multiple_reqs)
+      {
+        for (unsigned idx = 0; idx < regions.size(); idx++)
+          runtime->forest->make_versions_ready(regions[idx], version_infos[idx],
+                                          ready_events, map_applied_conditions);
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
