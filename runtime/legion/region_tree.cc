@@ -1509,9 +1509,9 @@ namespace Legion {
       // Perform the version analysis and make it ready
       top_node->perform_versioning_analysis(ctx.get_id(), context,
                                             init_version_info);
-      std::set<RtEvent> eq_ready_events;
-      init_version_info.make_ready(req, user_mask, 
-                                   eq_ready_events, applied_events);
+      std::set<RtEvent> eq_ready_events, local_applied_events;
+      init_version_info.make_ready(req, user_mask, eq_ready_events, 
+                                   local_applied_events);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1578,8 +1578,13 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->initialize_set(term_event, usage, user_mask, restricted,
-            sources, corresponding, context_uid, init_index, applied_events);
+         sources, corresponding, context_uid, init_index, local_applied_events);
       init_version_info.finalize_mapping();
+      if (!local_applied_events.empty())
+        Runtime::trigger_event(mapped_event,
+            Runtime::merge_events(local_applied_events));
+      else
+        Runtime::trigger_event(mapped_event);
     }
 
     //--------------------------------------------------------------------------
