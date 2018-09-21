@@ -41,8 +41,8 @@ composite_pat = re.compile(prefix + r'GC Composite View (?P<did>[0-9]+) (?P<node
 fill_pat = re.compile(prefix + r'GC Fill View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 phi_pat = re.compile(prefix + r'GC Phi View (?P<did>[0-9]+) (?P<node>[0-9]+)')
 reduction_pat = re.compile(prefix + r'GC Reduction View (?P<did>[0-9]+) (?P<node>[0-9]+) (?P<inst>[0-9]+)')
-# Version State
-version_state_pat = re.compile(prefix + r'GC Version State (?P<did>[0-9]+) (?P<node>[0-9]+)')
+# Equivalence Set 
+equivalence_set_pat = re.compile(prefix + r'GC Equivalence Set (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future
 future_pat = re.compile(prefix + r'GC Future (?P<did>[0-9]+) (?P<node>[0-9]+)')
 # Future Map
@@ -579,12 +579,12 @@ class FutureMap(Base):
     def __repr__(self):
         return 'Future Map '+str(self.did)+' (Node='+str(self.node)+')'
 
-class VersionState(Base):
+class EquivalenceSet(Base):
     def __init__(self, did, node):
-        super(VersionState,self).__init__(did, node)
+        super(EquivalenceSet,self).__init__(did, node)
 
     def __repr__(self):
-        return 'Version State '+str(self.did)+' (Node='+str(self.node)+')'
+        return 'Equivalence Set '+str(self.did)+' (Node='+str(self.node)+')'
 
 class Constraints(Base):
     def __init__(self, did, node):
@@ -657,7 +657,7 @@ class State(object):
         self.instances = {}
         self.src_names = {}
         self.constraints = {}
-        self.version_states = {}
+        self.equivalence_sets = {}
         self.index_spaces = {}
         self.index_partitions = {}
         self.field_spaces = {}
@@ -748,10 +748,10 @@ class State(object):
                                             long(m.group('node')),
                                             long(m.group('inst')))
                     continue
-                m = version_state_pat.match(line)
+                m = equivalence_set_pat.match(line)
                 if m is not None:
-                    self.log_version_state(long(m.group('did')),
-                                           long(m.group('node')))
+                    self.log_equivalence_set(long(m.group('did')),
+                                             long(m.group('node')))
                     continue
                 m = future_pat.match(line)
                 if m is not None:
@@ -839,7 +839,7 @@ class State(object):
             future_map.update_nested_references(self)
         for constraint in self.constraints.itervalues():
             constraint.update_nested_references(self)
-        for state in self.version_states.itervalues():
+        for state in self.equivalence_sets.itervalues():
             state.update_nested_references(self)
         for index_space in self.index_spaces.itervalues():
             index_space.update_nested_references(self)
@@ -906,8 +906,8 @@ class State(object):
         view = self.get_view(did, node, 'Reduction')
         view.add_manager(manager)
 
-    def log_version_state(self, did, node):
-        self.get_version_state(did, node);
+    def log_equivalence_set(self, did, node):
+        self.get_equivalence_set(did, node);
 
     def log_future(self, did, node):
         self.get_future(did, node)
@@ -964,14 +964,14 @@ class State(object):
                 del self.unknowns[key]
         return self.views[key]
 
-    def get_version_state(self, did, node):
+    def get_equivalence_set(self, did, node):
         key = (did,node)
-        if key not in self.version_states:
-            self.version_states[key] = VersionState(did, node)
+        if key not in self.equivalence_sets:
+            self.equivalence_sets[key] = EquivalenceSet(did, node)
             if key in self.unknowns:
-                self.version_states[key].clone(self.unknowns[key])
+                self.equivalence_sets[key].clone(self.unknowns[key])
                 del self.unknowns[key]
-        return self.version_states[key]
+        return self.equivalence_sets[key]
 
     def get_future(self, did, node):
         key = (did,node)
@@ -1055,8 +1055,8 @@ class State(object):
             return self.futures[key]
         if key in self.future_maps:
             return self.future_maps[key]
-        if key in self.version_states:
-            return self.version_states[key]
+        if key in self.equivalence_sets:
+            return self.equivalence_sets[key]
         if key in self.constraints:
             return self.constraints[key]
         if key in self.index_spaces:
@@ -1087,8 +1087,8 @@ class State(object):
         for did,future_map in self.future_maps.iteritems():
             print "Checking for cycles in "+repr(future_map)
             future_map.check_for_cycles()
-        for did,version in self.version_states.iteritems():
-            print "Checking for cycles in "+repr(version)
+        for did,eq in self.equivalence_sets.iteritems():
+            print "Checking for cycles in "+repr(eq)
             version.check_for_cycles()
         for did,constraint in self.constraints.iteritems():
             print "Checking for cycles in "+repr(constraint)
@@ -1116,7 +1116,7 @@ class State(object):
         leaked_managers = 0
         pinned_managers = 0
         leaked_views = 0
-        leaked_states = 0
+        leaked_eq_sets = 0
         leaked_index_spaces = 0
         leaked_index_partitions = 0
         leaked_field_spaces = 0
@@ -1141,9 +1141,9 @@ class State(object):
         for view in self.views.itervalues():
             if not view.check_for_leaks(verbose):
                 leaked_views += 1
-        for state in self.version_states.itervalues():
-            if not state.check_for_leaks(verbose):
-                leaked_states += 1
+        for eq in self.equivalence_sets.itervalues():
+            if not eq.check_for_leaks(verbose):
+                leaked_eq_sets += 1
         for index_space in self.index_spaces.itervalues():
             if not index_space.check_for_leaks(verbose):
                 leaked_index_spaces += 1
@@ -1184,10 +1184,10 @@ class State(object):
             print "  LEAKED VIEWS: "+str(leaked_views)
         else:
             print "  Leaked Views: "+str(leaked_views)
-        if leaked_states > 0:
-            print "  LEAKED VERSION STATES: "+str(leaked_states)
+        if leaked_eq_sets > 0:
+            print "  LEAKED EQUIVALENCE SETS: "+str(leaked_eq_sets)
         else:
-            print "  Leaked Version States: "+str(leaked_states)
+            print "  Leaked Equivalence Sets: "+str(leaked_eq_sets)
         if leaked_index_spaces > 0:
             print "  LEAKED INDEX SPACES: "+str(leaked_index_spaces)
         else:
