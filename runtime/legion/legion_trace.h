@@ -618,6 +618,10 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
+#endif
                              ApEvent precondition,
                              ReductionOpID redop,
                              bool reduction_fold);
@@ -645,6 +649,8 @@ namespace Legion {
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                              UniqueID fill_uid,
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
 #endif
                              ApEvent precondition);
 #if 0
@@ -1021,6 +1027,8 @@ namespace Legion {
                 const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                 UniqueID fill_uid,
+                FieldSpace handle,
+                RegionTreeID tree_id,
 #endif
                 unsigned precondition_idx);
       virtual ~IssueFill(void);
@@ -1060,6 +1068,8 @@ namespace Legion {
       size_t fill_size;
 #ifdef LEGION_SPY
       UniqueID fill_uid;
+      FieldSpace handle;
+      RegionTreeID tree_id;
 #endif
       unsigned precondition_idx;
     };
@@ -1079,6 +1089,10 @@ namespace Legion {
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                FieldSpace handle,
+                RegionTreeID tree_id,
+#endif
                 unsigned precondition_idx,
                 ReductionOpID redop, bool reduction_fold);
       virtual ~IssueCopy(void);
@@ -1115,6 +1129,10 @@ namespace Legion {
       IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
+#ifdef LEGION_SPY
+      FieldSpace handle;
+      RegionTreeID tree_id;
+#endif
       unsigned precondition_idx;
       ReductionOpID redop;
       bool reduction_fold;

@@ -695,11 +695,17 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold) = 0;
       virtual Realm::InstanceLayoutGeneric*
@@ -732,6 +738,8 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition);
       template<int DIM, typename T>
@@ -740,6 +748,10 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
       template<int DIM, typename T>
@@ -858,11 +870,17 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
@@ -1030,11 +1048,17 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
@@ -1094,11 +1118,17 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
@@ -1661,11 +1691,17 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*

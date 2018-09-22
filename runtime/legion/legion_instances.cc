@@ -1960,7 +1960,8 @@ namespace Legion {
             PhysicalTraceInfo fake_info(NULL);
 #ifdef LEGION_SPY
             ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
-                  fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, ready);
+                  fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
+                  field_space_node->handle, tree_id, ready);
 #else
             ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
                   fill_buffer, reduction_op->sizeof_rhs, ready);

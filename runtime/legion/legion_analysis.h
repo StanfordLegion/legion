@@ -137,6 +137,10 @@ namespace Legion {
                              IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
+#endif
                              ApEvent precondition,
                              ReductionOpID redop,
                              bool reduction_fold) const;
@@ -146,6 +150,8 @@ namespace Legion {
                              const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                              UniqueID fill_uid,
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
 #endif
                              ApEvent precondition) const;
       void record_empty_copy(DeferredView *view,

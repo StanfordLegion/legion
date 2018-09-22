@@ -2164,7 +2164,8 @@ namespace Legion {
         new FillView(this, did, runtime->address_space,
                      fill_value, true/*register now*/
 #ifdef LEGION_SPY
-                     , fill_op_uid
+                     , op->get_unique_op_id()
+
 #endif
                      );
 #if 0
@@ -4934,6 +4935,8 @@ namespace Legion {
                                  const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                  UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
 #endif
                                  ApEvent precondition)
     //--------------------------------------------------------------------------
@@ -4945,7 +4948,7 @@ namespace Legion {
 #endif
       return result->issue_fill(trace_info, dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
-                                fill_uid,
+                                fill_uid, handle, tree_id,
 #endif
                                 precondition);
     }
@@ -4955,6 +4958,10 @@ namespace Legion {
                                  const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -4965,6 +4972,9 @@ namespace Legion {
       assert(result != NULL);
 #endif
       return result->issue_copy(trace_info, dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                                handle, tree_id,
+#endif
                                 precondition, redop, reduction_fold);
     }
 
@@ -5557,6 +5567,8 @@ namespace Legion {
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
 #endif
+      if (is_owner() && ctx->runtime->legion_spy_enabled)
+        LegionSpy::log_index_space_expr(handle.get_id(), expr_id);
     }
 
     //--------------------------------------------------------------------------

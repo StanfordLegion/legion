@@ -3707,6 +3707,10 @@ namespace Legion {
                                              IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
+#endif
                                              ApEvent precondition,
                                              ReductionOpID redop,
                                              bool reduction_fold)
@@ -3759,6 +3763,9 @@ namespace Legion {
       unsigned precondition_idx = pre_finder->second;
       instructions.push_back(new IssueCopy(
             *this, lhs_, expr, op_key, src_fields, dst_fields,
+#ifdef LEGION_SPY
+            handle, tree_id,
+#endif
             precondition_idx, redop, reduction_fold));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
@@ -4103,6 +4110,8 @@ namespace Legion {
                                              size_t fill_size,
 #ifdef LEGION_SPY
                                              UniqueID fill_uid,
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
 #endif
                                              ApEvent precondition)
     //--------------------------------------------------------------------------
@@ -4148,7 +4157,7 @@ namespace Legion {
       instructions.push_back(new IssueFill(*this, lhs_, expr, key,
                                            fields, fill_value, fill_size, 
 #ifdef LEGION_SPY
-                                           fill_uid,
+                                           fill_uid, handle, tree_id,
 #endif
                                            precondition_idx));
 #ifdef DEBUG_LEGION
@@ -4636,9 +4645,15 @@ namespace Legion {
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
+#ifdef LEGION_SPY
+                         FieldSpace h, RegionTreeID tid,
+#endif
                          unsigned pi, ReductionOpID ro, bool rf)
-      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s),
-        dst_fields(d), precondition_idx(pi), redop(ro), reduction_fold(rf)
+      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+#ifdef LEGION_SPY
+        handle(h), tree_id(tid), 
+#endif
+        precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4672,6 +4687,9 @@ namespace Legion {
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
       events[lhs] = expr->issue_copy(trace_info, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                     handle, tree_id,
+#endif
                                      precondition, redop, reduction_fold);
     }
 
@@ -4721,7 +4739,11 @@ namespace Legion {
       assert(pfinder != rewrite.end());
 #endif
       return new IssueCopy(tpl, lfinder->second, expr, owner, src_fields,
-                           dst_fields, pfinder->second, redop, reduction_fold);
+                           dst_fields, 
+#ifdef LEGION_SPY
+                           handle, tree_id,
+#endif
+                           pfinder->second, redop, reduction_fold);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4734,12 +4756,12 @@ namespace Legion {
                          const std::vector<CopySrcDstField> &f,
                          const void *value, size_t size, 
 #ifdef LEGION_SPY
-                         UniqueID uid,
+                         UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
                          unsigned pi)
       : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
-        fill_uid(uid),
+        fill_uid(uid), handle(h), tree_id(tid),
 #endif
         precondition_idx(pi)
     //--------------------------------------------------------------------------
@@ -4778,7 +4800,7 @@ namespace Legion {
       events[lhs] = expr->issue_fill(trace_info, fields, 
                                      fill_value, fill_size,
 #ifdef LEGION_SPY
-                                     fill_uid,
+                                     fill_uid, handle, tree_id,
 #endif
                                      precondition);
     }
@@ -4818,7 +4840,7 @@ namespace Legion {
       return new IssueFill(tpl, lfinder->second, expr, owner, fields, 
                            fill_value, fill_size, 
 #ifdef LEGION_SPY
-                           fill_uid,
+                           fill_uid, handle, tree_id,
 #endif
                            pfinder->second);
     }

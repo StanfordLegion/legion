@@ -200,6 +200,61 @@ namespace Legion {
       static inline void log_empty_index_space(IDType handle)
       {
         log_spy.print("Empty Index Space " IDFMT "", handle);
+      } 
+
+      // Index space expression computations
+      static inline void log_index_space_expr(IDType unique_id,
+                                              IndexSpaceExprID expr_id)
+      {
+        log_spy.print("Index Space Expression " IDFMT " %lld", 
+                      unique_id, expr_id);
+      }
+
+      static inline void log_index_space_union(IndexSpaceExprID result_id,
+                                const std::vector<IndexSpaceExprID> &sources)
+      {
+        char *result = (char*)malloc(sources.size() * 8);
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          if (idx > 0)
+          {
+            char temp[8];
+            sprintf(temp, " %lld", sources[idx]);
+            strcat(result, temp);
+          }
+          else
+            sprintf(result," %lld", sources[idx]);
+        }
+        log_spy.print("Index Space Union %lld %zd %s", result_id, 
+                      sources.size(), result);
+        free(result);
+      }
+
+      static inline void log_index_space_intersection(IndexSpaceExprID res_id,
+                                  const std::vector<IndexSpaceExprID> &sources)
+      {
+        char *result = (char*)malloc(sources.size() * 8);
+        for (unsigned idx = 0; idx < sources.size(); idx++)
+        {
+          if (idx > 0)
+          {
+            char temp[8];
+            sprintf(temp, " %lld", sources[idx]);
+            strcat(result, temp);
+          }
+          else
+            sprintf(result," %lld", sources[idx]);
+        }
+        log_spy.print("Index Space Intersection %lld %zd %s", res_id, 
+                      sources.size(), result);
+        free(result);
+      }
+
+      static inline void log_index_space_difference(IndexSpaceExprID result_id,
+                                  IndexSpaceExprID left, IndexSpaceExprID right)
+      {
+        log_spy.print("Index Space Difference %lld %lld %lld", 
+                      result_id, left, right);
       }
 
       // Logger calls for operations 
@@ -262,18 +317,6 @@ namespace Legion {
         log_spy.print("Close Operation %llu %llu %u %u",
 		      context, unique_id, is_intermediate_close_op ? 1 : 0,
 		      read_only_close_op ? 1 : 0);
-      }
-
-      static inline void log_open_operation(UniqueID context,
-                                            UniqueID unique_id)
-      {
-        log_spy.print("Open Operation %llu %llu", context, unique_id);
-      }
-
-      static inline void log_advance_operation(UniqueID context,
-                                               UniqueID unique_id)
-      {
-        log_spy.print("Advance Operation %llu %llu", context, unique_id);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,
@@ -783,13 +826,13 @@ namespace Legion {
       }
 
       static inline void log_copy_events(UniqueID op_unique_id,
-                                         LogicalRegion handle,
+                                         IndexSpaceExprID expr_id,
+                                         FieldSpace handle,
+                                         RegionTreeID tree_id,
                                          LgEvent pre, LgEvent post)
       {
-        log_spy.print("Copy Events %llu %d %d %d " IDFMT " " IDFMT,
-                      op_unique_id,
-                      handle.get_index_space().get_id(),
-                      handle.get_field_space().get_id(), handle.get_tree_id(), 
+        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
+                      op_unique_id, expr_id, handle.get_id(), tree_id,
                       pre.id, post.id);
       }
 
@@ -809,13 +852,14 @@ namespace Legion {
       }
 
       static inline void log_fill_events(UniqueID op_unique_id,
-                                         LogicalRegion handle,
+                                         IndexSpaceExprID expr_id, 
+                                         FieldSpace handle,
+                                         RegionTreeID tree_id,
                                          LgEvent pre, LgEvent post,
                                          UniqueID fill_unique_id)
       {
-        log_spy.print("Fill Events %llu %d %d %d " IDFMT " " IDFMT " %llu",
-		      op_unique_id, handle.get_index_space().get_id(),
-		      handle.get_field_space().get_id(), handle.get_tree_id(),
+        log_spy.print("Fill Events %llu %lld %d %d " IDFMT " " IDFMT " %llu",
+		      op_unique_id, expr_id, handle.get_id(), tree_id,
 		      pre.id, post.id, fill_unique_id);
       }
 
@@ -849,8 +893,7 @@ namespace Legion {
       static inline void log_replay_operation(UniqueID op_unique_id)
       {
         log_spy.print("Replay Operation %llu", op_unique_id);
-      }
-
+      } 
 #endif
     }; // namespace LegionSpy
 

@@ -405,6 +405,10 @@ namespace Legion {
                                  IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
                                  ApEvent precondition,
                                  ReductionOpID redop,
                                  bool reduction_fold) const
@@ -416,6 +420,9 @@ namespace Legion {
       assert(tpl->is_recording());
 #endif
       tpl->record_issue_copy(op, result, expr, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                             handle, tree_id,
+#endif
                              precondition, redop, reduction_fold);
     }
 
@@ -426,6 +433,8 @@ namespace Legion {
                                      const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                                      UniqueID fill_uid,
+                                     FieldSpace handle,
+                                     RegionTreeID tree_id,
 #endif
                                      ApEvent precondition) const
     //--------------------------------------------------------------------------
@@ -437,7 +446,7 @@ namespace Legion {
 #endif
       tpl->record_issue_fill(op, result, expr, fields, fill_value, fill_size,
 #ifdef LEGION_SPY
-                             fill_uid,
+                             fill_uid, handle, tree_id,
 #endif
                              precondition);
     }
@@ -2416,6 +2425,10 @@ namespace Legion {
       std::vector<CopySrcDstField> dst_fields;
       target->copy_to(fill_mask, dst_fields, fills[0]->across_helper);
       const UniqueID op_id = op->get_unique_op_id();
+#ifdef LEGION_SPY
+      PhysicalManager *manager = target->get_manager();
+      FieldSpaceNode *field_space_node = manager->field_space_node;
+#endif
       if (fills.size() == 1)
       {
 #ifdef DEBUG_LEGION
@@ -2429,6 +2442,8 @@ namespace Legion {
                                                    fill_view->value->value_size,
 #ifdef LEGION_SPY
                                                      fill_view->fill_op_uid,
+                                                     field_space_node->handle,
+                                                     manager->tree_id,
 #endif
                                                      precondition);
         // Record the fill result in the destination 
@@ -2470,6 +2485,8 @@ namespace Legion {
                                                   it->first->value->value_size,
 #ifdef LEGION_SPY
                                                        it->first->fill_op_uid,
+                                                       field_space_node->handle,
+                                                       manager->tree_id,
 #endif
                                                        precondition);
           if (result.exists())
@@ -2497,6 +2514,10 @@ namespace Legion {
       assert(!!copy_mask);
 #endif
       const UniqueID op_id = op->get_unique_op_id();
+#ifdef LEGION_SPY
+      PhysicalManager *manager = target->get_manager();
+      FieldSpaceNode *field_space_node = manager->field_space_node;
+#endif
       for (std::map<InstanceView*,std::vector<CopyUpdate*> >::const_iterator
             cit = copies.begin(); cit != copies.end(); cit++)
       {
@@ -2517,7 +2538,12 @@ namespace Legion {
           source->copy_from(copy_mask, src_fields);
           IndexSpaceExpression *copy_expr = update->expr;
           const ApEvent result = copy_expr->issue_copy(trace_info, 
-            dst_fields, src_fields, precondition, update->redop, false/*fold*/);
+                                    dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                                    field_space_node->handle,
+                                    manager->tree_id,
+#endif
+                                    precondition, update->redop, false/*fold*/);
           if (result.exists())
           {
             source->add_copy_user(true/*reading*/,
@@ -2558,7 +2584,12 @@ namespace Legion {
             src_fields.clear();
             it->first->copy_from(copy_mask, src_fields);
             const ApEvent result = copy_expr->issue_copy(trace_info, 
-              dst_fields, src_fields, precondition, redop, false/*fold*/);
+                                    dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                                    field_space_node->handle,
+                                    manager->tree_id,
+#endif
+                                    precondition, redop, false/*fold*/);
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/,
@@ -2596,6 +2627,10 @@ namespace Legion {
       const bool reduction_fold = target->is_reduction_view();
       const UniqueID op_id = op->get_unique_op_id();
       bool done = false;
+#ifdef LEGION_SPY
+      PhysicalManager *manager = target->get_manager();
+      FieldSpaceNode *field_space_node = manager->field_space_node;
+#endif
       while (!done)
       {
         // Group by fields and reduction epochs
@@ -2644,11 +2679,16 @@ namespace Legion {
                 // Issue the reduction from this view
                 std::vector<CopySrcDstField> src_fields, dst_fields;
                 src_view->reduce_from(eit->first.second, src_mask, src_fields);
-                target->reduce_to(eit->first.second, src_mask, src_fields,
+                target->reduce_to(eit->first.second, src_mask, dst_fields,
                                   update->across_helper); 
                 ApEvent result = update->expr->issue_copy(trace_info,
-                    src_fields, dst_fields, state.current_precondition, 
-                    eit->first.second, reduction_fold); 
+                                  src_fields, dst_fields, 
+#ifdef LEGION_SPY
+                                  field_space_node->handle,
+                                  manager->tree_id,
+#endif
+                                  state.current_precondition, 
+                                  eit->first.second, reduction_fold); 
                 if (result.exists())
                 {
                   src_view->add_copy_user(true/*reading*/,
@@ -2708,7 +2748,7 @@ namespace Legion {
               std::vector<CopySrcDstField> src_fields, dst_fields;
               git->first.second->reduce_from(eit->first.second, 
                                              src_mask, src_fields);
-              target->reduce_to(eit->first.second, src_mask, src_fields,
+              target->reduce_to(eit->first.second, src_mask, dst_fields,
                                 state.reduce->across_helper); 
               IndexSpaceExpression *reduce_expr = NULL;
               if (git->second.size() > 1)
@@ -2722,8 +2762,11 @@ namespace Legion {
               else
                 reduce_expr = state.reduce->expr; 
               ApEvent result = reduce_expr->issue_copy(trace_info,
-                  src_fields, dst_fields, git->first.first, 
-                  eit->first.second, reduction_fold);
+                          src_fields, dst_fields, 
+#ifdef LEGION_SPY
+                          field_space_node->handle, manager->tree_id,
+#endif
+                          git->first.first, eit->first.second, reduction_fold);
               if (result.exists())
               {
                 // Record the source user
@@ -3554,29 +3597,40 @@ namespace Legion {
           {
             if (IS_REDUCE(usage))
             {
-              // Check to see if we have it in a reduction mode
-              FieldMask redop_mask;
-              if (!(request_mask * single_redop_fields))
+              // See if we have it in exclusive mode
+              if (!(request_mask * exclusive_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = single_reduction_copies.find(owner_space);
-                if (finder != single_reduction_copies.end())
-                  redop_mask |= finder->second & request_mask;
+                  finder = exclusive_copies.find(owner_space);
+                if (finder != exclusive_copies.end())
+                  request_mask -= finder->second;
               }
-              if (!(request_mask * multi_redop_fields))
+              if (!!request_mask)
               {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = multi_reduction_copies.find(owner_space);
-                if (finder != multi_reduction_copies.end())
-                  redop_mask |= finder->second & request_mask;
-              }
-              if (!!redop_mask)
-              {
-                // Has to be in the right reduction mode too
-                LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
-                  redop_finder = redop_modes.find(usage.redop);
-                if (redop_finder != redop_modes.end())
-                  request_mask -= (redop_finder->second & redop_mask);
+                // Check to see if we have it in a reduction mode
+                FieldMask redop_mask;
+                if (!(request_mask * single_redop_fields))
+                {
+                  LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                    finder = single_reduction_copies.find(owner_space);
+                  if (finder != single_reduction_copies.end())
+                    redop_mask |= finder->second & request_mask;
+                }
+                if (!(request_mask * multi_redop_fields))
+                {
+                  LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                    finder = multi_reduction_copies.find(owner_space);
+                  if (finder != multi_reduction_copies.end())
+                    redop_mask |= finder->second & request_mask;
+                }
+                if (!!redop_mask)
+                {
+                  // Has to be in the right reduction mode too
+                  LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
+                    redop_finder = redop_modes.find(usage.redop);
+                  if (redop_finder != redop_modes.end())
+                    request_mask -= (redop_finder->second & redop_mask);
+                }
               }
             }
             else 
