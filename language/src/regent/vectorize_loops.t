@@ -1213,6 +1213,9 @@ function vectorize_loops.stat(node)
   elseif node:is(ast.typed.stat.Fence) then
     return node
 
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return node
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end

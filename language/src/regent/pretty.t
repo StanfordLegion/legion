@@ -1144,6 +1144,16 @@ function pretty.stat_parallelize_with(cx, node)
   return text.Lines { lines = result }
 end
 
+function pretty.stat_parallel_prefix(cx, node)
+  local result = terralib.newlist()
+  result:insert(pretty.annotations(cx, node.annotations))
+  result:insert(join({"__parallel_prefix(",
+    commas({pretty.expr_region_root(cx, node.lhs),
+            pretty.expr_region_root(cx, node.rhs),
+            node.op, pretty.expr(cx, node.dir)}), ")"}))
+  return text.Lines { lines = result }
+end
+
 function pretty.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return pretty.stat_if(cx, node)
@@ -1219,6 +1229,9 @@ function pretty.stat(cx, node)
 
   elseif node:is(ast.typed.stat.ParallelizeWith) then
     return pretty.stat_parallelize_with(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return pretty.stat_parallel_prefix(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -15,8 +15,10 @@ sudo apt-get install llvm-3.5-dev libclang-3.5-dev clang-3.5
 Regent requires:
 
   * Python 2.7 or 3.x (for the self-installer and test suite)
-  * LLVM and Clang **with headers** (as of January 2017 LLVM 3.5 is
-    recommended; 3.6-3.9 also work but may be missing debug symbols)
+  * LLVM and Clang **with headers**:
+      * LLVM 3.8 is recommended for use with CUDA
+      * LLVM 3.5 is recommended for debugging (other versions will be missing debug symbols)
+      * LLVM 3.5-3.9 and 6.0 are also supported
 
 Regent also has a number of transitive dependencies via Legion:
 
@@ -24,7 +26,7 @@ Regent also has a number of transitive dependencies via Legion:
   * A C++ 98 or newer compiler (GCC, Clang, Intel, or PGI) and GNU Make
   * *Optional*: CUDA 5.0 or newer (for NVIDIA GPUs)
   * *Optional*: [GASNet](https://gasnet.lbl.gov/) (for networking)
-  * *Optional*: LLVM 3.5 (for dynamic code generation)
+  * *Optional*: LLVM 3.5-3.9 (for dynamic code generation)
   * *Optional*: HDF5 (for file I/O)
 
 ## Installing

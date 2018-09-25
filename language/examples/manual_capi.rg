@@ -134,14 +134,14 @@ terra main()
   var layout_constraints = c.legion_task_layout_constraint_set_create()
   [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
-    "top_level_task",
+    "top_level_task", "top_level_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
     nil, 0)
   [ tasklib.preregister_task(sub_task) ](
     TID_SUB_TASK,
-    "sub_task",
+    "sub_task", "sub_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},

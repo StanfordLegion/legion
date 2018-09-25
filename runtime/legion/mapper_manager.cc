@@ -1334,6 +1334,18 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
+    const char* MapperManager::find_task_variant_name(
+                     MappingCallInfo *ctx, TaskID task_id, VariantID variant_id)
+    //--------------------------------------------------------------------------
+    {
+      pause_mapper_call(ctx);
+      VariantImpl *impl = runtime->find_variant_impl(task_id, variant_id);
+      const char *name = impl->get_name();
+      resume_mapper_call(ctx);
+      return name;
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperManager::is_leaf_variant(MappingCallInfo *ctx,
                                         TaskID task_id, VariantID variant_id)
     //--------------------------------------------------------------------------

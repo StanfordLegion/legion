@@ -71,6 +71,7 @@ local language = {
     "__optimize",
     "__parallel",
     "__parallelize_with",
+    "__parallel_prefix",
     "__physical",
     "__raw",
     "__runtime",

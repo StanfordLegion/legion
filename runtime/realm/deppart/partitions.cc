@@ -47,7 +47,7 @@ namespace Realm {
     bool cfg_disable_intersection_optimization = false;
     int cfg_max_rects_in_approximation = 32;
     size_t cfg_max_bytes_per_packet = 2048;//32768;
-    bool cfg_worker_threads_sleep = false;
+    bool cfg_worker_threads_sleep = true;
   };
 
   // TODO: C++11 has type_traits and std::make_unsigned
@@ -784,6 +784,7 @@ namespace Realm {
 
     cp.add_option_int("-dp:workers", DeppartConfig::cfg_num_partitioning_workers);
     cp.add_option_bool("-dp:noisectopt", DeppartConfig::cfg_disable_intersection_optimization);
+    cp.add_option_int("-dp:sleep", DeppartConfig::cfg_worker_threads_sleep);
 
     cp.parse_command_line(cmdline);
   }

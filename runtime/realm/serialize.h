@@ -98,9 +98,13 @@ namespace Realm {
 
     class FixedBufferSerializer {
     public:
+      FixedBufferSerializer(void);
       FixedBufferSerializer(void *buffer, size_t size);
       FixedBufferSerializer(ByteArray &array);
       ~FixedBufferSerializer(void);
+
+      void reset(void *buffer, size_t size);
+      void reset(ByteArray &array);
 
       ptrdiff_t bytes_left(void) const;
 

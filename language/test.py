@@ -230,6 +230,7 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
+          os.path.join('tests', 'regent', 'layout'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
@@ -241,6 +242,7 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
           os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
+          os.path.join('tests', 'regent', 'layout'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
@@ -253,6 +255,7 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
          (os.path.join('tests', 'regent', 'run_pass'),
           os.path.join('tests', 'regent', 'perf'),
           os.path.join('tests', 'regent', 'bugs'),
+          os.path.join('tests', 'regent', 'layout'),
           os.path.join('tests', 'bishop', 'run_pass'),
           os.path.join('examples'),
           os.path.join('..', 'tutorial'),
@@ -318,38 +321,41 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verb
 
     all_saved_temps = []
     try:
-        for test_name, filename, result in results:
-            while True:
-                try:
-                    _test_name, _filename, saved_temps, outcome, output = result.get(timeout=60)
-                    assert _test_name == test_name and _filename == filename
-                except multiprocessing.TimeoutError:
-                    print('Potential Hang: (%s) %s' % (test_name, filename))
-                    sys.stdout.flush()
-                else:
-                    break
-            if len(saved_temps) > 0:
-                all_saved_temps.append((test_name, filename, saved_temps))
-            if outcome == PASS:
-                if quiet:
-                    print('.', end='')
-                    sys.stdout.flush()
-                else:
-                    print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
-                if output is not None: print(output)
-                test_counters[test_name].passed += 1
-            elif outcome == FAIL:
-                if quiet: print()
-                print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
-                if output is not None: print(output)
-                test_counters[test_name].failed += 1
-            elif outcome == TIMEOUT:
-                if quiet: print()
-                print('[%sTIMEOUT%s] (%s) %s' % (red, clear, test_name, filename))
-                if output is not None: print(output)
-                test_counters[test_name].failed += 1
+        result_set = set(results)
+        while True:
+            completed = set()
+            for test_result in result_set:
+                test_name, filename, result = test_result
+                if result.ready():
+                    _test_name, _filename, saved_temps, outcome, output = result.get()
+                    if len(saved_temps) > 0:
+                        all_saved_temps.append((test_name, filename, saved_temps))
+                    if outcome == PASS:
+                        if quiet:
+                            print('.', end='')
+                            sys.stdout.flush()
+                        else:
+                            print('[%sPASS%s] (%s) %s' % (green, clear, test_name, filename))
+                        if output is not None: print(output)
+                        test_counters[test_name].passed += 1
+                    elif outcome == FAIL:
+                        if quiet: print()
+                        print('[%sFAIL%s] (%s) %s' % (red, clear, test_name, filename))
+                        if output is not None: print(output)
+                        test_counters[test_name].failed += 1
+                    elif outcome == TIMEOUT:
+                        if quiet: print()
+                        print('[%sTIMEOUT%s] (%s) %s' % (red, clear, test_name, filename))
+                        if output is not None: print(output)
+                        test_counters[test_name].failed += 1
+                    else:
+                        raise Exception('Unexpected test outcome %s' % outcome)
+                    completed.add(test_result)
+            result_set -= completed
+            if len(result_set) > 0:
+                time.sleep(0.1)
             else:
-                raise Exception('Unexpected test outcome %s' % outcome)
+                break
     except KeyboardInterrupt:
         raise
 

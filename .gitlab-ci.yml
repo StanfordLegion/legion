@@ -74,6 +74,12 @@ variables:
   USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
+.gasnetex: &gasnetex
+  USE_GASNET: "1"
+  GASNET_VERSION: "GASNet-EX-snapshot"
+  # source URL is set by a GitLab CI variable as the GASNet-EX team prefers
+  #  it not to be public at this time
+  #GASNETEX_SNAPSHOT_SOURCE_URL: ...
 .cmake: &cmake
   USE_CMAKE: "1"
 
@@ -302,6 +308,10 @@ gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+gcc49_cxx98_debug_gasnetex_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetex, *regent, *incremental]
 # * Integration: LLVM + GASNet
 gcc49_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image, *tests]

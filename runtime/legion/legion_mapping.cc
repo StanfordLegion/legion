@@ -515,6 +515,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const char* MapperRuntime::find_task_variant_name(MapperContext ctx,
+                                     TaskID task_id, VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      return ctx->manager->find_task_variant_name(ctx, task_id, variant_id);
+    }
+
+    //--------------------------------------------------------------------------
     bool MapperRuntime::is_leaf_variant(MapperContext ctx, TaskID task_id,
                                            VariantID variant_id) const
     //--------------------------------------------------------------------------

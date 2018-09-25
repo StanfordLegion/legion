@@ -74,6 +74,7 @@ function tasklib.preregister_task(terrafunc)
     local ir = terralib.saveobj(nil, "llvmir", { entry=wrapped } )
     local rfunc = terra(id : c.legion_task_id_t,
                         task_name : &int8,
+                        variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
                         layout_constraints : c.legion_task_layout_constraint_set_t,
                         options: c.legion_task_config_options_t,
@@ -89,13 +90,14 @@ function tasklib.preregister_task(terrafunc)
     -- use the terra function directly, which ffi will convert to a (non-portable) function pointer
     local rfunc = terra(id : c.legion_task_id_t,
                         task_name : &int8,
+                        variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
                         layout_constraints : c.legion_task_layout_constraint_set_t,
                         options: c.legion_task_config_options_t,
                         userdata : &opaque,
                         userlen : c.size_t)
       return c.legion_runtime_preregister_task_variant_fnptr(
-        id, task_name,
+        id, task_name, variant_name,
         execution_constraints, layout_constraints, options,
         wrapped, userdata, userlen)
     end
@@ -112,6 +114,7 @@ function tasklib.register_task(terrafunc)
     local rfunc = terra(runtime : c.legion_runtime_t,
                         id : c.legion_task_id_t,
                         task_name : &int8,
+                        variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
                         layout_constraints : c.legion_task_layout_constraint_set_t,
                         options: c.legion_task_config_options_t,
@@ -129,13 +132,14 @@ function tasklib.register_task(terrafunc)
     local rfunc = terra(runtime : c.legion_runtime_t,
                         id : c.legion_task_id_t,
                         task_name : &int8,
+                        variant_name : &int8,
                         execution_constraints : c.legion_execution_constraint_set_t,
                         layout_constraints : c.legion_task_layout_constraint_set_t,
                         options: c.legion_task_config_options_t,
                         userdata : &opaque,
                         userlen : c.size_t)
       return c.legion_runtime_register_task_variant_fnptr(
-        runtime, id, task_name,
+        runtime, id, task_name, variant_name,
         false, -- global registration not possible with non-portable pointer
         execution_constraints, layout_constraints, options,
         wrapped, userdata, userlen)

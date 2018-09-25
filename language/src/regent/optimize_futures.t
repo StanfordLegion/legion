@@ -352,6 +352,9 @@ function analyze_var_flow.stat(cx, node)
   elseif node:is(ast.typed.stat.Fence) then
     return
 
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return
+
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
@@ -503,10 +506,18 @@ end
 
 function optimize_futures.expr_cast(cx, node)
   local fn = concretize(optimize_futures.expr(cx, node.fn))
-  local arg = concretize(optimize_futures.expr(cx, node.arg))
+  local arg = optimize_futures.expr(cx, node.arg)
+  local arg_type = std.as_read(arg.expr_type)
+
+  local expr_type = node.expr_type
+  if std.is_future(arg_type) then
+    expr_type = std.future(expr_type)
+  end
+
   return node {
     fn = fn,
     arg = arg,
+    expr_type = expr_type,
   }
 end
 
@@ -1441,6 +1452,14 @@ function optimize_futures.stat_fence(cx, node)
   return terralib.newlist({node})
 end
 
+function optimize_futures.stat_parallel_prefix(cx, node)
+  return terralib.newlist({
+    node {
+      dir = optimize_futures.expr(cx, node.dir),
+    }
+  })
+end
+
 function optimize_futures.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_futures.stat_if(cx, node)
@@ -1495,6 +1514,9 @@ function optimize_futures.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Fence) then
     return optimize_futures.stat_fence(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return optimize_futures.stat_parallel_prefix(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
