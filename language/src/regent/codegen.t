@@ -3307,6 +3307,7 @@ local lift_cast_to_futures = terralib.memoize(
         leaf = true,
         inner = false,
         idempotent = true,
+        replicable = false, 
       },
       region_divergence = false,
       prototype = task,
