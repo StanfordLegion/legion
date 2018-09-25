@@ -413,6 +413,7 @@ local node_is_idempotent = {
   [ast.typed.stat.RawDelete]       = always_true,
   [ast.typed.stat.Fence]           = always_true,
   [ast.typed.stat.ParallelizeWith] = always_true,
+  [ast.typed.stat.ParallelPrefix]  = always_true,
 
   [ast.typed.stat.Internal]          = unreachable,
   [ast.typed.stat.ForNumVectorized]  = unreachable,
@@ -549,6 +550,7 @@ local node_is_replicable = {
   [ast.typed.stat.RawDelete] = always_true,
   [ast.typed.stat.Fence] = always_true,
   [ast.typed.stat.ParallelizeWith] = always_true,
+  [ast.typed.stat.ParallelPrefix] = always_true,
 
   [ast.typed.stat.Internal]          = unreachable,
   [ast.typed.stat.ForNumVectorized]  = unreachable,
