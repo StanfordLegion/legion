@@ -42,6 +42,8 @@
 #endif
 
 #if !USE_TLS
+#include "realm/activemsg.h"
+
 typedef GASNetHSL ImmovableLock;
 class AutoImmovableLock {
 public:

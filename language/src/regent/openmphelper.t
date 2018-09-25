@@ -148,6 +148,7 @@ function omp.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
           var idx = i * (omp.CACHE_LINE_SIZE / [sizeof(symbol.type)])
           [symbol] = [std.quote_binary_op(op, symbol, `([arg].[field_name][idx]))]
         end
+        std.c.free([arg].[field_name])
       end
     else
       return quote end

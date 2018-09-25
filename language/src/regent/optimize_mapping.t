@@ -489,6 +489,14 @@ function optimize_mapping.stat_fence(cx, node)
   return annotate(node, usage, usage)
 end
 
+function optimize_mapping.stat_parallel_prefix(cx, node)
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
+  local usage = usage_meet(uses(cx, lhs_type, inline),
+                           uses(cx, rhs_type, inline))
+  return annotate(node, usage, usage)
+end
+
 function optimize_mapping.stat(cx, node)
   if node:is(ast.typed.stat.If) then
     return optimize_mapping.stat_if(cx, node)
@@ -543,6 +551,9 @@ function optimize_mapping.stat(cx, node)
 
   elseif node:is(ast.typed.stat.Fence) then
     return optimize_mapping.stat_fence(cx, node)
+
+  elseif node:is(ast.typed.stat.ParallelPrefix) then
+    return optimize_mapping.stat_parallel_prefix(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -44,6 +44,10 @@ namespace Legion {
       typedef Legion::UnsafeFieldAccessor<char,3,coord_t,
                 Realm::AffineAccessor<char,3,coord_t> >   ArrayAccessor3D;
 
+      typedef RectInDomainIterator<1,coord_t>  RectInDomainIterator1D;
+      typedef RectInDomainIterator<2,coord_t>  RectInDomainIterator2D;
+      typedef RectInDomainIterator<3,coord_t>  RectInDomainIterator3D;
+
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
 // but it's pretty annoying to get this macro to handle all the cases right
@@ -71,6 +75,9 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
       NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
+      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_1d_t, RectInDomainIterator1D *);
+      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_2d_t, RectInDomainIterator2D *);
+      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_3d_t, RectInDomainIterator3D *);
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);

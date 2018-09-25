@@ -186,6 +186,7 @@ local node_allow_annotations = {
   [ast.typed.stat.RawDelete]       = deny_all,
   [ast.typed.stat.Fence]           = deny_all,
   [ast.typed.stat.ParallelizeWith] = deny_all,
+  [ast.typed.stat.ParallelPrefix]  = deny_all,
 
   [ast.typed.stat.Internal]          = unreachable,
   [ast.typed.stat.ForNumVectorized]  = unreachable,

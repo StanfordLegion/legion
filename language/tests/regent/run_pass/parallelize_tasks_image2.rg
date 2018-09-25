@@ -14,8 +14,7 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fdebug", "1",
---   "-fparallelize-dop", "2,2"],
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "2,2"],
 --  ["-ll:cpu", "4", "-fparallelize-dop", "2,5"],
 --  ["-ll:cpu", "4", "-fparallelize-dop", "5,5"]
 -- ]

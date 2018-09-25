@@ -64,7 +64,7 @@ legion_cxx_tests = [
 ]
 
 if platform.system() != 'Darwin':
-    legion_cxx_tests = legion_cxx_tests + [
+    legion_cxx_tests += [
         # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
         ['test/attach_file_mini/attach_file_mini', []],
     ]
@@ -96,12 +96,15 @@ legion_python_cxx_tests = [
 ]
 
 legion_hdf_cxx_tests = [
-    # Examples
-    ['examples/attach_file/attach_file', []],
-
     # Tests
     ['test/hdf_attach_subregion_parallel/hdf_attach_subregion_parallel', ['-ll:cpu', '4']],
 ]
+
+if platform.system() != 'Darwin':
+    legion_hdf_cxx_tests += [
+        # FIXME: Fails non-deterministically on Mac OS: https://github.com/StanfordLegion/legion/issues/213
+        ['examples/attach_file/attach_file', []],
+    ]
 
 def get_legion_cxx_perf_tests(nodes, cores_per_node):
     return [
@@ -540,6 +543,8 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline.append('-DLegion_USE_GASNet=%s' % ('ON' if env['USE_GASNET'] == '1' else
                                                'OFF'))
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
+    cmdline.append('-DLegion_USE_Python=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
+    cmdline.append('-DBUILD_SHARED_LIBS=%s' % ('ON' if env['USE_PYTHON'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_LLVM=%s' % ('ON' if env['USE_LLVM'] == '1' else 'OFF'))
     cmdline.append('-DLegion_USE_HDF5=%s' % ('ON' if env['USE_HDF'] == '1' else 'OFF'))
     if test_ctest:

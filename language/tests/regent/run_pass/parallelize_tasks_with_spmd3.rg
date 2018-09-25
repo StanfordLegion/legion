@@ -14,7 +14,7 @@
 
 -- runs-with:
 -- [
---  ["-ll:cpu", "3", "-fbounds-checks", "1", "-fdebug", "1",
+--  ["-ll:cpu", "3", "-fbounds-checks", "1",
 --   "-fparallelize-dop", "9", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "3"],
 --  ["-ll:cpu", "4", "-fflow-spmd", "1"],
 --  ["-ll:cpu", "4", "-fflow-spmd", "1", "-fflow-spmd-shardsize", "2"]

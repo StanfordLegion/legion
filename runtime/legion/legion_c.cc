@@ -478,6 +478,58 @@ legion_domain_point_iterator_next(legion_domain_point_iterator_t handle_)
   return CObjectWrapper::wrap(next);
 }
 
+// -----------------------------------------------------------------------
+// Rect in Domain Iterator
+// -----------------------------------------------------------------------
+
+#define DEFINE_RECT_IN_DOMAIN_ITERATOR(N)                                      \
+                                                                               \
+legion_rect_in_domain_iterator_##N##d_t                                        \
+legion_rect_in_domain_iterator_create_##N##d(legion_domain_t handle_)          \
+{                                                                              \
+  Domain domain = CObjectWrapper::unwrap(handle_);                             \
+  assert(domain.dim == N);                                                     \
+  RectInDomainIterator<N,coord_t> *itr =                                       \
+    new RectInDomainIterator<N,coord_t>(DomainT<N,coord_t>(domain));           \
+  return CObjectWrapper::wrap(itr);                                            \
+}                                                                              \
+                                                                               \
+void                                                                           \
+legion_rect_in_domain_iterator_destroy_##N##d(                                 \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  delete itr;                                                                  \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_valid_##N##d(                                   \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->valid();                                                         \
+}                                                                              \
+                                                                               \
+bool                                                                           \
+legion_rect_in_domain_iterator_step_##N##d(                                    \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return itr->step();                                                          \
+}                                                                              \
+                                                                               \
+legion_rect_##N##d_t                                                           \
+legion_rect_in_domain_iterator_get_rect_##N##d(                                \
+                              legion_rect_in_domain_iterator_##N##d_t handle_) \
+{                                                                              \
+  RectInDomainIterator<N,coord_t> *itr = CObjectWrapper::unwrap(handle_);      \
+  return CObjectWrapper::wrap(**itr);                                          \
+}                                                                              \
+
+DEFINE_RECT_IN_DOMAIN_ITERATOR(1)
+DEFINE_RECT_IN_DOMAIN_ITERATOR(2)
+DEFINE_RECT_IN_DOMAIN_ITERATOR(3)
+
 // -------------------------------------------------------
 // Coloring Operations
 // -------------------------------------------------------
@@ -5057,6 +5109,7 @@ legion_runtime_register_task_variant_fnptr(
   legion_runtime_t runtime_,
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  const char *variant_name /* = NULL*/,
   bool global,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
@@ -5074,7 +5127,7 @@ legion_runtime_register_task_variant_fnptr(
   if (id == AUTO_GENERATE_ID)
     id = runtime->generate_dynamic_task_id();
 
-  TaskVariantRegistrar registrar(id, task_name, global);
+  TaskVariantRegistrar registrar(id, variant_name, global);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);
@@ -5099,6 +5152,7 @@ legion_task_id_t
 legion_runtime_preregister_task_variant_fnptr(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
+  const char *variant_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
   legion_task_config_options_t options,
@@ -5114,7 +5168,7 @@ legion_runtime_preregister_task_variant_fnptr(
   if (id == AUTO_GENERATE_ID)
     id = Runtime::generate_static_task_id();
 
-  TaskVariantRegistrar registrar(id, task_name);
+  TaskVariantRegistrar registrar(id, variant_name);
   registrar.set_leaf(options.leaf);
   registrar.set_inner(options.inner);
   registrar.set_idempotent(options.idempotent);

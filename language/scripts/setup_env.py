@@ -22,9 +22,9 @@ def discover_llvm_version():
     if platform.node().startswith('titan'):
         return '38'
     elif os.environ.get('LMOD_SYSTEM_NAME') == 'summit': # Summit doesn't set hostname
-        return '38'
+        return '60'
     else:
-        return '39'
+        return '60'
 
 def discover_skip_certificate_check():
     if platform.node().startswith('titan'):
@@ -56,11 +56,11 @@ def gasnet_enabled():
 def hdf_enabled():
     return 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
 
-def check_sha1(file_path, sha1):
+def check_sha256(file_path, sha256):
     with open(file_path, 'rb') as f:
-        assert hashlib.sha1(f.read()).hexdigest() == sha1
+        assert hashlib.sha256(f.read()).hexdigest() == sha256
 
-def download(dest_path, url, sha1, insecure=False):
+def download(dest_path, url, sha256, insecure=False):
     dest_dir = os.path.dirname(dest_path)
     dest_file = os.path.basename(dest_path)
     insecure_flag = []
@@ -68,11 +68,11 @@ def download(dest_path, url, sha1, insecure=False):
         insecure_flag = ['--no-check-certificate']
 
     if os.path.exists(dest_path):
-        check_sha1(dest_path, sha1)
+        check_sha256(dest_path, sha256)
         return
 
     subprocess.check_call(['wget'] + insecure_flag + ['-O', dest_path, url])
-    check_sha1(dest_path, sha1)
+    check_sha256(dest_path, sha256)
 
 def extract(dest_dir, archive_path, format):
     if format == 'gz':
@@ -111,6 +111,7 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
             [cmake_exe,
              '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
              '-DCMAKE_BUILD_TYPE=Release',
+             '-DLLVM_ENABLE_ASSERTIONS=OFF'
              '-DLLVM_ENABLE_ZLIB=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
              source_dir],
@@ -197,27 +198,35 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
         pass # Hope this means it already exists
     assert(os.path.isdir(llvm_dir))
 
+    mirror = 'http://sapling.stanford.edu/~eslaught/llvm' # 'https://releases.llvm.org'
     if llvm_version == '35':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.5.2.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.5.2.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.5.2.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.5.2.src')
-        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/llvm-3.5.2.src.tar.xz', '85faf7cbd518dabeafc4d3f7e909338fc1dab3c4', insecure=insecure)
-        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.5.2/cfe-3.5.2.src.tar.xz', '50291e4c4ced8fcee3cca40bff0afb19fcc356e2', insecure=insecure)
+        download(llvm_tarball, '%s/3.5.2/llvm-3.5.2.src.tar.xz' % mirror, '44196156d5749eb4b4224fe471a29cc3984df92570a4a89fa859f7394fc0c575', insecure=insecure)
+        download(clang_tarball, '%s/3.5.2/cfe-3.5.2.src.tar.xz' % mirror, '4feb575f74fb3a74b6245400460230141bf610f235ef3a25008cfe6137828620', insecure=insecure)
     elif llvm_version == '38':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.8.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.8.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.8.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.8.1.src')
-        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.8.1/llvm-3.8.1.src.tar.xz', 'e0c48c4c182424b99999367d688cd8ce7876827b', insecure=insecure)
-        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.8.1/cfe-3.8.1.src.tar.xz', 'b5ff24dc6ad8f84654f4859389990bace1cfb6d5', insecure=insecure)
+        download(llvm_tarball, '%s/3.8.1/llvm-3.8.1.src.tar.xz' % mirror, '6e82ce4adb54ff3afc18053d6981b6aed1406751b8742582ed50f04b5ab475f9', insecure=insecure)
+        download(clang_tarball, '%s/3.8.1/cfe-3.8.1.src.tar.xz' % mirror, '4cd3836dfb4b88b597e075341cae86d61c63ce3963e45c7fe6a8bf59bb382cdf', insecure=insecure)
     elif llvm_version == '39':
         llvm_tarball = os.path.join(llvm_dir, 'llvm-3.9.1.src.tar.xz')
         llvm_source_dir = os.path.join(llvm_dir, 'llvm-3.9.1.src')
         clang_tarball = os.path.join(llvm_dir, 'cfe-3.9.1.src.tar.xz')
         clang_source_dir = os.path.join(llvm_dir, 'cfe-3.9.1.src')
-        download(llvm_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/llvm-3.9.1.src.tar.xz', 'ce801cf456b8dacd565ce8df8288b4d90e7317ff', insecure=insecure)
-        download(clang_tarball, 'http://sapling.stanford.edu/~eslaught/llvm/3.9.1/cfe-3.9.1.src.tar.xz', '95e4be54b70f32cf98a8de36821ea5495b84add8', insecure=insecure)
+        download(llvm_tarball, '%s/3.9.1/llvm-3.9.1.src.tar.xz' % mirror, '1fd90354b9cf19232e8f168faf2220e79be555df3aa743242700879e8fd329ee', insecure=insecure)
+        download(clang_tarball, '%s/3.9.1/cfe-3.9.1.src.tar.xz' % mirror, 'e6c4cebb96dee827fa0470af313dff265af391cb6da8d429842ef208c8f25e63', insecure=insecure)
+    elif llvm_version == '60':
+        llvm_tarball = os.path.join(llvm_dir, 'llvm-6.0.1.src.tar.xz')
+        llvm_source_dir = os.path.join(llvm_dir, 'llvm-6.0.1.src')
+        clang_tarball = os.path.join(llvm_dir, 'cfe-6.0.1.src.tar.xz')
+        clang_source_dir = os.path.join(llvm_dir, 'cfe-6.0.1.src')
+        download(llvm_tarball, '%s/6.0.1/llvm-6.0.1.src.tar.xz' % mirror, 'b6d6c324f9c71494c0ccaf3dac1f16236d970002b42bb24a6c9e1634f7d0f4e2', insecure=insecure)
+        download(clang_tarball, '%s/6.0.1/cfe-6.0.1.src.tar.xz' % mirror, '7c243f1485bddfdfedada3cd402ff4792ea82362ff91fbdac2dae67c6026b667', insecure=insecure)
     else:
         assert False
 
@@ -241,7 +250,7 @@ def install_hdf(hdf_dir, hdf_install_dir, thread_count, cache, is_cray, insecure
     assert(os.path.isdir(hdf_dir))
     hdf_tarball = os.path.join(hdf_dir, 'hdf5-1.10.1.tar.gz')
     hdf_source_dir = os.path.join(hdf_dir, 'hdf5-1.10.1')
-    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '73b77a23ca099ac47d8241f633bf67430007c430', insecure=insecure)
+    download(hdf_tarball, 'http://sapling.stanford.edu/~manolis/hdf/hdf5-1.10.1.tar.gz', '048a9d149fb99aaa1680a712963f5a78e9c43b588d0e79d55e06760ec377c172', insecure=insecure)
     if not cache:
         extract(hdf_dir, hdf_tarball, 'gz')
         build_hdf(hdf_source_dir, hdf_install_dir, thread_count, is_cray)
@@ -322,6 +331,8 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
         llvm_use_cmake = False
     elif llvm_version == '39':
         llvm_use_cmake = True
+    elif llvm_version == '60':
+        llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
 
@@ -358,7 +369,7 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
 
     cmake_exe = None
     try:
-        cmake_version = subprocess.check_output(['cmake', '--version'])
+        cmake_version = subprocess.check_output(['cmake', '--version']).decode('utf-8')
     except:
         pass # Can't find CMake, continue to download
     else:
@@ -380,7 +391,7 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 
             cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '915bc981aab354821fb9fd28374a720fdb3aa180', insecure=insecure)
+            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406', insecure=insecure)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
@@ -451,7 +462,7 @@ if __name__ == '__main__':
         default=os.environ.get('USE_CMAKE') == 1,
         help='Use CMake to build Legion.')
     parser.add_argument(
-        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39'),
+        '--llvm-version', dest='llvm_version', required=False, choices=('35', '38', '39', '60'),
         default=discover_llvm_version(),
         help='Select LLVM version.')
     parser.add_argument(

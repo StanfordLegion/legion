@@ -15,10 +15,8 @@
 -- runs-with:
 -- [["-ll:cpu", "4"],
 --  ["-ll:cpu", "4", "-fopenmp", "1"],
---  ["-ll:cpu", "4", "-fbounds-checks", "1",
---   "-fdebug", "1", "-fparallelize-dop", "2,2"],
---  ["-ll:cpu", "4", "-fbounds-checks", "1",
---   "-fdebug", "1", "-fparallelize-dop", "4,2,2"]]
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "2,2"],
+--  ["-ll:cpu", "4", "-fbounds-checks", "1", "-fparallelize-dop", "4,2,2"]]
 
 import "regent"
 

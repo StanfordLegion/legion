@@ -1172,6 +1172,7 @@ namespace Realm {
       cp.add_option_int("-realm:eventloopcheck", Config::event_loop_detection_limit);
       cp.add_option_bool("-ll:force_kthreads", Config::force_kernel_threads);
       cp.add_option_bool("-ll:frsrv_fallback", Config::use_fast_reservation_fallback);
+      cp.add_option_int("-ll:machine_query_cache", Config::use_machine_query_cache);
 
       bool cmdline_ok = cp.parse_command_line(cmdline);
 
@@ -1391,7 +1392,7 @@ namespace Realm {
 			    *core_reservations,
 			    stack_size_in_mb << 20);
 
-#ifdef USE_GASNET
+#if defined(USE_GASNET) && (((GEX_SPEC_VERSION_MAJOR << 8) + GEX_SPEC_VERSION_MINOR) < 5)
       // this needs to happen after init_endpoints
       gasnet_coll_init(0, 0, 0, 0, 0);
 #endif
