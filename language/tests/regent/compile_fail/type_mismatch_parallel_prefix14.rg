@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_parallel_prefix12.rg:25: type mismatch in argument 1: expected a region of ispace(int1d), but got a region of ispace(int1d)
+-- type_mismatch_parallel_prefix14.rg:26: invalid privilege in argument 2: reads($s)
 --   __parallel_prefix(r, s, +, 1)
---                     ^
+--                        ^
 
 import "regent"
 
