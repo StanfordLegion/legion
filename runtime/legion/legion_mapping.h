@@ -1625,6 +1625,8 @@ namespace Legion {
                              const TaskLayoutConstraintSet &layout_constraints,
                              TaskID generator_tid, VariantID generator_vid, 
                              Processor generator_processor, bool &created) const;
+      const char* find_task_variant_name(MapperContext ctx,
+                                         TaskID task_id, VariantID vid) const;
       bool is_leaf_variant(MapperContext ctx, TaskID task_id,
                                      VariantID variant_id) const;
       bool is_inner_variant(MapperContext ctx, TaskID task_id,

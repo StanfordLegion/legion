@@ -209,7 +209,7 @@ namespace Realm {
   void PreimageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // a PreimageMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).sparsity.creator_node;
+    NodeID exec_node = ID(inst).instance.owner_node;
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -328,9 +328,9 @@ namespace Realm {
       target_node = ID(target.sparsity).sparsity.creator_node;
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).sparsity.creator_node;
+	target_node = ID(ptr_data[targets.size() % ptr_data.size()].inst).instance.owner_node;
       else
-	target_node = ID(range_data[targets.size() % range_data.size()].inst).sparsity.creator_node;
+	target_node = ID(range_data[targets.size() % range_data.size()].inst).instance.owner_node;
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     preimage.sparsity = sparsity;
 

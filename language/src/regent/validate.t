@@ -275,6 +275,7 @@ local node_vars_are_valid = {
   [ast.typed.stat.RawDelete]       = continue,
   [ast.typed.stat.Fence]           = continue,
   [ast.typed.stat.ParallelizeWith] = continue,
+  [ast.typed.stat.ParallelPrefix]  = continue,
   [ast.typed.stat.BeginTrace]      = continue,
   [ast.typed.stat.EndTrace]        = continue,
   [ast.typed.stat.MapRegions]      = continue,

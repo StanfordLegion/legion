@@ -48,7 +48,7 @@ terra top_level_task(task : c.legion_task_t,
   c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
   var layout_constraints = c.legion_task_layout_constraint_set_create()
   [ tasklib.register_task(sub_task) ](
-    runtime, TID_SUB_TASK, "sub_task",
+    runtime, TID_SUB_TASK, "sub_task", "sub_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
@@ -82,7 +82,7 @@ terra main()
   var layout_constraints = c.legion_task_layout_constraint_set_create()
   [ tasklib.preregister_task(top_level_task) ](
     TID_TOP_LEVEL_TASK,
-    "top_level_task",
+    "top_level_task", "top_level_task",
     execution_constraints, layout_constraints,
     c.legion_task_config_options_t {
       leaf = false, inner = false, idempotent = false},
