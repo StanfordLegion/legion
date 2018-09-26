@@ -7911,7 +7911,13 @@ function codegen.stat_for_list(cx, node)
     args:insertall(lower_bounds)
     args:insertall(counts)
     args:insertall(device_ptrs)
-    args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
+    args:sort(function(s1, s2)
+        local t1 = s1.type
+        if t1:isarray() then t1 = t1.type end
+        local t2 = s2.type
+        if t2:isarray() then t2 = t2.type end
+        return sizeof(t1) > sizeof(t2)
+    end)
 
     local terra kernel([args])
       [kernel_preamble]
