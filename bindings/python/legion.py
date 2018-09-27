@@ -498,9 +498,9 @@ class Region(object):
 
     def map_inline(self):
         fields_by_privilege = collections.defaultdict(set)
-        for field_name, privilege in self.privileges.iteritems():
+        for field_name, privilege in self.privileges.items():
             fields_by_privilege[privilege].add(field_name)
-        for privilege, field_names  in fields_by_privilege.iteritems():
+        for privilege, field_names  in fields_by_privilege.items():
             launcher = c.legion_inline_launcher_create_logical_region(
                 self.handle[0],
                 privilege._legion_privilege(), 0, # EXCLUSIVE
