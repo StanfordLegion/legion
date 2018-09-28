@@ -1015,7 +1015,7 @@ namespace Legion {
         assert(use_event.exists());
 #endif
         LegionSpy::log_physical_instance(use_event, inst.id, mem->memory.id, 
-               field_space_node->handle, instance_domain->expr_id, 0/*redop*/);
+           instance_domain->expr_id, field_space_node->handle, tid, 0/*redop*/);
         layout->log_instance_layout(use_event);
       }
     }
@@ -1293,7 +1293,7 @@ namespace Legion {
         assert(use_event.exists());
 #endif
         LegionSpy::log_physical_instance(use_event, inst.id, mem->memory.id, 
-                                  node->handle, inst_domain->expr_id, redop);
+                            inst_domain->expr_id, node->handle, tid, redop);
         layout->log_instance_layout(use_event);
       }
     }

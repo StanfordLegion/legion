@@ -2682,7 +2682,7 @@ namespace Legion {
                 target->reduce_to(eit->first.second, src_mask, dst_fields,
                                   update->across_helper); 
                 ApEvent result = update->expr->issue_copy(trace_info,
-                                  src_fields, dst_fields, 
+                                  dst_fields, src_fields, 
 #ifdef LEGION_SPY
                                   field_space_node->handle,
                                   manager->tree_id,
@@ -2762,7 +2762,7 @@ namespace Legion {
               else
                 reduce_expr = state.reduce->expr; 
               ApEvent result = reduce_expr->issue_copy(trace_info,
-                          src_fields, dst_fields, 
+                          dst_fields, src_fields, 
 #ifdef LEGION_SPY
                           field_space_node->handle, manager->tree_id,
 #endif
@@ -5080,6 +5080,8 @@ namespace Legion {
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             valid_instances.begin(); it != valid_instances.end(); it++)
       {
+        if (!it->first->is_instance_view())
+          continue;
         const FieldMask overlap = it->second & user_mask;
         if (!overlap)
           continue;
@@ -5911,13 +5913,16 @@ namespace Legion {
         FieldMaskSet<LogicalView> srcs;
         for (unsigned idx = 0; idx < src_views.size(); idx++)
         {
+          if (first->first == src_views[idx])
+            continue;
           const FieldMask overlap = 
             src_instances[idx].get_valid_fields() & restricted_mask;
           if (!overlap)
             continue;
           srcs.insert(src_views[idx], overlap);
         }
-        aggregator.record_updates(dst_view, srcs, restricted_mask, set_expr);
+        if (!srcs.empty())
+          aggregator.record_updates(dst_view, srcs, restricted_mask, set_expr);
       }
       else if (src_instances.size() == 1)
       {
@@ -5930,6 +5935,8 @@ namespace Legion {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               valid_instances.begin(); it != valid_instances.end(); it++)
         {
+          if (it->first == src_views[0])
+            continue;
           const FieldMask overlap = it->second & restricted_mask;
           if (!overlap)
             continue;
@@ -5950,16 +5957,16 @@ namespace Legion {
           FieldMaskSet<LogicalView> srcs;
           for (unsigned idx = 0; idx < src_views.size(); idx++)
           {
+            if (dst_view == src_views[idx])
+              continue;
             const FieldMask src_overlap = 
               src_instances[idx].get_valid_fields() & dst_overlap;
             if (!src_overlap)
               continue;
             srcs.insert(src_views[idx], src_overlap);
           }
-#ifdef DEBUG_LEGION
-          assert(!srcs.empty());
-#endif
-          aggregator.record_updates(dst_view, srcs, dst_overlap, set_expr);
+          if (!srcs.empty())
+            aggregator.record_updates(dst_view, srcs, dst_overlap, set_expr);
         }
       }
     }

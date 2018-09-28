@@ -573,13 +573,14 @@ namespace Legion {
       // Logger call for physical instances
       static inline void log_physical_instance(ApEvent inst_event,
                                                IDType inst_id, IDType mem_id,
-                                               FieldSpace handle,
                                                IndexSpaceExprID expr_id,
+                                               FieldSpace handle,
+                                               RegionTreeID tid,
                                                ReductionOpID redop)
       {
         log_spy.print("Physical Instance " IDFMT " " IDFMT " " IDFMT 
-                      " %d %d %lld", inst_event.id, inst_id, mem_id, redop, 
-                      handle.get_id(), expr_id);
+                      " %d %lld %d %d", inst_event.id, inst_id, mem_id, redop, 
+                      expr_id, handle.get_id(), tid);
       }
 
       static inline void log_physical_instance_field(ApEvent inst_event,
@@ -844,13 +845,6 @@ namespace Legion {
                   post.id, src_fid, src_event.id, dst_fid, dst_event.id, redop);
       }
 
-      static inline void log_copy_intersect(LgEvent post, 
-                                            int is_region, IDType index)
-      {
-        log_spy.print("Copy Intersect " IDFMT " %d " IDFMT,
-                      post.id, is_region, index);
-      }
-
       static inline void log_fill_events(UniqueID op_unique_id,
                                          IndexSpaceExprID expr_id, 
                                          FieldSpace handle,
@@ -869,13 +863,6 @@ namespace Legion {
         log_spy.print("Fill Field " IDFMT " %d " IDFMT, 
                       post.id, fid, dst_event.id);
       }
-
-      static inline void log_fill_intersect(LgEvent post, 
-                                            int is_region, IDType index)
-      {
-        log_spy.print("Fill Intersect " IDFMT " %d " IDFMT,
-		      post.id, is_region, index);
-      } 
 
       static inline void log_deppart_events(UniqueID op_unique_id,
                                             IndexSpace handle,

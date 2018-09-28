@@ -122,6 +122,11 @@ OpNames = [
 "Must Epoch Op",
 ]
 
+INDEX_SPACE_EXPR = 0
+UNION_EXPR = 1
+INTERSECT_EXPR = 2
+DIFFERENCE_EXPR = 3,
+
 def check_for_anti_dependence(req1, req2, actual):
     if req1.is_read_only():
         assert req2.has_write()
@@ -1999,11 +2004,101 @@ class Memory(object):
                 '%s -> %s [label="%s",style=solid,color=black,penwidth=2];' %
                 (self.node_name, mem.node_name, label))
 
+class IndexExpr(object):
+    __slot__ = ['state', 'expr_id', 'kind', 'base', 'point_set', 'node_name']
+    def __init__(self, state, expr_id):
+        self.state = state
+        self.expr_id = expr_id
+        self.kind = None
+        self.base = None
+        self.point_set = None
+        self.node_name = None
+
+    def set_index_space(self, index_space):
+        assert self.kind is None
+        self.kind = INDEX_SPACE_EXPR
+        self.base = index_space
+
+    def add_union_expr(self, union_expr):
+        if self.kind != UNION_EXPR:
+            assert self.kind is None
+            self.kind = UNION_EXPR
+            assert self.base is None
+            self.base = set()
+        self.base.add(union_expr)
+
+    def add_intersect_expr(self, inter_expr):
+        if self.kind != INTERSECT_EXPR:
+            assert self.kind is None
+            self.kind = INTERSECT_EXPR
+            assert self.base is None
+            self.base = set()
+        self.base.add(inter_expr)
+
+    def set_diff_expr(self, left, right):
+        assert self.kind is None
+        self.kind = DIFFERENCE_EXPR
+        self.base = list()
+        self.base.append(left)
+        self.base.append(right)
+
+    def get_point_set(self):
+        if self.point_set is None:
+            assert self.kind is not None
+            if self.kind == INDEX_SPACE_EXPR:
+                self.point_set = self.base.get_point_set().copy()
+            elif self.kind == UNION_EXPR:
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set |= expr.get_point_set()
+            elif self.kind == INTERSECT_EXPR:
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set &= expr.get_point_set()
+            else:
+                assert self.kind == DIFFERENCE_KIND
+                for expr in self.base:
+                    if self.point_set is None:
+                        self.point_set = expr.get_point_set().copy()
+                    else:
+                        self.point_set -= expr.get_point_set()
+        return self.point_set
+
+    def __str__(self):
+        assert self.kind is not None
+        if self.kind == INDEX_SPACE_EXPR:
+            return str(self.base)
+        elif self.kind == UNION_EXPR:
+            result = None
+            for expr in self.base:
+                if result is None:
+                    result = "(" + str(expr)
+                else:
+                    result += " u " + str(expr)
+            return result + ")"
+        elif self.kind == INTERSECT_EXPR:
+            result = None
+            for expr in self.base:
+                if result is None:
+                    result = "(" + str(expr)
+                else:
+                    result += " ^ "+str(expr)
+            return result + ")"
+        else:
+            assert self.kind == DIFFERENCE_KIND
+            return "(" + self.base[0] + " - " + self.base[1] + ")"
+
+    __repr__ = __str__
+
 class IndexSpace(object):
     __slots__ = ['state', 'uid', 'parent', 'color', 'children', 
                  'instances', 'name', 'independent_children',
                  'depth', 'shape', 'point_set', 'node_name', 
-                 'intersections', 'dominated']
+                 'intersections', 'dominated', 'expr']
     def __init__(self, state, uid):
         self.state = state
         self.uid = uid
@@ -2018,9 +2113,14 @@ class IndexSpace(object):
         self.node_name = 'index_space_node_%s' % uid
         self.intersections = dict() 
         self.dominated = dict()
+        self.expr = None
 
     def set_name(self, name):
         self.name = name
+
+    def set_expr(self, expr):
+        assert self.expr is None
+        self.expr = expr
 
     def set_parent(self, parent, color):
         self.parent = parent
@@ -7432,8 +7532,8 @@ class InstanceUser(object):
         return self.coher == RELAXED
 
 class Instance(object):
-    __slots__ = ['state', 'use_event', 'handle', 'memory', 'region', 'fields', 
-                 'redop', 'verification_users', 'processor', 
+    __slots__ = ['state', 'use_event', 'handle', 'memory', 'fields', 'redop', 
+                 'index_expr', 'field_space', 'tree_id', 'verification_users', 'processor', 
                  'creator', 'uses', 'creator_regions', 'specialized_constraint',
                  'memory_constraint', 'field_constraint', 'ordering_constraint',
                  'splitting_constraints', 'dimension_constraints',
@@ -7448,7 +7548,9 @@ class Instance(object):
         else:
             self.handle = None 
         self.memory = None
-        self.region = None # Upper bound region
+        self.index_expr = None
+        self.field_space = None
+        self.tree_id = None
         self.creator_regions = None # Regions contributing to upper bound
         self.fields = None
         self.redop = 0
@@ -7480,16 +7582,18 @@ class Instance(object):
     def set_memory(self, memory):
         self.memory = memory
 
-    def set_region(self, region):
-        self.region = region
+    def set_properties(self, index_expr, field_space, tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.tree_id = tid
 
     def set_redop(self, redop):
         self.redop = redop
 
     def add_field(self, fid):
         # We better have a region at this point
-        assert self.region is not None
-        field = self.region.field_space.get_field(fid)
+        assert self.field_space is not None
+        field = self.field_space.get_field(fid)
         if self.fields is None:
             self.fields = set()
         self.fields.add(field)
@@ -7916,7 +8020,7 @@ class Event(object):
         self.phase_barrier = True
 
 class RealmBase(object):
-    __slots__ = ['state', 'realm_num', 'creator', 'region', 'intersect', 
+    __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space', 'tree_id', 
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                   'generation', 'event_context', 'analyzed', 'cluster_name', 
                   'reachable_cache']
@@ -7924,8 +8028,9 @@ class RealmBase(object):
         self.state = state
         self.realm_num = realm_num
         self.creator = None
-        self.region = None
-        self.intersect = None
+        self.index_expr = None
+        self.field_space = None
+        self.tree_id = None
         self.physical_incoming = set()
         self.physical_outgoing = set()
         self.start_event = state.get_no_event()
@@ -7936,13 +8041,10 @@ class RealmBase(object):
         self.cluster_name = None # always none
         self.reachable_cache = None
 
-    def set_region(self, region):
-        self.region = region
-
-    def set_intersect(self, intersect):
-        assert self.region is not None
-        if intersect is not self.region.index_space:
-            self.intersect = intersect
+    def set_tree_properties(self, index_expr, field_space, tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.tree_id = tid
 
     def is_realm_operation(self):
         return True
@@ -8083,11 +8185,11 @@ class RealmCopy(RealmBase):
         self.creator = new_creator
 
     def add_field(self, src_fid, src, dst_fid, dst, redop):
-        assert self.region is not None
+        assert self.field_space is not None
         # Always get the fields from the source and destination regions
         # which is especially important for handling cross-region copies
-        src_field = src.region.field_space.get_field(src_fid)
-        dst_field = dst.region.field_space.get_field(dst_fid)
+        src_field = src.field_space.get_field(src_fid)
+        dst_field = dst.field_space.get_field(dst_fid)
         self.src_fields.append(src_field)
         self.dst_fields.append(dst_field)
         self.srcs.append(src)
@@ -8103,11 +8205,9 @@ class RealmCopy(RealmBase):
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.region)
+            label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.index_expr)
         else:
-            label = "Realm Copy of "+str(self.region)
-        if self.intersect is not None:
-            label += " (intersect with "+str(self.intersect)+")"
+            label = "Realm Copy of "+str(self.index_expr)
         if self.creator is not None:
             label += " generated by "+str(self.creator)
             if self.creator.kind == SINGLE_TASK_KIND:
@@ -8154,10 +8254,8 @@ class RealmCopy(RealmBase):
         field_size = 0
         for field in self.src_fields:
             field_size += field.size
-        shape = self.region.index_space.shape
-        if self.intersect:
-            shape = shape & self.intersect.shape
-        return (field_size * shape.volume())
+        point_set = self.index_expr.get_point_set()
+        return (field_size * point_set.volume())
 
 
 class RealmFill(RealmBase):
@@ -8192,18 +8290,16 @@ class RealmFill(RealmBase):
         self.creator = new_creator
 
     def add_field(self, fid, dst):
-        assert self.region is not None
-        field = dst.region.field_space.get_field(fid)
+        assert self.field_space is not None
+        field = self.field_space.get_field(fid)
         self.fields.append(field)
         self.dsts.append(dst)
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.region)
+            label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.index_expr)
         else:
-            label = "Realm Fill of "+str(self.region)
-        if self.intersect is not None:
-            label += " (intersect with "+str(self.intersect)+")"
+            label = "Realm Fill of "+str(self.index_expr)
         if self.creator is not None:
             label += " generated by "+str(self.creator)
         lines = [[{ "label" : label, "colspan" : 3 }]]
@@ -8711,6 +8807,14 @@ index_space_rect_pat     = re.compile(
            "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
 empty_index_space_pat    = re.compile(
     prefix+"Empty Index Space (?P<uid>[0-9a-f]+)")
+index_expr_pat           = re.compile(
+    prefix+"Index Space Expression (?P<uid>[0-9a-f]+) (?P<expr>[0-9]+)")
+union_expr_pat           = re.compile(
+    prefix+"Index Space Union (?P<expr>[0-9]+) (?P<count>[0-9]+)")
+intersect_expr_pat       = re.compile(
+    prefix+"Index Space Intersection (?P<expr>[0-9]+) (?P<count>[0-9]+)")
+diff_expr_pat            = re.compile(
+    prefix+"Index Space Difference (?P<expr>[0-9]+) (?P<left>[0-9]+) (?P<right>[0-9]+)")
 # Patterns for operations
 task_name_pat            = re.compile(
     prefix+"Task ID Name (?P<tid>[0-9]+) (?P<name>[-$()\w. ]+)")
@@ -8820,10 +8924,7 @@ predicate_use_pat       = re.compile(
     prefix+"Predicate Use (?P<uid>[0-9]+) (?P<pred>[0-9]+)")
 # Physical instance and mapping decision patterns
 instance_pat            = re.compile(
-    prefix+"Physical Instance (?P<eid>[0-9a-f]+) (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+)")
-instance_region_pat     = re.compile(
-    prefix+"Physical Instance Region (?P<eid>[0-9a-f]+) (?P<ispace>[0-9]+) "
-           "(?P<fspace>[0-9]+) (?P<tid>[0-9]+)")
+    prefix+"Physical Instance (?P<eid>[0-9a-f]+) (?P<iid>[0-9a-f]+) (?P<mid>[0-9a-f]+) (?P<redop>[0-9]+) (?P<expr>[0-9]+) (?P<space>[0-9]+) (?P<tid>[0-9]+)")
 instance_field_pat      = re.compile(
     prefix+"Physical Instance Field (?P<eid>[0-9a-f]+) (?P<fid>[0-9]+)")
 instance_creator_pat    = re.compile(
@@ -8899,16 +9000,12 @@ realm_copy_pat          = re.compile(
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
-realm_copy_intersect_pat= re.compile(
-    prefix+"Copy Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) (?P<index>[0-9a-f]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
            "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
-realm_fill_intersect_pat= re.compile(
-    prefix+"Fill Intersect (?P<id>[0-9a-f]+) (?P<reg>[0-1]+) (?P<index>[0-9a-f]+)")
 realm_deppart_pat       = re.compile(
     prefix+"Deppart Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) "+
            "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
@@ -8981,9 +9078,10 @@ def parse_legion_spy_line(line, state):
         copy.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         copy.set_creator(op)
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        copy.set_region(region)
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        field_space = state.get_field_space(int(m.group('fspace')))
+        tree_id = int(m.group('tid'))
+        copy.set_tree_properties(index_expr, field_space, tree_id)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:
@@ -8994,16 +9092,6 @@ def parse_legion_spy_line(line, state):
         copy.add_field(int(m.group('srcfid')), src, 
                        int(m.group('dstfid')), dst, int(m.group('redop')))
         return True
-    m = realm_copy_intersect_pat.match(line)
-    if m is not None:
-        e = state.get_event(int(m.group('id'),16))
-        copy = state.get_realm_copy(e)
-        is_region = True if int(m.group('reg')) == 1 else False
-        if is_region:
-            copy.set_intersect(state.get_index_space(int(m.group('index'),16)))
-        else:
-            copy.set_intersect(state.get_index_partition(int(m.group('index'),16)))
-        return True
     m = realm_fill_pat.match(line)
     if m is not None:
         e1 = state.get_event(int(m.group('preid'),16))
@@ -9012,9 +9100,10 @@ def parse_legion_spy_line(line, state):
         fill.set_start(e1)
         op = state.get_operation(int(m.group('uid')))
         fill.set_creator(op)
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        fill.set_region(region)
+        index_expr = state.get_index_expr(int(m.group('ispace')))
+        field_space = state.get_field_space(int(m.group('fspace')))
+        tree_id = int(m.group('tid'))
+        fill.set_tree_properties(index_expr, field_space, tree_id)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
@@ -9022,16 +9111,6 @@ def parse_legion_spy_line(line, state):
         fill = state.get_realm_fill(e)
         dst = state.get_instance(int(m.group('dstid'),16))
         fill.add_field(int(m.group('fid')), dst)
-        return True
-    m = realm_fill_intersect_pat.match(line)
-    if m is not None:
-        e = state.get_event(int(m.group('id'),16))
-        fill = state.get_realm_fill(e)
-        is_region = True if int(m.group('reg')) == 1 else False
-        if is_region:
-            fill.set_intersect(state.get_index_space(int(m.group('index'),16)))
-        else:
-            fill.set_intersect(state.get_index_partition(int(m.group('index'),16)))
         return True
     m = realm_deppart_pat.match(line)
     if m is not None:
@@ -9163,13 +9242,9 @@ def parse_legion_spy_line(line, state):
         inst.set_handle(int(m.group('iid'),16))
         inst.set_memory(mem)
         inst.set_redop(int(m.group('redop')))
-        return True
-    m = instance_region_pat.match(line)
-    if m is not None:
-        inst = state.get_instance(int(m.group('eid'),16))
-        region = state.get_region(int(m.group('ispace')), 
-            int(m.group('fspace')), int(m.group('tid')))
-        inst.set_region(region)
+        inst_expr = state.get_index_expr(int(m.group('expr')))
+        space = state.get_field_space(int(m.group('space')))
+        inst.set_properties(inst_expr, space, int(m.group('tid')))
         return True
     m = instance_field_pat.match(line)
     if m is not None:
@@ -9686,6 +9761,45 @@ def parse_legion_spy_line(line, state):
         index_space = state.get_index_space(int(m.group('uid'),16))
         index_space.set_empty()
         return True
+    m = index_expr_pat.match(line)
+    if m is not None:
+        index_space = state.get_index_space(int(m.group('uid'),16))
+        expr_id = int(m.group('expr'))
+        index_space.set_expr(expr_id)
+        index_expr = state.get_index_expr(expr_id)
+        index_expr.set_index_space(index_space)
+        return True
+    m = union_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        remainder = line[m.end()+2:]
+        expr_ids = re.split('\W+', remainder)
+        count = int(m.group('count'))
+        # Don't handle end-of-line characters well
+        assert len(expr_ids) == count + 1
+        for expr_id in expr_ids[:count]:
+            sub_expr = state.get_index_expr(int(expr_id))
+            index_expr.add_union_expr(sub_expr)
+        return True
+    m = intersect_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        remainder = line[m.end()+2:]
+        expr_ids = re.split('\W+', remainder)
+        count = int(m.group('count'))
+        # Don't handle end-of-line characters well
+        assert len(expr_ids) == count + 1
+        for expr_id in expr_ids[:count]:
+            sub_expr = state.get_index_expr(int(expr_id))
+            index_expr.add_intersect_expr(sub_expr)
+        return True
+    m = diff_expr_pat.match(line)
+    if m is not None:
+        index_expr = state.get_index_expr(int(m.group('expr')))
+        left_expr = state.get_index_expr(int(m.group('left')))
+        right_expr = state.get_index_expr(int(m.group('right')))
+        index_expr.set_diff_expr(left_expr, right_expr)
+        return True
     # Machine kinds (at the bottom cause they are least likely)
     m = proc_kind_pat.match(line)
     if m is not None:
@@ -9743,9 +9857,9 @@ def parse_legion_spy_line(line, state):
 
 class State(object):
     __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
-                 'processor_kinds', 'memory_kinds', 'index_spaces', 'index_partitions',
-                 'field_spaces', 'regions', 'partitions', 'top_spaces', 'trees',
-                 'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
+                 'processor_kinds', 'memory_kinds', 'index_exprs', 'index_spaces', 
+                 'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces',
+                 'trees', 'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
                  'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 'depparts',
                  'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
                  'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
@@ -9765,6 +9879,7 @@ class State(object):
         self.processor_kinds = dict()
         self.memory_kinds = dict()
         # Region tree things
+        self.index_exprs = dict()
         self.index_spaces = dict()
         self.index_partitions = dict()
         self.field_spaces = dict()
@@ -10349,6 +10464,13 @@ class State(object):
         mem = Memory(self, mem_id)
         self.memories[mem_id] = mem
         return mem
+
+    def get_index_expr(self, expr_id):
+        if expr_id in self.index_exprs:
+            return self.index_exprs[expr_id]
+        result = IndexExpr(self, expr_id)
+        self.index_exprs[expr_id] = result
+        return result
 
     def get_index_space(self, iid):
         if iid in self.index_spaces:

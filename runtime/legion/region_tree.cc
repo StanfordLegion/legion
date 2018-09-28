@@ -5546,10 +5546,10 @@ namespace Legion {
     IndexSpaceNode::IndexSpaceNode(RegionTreeForest *ctx, IndexSpace h, 
                                    IndexPartNode *par, LegionColor c,
                                    DistributedID did, ApEvent ready,
-                                   IndexSpaceExprID expr_id)
+                                   IndexSpaceExprID exp_id)
       : IndexTreeNode(ctx, (par == NULL) ? 0 : par->depth + 1, c,
                       did, get_owner_space(h, ctx->runtime)),
-        IndexSpaceExpression(h.type_tag, expr_id > 0 ? expr_id : 
+        IndexSpaceExpression(h.type_tag, exp_id > 0 ? exp_id : 
             runtime->get_unique_index_space_expr_id(), node_lock),
         handle(h), parent(par), index_space_ready(ready), 
         realm_index_space_set(Runtime::create_rt_user_event()), 
@@ -5568,7 +5568,7 @@ namespace Legion {
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
 #endif
       if (is_owner() && ctx->runtime->legion_spy_enabled)
-        LegionSpy::log_index_space_expr(handle.get_id(), expr_id);
+        LegionSpy::log_index_space_expr(handle.get_id(), this->expr_id);
     }
 
     //--------------------------------------------------------------------------

@@ -2567,7 +2567,7 @@ namespace Legion {
     void SingleTask::initialize_map_task_input(Mapper::MapTaskInput &input,
                                                Mapper::MapTaskOutput &output,
                                                MustEpochOp *must_epoch_owner,
-                                      std::vector<InstanceSet> &valid)
+                                               std::vector<InstanceSet> &valid)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INITIALIZE_MAP_TASK_CALL);
@@ -5136,6 +5136,11 @@ namespace Legion {
                                          mapped_precondition);
         return;
       }
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        if (virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].finalize_mapping();
+      }
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
       // We used to have to apply our virtual state here, but that is now
@@ -5910,6 +5915,11 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          mapped_precondition);
         return;
+      }
+      for (unsigned idx = 0; idx < version_infos.size(); idx++)
+      {
+        if (virtual_mapped[idx] && !no_access_regions[idx])
+          version_infos[idx].finalize_mapping();
       }
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
