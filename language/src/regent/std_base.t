@@ -122,17 +122,11 @@ do
     "fprintf",
     "fscanf",
     "printf",
-    "snprintf",
-    "sprintf",
     "scanf",
-    "sscanf",
     "rand",
     "rand_r",
     "vfscanf",
     "vscanf",
-    "vsnprintf",
-    "vsprintf",
-    "vsscanf",
   }
   for k, v in pairs(c) do
     if not blacklist[k] then
