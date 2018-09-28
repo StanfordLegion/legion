@@ -2082,6 +2082,7 @@ namespace Legion {
       CopyFillAggregator across_aggregator(this, op, dst_index,
                                            map_applied, true/*track*/);
       FieldMask initialized = src_mask;
+      std::vector<CopyAcrossHelper*> across_helpers;
       if (perfect)
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -2099,7 +2100,6 @@ namespace Legion {
       }
       else
       {
-        std::vector<CopyAcrossHelper*> across_helpers;
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
           across_helpers.push_back(
@@ -2121,9 +2121,7 @@ namespace Legion {
                                      target_views, overlap, across_aggregator,
                                      guard, dst_req.redop, initialized,
                                      &src_indexes,&dst_indexes,&across_helpers);
-        }
-        for (unsigned idx = 0; idx < across_helpers.size(); idx++)
-          delete across_helpers[idx];
+        } 
       }
       if (initialized != src_mask)
       {
@@ -2134,7 +2132,13 @@ namespace Legion {
       assert(across_aggregator.has_updates());
 #endif
       across_aggregator.issue_updates(trace_info, precondition);
-      return across_aggregator.summarize(trace_info);
+      const ApEvent result = across_aggregator.summarize(trace_info);
+      if (!across_helpers.empty())
+      {
+        for (unsigned idx = 0; idx < across_helpers.size(); idx++)
+          delete across_helpers[idx];
+      }
+      return result;
     }
 
     //--------------------------------------------------------------------------

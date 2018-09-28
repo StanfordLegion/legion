@@ -2283,17 +2283,15 @@ namespace Legion {
 #endif
                                                 );
       }
+      // We're also done with our mapper so tell it that
+      version_info.finalize_mapping();
+#ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {
-#ifdef DEBUG_LEGION
         assert(!mapped_instances.empty());
-#endif 
-        // We're also done with our mapper so tell it that
-        version_info.finalize_mapping();
-#ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
-#endif
       } 
+#endif
       // Update our physical instance with the newly mapped instances
       // Have to do this before triggering the mapped event
       if (effects_done.exists())
