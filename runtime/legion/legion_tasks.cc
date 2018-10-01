@@ -3405,16 +3405,19 @@ namespace Legion {
         }
         if (no_access_regions[idx])
           continue;
+        VersionInfo &local_info = get_version_info(idx);
         // If we virtual mapped it, there is nothing to do
         if (virtual_mapped[idx])
+        {
+          local_info.finalize_mapping();
           continue;
+        }
         // Set the current mapping index before doing anything
         // that sould result in a copy
         set_current_mapping_index(idx);
         // apply the results of the mapping to the tree
         ApEvent effects = 
-          runtime->forest->physical_register_only(regions[idx], 
-                                    get_version_info(idx), 
+          runtime->forest->physical_register_only(regions[idx], local_info, 
                                     this, idx, init_precondition,
                                     local_termination_event, 
                                     map_applied_conditions,
@@ -3427,6 +3430,10 @@ namespace Legion {
                                     multiple_requirements/*read only locks*/);
         if (effects.exists())
           effects_postconditions.insert(effects);
+        local_info.finalize_mapping();
+#ifdef DEBUG_LEGION
+        dump_physical_state(&regions[idx], idx);
+#endif
       }
       // Release any read-only reservations that we're holding
       if (!read_only_reservations.empty())
@@ -4891,14 +4898,6 @@ namespace Legion {
       map_all_regions(get_task_completion(), must_epoch_owner);
       // If we mapped, then we are no longer stealable
       stealable = false;
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (!virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].finalize_mapping();
-#ifdef DEBUG_LEGION
-        dump_physical_state(&regions[idx], idx);
-#endif
-      }
       // We can now apply any arrives or releases
       if (!arrive_barriers.empty() || !grants.empty())
       {
@@ -5135,11 +5134,6 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          mapped_precondition);
         return;
-      }
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].finalize_mapping();
       }
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();
@@ -5668,14 +5662,6 @@ namespace Legion {
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
       map_all_regions(point_termination, must_epoch_owner);
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (!virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].finalize_mapping();
-#ifdef DEBUG_LEGION
-        dump_physical_state(&regions[idx], idx);
-#endif
-      }
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf() && !has_virtual_instances()) 
@@ -5915,11 +5901,6 @@ namespace Legion {
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY,
                                          mapped_precondition);
         return;
-      }
-      for (unsigned idx = 0; idx < version_infos.size(); idx++)
-      {
-        if (virtual_mapped[idx] && !no_access_regions[idx])
-          version_infos[idx].finalize_mapping();
       }
       if (runtime->legion_spy_enabled)
         execution_context->log_created_requirements();

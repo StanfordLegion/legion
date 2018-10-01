@@ -2034,7 +2034,7 @@ namespace Legion {
                                         const RegionRequirement &dst_req,
                                         VersionInfo &src_version_info,
                                         const InstanceSet &dst_targets,
-                                        ApEvent term_event, Operation *op, 
+                                        Operation *op, 
                                         unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, PredEvent guard, 
                                         std::set<RtEvent> &map_applied,

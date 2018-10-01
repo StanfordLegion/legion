@@ -3763,7 +3763,7 @@ namespace Legion {
                                                   src_versions[idx],
                                                   this, idx, 
                                                   local_init_precondition,
-                                                  local_completion,
+                                                  ApEvent::NO_AP_EVENT,
                                                   map_applied_conditions,
                                                   src_targets,
                                                   trace_info
@@ -3790,7 +3790,7 @@ namespace Legion {
                                                 dst_versions[idx], this, 
                                                 idx + src_requirements.size(),
                                                 local_init_precondition,
-                                                local_completion,
+                                                ApEvent::NO_AP_EVENT,
                                                 map_applied_conditions,
                                                 dst_targets,
                                                 trace_info
@@ -3814,8 +3814,7 @@ namespace Legion {
         ApEvent across_done = 
           runtime->forest->copy_across( 
                                 src_requirements[idx], dst_requirements[idx],
-                                src_versions[idx], dst_targets,
-                                local_completion, this, idx,
+                                src_versions[idx], dst_targets, this, idx,
                                 idx + src_requirements.size(),
                                 local_init_precondition, predication_guard, 
                                 map_applied_conditions, trace_info);
