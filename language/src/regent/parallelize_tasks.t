@@ -1350,7 +1350,8 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
         compute_extent[index_type], terralib.newlist {
           ast_util.mk_expr_constant(factors[1], int),
           ast_util.mk_expr_bounds_access(ast_util.mk_expr_id(region_symbol))
-        })
+        },
+        true)
       color_type = index_type
     end
   else
@@ -1395,7 +1396,8 @@ local function create_equal_partition(caller_cx, region_symbol, pparam)
         std.assert, terralib.newlist {
           ast_util.mk_expr_binary("==", bounds, my_bounds),
           ast_util.mk_expr_constant("color space bounds mismatch", rawstring)
-        })))
+        },
+        true)))
   end
 
   return partition_symbol, stats
@@ -1437,7 +1439,7 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     base_name .. "__coloring")
   local coloring_expr = ast_util.mk_expr_id(coloring_symbol)
   stats:insert(ast_util.mk_stat_var(coloring_symbol, nil,
-                           ast_util.mk_expr_call(c.legion_domain_point_coloring_create)))
+                           ast_util.mk_expr_call(c.legion_domain_point_coloring_create, nil, true)))
 
   local loop_body = terralib.newlist()
   local pr_expr = ast_util.mk_expr_id(pr)
@@ -1468,7 +1470,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                  terralib.newlist { pr_bounds_expr,
                                     sr_bounds_expr,
                                     ast_util.mk_expr_id(tmp_var),
-                                    polarity_expr })
+                                    polarity_expr },
+                 true)
   --loop_body:insert(ast_util.mk_stat_block(ast_util.mk_block(terralib.newlist {
   --  ast_util.mk_stat_expr(ast_util.mk_expr_call(print_rect[pr_rect_type],
   --                            pr_bounds_expr)),
@@ -1485,7 +1488,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
     ast_util.mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
                                     color_expr,
-                                    ghost_rect_expr })))
+                                    ghost_rect_expr },
+                 true)))
 
   stats:insert(
     ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(loop_body)))
@@ -1494,7 +1498,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
                 ast_util.mk_expr_partition(gp_type, color_space_expr, coloring_expr)))
 
   stats:insert(ast_util.mk_stat_expr(ast_util.mk_expr_call(c.legion_domain_point_coloring_destroy,
-                                         coloring_expr)))
+                                         coloring_expr,
+                                         true)))
 
   if std.config["bounds-checks"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
@@ -1504,7 +1509,8 @@ local function create_image_partition(caller_cx, pr, pp, stencil, pparam)
         std.assert, terralib.newlist {
           ast_util.mk_expr_binary("==", bounds, my_bounds),
           ast_util.mk_expr_constant("color space bounds mismatch", rawstring)
-        })))
+        },
+        true)))
   end
 
   caller_cx:update_constraint(sr_expr)
@@ -1543,7 +1549,7 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
   local coloring_symbol = get_new_tmp_var(c.legion_domain_point_coloring_t, base_name .. "__coloring")
   local coloring_expr = ast_util.mk_expr_id(coloring_symbol)
   stats:insert(ast_util.mk_stat_var(coloring_symbol, nil,
-                           ast_util.mk_expr_call(c.legion_domain_point_coloring_create)))
+                           ast_util.mk_expr_call(c.legion_domain_point_coloring_create, nil, true)))
 
   local loop_body = terralib.newlist()
   local sr_expr = ast_util.mk_expr_id(sr)
@@ -1555,7 +1561,8 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
   local intersect_expr =
     ast_util.mk_expr_call(get_intersection(sr_rect_type),
                  terralib.newlist { sr_bounds_expr,
-                                    srpp_bounds_expr })
+                                    srpp_bounds_expr },
+                 true)
   --loop_body:insert(ast_util.mk_stat_expr(ast_util.mk_expr_call(print_rect[sr_rect_type],
   --                                           sr_bounds_expr)))
   --loop_body:insert(ast_util.mk_stat_expr(ast_util.mk_expr_call(print_rect[sr_rect_type],
@@ -1568,7 +1575,8 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
     ast_util.mk_expr_call(c.legion_domain_point_coloring_color_domain,
                  terralib.newlist { coloring_expr,
                                     color_expr,
-                                    intersect_expr })))
+                                    intersect_expr },
+                 true)))
 
   stats:insert(
     ast_util.mk_stat_for_list(color_symbol, color_space_expr, ast_util.mk_block(loop_body)))
@@ -1577,7 +1585,8 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
                 ast_util.mk_expr_partition(sp_type, color_space_expr, coloring_expr)))
 
   stats:insert(ast_util.mk_stat_expr(ast_util.mk_expr_call(c.legion_domain_point_coloring_destroy,
-                                         coloring_expr)))
+                                         coloring_expr,
+                                         true)))
 
   if std.config["bounds-checks"] then
     local bounds = ast_util.mk_expr_bounds_access(color_space_symbol)
@@ -1587,7 +1596,8 @@ local function create_subset_partition(caller_cx, sr, pp, pparam)
         std.assert, terralib.newlist {
           ast_util.mk_expr_binary("==", bounds, my_bounds),
           ast_util.mk_expr_constant("color space bounds mismatch", rawstring)
-        })))
+        },
+        true)))
   end
 
   caller_cx:add_primary_partition(sr, pparam, sp_symbol)
@@ -2189,7 +2199,8 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
                 std.assert, terralib.newlist {
                   ast_util.mk_expr_binary("==", bounds, my_bounds),
                   ast_util.mk_expr_constant("color space bounds mismatch", rawstring)
-                })))
+                },
+                true)))
           end
         end
       end
@@ -3126,7 +3137,8 @@ function parallelize_tasks.stat(task_cx)
                          terralib.newlist {
                            ast_util.mk_expr_constant(false, bool),
                            ast_util.mk_expr_constant("unreachable", rawstring)
-                         })),
+                         },
+                         true)),
           })
         end
         stats:insert(case_split_if)
@@ -3158,7 +3170,8 @@ function parallelize_tasks.top_task_body(task_cx, node)
         stats:insert(ast_util.mk_stat_var(red_var, stat.type))
 
         local cond = ast_util.mk_expr_call(is_zero,
-          ast_util.mk_expr_id(task_cx:get_task_point_symbol()))
+          ast_util.mk_expr_id(task_cx:get_task_point_symbol()),
+          true)
         local if_stat = ast_util.mk_stat_if(
           cond, ast_util.mk_stat_assignment(red_var_expr, stat.value))
         local init =

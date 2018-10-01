@@ -4290,6 +4290,9 @@ do
       intrinsic_name = intrinsic_name .. "f" .. (sizeof(elmt_type) * 8)
       local op = terralib.intrinsic(intrinsic_name, arg_type -> arg_type)
       to_math_op_name[op] = fname
+
+      std.replicable_whitelist[op] = true -- Math ops are pure.
+
       return op
     end)
   end

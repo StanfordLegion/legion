@@ -140,6 +140,13 @@ do
     base.domain_from_bounds_1d,
     base.domain_from_bounds_2d,
     base.domain_from_bounds_3d,
+
+    -- Terra functions that happen to be placed in global scope:
+    _G["sizeof"],
+    _G["vector"],
+    _G["vectorof"],
+    _G["array"],
+    _G["arrayof"],
   }
   for _, v in ipairs(other) do
     base.replicable_whitelist[v] = true

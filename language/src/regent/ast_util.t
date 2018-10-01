@@ -95,7 +95,7 @@ function ast_util.mk_expr_binary(op, lhs, rhs)
   }
 end
 
-function ast_util.mk_expr_call(fn, args)
+function ast_util.mk_expr_call(fn, args, replicable)
   args = args or terralib.newlist()
   if not terralib.islist(args) then
     args = terralib.newlist {args}
@@ -131,7 +131,7 @@ function ast_util.mk_expr_call(fn, args)
     args = args,
     expr_type = expr_type,
     conditions = terralib.newlist(),
-    replicable = false,
+    replicable = replicable or false,
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   }
