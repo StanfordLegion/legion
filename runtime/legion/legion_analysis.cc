@@ -2549,9 +2549,18 @@ namespace Legion {
             source->add_copy_user(true/*reading*/,
                                   result, copy_mask, copy_expr,
                                   op_id, index, effects, trace_info);
-            target->add_copy_user(false/*reading*/,
-                                  result, copy_mask, copy_expr,
-                                  op_id, index, effects, trace_info);
+            if (update->across_helper != NULL)
+            {
+              const FieldMask dst_mask = 
+                update->across_helper->convert_src_to_dst(copy_mask);
+              target->add_copy_user(false/*reading*/,
+                                    result, dst_mask, copy_expr,
+                                    op_id, index, effects, trace_info);
+            }
+            else
+              target->add_copy_user(false/*reading*/,
+                                    result, copy_mask, copy_expr,
+                                    op_id, index, effects, trace_info);
             if (track_events)
               events.insert(result);
           }
@@ -2575,6 +2584,9 @@ namespace Legion {
 #endif
             src_exprs[(*it)->source].insert((*it)->expr);
           }
+          const FieldMask dst_mask = 
+            (cit->second[0]->across_helper == NULL) ? copy_mask : 
+             cit->second[0]->across_helper->convert_src_to_dst(copy_mask);
           for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
                 const_iterator it = src_exprs.begin(); 
                 it != src_exprs.end(); it++)
@@ -2596,7 +2608,7 @@ namespace Legion {
                                     result, copy_mask, copy_expr,
                                     op_id, index, effects, trace_info);
               target->add_copy_user(false/*reading*/,
-                                    result, copy_mask, copy_expr,
+                                    result, dst_mask, copy_expr,
                                     op_id, index, effects, trace_info);
               if (track_events)
                 events.insert(result);
