@@ -328,9 +328,9 @@ namespace Legion {
         Processor                              initial_proc; // = current
         bool                                   inline_task;  // = false
         bool                                   stealable;   // = false
-        bool                                   replicable;  // = false
         bool                                   map_locally;  // = false
         bool                                   memoize;  // = false
+        bool                                   replicate; // = false
         TaskPriority                           parent_priority; // = current
       };
       //------------------------------------------------------------------------
