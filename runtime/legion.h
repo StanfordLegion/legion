@@ -56,9 +56,12 @@
 // temporary helper macro to turn link errors into runtime errors
 #define UNIMPLEMENTED_METHOD(retval) do { assert(0); return retval; } while(0)
 
-// There will be a new implementation of this for control replication
 #define LEGION_PRINT_ONCE(runtime, ctx, file, fmt, ...)   \
-  fprintf(file, fmt, ##__VA_ARGS__);            
+{                                                         \
+  char message[4096];                                     \
+  snprintf(message, 4096, fmt, ##__VA_ARGS__);            \
+  runtime->print_once(ctx, file, message);                \
+}
 
 /**
  * \namespace Legion
@@ -1335,7 +1338,8 @@ namespace Legion {
                        unsigned previous_req_index,
                        unsigned current_req_index,
                        DependenceType dtype,
-                       bool validates = false);
+                       bool validates = false,
+                       bool shard_only = false);
     public:
       inline void add_field(FieldID fid);
     public:
@@ -1351,6 +1355,9 @@ namespace Legion {
       DependenceType                dependence_type;
       // Whether this requirement validates the previous writer
       bool                          validates;
+      // Whether this dependence is a shard-only dependence for 
+      // control replication or it depends on all other copies
+      bool                          shard_only;
       // Fields that have the dependence
       std::set<FieldID>             dependent_fields;
     };
@@ -1401,6 +1408,10 @@ namespace Legion {
       MapperID                           map_id;
       MappingTagID                       tag;
       DomainPoint                        point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
+      IndexSpace                         sharding_space;
     public:
       // If the predicate is set to anything other than
       // Predicate::TRUE_PRED, then the application must 
@@ -1482,6 +1493,9 @@ namespace Legion {
       Processor::TaskFuncID              task_id;
       Domain                             launch_domain;
       IndexSpace                         launch_space;
+      // Will only be used in control replication context. If left
+      // unset the runtime will use launch_domain/launch_space
+      IndexSpace                         sharding_space; 
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
@@ -1621,6 +1635,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
+      IndexSpace                      sharding_space;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1673,6 +1691,9 @@ namespace Legion {
       std::vector<PhaseBarrier>       arrive_barriers;
       Domain                          launch_domain;
       IndexSpace                      launch_space;
+      // Will only be used in control replication context. If left
+      // unset the runtime will use launch_domain/launch_space
+      IndexSpace                      sharding_space; 
       Predicate                       predicate;
       MapperID                        map_id;
       MappingTagID                    tag;
@@ -1721,6 +1742,10 @@ namespace Legion {
       MapperID                        map_id;
       MappingTagID                    tag;
       DomainPoint                     point;
+      // Only used in control replication contexts for
+      // doing sharding. If left unspecified the runtime
+      // will use an index space of size 1 containing 'point'
+      IndexSpace                      sharding_space;
     public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
@@ -1795,6 +1820,9 @@ namespace Legion {
     public:
       Domain                          launch_domain;
       IndexSpace                      launch_space;
+      // Will only be used in control replication context. If left
+      // unset the runtime will use launch_domain/launch_space
+      IndexSpace                      sharding_space; 
       LogicalRegion                   region;
       LogicalPartition                partition;
       LogicalRegion                   parent;
@@ -2443,6 +2471,12 @@ namespace Legion {
       std::vector<TaskLauncher>      single_tasks;
       std::vector<IndexTaskLauncher> index_tasks;
     public:
+      Domain                         launch_domain;
+      IndexSpace                     launch_space;
+      // Will only be used in control replication context. If left
+      // unset the runtime will use launch_space/launch_domain
+      IndexSpace                     sharding_space;
+    public:
       bool                           silence_warnings;
     };
 
@@ -2543,6 +2577,7 @@ namespace Legion {
         FILL_MAPPABLE,
         PARTITION_MAPPABLE,
         DYNAMIC_COLLECTIVE_MAPPABLE,
+        MUST_EPOCH_MAPPABLE,
       };
       virtual MappableType get_mappable_type(void) const = 0;
       virtual const Task* as_task(void) const = 0;
@@ -2554,6 +2589,7 @@ namespace Legion {
       virtual const Fill* as_fill(void) const = 0;
       virtual const Partition* as_partition(void) const = 0;
       virtual const DynamicCollective* as_dynamic_collective(void) const = 0;
+      virtual const MustEpoch* as_must_epoch(void) const = 0;
     public:
       MapperID                                  map_id;
       MappingTagID                              tag;
@@ -2590,6 +2626,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Task argument information
       Processor::TaskFuncID task_id; 
@@ -2644,6 +2681,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Copy Launcher arguments
       std::vector<RegionRequirement>    src_requirements;
@@ -2685,6 +2723,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Inline Launcher arguments
       RegionRequirement                 requirement;
@@ -2719,6 +2758,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Acquire Launcher arguments
       LogicalRegion                     logical_region;
@@ -2754,6 +2794,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Release Launcher arguments
       LogicalRegion                     logical_region;
@@ -2793,6 +2834,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement                 requirement;
@@ -2824,6 +2866,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Synthesized region requirement
       RegionRequirement               requirement;
@@ -2864,6 +2907,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return this; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       enum PartitionKind {
         BY_FIELD, // create partition by field
@@ -2885,6 +2929,42 @@ namespace Legion {
     public:
       // Parent task for the partition operation
       const Task*                         parent_task;
+    };
+
+    /**
+     * \class MustEpoch
+     * This class represents a must-epoch operation
+     * for the original launchers. See the must
+     * epoch launcher for more information.
+     */
+    class MustEpoch : public Mappable {
+    protected:
+      FRIEND_ALL_RUNTIME_CLASSES
+      MustEpoch(void);
+    public:
+      virtual MappableType get_mappable_type(void) const
+        { return MUST_EPOCH_MAPPABLE; }
+      virtual const Task* as_task(void) const { return NULL; }
+      virtual const Copy* as_copy(void) const { return NULL; }
+      virtual const InlineMapping* as_inline(void) const { return NULL; }
+      virtual const Acquire* as_acquire(void) const { return NULL; }
+      virtual const Release* as_release(void) const { return NULL; }
+      virtual const Close* as_close(void) const { return NULL; }
+      virtual const Fill* as_fill(void) const { return NULL; }
+      virtual const Partition* as_partition(void) const { return NULL; }
+      virtual const DynamicCollective* as_dynamic_collective(void) const
+        { return NULL; }
+      virtual const MustEpoch* as_must_epoch(void) const { return this; }
+    public:
+      std::vector<const Task*>                  individual_tasks;
+      std::vector<const Task*>                  index_space_tasks;
+    public:
+      // Index space of points for the must epoch operation
+      Domain                                    launch_domain;
+      IndexSpace                                sharding_space;
+    public:
+      // Parent task for the must epoch operation
+      const Task*                               parent_task;
     };
 
     //==========================================================================
@@ -2991,6 +3071,34 @@ namespace Legion {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
 
+      /*
+       * This method corresponds to the one above for projecting from
+       * a logical region but is only invoked if the 'is_functional' 
+       * method for this projection functor returns true. It must always 
+       * return the same result when called with the same parameters
+       * @param upper_bound the upper bound logical region
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalRegion upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
+
+      /**
+       * This method corresponds to the one above for projecting from
+       * a logical partition but is only invoked if the 'is_functional' 
+       * method for this projection functor returns true. It must always 
+       * return the same result when called with the same parameters
+       * @param upper_bound the upper bound logical partition 
+       * @param point the point being projected
+       * @param launch_domain the launch domain of the index operation
+       * @return logical region result
+       */
+      virtual LogicalRegion project(LogicalPartition upper_bound,
+                                    const DomainPoint &point,
+                                    const Domain &launch_domain);
+
       /**
        * @deprecated
        * Compute the projection for a logical region projection
@@ -3034,6 +3142,14 @@ namespace Legion {
        */
       virtual bool is_exclusive(void) const { return false; }
 
+      /*
+       * Indicate whether this is a functional projection
+       * functor or whether it depends on the operation being
+       * launched. This will determine which project method
+       * is invoked by the runtime.
+       */
+      virtual bool is_functional(void) const { return false; }
+
       /**
        * Specify the depth which this projection function goes
        * for all the points in an index space launch from 
@@ -3053,6 +3169,29 @@ namespace Legion {
       inline void set_runtime(Runtime *rt) { runtime = rt; }
     protected:
       Runtime *runtime;
+    };
+
+    /**
+     * \class ShardingFunctor
+     * 
+     * A sharding functor is a object that is during control
+     * replication of a task to determine which points of an
+     * operation are owned by a given shard. Unlike projection
+     * functors, these functors are not given access to the
+     * operation being sharded. We provide access to the local
+     * processor on which this operation exists and the mapping
+     * of shards to processors. Legion will assume that this
+     * functor is functional so the same arguments passed to 
+     * functor will always result in the same operation.
+     */
+    class ShardingFunctor {
+    public:
+      ShardingFunctor(void);
+      virtual ~ShardingFunctor(void);
+    public:
+      virtual ShardID shard(const DomainPoint &point,
+                            const Domain &full_space,
+                            const size_t total_shards) = 0;
     };
 
     /**
@@ -5843,6 +5982,11 @@ namespace Legion {
        * Return the local MPI rank ID for the current Legion runtime
        */
       int find_local_MPI_rank(void);
+
+      /**
+       * @return true if the MPI interop has been established
+       */
+      bool is_MPI_interop_configured(void);
     public:
       //------------------------------------------------------------------------
       // Semantic Information 
@@ -6148,6 +6292,29 @@ namespace Legion {
        * @param result pointer to assign to the name
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
+
+    public:
+      //------------------------------------------------------------------------
+      // Printing operations, these are useful for only generating output
+      // from a single task if the task has been replicated (either directly
+      // or as part of control replication).
+      //------------------------------------------------------------------------
+      /**
+       * Print the string to the given C file (may also be stdout/stderr)
+       * exactly once regardless of the replication status of the task.
+       * @param ctx the enclosing task context
+       * @param file the file to be written to
+       * @param message pointer to the C string to be written
+       */
+      void print_once(Context ctx, FILE *f, const char *message);
+
+      /**
+       * Print the logger message exactly once regardless of the control
+       * replication status of the task.
+       * @param ctx the enclosing task context
+       * @param message the Realm Logger Message to be logged
+       */
+      void log_once(Context ctx, Realm::LoggerMessage &message);
     public:
       //------------------------------------------------------------------------
       // Registration Callback Operations
@@ -6273,6 +6440,51 @@ namespace Legion {
        */
       static void preregister_projection_functor(ProjectionID pid,
                                                  ProjectionFunctor *functor);
+
+      /**
+       * Dynamically generate a unique sharding ID for use across the machine
+       * @return a ShardingID that is globally unique across the machine
+       */
+      ShardingID generate_dynamic_sharding_id(void);
+
+      /** 
+       * Generate a contiguous set of ShardingIDs for use by a library.
+       * This call will always generate the same answer for the same library
+       * name no many how many times it is called or on how many nodes it
+       * is called. If the count passed in to this method differs for the 
+       * same library name the runtime will raise an error.
+       * @param name a unique null-terminated string that names the library
+       * @param count the number of sharding IDs that should be generated
+       * @return the first sharding ID that is allocated to the library
+       */
+      ShardingID generate_library_sharding_ids(const char *name, size_t count);
+
+      /**
+       * Statically generate a unique Sharding ID for use across the machine.
+       * This can only be called prior to the runtime starting. It must be
+       * invoked symmetrically across all the nodes in the machine prior
+       * to starting the runtime.
+       * @return ShardingID that is globally unique across the machine
+       */
+      static ShardingID generate_static_sharding_id(void);
+      
+      /**
+       * Register a sharding functor for handling control replication
+       * queries about which shard owns which a given point in an 
+       * index space launch.
+       */
+      void register_sharding_functor(ShardingID sid,
+                                     ShardingFunctor *functor,
+                                     bool silence_warnings = false);
+
+      /**
+       * Register a sharding functor before the runtime has 
+       * started only. The sharding functor will be invoked to
+       * handle queries during control replication about which
+       * shard owns a given point in an index space launch.
+       */
+      static void preregister_sharding_functor(ShardingID sid,
+                                               ShardingFunctor *functor);
     public:
       //------------------------------------------------------------------------
       // Start-up Operations
