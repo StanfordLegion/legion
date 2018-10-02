@@ -33,6 +33,8 @@ std.config, std.args = base.config, base.args
 local c = base.c
 std.c = c
 
+std.replicable_whitelist = base.replicable_whitelist
+
 std.file_read_only = c.LEGION_FILE_READ_ONLY
 std.file_read_write = c.LEGION_FILE_READ_WRITE
 std.file_create = c.LEGION_FILE_CREATE
@@ -3677,7 +3679,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
           var options = c.legion_task_config_options_t {
             leaf = [ options.leaf and std.config["legion-leaf"] ],
             inner = [ options.inner and std.config["legion-inner"] ],
-            idempotent = options.idempotent,
+            idempotent = [ options.idempotent and std.config["legion-idempotent"] ],
+            replicable = [ options.replicable and std.config["legion-replicable"] ],
           }
 
           c.legion_runtime_preregister_task_variant_fnptr(
@@ -4287,6 +4290,9 @@ do
       intrinsic_name = intrinsic_name .. "f" .. (sizeof(elmt_type) * 8)
       local op = terralib.intrinsic(intrinsic_name, arg_type -> arg_type)
       to_math_op_name[op] = fname
+
+      std.replicable_whitelist[op] = true -- Math ops are pure.
+
       return op
     end)
   end
