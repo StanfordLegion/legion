@@ -722,7 +722,12 @@ namespace Realm {
       stack_t oldstack;
       int ret = sigaltstack(&disabled, &oldstack);
       assert(ret == 0);
-      assert(oldstack.ss_sp == thread->altstack_base);
+      // in a perfect world, we'd double-check that it's our stack we
+      //  unloaded, but some libraries (e.g. libpython 3.4) do not clean
+      //  up properly, so our stack may not have been active anyway
+      // either way though, it's not active after the call above, so it's
+      //  safe to free the memory now
+      //assert(oldstack.ss_sp == thread->altstack_base);
       free(thread->altstack_base);
     }
 
