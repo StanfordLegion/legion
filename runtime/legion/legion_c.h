@@ -281,6 +281,7 @@ extern "C" {
     bool leaf /* = false */;
     bool inner /* = false */;
     bool idempotent /* = false */;
+    bool replicable /* = false */;
   }  legion_task_config_options_t;
 
   /**
@@ -339,6 +340,7 @@ extern "C" {
     bool stealable;
     bool map_locally;
     bool memoize;
+    bool replicate;
     legion_task_priority_t parent_priority;
   } legion_task_options_t;
 
@@ -369,10 +371,9 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_region_t)(
       legion_runtime_t /* runtime */,
-      const legion_mappable_t /* mappable */,
-      unsigned /* index */,
       legion_logical_region_t /* upper_bound */,
-      legion_domain_point_t /* point */);
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */);
 
   /**
    * Interface for a Legion C projection functor (Logical Partition
@@ -381,10 +382,9 @@ extern "C" {
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
       legion_runtime_t /* runtime */,
-      const legion_mappable_t /* mappable */,
-      unsigned /* index */,
       legion_logical_partition_t /* upper_bound */,
-      legion_domain_point_t /* point */);
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */);
 
   // -----------------------------------------------------------------------
   // Pointer Operations
