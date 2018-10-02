@@ -49,6 +49,11 @@ list(APPEND REGENT_SRC
 
 add_library(Regent ${REGENT_SRC})
 target_link_libraries(Regent PUBLIC Legion::Legion)
+
+if(Legion_USE_CUDA)
+  target_include_directories(Regent PRIVATE ${CUDA_INCLUDE_DIRS})
+endif()
+
 set_target_properties(Regent PROPERTIES POSITION_INDEPENDENT_CODE ON)
 set_target_properties(Regent PROPERTIES OUTPUT_NAME "regent${INSTALL_SUFFIX}")
 set_target_properties(Regent PROPERTIES SOVERSION ${SOVERSION})

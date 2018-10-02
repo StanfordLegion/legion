@@ -547,6 +547,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool MapperRuntime::is_replicable_variant(MapperContext ctx, 
+                                     TaskID task_id, VariantID variant_id) const
+    //--------------------------------------------------------------------------
+    {
+      // Will be implemented in the control replication branch
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     void MapperRuntime::filter_variants(MapperContext ctx, const Task &task,
             const std::vector<std::vector<PhysicalInstance> > &chosen_instances,
                                            std::vector<VariantID> &variants)

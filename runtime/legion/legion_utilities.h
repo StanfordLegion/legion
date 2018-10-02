@@ -130,6 +130,7 @@ namespace Legion {
       inline size_t get_buffer_size(void) const { return total_bytes; }
       inline size_t get_used_bytes(void) const { return index; }
       inline void* reserve_bytes(size_t size);
+      inline void reset(void);
     private:
       inline void resize(void);
     private:
@@ -1645,6 +1646,16 @@ namespace Legion {
       context_bytes += bytes;
 #endif
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    inline void Serializer::reset(void)
+    //--------------------------------------------------------------------------
+    {
+      index = 0;
+#ifdef DEBUG_LEGION
+      context_bytes = 0;
+#endif
     }
 
     //--------------------------------------------------------------------------
