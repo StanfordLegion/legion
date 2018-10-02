@@ -60,6 +60,17 @@ where reads writes(r.{c, a}) do
   end
 end
 
+task check(r : region(t))
+where reads(r) do
+  for x in r do
+    regentlib.c.printf("%d %d %d\n", x.a, x.b, x.c)
+    regentlib.assert(x.a == 30903, "test failed")
+    regentlib.assert(x.b == 50063, "test failed")
+    regentlib.assert(x.c == 70960, "test failed")
+  end
+end
+
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), t)
   var x0 = dynamic_cast(ptr(t, r), 0)
@@ -100,11 +111,6 @@ task main()
     end
   end
 
-  for x in r do
-    regentlib.c.printf("%d %d %d\n", x.a, x.b, x.c)
-    regentlib.assert(x.a == 30903, "test failed")
-    regentlib.assert(x.b == 50063, "test failed")
-    regentlib.assert(x.c == 70960, "test failed")
-  end
+  check(r)
 end
 regentlib.start(main)

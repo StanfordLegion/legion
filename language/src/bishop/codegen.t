@@ -536,6 +536,7 @@ function codegen.select_task_options(rules, automata, signature,
     [options_var].map_locally = false
     [options_var].stealable = false
     [options_var].memoize = false
+    [options_var].replicate = false
     [body]
   end
 end

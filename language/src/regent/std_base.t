@@ -43,6 +43,7 @@ local c = terralib.includecstring([[
 #include "legion_terra.h"
 #include "legion_terra_partitions.h"
 #include "murmur_hash3.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,6 +112,46 @@ terra base.domain_from_bounds_3d(start : c.legion_point_3d_t,
     },
   }
   return c.legion_domain_from_rect_3d(rect)
+end
+
+-- A whitelist of functions that are known to be ok. We're importing a
+-- fixed list of known C headers above, so it should be ok to use a
+-- blacklist here.
+base.replicable_whitelist = {}
+do
+  local blacklist = data.set {
+    "fprintf",
+    "fscanf",
+    "printf",
+    "scanf",
+    "rand",
+    "rand_r",
+    "vfscanf",
+    "vscanf",
+  }
+  for k, v in pairs(c) do
+    if not blacklist[k] then
+      base.replicable_whitelist[v] = true
+    end
+  end
+
+  local other = {
+    base.assert_error,
+    base.assert,
+    base.domain_from_bounds_1d,
+    base.domain_from_bounds_2d,
+    base.domain_from_bounds_3d,
+
+    -- Terra functions that happen to be placed in global scope:
+    _G["sizeof"],
+    _G["vector"],
+    _G["vectorof"],
+    _G["array"],
+    _G["arrayof"],
+  }
+  for _, v in ipairs(other) do
+    base.replicable_whitelist[v] = true
+  end
 end
 
 -- #####################################

@@ -204,11 +204,13 @@ local node_allow_annotations = {
   [ast.typed.top.Task] = allow({
     "cuda",
     "external",
+    "idempotent",
     "inline",
     "inner",
     "leaf",
     "optimize",
     "parallel",
+    "replicable",
   }),
 
   [ast.typed.top.Fspace] = deny_all,
