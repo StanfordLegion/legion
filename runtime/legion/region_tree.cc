@@ -2161,11 +2161,12 @@ namespace Legion {
         const FieldMask uninitialized = src_mask - initialized;
         src_node->report_uninitialized_usage(op, src_index, uninitialized);
       }
-#ifdef DEBUG_LEGION
-      assert(across_aggregator.has_updates());
-#endif
-      across_aggregator.issue_updates(trace_info, precondition);
-      const ApEvent result = across_aggregator.summarize(trace_info);
+      ApEvent result;
+      if (across_aggregator.has_updates())
+      {
+        across_aggregator.issue_updates(trace_info, precondition);
+        result = across_aggregator.summarize(trace_info);
+      }
       if (!across_helpers.empty())
       {
         for (unsigned idx = 0; idx < across_helpers.size(); idx++)

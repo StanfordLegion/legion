@@ -3677,12 +3677,21 @@ namespace Legion {
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         InstanceSet &valid_instances = valid_dst_instances[idx];
+        // Little bit of a hack here, if we are going to do a reduction
+        // explicit copy, switch the privileges to read-write when doing
+        // the registration since we know we are using normal instances
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->physical_premap_only(this, idx+src_requirements.size(),
                                               dst_requirements[idx],
                                               dst_versions[idx],
                                               valid_instances);
         // No need to filter for copies
         prepare_for_mapping(valid_instances, input.dst_instances[idx]);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
       }
       // Now we can ask the mapper what to do
       if (mapper == NULL)

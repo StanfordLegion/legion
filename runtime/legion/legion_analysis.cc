@@ -2808,9 +2808,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < reduce_states.size(); idx++)
       {
         const ReduceUpdateState &state = reduce_states[idx];
-#ifdef DEBUG_LEGION
-        assert(state.current_precondition != precondition);
-#endif
         grouped_updates[state.current_precondition].push_back(idx);
       }
       for (std::map<ApEvent,std::vector<unsigned> >::const_iterator git =
@@ -6099,6 +6096,7 @@ namespace Legion {
                   if ((*it)->remove_nested_valid_ref(did))
                     delete (*it);
               }
+              reduction_instances.clear();
               reduction_fields.clear();
             }
             if (!restricted_instances.empty())
@@ -6108,6 +6106,7 @@ namespace Legion {
                     restricted_instances.end(); it++)
                 if (it->first->remove_nested_valid_ref(did))
                   delete it->first;
+              restricted_instances.clear();
               restricted_fields.clear();
             }
             version_numbers.clear();
