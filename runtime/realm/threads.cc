@@ -59,6 +59,7 @@ inline void makecontext_wrap(ucontext_t *u, void (*fn)(), int args, ...) { makec
 
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <signal.h>
 #include <string>
 #include <map>
@@ -668,6 +669,8 @@ namespace Realm {
     void (*entry_wrapper)(void *);
     pthread_t thread;
     bool ok_to_delete;
+    void *altstack_base;
+    size_t altstack_size;
   };
 
   KernelThread::KernelThread(void *_target, void (*_entry_wrapper)(void *),
@@ -687,6 +690,15 @@ namespace Realm {
   {
     KernelThread *thread = (KernelThread *)data;
 
+    // install our alt stack (if it exists) for signal handling
+    if(thread->altstack_base != 0) {
+      stack_t altstack = { ss_sp: thread->altstack_base,
+			   ss_flags: 0,
+			   ss_size: thread->altstack_size };
+      int ret = sigaltstack(&altstack, 0);
+      assert(ret == 0);
+    }
+
     // set up TLS so people can find us
     ThreadLocal::current_thread = thread;
 
@@ -702,6 +714,17 @@ namespace Realm {
     // on return, we update our status and terminate
     log_thread.info() << "thread " << thread << " finished";
     thread->update_state(STATE_FINISHED);
+
+    // uninstall and free our alt stack (if it exists)
+    if(thread->altstack_base != 0) {
+      stack_t disabled = { ss_sp: 0,
+			   ss_flags: SS_DISABLE };
+      stack_t oldstack;
+      int ret = sigaltstack(&disabled, &oldstack);
+      assert(ret == 0);
+      assert(oldstack.ss_sp == thread->altstack_base);
+      free(thread->altstack_base);
+    }
 
     // this is last so that the scheduler can delete us if it wants to
     if(thread->scheduler)
@@ -760,6 +783,21 @@ namespace Realm {
       CHECK_PTHREAD( pthread_attr_setstacksize(&attr, stack_size) );
 
     // TODO: actually use heap size
+
+    // default altstack size is 64KB
+    altstack_size = 64 << 10;
+    if(params.alt_stack_size != params.ALTSTACK_SIZE_DEFAULT)
+      altstack_size = params.alt_stack_size;
+    else if(rsrv.params.alt_stack_size != rsrv.params.ALTSTACK_SIZE_DEFAULT)
+      altstack_size = rsrv.params.alt_stack_size;
+
+    if(altstack_size > 0) {
+      int ret = posix_memalign(&altstack_base,
+			       sysconf(_SC_PAGESIZE),
+			       altstack_size);
+      assert(ret == 0);
+    } else
+      altstack_base = 0;
 
     update_state(STATE_STARTUP);
 
