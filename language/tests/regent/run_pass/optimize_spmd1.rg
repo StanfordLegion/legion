@@ -35,6 +35,15 @@ where reads(r), writes(r) do
   end
 end
 
+task check(r : region(int))
+where reads(r) do
+  for x in r do
+    regentlib.c.printf("%d\n", @x)
+    regentlib.assert(@x == 70963, "test failed")
+  end
+end
+
+__demand(__replicable)
 task main()
   var r = region(ispace(ptr, 3), int)
   var x0 = dynamic_cast(ptr(int, r), 0)
@@ -68,9 +77,6 @@ task main()
     end
   end
 
-  for x in r do
-    regentlib.c.printf("%d\n", @x)
-    regentlib.assert(@x == 70963, "test failed")
-  end
+  check(r)
 end
 regentlib.start(main)

@@ -105,9 +105,9 @@ ast.annotation:leaf("Forbid", {"value"}, true)
 ast.annotation:leaf("Unroll", {"value"}, true)
 
 -- Annotation: Sets
-ast.annotation:leaf("Set", {"cuda", "external", "inline", "inner", "leaf",
-                            "openmp", "optimize", "parallel", "spmd", "trace",
-                            "vectorize"},
+ast.annotation:leaf("Set", {"cuda", "external", "idempotent", "inline",
+                            "inner", "leaf", "openmp", "optimize", "parallel", 
+                            "replicable", "spmd", "trace", "vectorize"},
                     false, true)
 
 function ast.default_annotations()
@@ -115,12 +115,14 @@ function ast.default_annotations()
   return ast.annotation.Set {
     cuda = allow,
     external = allow,
+    idempotent = allow,
     inline = allow,
     inner = allow,
     leaf = allow,
     openmp = allow,
     optimize = allow,
     parallel = allow,
+    replicable = allow,
     spmd = allow,
     trace = allow,
     vectorize = allow,
@@ -545,7 +547,7 @@ ast.typed.stat:leaf("EndTrace", {"trace_id"})
 ast.typed.stat:leaf("MapRegions", {"region_types"})
 ast.typed.stat:leaf("UnmapRegions", {"region_types"})
 
-ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent"})
+ast:leaf("TaskConfigOptions", {"leaf", "inner", "idempotent", "replicable"})
 
 ast.typed:inner("top", {"annotations"})
 ast.typed.top:leaf("Fspace", {"name", "fspace"})
