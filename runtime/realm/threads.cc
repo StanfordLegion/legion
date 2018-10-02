@@ -692,9 +692,9 @@ namespace Realm {
 
     // install our alt stack (if it exists) for signal handling
     if(thread->altstack_base != 0) {
-      stack_t altstack = { ss_sp: thread->altstack_base,
-			   ss_flags: 0,
-			   ss_size: thread->altstack_size };
+      stack_t altstack = { .ss_sp = thread->altstack_base,
+			   .ss_flags = 0,
+			   .ss_size = thread->altstack_size };
       int ret = sigaltstack(&altstack, 0);
       assert(ret == 0);
     }
@@ -717,8 +717,8 @@ namespace Realm {
 
     // uninstall and free our alt stack (if it exists)
     if(thread->altstack_base != 0) {
-      stack_t disabled = { ss_sp: 0,
-			   ss_flags: SS_DISABLE };
+      stack_t disabled = { .ss_sp = 0,
+			   .ss_flags = SS_DISABLE };
       stack_t oldstack;
       int ret = sigaltstack(&disabled, &oldstack);
       assert(ret == 0);
