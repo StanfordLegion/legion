@@ -6799,9 +6799,14 @@ namespace Legion {
       if (compute_sets)
       {
         IndexSpaceExpression *expr = node->get_index_space_expression();
-        RtEvent ready = context->compute_equivalence_sets(this, 
-            node->get_tree_id(), expr, runtime->address_space);
-        Runtime::trigger_event(equivalence_sets_ready, ready);
+        if (!expr->is_empty())
+        {
+          RtEvent ready = context->compute_equivalence_sets(this, 
+              node->get_tree_id(), expr, runtime->address_space);
+          Runtime::trigger_event(equivalence_sets_ready, ready);
+        }
+        else
+          Runtime::trigger_event(equivalence_sets_ready);
       }
       // Wait if necessary for the results
       if (wait_on.exists() && !wait_on.has_triggered())

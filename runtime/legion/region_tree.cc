@@ -1702,15 +1702,32 @@ namespace Legion {
           {
             if ((*it)->find_reduction_instances(reduction_insts, 
                                                 req.redop, user_mask))
+            {
               req.flags |= RESTRICTED_FLAG;
+              // See below for why we can jump out
+              break;
+            }
             first = false;
           }
           else
             if ((*it)->filter_reduction_instances(reduction_insts, 
                                                   req.redop, user_mask))
+            {
               req.flags |= RESTRICTED_FLAG;
+              // See below for why we can jump out
+              break;
+            }
           if (reduction_insts.empty())
             break;
+        }
+        // If we're restricted then we report all the instances for backwards 
+        // compatibility with the old way physical analysis was done
+        if (req.flags & RESTRICTED_FLAG)
+        {
+          for (std::set<EquivalenceSet*>::const_iterator it = 
+                eq_sets.begin(); it != eq_sets.end(); it++)
+            (*it)->find_reduction_instances(reduction_insts, 
+                                            req.redop, user_mask);
         }
         if (!reduction_insts.empty())
         {
@@ -1729,14 +1746,30 @@ namespace Legion {
           if (first)
           {
             if ((*it)->find_valid_instances(valid_insts, user_mask))
+            {
               req.flags |= RESTRICTED_FLAG;
+              // See below for why we can jump out
+              break;
+            }
             first = false;
           }
           else
             if ((*it)->filter_valid_instances(valid_insts, user_mask))
+            {
               req.flags |= RESTRICTED_FLAG;
+              // See below for why we can jump out
+              break;
+            }
           if (valid_insts.empty())
             break;
+        }
+        // If we're restricted then we report all the instances for backwards 
+        // compatibility with the old way physical analysis was done
+        if (req.flags & RESTRICTED_FLAG)
+        {
+          for (std::set<EquivalenceSet*>::const_iterator it = 
+                eq_sets.begin(); it != eq_sets.end(); it++)
+            (*it)->find_valid_instances(valid_insts, user_mask);
         }
         if (!valid_insts.empty())
         {
