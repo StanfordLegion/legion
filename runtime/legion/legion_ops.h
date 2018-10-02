@@ -1620,6 +1620,7 @@ namespace Legion {
       virtual const Partition* as_partition(void) const { return NULL; }
       virtual const DynamicCollective* as_dynamic_collective(void) const
         { return &collective; }
+      virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

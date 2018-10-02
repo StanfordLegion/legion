@@ -7911,7 +7911,13 @@ function codegen.stat_for_list(cx, node)
     args:insertall(lower_bounds)
     args:insertall(counts)
     args:insertall(device_ptrs)
-    args:sort(function(s1, s2) return sizeof(s1.type) > sizeof(s2.type) end)
+    args:sort(function(s1, s2)
+        local t1 = s1.type
+        if t1:isarray() then t1 = t1.type end
+        local t2 = s2.type
+        if t2:isarray() then t2 = t2.type end
+        return sizeof(t1) > sizeof(t2)
+    end)
 
     local terra kernel([args])
       [kernel_preamble]
@@ -9313,13 +9319,41 @@ local function generate_parallel_prefix_gpu(cx, node)
     cudahelper.generate_parallel_prefix_op(cx.task_meta:get_cuda_variant(), total,
                                            lhs_write, lhs_read, rhs, lhs_base_pointer, rhs_base_pointer,
                                            res:getsymbol(), idx:getsymbol(), dir, node.op, elem_type)
+  local preamble, postamble
+  local lhs_base_pointer_back = terralib.newsymbol(lhs_base_pointer.type)
+  local rhs_base_pointer_back = terralib.newsymbol(rhs_base_pointer.type)
+  if lhs_base_pointer == rhs_base_pointer then
+    preamble = quote
+      var [lhs_base_pointer_back] = [lhs_base_pointer]
+      [lhs_base_pointer] = &[lhs_base_pointer][ [bounds].lo.__ptr ]
+    end
+    postamble = quote
+      [lhs_base_pointer] = [lhs_base_pointer_back]
+    end
+  else
+    preamble = quote
+      var [lhs_base_pointer_back] = [lhs_base_pointer]
+      var [rhs_base_pointer_back] = [rhs_base_pointer]
+      [lhs_base_pointer] = &[lhs_base_pointer][ [bounds].lo.__ptr ]
+      [rhs_base_pointer] = &[rhs_base_pointer][ [bounds].lo.__ptr ]
+    end
+    postamble = quote
+      [lhs_base_pointer] = [lhs_base_pointer_back]
+      [rhs_base_pointer] = [rhs_base_pointer_back]
+    end
+  end
+
   return quote
     do
       [generate_parallel_prefix_bounds_checks(cx, node, lhs_type, rhs_type)];
       [dir_value.actions]
       var [dir] = [dir_value.value]
       var [total] = [uint64]([bounds]:size())
-      [launch_actions]
+      do
+        [preamble]
+        [launch_actions]
+        [postamble]
+      end
     end
   end
 end

@@ -231,7 +231,7 @@ namespace Legion {
       Mapper(MapperRuntime *rt);
       virtual ~Mapper(void);
     public:
-      MapperRuntime *const runtime;
+      MapperRuntime *const runtime; 
     public:
       /**
        ** ----------------------------------------------------------------------
@@ -330,6 +330,7 @@ namespace Legion {
         bool                                   stealable;   // = false
         bool                                   map_locally;  // = false
         bool                                   memoize;  // = false
+        bool                                   replicate; // = false
         TaskPriority                           parent_priority; // = current
       };
       //------------------------------------------------------------------------
@@ -424,6 +425,7 @@ namespace Legion {
       struct SliceTaskInput {
         IndexSpace                             domain_is;
         Domain                                 domain;
+        IndexSpace                             sharding_is;
       };
       struct SliceTaskOutput {
         std::vector<TaskSlice>                 slices;
@@ -1290,10 +1292,15 @@ namespace Legion {
         std::vector<const Task*>                    tasks;
         std::vector<MappingConstraint>              constraints;
         MappingTagID                                mapping_tag;
+        // For collective map_must_epoch only
+        std::vector<Processor>                      shard_mapping;
+        ShardID                                     local_shard;
       };
       struct MapMustEpochOutput {
         std::vector<Processor>                      task_processors;
         std::vector<std::vector<PhysicalInstance> > constraint_mappings;
+        // For collective map_must_epoch only
+        std::vector<int>                            weights;
       };
       //------------------------------------------------------------------------
       virtual void map_must_epoch(const MapperContext           ctx,
@@ -1480,6 +1487,19 @@ namespace Legion {
       virtual void handle_task_result(const MapperContext           ctx,
                                       const MapperTaskResult&       result) = 0;
       //------------------------------------------------------------------------
+    public:
+      // Future structs for control replication, 
+      // provided here for forward compatibility
+      struct MapReplicateTaskOutput {
+        std::vector<MapTaskOutput>                      task_mappings;
+        std::vector<Processor>                          control_replication_map;
+      };
+      struct SelectShardingFunctorInput {
+        std::vector<Processor>                  shard_mapping;
+      };
+      struct SelectShardingFunctorOutput {
+        ShardingID                              chosen_functor;
+      };
     };
 
     /**
@@ -1606,6 +1626,8 @@ namespace Legion {
                                       VariantID variant_id)const;
       bool is_idempotent_variant(MapperContext ctx, TaskID task_id,
                                            VariantID variant_id) const;
+      bool is_replicable_variant(MapperContext ctx, TaskID task_id,
+                                      VariantID variant_id) const; 
     public:
       //------------------------------------------------------------------------
       // Methods for accelerating mapping decisions

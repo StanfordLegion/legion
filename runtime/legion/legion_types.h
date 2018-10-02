@@ -129,6 +129,7 @@ namespace Legion {
   class Close;
   class Fill;
   class Partition;
+  class MustEpoch;
   class Runtime;
   class MPILegionHandshake;
   // For backwards compatibility
@@ -1554,6 +1555,7 @@ namespace Legion {
   typedef ::legion_generation_id_t GenerationID;
   typedef ::legion_type_handle TypeHandle;
   typedef ::legion_projection_id_t ProjectionID;
+  typedef ::legion_sharding_id_t ShardingID;
   typedef ::legion_region_tree_id_t RegionTreeID;
   typedef ::legion_distributed_id_t DistributedID;
   typedef ::legion_address_space_t AddressSpaceID;
@@ -1568,6 +1570,8 @@ namespace Legion {
   typedef ::legion_projection_epoch_id_t ProjectionEpochID;
   typedef ::legion_task_id_t TaskID;
   typedef ::legion_layout_constraint_id_t LayoutConstraintID;
+  typedef ::legion_replication_id_t ReplicationID;
+  typedef ::legion_shard_id_t ShardID;
   typedef ::legion_internal_color_t LegionColor;
   typedef void (*RegistrationCallbackFnptr)(Machine machine, 
                 Runtime *rt, const std::set<Processor> &local_procs);
