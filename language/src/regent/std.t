@@ -4329,9 +4329,8 @@ do
     end
   end
 
-  local cmath = terralib.includec("math.h")
   for _, fname in pairs(cmath_ops) do
-    std[fname] = function(arg_type) return cmath[fname] end
+    std[fname] = function(arg_type) return c[fname] end
     if std.config["cuda"] and cudahelper.check_cuda_available() then
       cudahelper.register_builtin(fname, std[fname](double))
     end

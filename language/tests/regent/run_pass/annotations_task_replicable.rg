@@ -23,10 +23,16 @@ where reads writes(r) do
   end
 end
 
+local sqrt = regentlib.sqrt(double)
+local pow = regentlib.pow(double)
+
 __demand(__replicable)
 task main()
   var r = region(ispace(ptr, 4), int)
   fill(r, 0)
   inc(r, 100)
+
+  var x = sqrt(2)
+  var y = pow(1.5, 3)
 end
 regentlib.start(main)
