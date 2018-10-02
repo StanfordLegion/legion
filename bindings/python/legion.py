@@ -304,9 +304,11 @@ void = Type(None, None)
 float16 = Type(numpy.float16, 'short float')
 float32 = Type(numpy.float32, 'float')
 float64 = Type(numpy.float64, 'double')
+int8 = Type(numpy.int8, 'int8_t')
 int16 = Type(numpy.int16, 'int16_t')
 int32 = Type(numpy.int32, 'int32_t')
 int64 = Type(numpy.int64, 'int64_t')
+uint8 = Type(numpy.uint8, 'uint8_t')
 uint16 = Type(numpy.uint16, 'uint16_t')
 uint32 = Type(numpy.uint32, 'uint32_t')
 uint64 = Type(numpy.uint64, 'uint64_t')
@@ -496,9 +498,9 @@ class Region(object):
 
     def map_inline(self):
         fields_by_privilege = collections.defaultdict(set)
-        for field_name, privilege in self.privileges.iteritems():
+        for field_name, privilege in self.privileges.items():
             fields_by_privilege[privilege].add(field_name)
-        for privilege, field_names  in fields_by_privilege.iteritems():
+        for privilege, field_names  in fields_by_privilege.items():
             launcher = c.legion_inline_launcher_create_logical_region(
                 self.handle[0],
                 privilege._legion_privilege(), 0, # EXCLUSIVE

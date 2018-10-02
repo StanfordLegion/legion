@@ -3597,12 +3597,6 @@ function type_check.stat_parallel_prefix(cx, node)
     prev_ispace_type = ispace_type
   end
 
-  local function field_eq(field1, field2)
-    if #field1 ~= #field2 then return false end
-    if #field1 == 0 then return true end
-    return field1[1] == field2[1]
-  end
-
   if not supported_parallel_prefix_ops[node.op] then
     report.error(node,
         "type mismatch in argument 3: operator " .. node.op .. " is not a parallel prefix operator")
@@ -3611,6 +3605,20 @@ function type_check.stat_parallel_prefix(cx, node)
   if not std.as_read(dir.expr_type):isintegral() then
     report.error(node.dir,
         "type mismatch in argument 4: expected an integer type, but got " .. tostring(dir.expr_type))
+  end
+  local lhs_field_path = data.newtuple()
+  if #lhs.fields > 0 then lhs_field_path = lhs.fields[1] end
+  if not std.check_privilege(cx, std.writes, lhs.expr_type, lhs_field_path) then
+    report.error(lhs,
+        "invalid privilege in argument 1: " .. tostring(std.writes) .. "(" ..
+        (data.newtuple(lhs.region.value) .. lhs_field_path):mkstring(".") .. ")")
+  end
+  local rhs_field_path = data.newtuple()
+  if #rhs.fields > 0 then rhs_field_path = rhs.fields[1] end
+  if not std.check_privilege(cx, std.reads, rhs.expr_type, rhs_field_path) then
+    report.error(rhs,
+        "invalid privilege in argument 2: " .. tostring(std.reads) .. "(" ..
+        (data.newtuple(rhs.region.value) .. rhs_field_path):mkstring(".") .. ")")
   end
 
   return ast.typed.stat.ParallelPrefix {

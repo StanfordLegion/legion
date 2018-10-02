@@ -2826,21 +2826,71 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
-                                "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                                "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                            "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                            "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
                             "METHODS FOR NOW!");
 #endif
-      switch (mappable->get_mappable_type())
+      if (is_functional())
       {
-        case Mappable::TASK_MAPPABLE:
-          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
-                         index, upper_bound, point);
-        default:
-          REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
-                              "Unknown mappable type passed to projection "
-                              "functor! You must override the default "
-                              "implementations of the non-deprecated "
-                              "'project' methods!");
+        switch (mappable->get_mappable_type())
+        {
+          case Mappable::TASK_MAPPABLE:
+            {
+              const Task *task = mappable->as_task();
+              return project(upper_bound, point, task->index_domain);
+            }
+          case Mappable::COPY_MAPPABLE:
+            {
+              const Copy *copy = mappable->as_copy();
+              return project(upper_bound, point, copy->index_domain);
+            }
+          case Mappable::INLINE_MAPPABLE:
+          case Mappable::ACQUIRE_MAPPABLE:
+          case Mappable::RELEASE_MAPPABLE:
+          case Mappable::CLOSE_MAPPABLE:
+          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+            {
+              const Domain launch_domain(point, point);
+              return project(upper_bound, point, launch_domain);
+            }
+          case Mappable::FILL_MAPPABLE:
+            {
+              const Fill *fill = mappable->as_fill();
+              return project(upper_bound, point, fill->index_domain);
+            }
+          case Mappable::PARTITION_MAPPABLE:
+            {
+              const Partition *part = mappable->as_partition();
+              return project(upper_bound, point, part->index_domain);
+            }
+          case Mappable::MUST_EPOCH_MAPPABLE:
+            {
+              const MustEpoch *must = mappable->as_must_epoch();
+              return project(upper_bound, point, must->launch_domain);
+            }
+          default:
+            REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
+                                "Unknown mappable type passed to projection "
+                                "functor! You must override the default "
+                                "implementations of the non-deprecated "
+                                "'project' methods!");
+        }
+      }
+      else
+      {
+        switch (mappable->get_mappable_type())
+        {
+          case Mappable::TASK_MAPPABLE:
+            return project(0/*dummy ctx*/, 
+                           const_cast<Task*>(mappable->as_task()),
+                           index, upper_bound, point);
+          default:
+            REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
+                                "Unknown mappable type passed to projection "
+                                "functor! You must override the default "
+                                "implementations of the non-deprecated "
+                                "'project' methods!");
+        }
       }
       return LogicalRegion::NO_REGION;
     }
@@ -2857,22 +2907,72 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
-                                "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                                "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
-                                "METHODS FOR NOW!");
+                            "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                            "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                            "METHODS FOR NOW!");
 #endif
-      switch (mappable->get_mappable_type())
+      if (is_functional())
       {
-        case Mappable::TASK_MAPPABLE:
-          return project(0/*dummy ctx*/, const_cast<Task*>(mappable->as_task()),
-                         index, upper_bound, point);
-        default:
-          REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
-                                  "Unknown mappable type passed to projection "
-                                  "functor! You must override the default "
-                                  "implementations of the non-deprecated "
-                                  "'project' methods!");
-              assert(false);
+        switch (mappable->get_mappable_type())
+        {
+          case Mappable::TASK_MAPPABLE:
+            {
+              const Task *task = mappable->as_task();
+              return project(upper_bound, point, task->index_domain);
+            }
+          case Mappable::COPY_MAPPABLE:
+            {
+              const Copy *copy = mappable->as_copy();
+              return project(upper_bound, point, copy->index_domain);
+            }
+          case Mappable::INLINE_MAPPABLE:
+          case Mappable::ACQUIRE_MAPPABLE:
+          case Mappable::RELEASE_MAPPABLE:
+          case Mappable::CLOSE_MAPPABLE:
+          case Mappable::DYNAMIC_COLLECTIVE_MAPPABLE:
+            {
+              const Domain launch_domain(point, point);
+              return project(upper_bound, point, launch_domain);
+            }
+          case Mappable::FILL_MAPPABLE:
+            {
+              const Fill *fill = mappable->as_fill();
+              return project(upper_bound, point, fill->index_domain);
+            }
+          case Mappable::PARTITION_MAPPABLE:
+            {
+              const Partition *part = mappable->as_partition();
+              return project(upper_bound, point, part->index_domain);
+            }
+          case Mappable::MUST_EPOCH_MAPPABLE:
+            {
+              const MustEpoch *must = mappable->as_must_epoch();
+              return project(upper_bound, point, must->launch_domain);
+            }
+          default:
+            REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
+                                "Unknown mappable type passed to projection "
+                                "functor! You must override the default "
+                                "implementations of the non-deprecated "
+                                "'project' methods!");
+        }
+      }
+      else
+      {
+        switch (mappable->get_mappable_type())
+        {
+          case Mappable::TASK_MAPPABLE:
+            return project(0/*dummy ctx*/, 
+                           const_cast<Task*>(mappable->as_task()),
+                           index, upper_bound, point);
+          default:
+            REPORT_LEGION_ERROR(ERROR_UNKNOWN_MAPPABLE, 
+                                "Unknown mappable type passed to projection "
+                                "functor! You must override the default "
+                                "implementations of the non-deprecated "
+                                "'project' methods!");
+                assert(false);
+        }
       }
       return LogicalRegion::NO_REGION;
     }
@@ -2883,9 +2983,9 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "
-                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
+                          "INVOCATION OF DEPRECATED PROJECTION "
+                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
 
@@ -2894,9 +2994,9 @@ namespace Legion {
                           const DomainPoint &point, const Domain &launch_domain)
     //--------------------------------------------------------------------------
     {
-      Internal::log_run.error("ERROR: INVOCATION OF FUNCTIONAL PROJECTION "
-                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
-      assert(false);
+      REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
+                          "INVOCATION OF DEPRECATED PROJECTION "
+                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
 
@@ -2906,8 +3006,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                              "INVOCATION OF DEPRECATED PROJECTION "
-                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+                          "INVOCATION OF DEPRECATED PROJECTION "
+                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
 
@@ -2917,8 +3017,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_DEPRECATED_PROJECTION, 
-                              "INVOCATION OF DEPRECATED PROJECTION "
-                              "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
+                          "INVOCATION OF DEPRECATED PROJECTION "
+                          "FUNCTOR METHOD WITHOUT AN OVERRIDE!");
       return LogicalRegion::NO_REGION;
     }
 

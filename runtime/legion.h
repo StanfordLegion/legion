@@ -3074,7 +3074,7 @@ namespace Legion {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
 
-      /**
+      /*
        * This method corresponds to the one above for projecting from
        * a logical region but is only invoked if the 'is_functional' 
        * method for this projection functor returns true. It must always 
@@ -3145,7 +3145,7 @@ namespace Legion {
        */
       virtual bool is_exclusive(void) const { return false; }
 
-      /**
+      /*
        * Indicate whether this is a functional projection
        * functor or whether it depends on the operation being
        * launched. This will determine which project method
@@ -6295,6 +6295,7 @@ namespace Legion {
        * @param result pointer to assign to the name
        */
       void retrieve_name(LogicalPartition handle, const char *&result);
+
     public:
       //------------------------------------------------------------------------
       // Printing operations, these are useful for only generating output
