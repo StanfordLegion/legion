@@ -1412,7 +1412,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
       if (IS_NO_ACCESS(req))
         return;
-      version_info.initialize_mapping(op->get_mapped_event());
+      version_info.initialize_mapping(op);
       InnerContext *context = op->find_physical_context(idx);
       RegionTreeContext ctx = context->get_context(); 
 #ifdef DEBUG_LEGION
@@ -1502,16 +1502,13 @@ namespace Legion {
       // Do the normal versioning analysis since this will deal with
       // any aliasing of physical instances in the region requirements
       VersionInfo init_version_info;
-      // Make a user event to track when all effects are applied
-      RtUserEvent mapped_event = Runtime::create_rt_user_event();
-      init_version_info.initialize_mapping(mapped_event);
-      applied_events.insert(mapped_event);
+      init_version_info.initialize_mapping(context->owner_task);
       // Perform the version analysis and make it ready
       top_node->perform_versioning_analysis(ctx.get_id(), context,
                                             init_version_info);
-      std::set<RtEvent> eq_ready_events, local_applied_events;
+      std::set<RtEvent> eq_ready_events;
       init_version_info.make_ready(req, user_mask, eq_ready_events, 
-                                   local_applied_events);
+                                   applied_events);
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1578,13 +1575,8 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->initialize_set(term_event, usage, user_mask, restricted,
-         sources, corresponding, context_uid, init_index, local_applied_events);
+         sources, corresponding, context_uid, init_index, applied_events);
       init_version_info.finalize_mapping();
-      if (!local_applied_events.empty())
-        Runtime::trigger_event(mapped_event,
-            Runtime::merge_events(local_applied_events));
-      else
-        Runtime::trigger_event(mapped_event);
     }
 
     //--------------------------------------------------------------------------

@@ -83,19 +83,18 @@ namespace Legion {
     public:
       VersionInfo& operator=(const VersionInfo &rhs);
     public:
-      inline bool has_version_info(void) const { return mapped_event.exists(); }
+      inline bool has_version_info(void) const { return (op != NULL); }
       inline const std::set<EquivalenceSet*>& get_equivalence_sets(void) const
         { return equivalence_sets; }
-      inline RtEvent get_guard_event(void) const { return mapped_event; }
     public:
-      void initialize_mapping(RtEvent mapped_event);
+      void initialize_mapping(Operation *op);
       void record_equivalence_sets(VersionManager *owner,
                                    const std::set<EquivalenceSet*> &sets);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
           std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
       void finalize_mapping(void);
     protected:
-      RtEvent mapped_event;
+      Operation *op;
       std::set<EquivalenceSet*> equivalence_sets;
       VersionManager *owner;
     };
@@ -767,10 +766,13 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       void clone_from(EquivalenceSet *parent);
-      bool acquire_mapping_guard(RtEvent mapped_event,
+      inline bool has_unrefined_remainder(void) const 
+        { return (unrefined_remainder != NULL); }
+      void refine_remainder(void);
+      bool acquire_mapping_guard(Operation *op,
                                  std::vector<EquivalenceSet*> &alt_sets,
                                  bool recursed = false);
-      void remove_mapping_guard(RtEvent mapped_event);
+      void remove_mapping_guard(Operation *op);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
                                          IndexSpaceExpression *expr, 
                                          AddressSpaceID source); 
@@ -962,7 +964,7 @@ namespace Legion {
       EqState eq_state;
       // Track the mapping events of the current operations that
       // are using this equivalence class to map
-      std::map<RtEvent,unsigned> mapping_guards;
+      std::map<Operation*,unsigned> mapping_guards;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready

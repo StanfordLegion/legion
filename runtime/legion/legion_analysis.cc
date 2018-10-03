@@ -159,14 +159,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : owner(NULL)
+      : op(NULL), owner(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
-      : owner(NULL)
+      : op(NULL), owner(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -181,7 +181,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!mapped_event.exists());
+      assert(op == NULL);
       assert(equivalence_sets.empty());
       assert(owner == NULL);
 #endif
@@ -200,13 +200,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::initialize_mapping(RtEvent mapped)
+    void VersionInfo::initialize_mapping(Operation *o)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!mapped_event.exists());
+      assert(op == NULL);
 #endif
-      mapped_event = mapped;
+      op = o;
     }
 
     //--------------------------------------------------------------------------
@@ -215,7 +215,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION 
-      assert(mapped_event.exists());
+      assert(op != NULL);
       assert(equivalence_sets.empty());
       assert(owner == NULL);
 #endif
@@ -224,7 +224,12 @@ namespace Legion {
       owner = own;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+      {
         (*it)->add_base_resource_ref(VERSION_INFO_REF);
+        // Check for unrefined remainders here before we record it
+        if ((*it)->has_unrefined_remainder())
+          (*it)->refine_remainder();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -235,7 +240,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapped_event.exists());
+      assert(op != NULL);
 #endif
       // First we need to go through and lock in the equivalence sets to
       // confirm that they won't be refined while we're doing the mapping
@@ -243,7 +248,7 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
-        if ((*it)->acquire_mapping_guard(mapped_event, alt_sets))
+        if ((*it)->acquire_mapping_guard(op, alt_sets))
         {
 #ifdef DEBUG_LEGION
           assert(!alt_sets.empty());
@@ -288,20 +293,20 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(mapped_event.exists());
+      assert(op != NULL);
 #endif
       if (!equivalence_sets.empty())
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         {
-          (*it)->remove_mapping_guard(mapped_event);
+          (*it)->remove_mapping_guard(op);
           if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
             delete (*it);
         }
         equivalence_sets.clear();
       }
-      mapped_event = RtEvent::NO_RT_EVENT;
+      op = NULL;
       owner = NULL;
     }
 
@@ -3119,30 +3124,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::acquire_mapping_guard(RtEvent mapped_event,
+    void EquivalenceSet::refine_remainder(void)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // Could have lost the race so check again
+      if (unrefined_remainder != NULL)
+      {
+        LocalRefinement *refinement = 
+          new LocalRefinement(unrefined_remainder, this);
+        // We can clear the unrefined remainder now
+        unrefined_remainder = NULL;
+        add_pending_refinement(refinement);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::acquire_mapping_guard(Operation *op,
                std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
       std::vector<EquivalenceSet*> to_recurse;
       {
         AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+        assert(unrefined_remainder == NULL);
+#endif
         // We need to iterate until we get a valid lease while holding the lock
         if (is_owner())
         {
-          // If we have a unrefined remainder then we need that now
-          if (unrefined_remainder != NULL)
-          {
-            LocalRefinement *refinement = 
-              new LocalRefinement(unrefined_remainder, this);
-            // We can clear the unrefined remainder now
-            unrefined_remainder = NULL;
-            add_pending_refinement(refinement);
-          }
           // Wait until all the refinements are done before going on
           // to the next step
           while ((eq_state == REFINING_STATE) ||
                   !pending_refinements.empty())
           {
+            // A special case here where if our operation already grabbed
+            // acquired this equivalence class then we can piggy back 
+            // onto this same reservation. Note that this prevents the
+            // ABA problem where we have aliased but non-interfering
+            // region requirements that need to acquire the same 
+            // equivalence class, but a refinement request comes in
+            // from a different operation between the two acquires.
+            if (subsets.empty())
+            {
+              std::map<Operation*,unsigned>::iterator finder = 
+                mapping_guards.find(op);
+              if (finder != mapping_guards.end())
+              {
+                finder->second++;
+                return false;
+              }
+            }
             if (!transition_event.exists())
               transition_event = Runtime::create_rt_user_event();
             RtEvent wait_on = transition_event;
@@ -3200,10 +3232,10 @@ namespace Legion {
                     (eq_state == PENDING_INVALID_STATE));
           assert(unrefined_remainder == NULL); // nor a remainder
 #endif
-          std::map<RtEvent,unsigned>::iterator finder = 
-            mapping_guards.find(mapped_event);
+          std::map<Operation*,unsigned>::iterator finder = 
+            mapping_guards.find(op);
           if (finder == mapping_guards.end())
-            mapping_guards[mapped_event] = 1;
+            mapping_guards[op] = 1;
           else
             finder->second++;
         }
@@ -3215,8 +3247,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->acquire_mapping_guard(mapped_event, 
-                                       alt_sets, true/*recursed*/);
+          (*it)->acquire_mapping_guard(op, alt_sets, true/*recursed*/);
         // We've been refined so return true indicating that we changed
         return true;
       }
@@ -3227,12 +3258,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::remove_mapping_guard(RtEvent mapped_event)
+    void EquivalenceSet::remove_mapping_guard(Operation *op)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      std::map<RtEvent,unsigned>::iterator finder = 
-        mapping_guards.find(mapped_event);
+      std::map<Operation*,unsigned>::iterator finder = mapping_guards.find(op);
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert((eq_state == MAPPING_STATE) || 
