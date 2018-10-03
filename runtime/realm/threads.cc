@@ -717,6 +717,9 @@ namespace Realm {
 
     // uninstall and free our alt stack (if it exists)
     if(thread->altstack_base != 0) {
+      // so MacOS doesn't seem to want to let you disable a stack, returning
+      //  EINVAL even if the stack is not active - free the memory anyway
+#ifndef __MACH__
       stack_t disabled = { .ss_sp = 0,
 			   .ss_flags = SS_DISABLE };
       stack_t oldstack;
@@ -728,6 +731,7 @@ namespace Realm {
       // either way though, it's not active after the call above, so it's
       //  safe to free the memory now
       //assert(oldstack.ss_sp == thread->altstack_base);
+#endif
       free(thread->altstack_base);
     }
 
