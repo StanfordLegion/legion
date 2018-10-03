@@ -912,34 +912,32 @@ namespace Legion {
 
     class OperationCreator {
     public:
-      virtual ~OperationCreator(void) { }
+      OperationCreator(void);
+      virtual ~OperationCreator(void); 
     public:
-      virtual IndexSpaceOperation* create(void) = 0;
+      void produce(IndexSpaceOperation *op);
+      IndexSpaceOperation* consume(void);
+    private:
+      IndexSpaceOperation *result;
     };
 
     class UnionOpCreator : public OperationCreator {
     public:
       UnionOpCreator(RegionTreeForest *f, TypeTag t,
                      const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), exprs(e) 
+        { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(UnionOpCreator *creator)
       {
-        creator->result = new IndexSpaceUnion<N::N,T>(creator->exprs,
-            creator->forest);
+        creator->produce(new IndexSpaceUnion<N::N,T>(creator->exprs,
+                                                     creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
@@ -961,25 +959,19 @@ namespace Legion {
     public:
       IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
                             const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), exprs(e) 
+        { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(IntersectionOpCreator *creator)
       {
-        creator->result = new IndexSpaceIntersection<N::N,T>(creator->exprs,
-            creator->forest);
+        creator->produce(new IndexSpaceIntersection<N::N,T>(creator->exprs,
+                                                            creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
@@ -1002,26 +994,20 @@ namespace Legion {
     public:
       DifferenceOpCreator(RegionTreeForest *f, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), type_tag(t), lhs(l), rhs(r) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), lhs(l), rhs(r) 
+        { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(DifferenceOpCreator *creator)
       {
-        creator->result = new IndexSpaceDifference<N::N,T>(creator->lhs,
-            creator->rhs, creator->forest);
+        creator->produce(new IndexSpaceDifference<N::N,T>(creator->lhs,
+                                          creator->rhs, creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>

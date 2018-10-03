@@ -4786,9 +4786,6 @@ namespace Legion {
     IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(invalidated > 0);
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -4840,6 +4837,50 @@ namespace Legion {
         if ((*it)->remove_reference())
           delete (*it);
       }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Operation Creator 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    OperationCreator::OperationCreator(void)
+      : result(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    OperationCreator::~OperationCreator(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we still have a result then it's because it wasn't consumed need 
+      // we need to remove it's reference that was added by the 
+      // IndexSpaceOperation constructor 
+      if ((result != NULL) && result->remove_expression_reference())
+        delete result;
+    }
+
+    //--------------------------------------------------------------------------
+    void OperationCreator::produce(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(result == NULL);
+#endif
+      result = op;
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation* OperationCreator::consume(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      IndexSpaceOperation *temp = result;
+      result = NULL;
+      return temp;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5220,7 +5261,7 @@ namespace Legion {
         AutoLock t_lock(trie_lock);
         if (local_operation != NULL)
           return local_operation;
-        local_operation = creator.create();
+        local_operation = creator.consume();
         return local_operation;
       }
       else if (expressions.size() == (depth+2))
@@ -5256,7 +5297,7 @@ namespace Legion {
           if (node_finder == nodes.end())
           {
             // Didn't find the sub-node, so make the operation here
-            IndexSpaceOperation *result = creator.create();
+            IndexSpaceOperation *result = creator.consume();
             operations[target_expr] = result;
             return result;
           }
