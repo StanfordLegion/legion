@@ -1169,7 +1169,6 @@ task test()
   var rz_c = rz_p.colors
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  do -- Hack: Parallelizer removes inner scope
   __parallelize_with rz_p, rz_c
   do
     -- Hack: Manually inline this call to make parallelizer happy
@@ -1196,7 +1195,6 @@ task test()
                subregion[0], subregion[1], subregion[2], subregion[3])
 
     init_radial_velocity(rp, uinitradial)
-  end
   end
   -- Hack: Force main task to wait for initialization to finish.
   wait_for(dummy(rz))
