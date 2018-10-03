@@ -17,7 +17,7 @@
 --   ["pennant.tests/sedovsmall/sedovsmall.pnt",
 --    "-npieces", "1", "-fparallelize", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
---    "-npieces", "3", "-ll:cpu", "3", "-fparallelize", "0"
+--    "-npieces", "3", "-ll:cpu", "3", "-fparallelize", "0",
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
 --   ["pennant.tests/leblanc/leblanc.pnt",
 --    "-npieces", "2", "-ll:cpu", "2", "-fparallelize", "0"]
