@@ -1674,6 +1674,8 @@ function specialize.stat_parallelize_with(cx, node)
     end
     return hint
   end)
+
+  local cx = cx:new_local_scope()
   return ast.specialized.stat.ParallelizeWith {
     hints = hints,
     block = specialize.block(cx, node.block),
