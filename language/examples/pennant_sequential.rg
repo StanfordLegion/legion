@@ -232,13 +232,16 @@ task calc_volumes(rz : region(zone), rp : region(point),
                   enable : bool)
 where
   reads(rz.{zxp, znump}, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zareap, zvolp}, rs.{sareap, elen})
+  writes(rs.{sareap, elen}),
+  reads writes(rz.{zareap, zvolp})
 do
   if not enable then return end
 
-  var zareap = 0.0
-  var zvolp = 0.0
-  var nside = 1
+  for z in rz do
+    z.zareap = 0.0
+    z.zvolp = 0.0
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -252,17 +255,8 @@ do
     -- s.svolp = sv
     s.elen = length(p2_pxp - p1_pxp)
 
-    zareap += sa
-    zvolp += sv
-
-    if nside == z.znump then
-      z.zareap = zareap
-      z.zvolp = (1.0 / 3.0) * zvolp
-      zareap = 0.0
-      zvolp = 0.0
-      nside = 0
-    end
-    nside += 1
+    z.zareap += sa
+    z.zvolp += (1.0 / 3.0) * sv
 
     regentlib.assert(sv > 0.0, "sv negative")
   end
@@ -420,24 +414,19 @@ task qcs_zone_center_velocity(rz : region(zone), rp : region(point),
                               enable : bool)
 where
   reads(rz.znump, rp.pu, rs.{mapsz, mapsp1}),
-  writes(rz.zuc)
+  reads writes(rz.zuc)
 do
   if not enable then return end
 
-  var zuc = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
+  for z in rz do
+    z.zuc = vec2 { x = 0.0, y = 0.0 }
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
 
-    zuc += (1.0 / double(z.znump))*p1.pu
-
-    if nside == z.znump then
-      z.zuc = zuc
-      zuc = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    z.zuc += (1.0 / double(z.znump))*p1.pu
   end
 end
 
