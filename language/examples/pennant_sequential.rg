@@ -14,10 +14,13 @@
 
 -- runs-with:
 -- [
---   ["pennant.tests/sedovsmall/sedovsmall.pnt"],
+--   ["pennant.tests/sedovsmall/sedovsmall.pnt",
+--    "-npieces", "1", "-fparallelize", "0"],
 --   ["pennant.tests/sedov/sedov.pnt",
+--    "-npieces", "3", "-ll:cpu", "3", "-fparallelize", "0"
 --    "-absolute", "2e-6", "-relative", "1e-8", "-relative_absolute", "1e-10"],
---   ["pennant.tests/leblanc/leblanc.pnt"]
+--   ["pennant.tests/leblanc/leblanc.pnt",
+--    "-npieces", "2", "-ll:cpu", "2", "-fparallelize", "0"]
 -- ]
 
 -- Inspired by https://github.com/losalamos/PENNANT
@@ -33,6 +36,7 @@ local c = regentlib.c
 -- ## Initialization
 -- #################
 
+__demand(__parallel)
 task init_mesh_zones(rz : region(zone))
 where
   writes(rz.{zx, zarea, zvol})
@@ -47,6 +51,7 @@ end
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
 
+__demand(__parallel)
 task init_side_fracs(rz : region(zone), rp : region(point),
                      rs : region(side(rz, rp, rs)))
 where
@@ -60,6 +65,7 @@ do
   end
 end
 
+__demand(__parallel)
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
                 subregion_x0 : double, subregion_x1 : double,
@@ -92,6 +98,7 @@ do
   end
 end
 
+__demand(__parallel)
 task init_radial_velocity(rp : region(point), vel : double)
 where
   reads(rp.px),
@@ -112,6 +119,7 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
+__demand(__parallel)
 task init_step_points(rp : region(point),
                       enable : bool)
 where
@@ -964,6 +972,7 @@ task continue_simulation(cycle : int64, cstop : int64,
   return (cycle < cstop and time < tstop)
 end
 
+--[[
 task simulate(rz : region(zone),
               rp : region(point),
               rs : region(side(rz, rp, rs)),
@@ -1058,7 +1067,10 @@ do
     time += dt
   end
 end
+]]
 
+--[[
+__demand(__inline)
 task initialize(rz : region(zone),
                 rp : region(point),
                 rs : region(side(rz, rp, rs)),
@@ -1088,15 +1100,8 @@ do
              subregion[0], subregion[1], subregion[2], subregion[3])
 
   init_radial_velocity(rp, uinitradial)
-
-  if conf.warmup then
-    -- Do one iteration to warm up the runtime.
-    var conf_warmup = conf
-    conf_warmup.cstop = 1
-    conf_warmup.enable = false
-    simulate(rz, rp, rs, conf_warmup)
-  end
 end
+]]
 
 task dummy(rz : region(zone)) : int
 where reads(rz) do
@@ -1160,7 +1165,7 @@ task test()
     colorings = unwrap(read_input_sequential(
       rz, rp, rs, conf))
 
-    c.legion_coloring_destroy(colorings.rz_all_c)
+    -- c.legion_coloring_destroy(colorings.rz_all_c)
     c.legion_coloring_destroy(colorings.rz_spans_c)
     c.legion_coloring_destroy(colorings.rp_all_c)
     c.legion_coloring_destroy(colorings.rp_all_private_c)
@@ -1171,14 +1176,137 @@ task test()
     c.legion_coloring_destroy(colorings.rs_spans_c)
   end
 
+  var rz_p = partition(disjoint, rz, colorings.rz_all_c)
+  var rz_c = rz_p.colors
+
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  initialize(rz, rp, rs, conf)
+  do -- Hack: Parallelizer removes inner scope
+  __parallelize_with rz_p, rz_c
+  do
+    -- Hack: Manually inline this call to make parallelizer happy
+    -- initialize(rz, rp, rs, conf)
+    var einit = conf.einit
+    var einitsub = conf.einitsub
+    var rinit = conf.rinit
+    var rinitsub = conf.rinitsub
+    var subregion = conf.subregion
+    var uinitradial = conf.uinitradial
+
+    var enable = true
+
+    init_mesh_zones(rz)
+
+    calc_centers_full(rz, rp, rs, enable)
+
+    calc_volumes_full(rz, rp, rs, enable)
+
+    init_side_fracs(rz, rp, rs)
+
+    init_hydro(rz,
+               rinit, einit, rinitsub, einitsub,
+               subregion[0], subregion[1], subregion[2], subregion[3])
+
+    init_radial_velocity(rp, uinitradial)
+  end
+  end
   -- Hack: Force main task to wait for initialization to finish.
   wait_for(dummy(rz))
 
   c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  simulate(rz, rp, rs, conf)
+  do -- Hack: Parallelizer removes inner scope
+  __parallelize_with rz_p, rz_c
+  do
+    -- Hack: Manually inline this call to make parallelizer happy
+    -- simulate(rz, rp, rs, conf)
+    var alfa = conf.alfa
+    var cfl = conf.cfl
+    var cflv = conf.cflv
+    var cstop = conf.cstop
+    var dtfac = conf.dtfac
+    var dtinit = conf.dtinit
+    var dtmax = conf.dtmax
+    var gamma = conf.gamma
+    var q1 = conf.q1
+    var q2 = conf.q2
+    var qgamma = conf.qgamma
+    var ssmin = conf.ssmin
+    var tstop = conf.tstop
+    var uinitradial = conf.uinitradial
+    var vfix = {x = 0.0, y = 0.0}
+
+    var enable = conf.enable
+
+    var interval = 10
+    var start_time = c.legion_get_current_time_in_micros()/1.e6
+    var last_time = start_time
+
+    var time = 0.0
+    var cycle : int64 = 0
+    var dt = dtmax
+    var dthydro = dtmax
+    while continue_simulation(cycle, cstop, time, tstop) do
+      init_step_points(rp, enable)
+
+      init_step_zones(rz, enable)
+
+      dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
+
+      if cycle > 0 and cycle % interval == 0 then
+        var current_time = c.legion_get_current_time_in_micros()/1.e6
+        c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+                 cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+        last_time = current_time
+      end
+
+      adv_pos_half(rp, dt, enable)
+
+      calc_centers(rz, rp, rs, enable)
+
+      calc_volumes(rz, rp, rs, enable)
+
+      calc_char_len(rz, rp, rs, enable)
+
+      calc_rho_half(rz, enable)
+
+      sum_point_mass(rz, rp, rs, enable)
+
+      calc_state_at_half(rz, gamma, ssmin, dt, enable)
+
+      calc_force_pgas_tts(rz, rp, rs, alfa, ssmin, enable)
+
+      qcs_zone_center_velocity(rz, rp, rs, enable)
+
+      qcs_corner_divergence(rz, rp, rs, enable)
+
+      qcs_qcn_force(rz, rp, rs, gamma, q1, q2, enable)
+
+      qcs_force(rz, rp, rs, enable)
+
+      qcs_vel_diff(rz, rp, rs, q1, q2, enable)
+
+      sum_point_force(rz, rp, rs, enable)
+
+      apply_boundary_conditions(rp, enable)
+
+      adv_pos_full(rp, dt, enable)
+
+      calc_centers_full(rz, rp, rs, enable)
+
+      calc_volumes_full(rz, rp, rs, enable)
+
+      calc_work(rz, rp, rs, dt, enable)
+
+      calc_work_rate_energy_rho_full(rz, dt, enable)
+
+      dthydro = dtmax
+      dthydro min= calc_dt_hydro(rz, dt, dtmax, cfl, cflv, enable)
+
+      cycle += 1
+      time += dt
+    end
+  end
+  end
   -- Hack: Force main task to wait for simulation to finish.
   wait_for(dummy(rz))
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
