@@ -1214,7 +1214,6 @@ task test()
 
   c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  do -- Hack: Parallelizer removes inner scope
   __parallelize_with rz_p, rz_c
   do
     -- Hack: Manually inline this call to make parallelizer happy
@@ -1305,7 +1304,6 @@ task test()
       cycle += 1
       time += dt
     end
-  end
   end
   -- Hack: Force main task to wait for simulation to finish.
   wait_for(dummy(rz))
