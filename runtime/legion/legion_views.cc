@@ -2147,6 +2147,7 @@ namespace Legion {
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
       PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index);
+      user->add_reference();
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor

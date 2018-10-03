@@ -1949,27 +1949,32 @@ namespace Legion {
             // Don't record this fill operation because it is just part
             // of the semantics of reduction instances and not something
             // that we want Legion Spy to see
-            void *fill_buffer = malloc(reduction_op->sizeof_rhs);
-            reduction_op->init(fill_buffer, 1);
-            std::vector<CopySrcDstField> dsts;
+            if (!instance_domain->is_empty())
             {
-              const std::vector<FieldID> &fill_fields = 
-                constraints.field_constraint.get_field_set();
-              layout->compute_copy_offsets(fill_fields, result, dsts);
-            }
-            PhysicalTraceInfo fake_info(NULL);
+              void *fill_buffer = malloc(reduction_op->sizeof_rhs);
+              reduction_op->init(fill_buffer, 1);
+              std::vector<CopySrcDstField> dsts;
+              {
+                const std::vector<FieldID> &fill_fields = 
+                  constraints.field_constraint.get_field_set();
+                layout->compute_copy_offsets(fill_fields, result, dsts);
+              }
+              PhysicalTraceInfo fake_info(NULL);
 #ifdef LEGION_SPY
-            ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
-                  fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
-                  field_space_node->handle, tree_id, ready);
+              ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
+                    fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
+                    field_space_node->handle, tree_id, ready);
 #else
-            ApEvent filled = instance_domain->issue_fill(fake_info, dsts, 
-                  fill_buffer, reduction_op->sizeof_rhs, ready);
+              ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
+                    fill_buffer, reduction_op->sizeof_rhs, ready);
 #endif
-            // We can free the buffer after we've issued the fill
-            free(fill_buffer);
-            // Trigger our filled_and_ready event
-            Runtime::trigger_event(filled_and_ready, filled);
+              // We can free the buffer after we've issued the fill
+              free(fill_buffer);
+              // Trigger our filled_and_ready event
+              Runtime::trigger_event(filled_and_ready, filled);
+            }
+            else
+              Runtime::trigger_event(filled_and_ready);
             break;
           }
         case REDUCTION_LIST_SPECIALIZE:

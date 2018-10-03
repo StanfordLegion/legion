@@ -1840,24 +1840,24 @@ namespace Legion {
         const LogicalView *view = src_views.begin()->first;
         const FieldMask record_mask = 
           src_views.get_valid_mask() & src_mask;
-#ifdef DEBUG_LEGION
-        assert(!!record_mask);
-#endif
-        if (view->is_instance_view())
+        if (!!record_mask)
         {
-          InstanceView *inst = view->as_instance_view();
-          record_view(inst);
-          CopyUpdate *update = 
-            new CopyUpdate(inst, record_mask, expr, redop, helper);
-          if (helper == NULL)
-            updates.insert(update, record_mask);
+          if (view->is_instance_view())
+          {
+            InstanceView *inst = view->as_instance_view();
+            record_view(inst);
+            CopyUpdate *update = 
+              new CopyUpdate(inst, record_mask, expr, redop, helper);
+            if (helper == NULL)
+              updates.insert(update, record_mask);
+            else
+              updates.insert(update, helper->convert_src_to_dst(record_mask));
+          }
           else
-            updates.insert(update, helper->convert_src_to_dst(record_mask));
-        }
-        else
-        {
-          DeferredView *def = view->as_deferred_view();
-          def->flatten(*this, dst_view, record_mask, expr, helper);
+          {
+            DeferredView *def = view->as_deferred_view();
+            def->flatten(*this, dst_view, record_mask, expr, helper);
+          }
         }
       }
       else
@@ -1868,9 +1868,8 @@ namespace Legion {
         for (LegionList<FieldSet<LogicalView*> >::aligned::const_iterator
               vit = view_sets.begin(); vit != view_sets.end(); vit++)
         {
-#ifdef DEBUG_LEGION
-          assert(!vit->elements.empty());
-#endif
+          if (vit->elements.empty())
+            continue;
           if (vit->elements.size() == 1)
           {
             // Easy case, just one view so do it  

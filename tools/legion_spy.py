@@ -2452,6 +2452,8 @@ class IndexPartition(object):
                     self.point_set = child.get_point_set().copy()
                 else:
                     self.point_set |= child.get_point_set()
+            if self.point_set is None:
+                self.point_set = PointSet() 
         return self.point_set
 
     def intersection(self, other):
