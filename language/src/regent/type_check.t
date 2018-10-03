@@ -556,10 +556,6 @@ function type_check.expr_field_access(cx, node)
     field_type = std.rect_type(index_type)
   elseif std.is_partition(std.as_read(unpack_type)) and node.field_name == "colors" then
     field_type = std.as_read(unpack_type):colors()
-    if field_type:is_opaque() then
-      report.error(node, "no field '" .. node.field_name .. "' in type " ..
-                  tostring(std.as_read(unpack_type)))
-    end
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
     report.error(node, "no field '" .. node.field_name .. "' in type " ..
                 tostring(std.as_read(value_type)))
