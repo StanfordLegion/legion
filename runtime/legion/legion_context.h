@@ -1115,6 +1115,8 @@ namespace Legion {
     protected:
       mutable LocalLock                         tree_set_lock;
       std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
+      std::map<std::pair<RegionTreeID,
+        IndexSpaceExprID>,EquivalenceSet*>      empty_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;

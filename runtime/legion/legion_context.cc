@@ -2022,6 +2022,16 @@ namespace Legion {
             delete it->second;
         tree_equivalence_sets.clear();
       }
+      if (!empty_equivalence_sets.empty())
+      {
+        for (std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
+                                EquivalenceSet*>::const_iterator it = 
+              empty_equivalence_sets.begin(); it != 
+              empty_equivalence_sets.end(); it++)
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            delete it->second;
+        empty_equivalence_sets.clear();
+      }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
       assert(outstanding_subtasks == 0);
@@ -2082,6 +2092,50 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet *root = NULL;
+      if (expr->is_empty())
+      {
+        // Special case for empty expression
+        {
+          const std::pair<RegionTreeID,IndexSpaceExprID> 
+            key(tree_id, expr->expr_id);
+          AutoLock tree_lock(tree_set_lock);
+          // Check to see if we already have an empty equivalence set
+          // and if not make it
+          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
+                   EquivalenceSet*>::const_iterator finder = 
+                     empty_equivalence_sets.find(key);
+          if (finder == empty_equivalence_sets.end())
+          {
+            root = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(),
+              runtime->address_space, expr, true/*register now*/); 
+            empty_equivalence_sets[key] = root;
+            root->add_base_resource_ref(CONTEXT_REF);
+          }
+          else
+            root = finder->second;
+        }
+        // Now that we have the empty equivalence set, either record it
+        // or send it back to the source node for the response
+        if (source != runtime->address_space)
+        {
+          // Not local so we need to send a message
+          RtUserEvent recorded_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(root->did);
+            rez.serialize(manager);
+            rez.serialize(recorded_event);
+          }
+          runtime->send_equivalence_set_ray_trace_response(source, rez);
+          return recorded_event;
+        }
+        else
+          manager->record_equivalence_set(root);
+        return RtEvent::NO_RT_EVENT;
+      }
+      else
       {
         AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
         std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 

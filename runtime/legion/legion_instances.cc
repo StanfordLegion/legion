@@ -183,7 +183,10 @@ namespace Legion {
       // Switch data structures from layout by field order to order
       // of field locations in the bit mask
 #ifdef DEBUG_LEGION
-      assert(mask_index_map.size() == 
+      // Greater than or equal because local fields can alias onto the
+      // same index for the allocated instances, note that the fields
+      // themselves still get allocated their own space in the instance
+      assert(mask_index_map.size() >= 
                 size_t(FieldMask::pop_count(allocated_fields)));
 #endif
       for (unsigned idx = 0; idx < mask_index_map.size(); idx++)

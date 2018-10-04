@@ -3147,34 +3147,42 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_recurse;
       {
         AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-        assert(unrefined_remainder == NULL);
-#endif
+        // A special case here where if our operation already 
+        // acquired this equivalence class then we can piggy back 
+        // onto this same reservation. Note that this prevents the
+        // ABA problem where we have aliased but non-interfering
+        // region requirements that need to acquire the same 
+        // equivalence class, but a refinement request comes in
+        // from a different operation between the two acquires.
+        if (!mapping_guards.empty())
+        {
+          std::map<Operation*,unsigned>::iterator finder = 
+            mapping_guards.find(op);
+          if (finder != mapping_guards.end())
+          {
+            finder->second++;
+            if (recursed)
+              alt_sets.push_back(this);
+            return false;
+          }
+        }
         // We need to iterate until we get a valid lease while holding the lock
         if (is_owner())
         {
+          // If we have an unrefined remainder then we need to do that now
+          if (unrefined_remainder != NULL)
+          {
+            LocalRefinement *refinement = 
+              new LocalRefinement(unrefined_remainder, this);
+            // We can clear the unrefined remainder now
+            unrefined_remainder = NULL;
+            add_pending_refinement(refinement);
+          }
           // Wait until all the refinements are done before going on
           // to the next step
           while ((eq_state == REFINING_STATE) ||
                   !pending_refinements.empty())
           {
-            // A special case here where if our operation already grabbed
-            // acquired this equivalence class then we can piggy back 
-            // onto this same reservation. Note that this prevents the
-            // ABA problem where we have aliased but non-interfering
-            // region requirements that need to acquire the same 
-            // equivalence class, but a refinement request comes in
-            // from a different operation between the two acquires.
-            if (subsets.empty())
-            {
-              std::map<Operation*,unsigned>::iterator finder = 
-                mapping_guards.find(op);
-              if (finder != mapping_guards.end())
-              {
-                finder->second++;
-                return false;
-              }
-            }
             if (!transition_event.exists())
               transition_event = Runtime::create_rt_user_event();
             RtEvent wait_on = transition_event;
@@ -3231,13 +3239,10 @@ namespace Legion {
             assert((eq_state == VALID_STATE) ||
                     (eq_state == PENDING_INVALID_STATE));
           assert(unrefined_remainder == NULL); // nor a remainder
+          // Should have been handled above
+          assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
-          std::map<Operation*,unsigned>::iterator finder = 
-            mapping_guards.find(op);
-          if (finder == mapping_guards.end())
-            mapping_guards[op] = 1;
-          else
-            finder->second++;
+          mapping_guards[op] = 1;
         }
         else // Our set of subsets are now what we need
           to_recurse = subsets;
@@ -6827,14 +6832,9 @@ namespace Legion {
       if (compute_sets)
       {
         IndexSpaceExpression *expr = node->get_index_space_expression();
-        if (!expr->is_empty())
-        {
-          RtEvent ready = context->compute_equivalence_sets(this, 
-              node->get_tree_id(), expr, runtime->address_space);
-          Runtime::trigger_event(equivalence_sets_ready, ready);
-        }
-        else
-          Runtime::trigger_event(equivalence_sets_ready);
+        RtEvent ready = context->compute_equivalence_sets(this, 
+            node->get_tree_id(), expr, runtime->address_space);
+        Runtime::trigger_event(equivalence_sets_ready, ready);
       }
       // Wait if necessary for the results
       if (wait_on.exists() && !wait_on.has_triggered())

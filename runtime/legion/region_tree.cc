@@ -9499,7 +9499,7 @@ namespace Legion {
         AutoLock n_lock(node_lock,1,false/*exclusive*/);
         for (unsigned idx = 0; idx < create_fields.size(); idx++)
         {
-          FieldID fid = create_fields[idx];
+          const FieldID fid = create_fields[idx];
           std::map<FieldID,FieldInfo>::const_iterator finder = fields.find(fid);
 	  // Catch unknown fields here for now
 	  if (finder == fields.end())
