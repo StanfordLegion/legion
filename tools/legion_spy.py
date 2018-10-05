@@ -68,10 +68,10 @@ SINGLE_TASK_KIND = 1
 INDEX_TASK_KIND = 2
 MAP_OP_KIND = 3
 INTER_CLOSE_OP_KIND = 4
-READ_ONLY_CLOSE_OP_KIND = 5
+#READ_ONLY_CLOSE_OP_KIND = 5
 POST_CLOSE_OP_KIND = 6
-OPEN_OP_KIND = 7
-ADVANCE_OP_KIND = 8
+#OPEN_OP_KIND = 7
+#ADVANCE_OP_KIND = 8
 FENCE_OP_KIND = 9
 COPY_OP_KIND = 10 
 FILL_OP_KIND = 11
@@ -2015,9 +2015,13 @@ class IndexExpr(object):
         self.node_name = None
 
     def set_index_space(self, index_space):
-        assert self.kind is None
-        self.kind = INDEX_SPACE_EXPR
-        self.base = index_space
+        if self.kind is None:
+            self.kind = INDEX_SPACE_EXPR
+            self.base = index_space
+        else:
+            # Should be some kind of normal expression
+            # that we turned into an index space
+            assert self.kind != INDEX_SPACE_EXPR
 
     def add_union_expr(self, union_expr):
         if self.kind != UNION_EXPR:
@@ -2699,7 +2703,7 @@ class LogicalRegion(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                 unopened, advance_op, prev, aliased, checks):
+                                 unopened, advance, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -2707,7 +2711,7 @@ class LogicalRegion(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance = \
             self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                            open_local, unopened, advance_op, prev, aliased, checks)
+                            open_local, unopened, advance, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
@@ -3026,7 +3030,7 @@ class LogicalPartition(object):
         path.append(self)
 
     def perform_logical_analysis(self, depth, path, op, req, field, open_local, 
-                                  unopened, advance_op, prev, aliased, checks):
+                                  unopened, advance, prev, aliased, checks):
         assert self is path[depth]
         if field not in self.logical_state:
             self.logical_state[field] = LogicalState(self, field)
@@ -3034,7 +3038,7 @@ class LogicalPartition(object):
         next_child = path[depth+1] if not arrived else None
         result,next_open,next_unopened,next_advance = \
           self.logical_state[field].perform_logical_analysis(op, req, next_child, 
-                          open_local, unopened, advance_op, prev, aliased, checks)
+                          open_local, unopened, advance, prev, aliased, checks)
         if not result:
             return False
         if not arrived:
@@ -3158,16 +3162,11 @@ class LogicalState(object):
         self.projection_mode = OPEN_NONE 
         self.projection_epoch = list()
 
-    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance_op, 
+    def perform_logical_analysis(self, op, req, next_child, open_local, unopened, advance, 
                                  previous_deps, aliased_children, perform_checks):
         # At most one of these should be true, they can both be false
         assert not open_local or not unopened
         arrived = next_child is None
-        # If we already did the open operation above there is no need to do it here
-        if open_local:
-            # Find or make our open operation
-            if not self.perform_open_operation(op, req, previous_deps, perform_checks):
-                return (False,None,None,None)
         # Figure out if we need to check close operations or not
         if unopened:
             if arrived and req.is_projection():
@@ -3183,26 +3182,18 @@ class LogicalState(object):
             next_open = self.open_state(op, req, next_child)
         # If we have an advance op, perform its analysis
         # otherwise see if we need to make one
-        if advance_op:
-            # Register dependences for our advance operation on anything here
-            if not self.perform_epoch_analysis(advance_op, advance_op.reqs[0],
-                                              perform_checks, False, None, op):
-                return (False,None,None,None)
+        if advance:
             # Mark that we are now dirty below
             assert not self.dirty_below
             self.dirty_below = True
-            # TODO: Record dependences on other users in disjoint trees
         elif req.has_write() and not self.dirty_below and \
                           (not arrived or (req.is_projection() and
                             (not req.is_reg or req.projection_function.depth > 0))):
-            result,advance_op = self.perform_advance_operation(op, 
-                                 req, previous_deps, perform_checks) 
-            if not result:
-                return (False,None,None,None)
+            # Mark that we need to record this dirty below from now on
+            advance = True
             # Mark that we are dirty below
             if not arrived or req.is_projection():
                 self.dirty_below = True
-            # TODO: Record dependences on other users in disjoint trees
         # Now do our analysis to figure out who we need to wait on locally
         if not self.perform_epoch_analysis(op, req, perform_checks,
                                            arrived, previous_deps):
@@ -3216,7 +3207,7 @@ class LogicalState(object):
             return (True,None,None,None)
         else:
             next_unopened = unopened and not next_open 
-            return (True,next_open and unopened,next_unopened,advance_op)
+            return (True,next_open and unopened,next_unopened,advance)
 
     def register_logical_user(self, op, req):
         self.current_epoch_users.append((op,req))
@@ -3242,93 +3233,6 @@ class LogicalState(object):
         self.dirty_below = False
         self.projection_mode = OPEN_NONE
         self.projection_epoch = list()
-
-    def perform_open_operation(self, op, req, previous_deps, perform_checks):
-        open_op = self.find_open_operation(op, req, perform_checks)
-        # No need to do anything for the open, just perform the epoch analysis
-        assert 0 in open_op.reqs
-        open_req = open_op.reqs[0]
-        # Check for dependences on things above us in the tree
-        for prev_op,prev_req in previous_deps:
-            # Check for replays
-            if prev_op is op:
-                # If it is a previous registration of ourself, skip it
-                # This will only happen during replays
-                if prev_req.index == req.index:
-                    continue
-                assert False
-            # Check to see if it has the mapping dependence
-            if perform_checks:
-                if not open_op.has_mapping_dependence(open_req, prev_op, prev_req,
-                                      ANTI_DEPENDENCE if prev_req.is_read_only()
-                                      else TRUE_DEPENDENCE, self.field):
-                    print(("ERROR: open operation %s generated by "+
-                          "field %s of region requirement "+
-                          "%s of %s failed to find a "+
-                          "mapping dependence on previous operation "+
-                          "%s from higher in the region tree") %
-                          (open_op, self.field, req.index, op, prev_op))
-                    if self.node.state.assert_on_error:
-                        assert False
-                    return False
-            else:
-                # Not performing checks so record the mapping dependence
-                dep_type = compute_dependence_type(prev_req, open_req) 
-                dep = MappingDependence(prev_op, open_op, prev_req.index,
-                                        open_req.index, dep_type)
-                prev_op.add_outgoing(dep)
-                open_op.add_incoming(dep)
-        # Then check for dependences at this level
-        if not self.perform_epoch_analysis(open_op, open_req,
-                                           perform_checks, False, None, op):
-            return False
-        # Record the open operation in our current epoch
-        self.register_logical_user(open_op, open_req)
-        return True
-
-    def perform_advance_operation(self, op, req, previous_deps, perform_checks):
-        advance = self.find_advance_operation(op, req, perform_checks)
-        # No need to do anything for the advance, just perform the epoch analysis
-        assert 0 in advance.reqs
-        advance_req = advance.reqs[0]
-        # TODO: Need to catch dependences on advances above in the tree
-        # from aliased but non-interfering region requirements
-        # Check for dependences on things above us in the tree
-        for prev_op,prev_req in previous_deps:
-            # Check for replays
-            if prev_op is op:
-                # If it is a previous registration of ourself, skip it
-                # This will only happen during replays
-                if prev_req.index == req.index:
-                    continue
-                assert False
-            if perform_checks:
-                if not advance.has_mapping_dependence(advance_req, prev_op, prev_req,
-                                      ANTI_DEPENDENCE if prev_req.is_read_only()
-                                      else TRUE_DEPENDENCE, self.field):
-                    print(("ERROR: advance operation %s generated by "+
-                          "field %s of region requirement "+
-                          "%s of %s failed to find a "+
-                          "mapping dependence on previous operation "+
-                          "%s from higher in the region tree") %
-                          (advance, self.field, req.index, op, prev_op))
-                    if self.node.state.assert_on_error:
-                        assert False
-                    return (False,None)
-            else:
-                # Not performing checks so record the mapping dependence
-                dep_type = compute_dependence_type(prev_req, advance_req)
-                dep = MappingDependence(prev_op, advance, prev_req.index,
-                                        advance_req.index, dep_type)
-                prev_op.add_outgoing(dep)
-                advance.add_incoming(dep)
-        # Then check for dependences at this level
-        if not self.perform_epoch_analysis(advance, advance_req,
-                                           perform_checks, False, None, op):
-            return (False,None)
-        # Record the open operation in our current epoch
-        self.register_logical_user(advance, advance_req)
-        return (True,advance)
 
     def open_state(self, op, req, next_child):
         # Then figure out how to open our child if necessary  
@@ -3676,40 +3580,6 @@ class LogicalState(object):
             assert False # should never get here
         return True 
 
-    def find_open_operation(self, op, req, perform_checks):
-        open_op = op.get_open_operation(req, self.node, self.field)
-        if open_op is None:
-            if perform_checks:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an open operation for field %s of region "+
-                      "requirement %s at %s") %
-                      (op, str(op.uid), self.field, req.index, self.node))
-            else:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an open operation that we normally would have expected. "+
-                      "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm.") % (op, str(op.uid)))
-            if self.node.state.assert_on_error:
-                assert False
-        return open_op
-
-    def find_advance_operation(self, op, req, perform_checks):
-        advance = op.get_advance_operation(req, self.node, self.field)
-        if advance is None:
-            if perform_checks:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an advance operation for field %s of region "+
-                      "requirement %s at %s") %
-                      (op, str(op.uid), self.field, req.index, self.node))
-            else:
-                print(("ERROR: %s (UID=%s) failed to generate "+
-                      "an advance operation that we normally would have expected. "+
-                      "This is likely a runtime bug. Re-run with logical checks "+
-                      "to confirm.") % (op, str(op.uid)))
-            if self.node.state.assert_on_error:
-                assert False
-        return advance
-
     def find_close_operation(self, op, req, read_only, perform_checks, error_str):
         close = op.get_close_operation(req, self.node, self.field, read_only)
         if close is None:
@@ -3901,7 +3771,7 @@ class LogicalState(object):
                                         req.index, dep_type)
                 prev_op.add_outgoing(dep)
                 op.add_incoming(dep)
-            if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
+            if recording_set is not None:
                 recording_set.append((prev_op,prev_req))
         if not dominates:
             for prev_op,prev_req in self.previous_epoch_users:
@@ -3925,7 +3795,7 @@ class LogicalState(object):
                                             req.index, dep_type)
                     prev_op.add_outgoing(dep)
                     op.add_incoming(dep)   
-                if recording_set is not None and prev_op.kind != ADVANCE_OP_KIND:
+                if recording_set is not None:
                     recording_set.append((prev_op,prev_req))
         if can_dominate and dominates:
             # Filter back the users
@@ -4960,13 +4830,13 @@ class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
                  'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
-                 'start_event', 'finish_event', 'inter_close_ops', 'open_ops', 
-                 'advance_ops', 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
+                 'start_event', 'finish_event', 'inter_close_ops', 
+                 'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
                  'realm_copies', 'realm_fills', 'realm_depparts', 'version_numbers', 
-                 'internal_idx', 'disjoint_close_fields', 'partition_kind', 
-                 'partition_node', 'node_name', 'cluster_name', 'generation', 
-                 'reachable_cache', 'transitive_warning_issued', 'arrival_barriers', 
+                 'internal_idx', 'partition_kind', 'partition_node', 'node_name', 
+                 'cluster_name', 'generation', 'reachable_cache', 
+                 'transitive_warning_issued', 'arrival_barriers', 
                  'wait_barriers', 'created_futures', 'used_futures', 'merged', "replayed"]
                   # If you add a field here, you must update the merge method
     def __init__(self, state, uid):
@@ -4986,8 +4856,6 @@ class Operation(object):
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
         self.inter_close_ops = None
-        self.open_ops = None
-        self.advance_ops = None
         self.summary_ops = None
         self.realm_copies = None
         self.realm_depparts = None
@@ -5006,8 +4874,6 @@ class Operation(object):
         # Only valid for internal operations (e.g. open, close, advance)
         self.creator = None
         self.internal_idx = -1
-        # Only valid for close operations
-        self.disjoint_close_fields = None
         # Only valid for pending partition operations
         self.partition_kind = None
         self.partition_node = None
@@ -5029,11 +4895,10 @@ class Operation(object):
         self.replayed = False
 
     def is_close(self):
-        return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND or \
-               self.kind == READ_ONLY_CLOSE_OP_KIND
+        return self.kind == INTER_CLOSE_OP_KIND or self.kind == POST_CLOSE_OP_KIND
 
     def is_internal(self):
-        return self.is_close() or self.kind == ADVANCE_OP_KIND or self.kind == OPEN_OP_KIND
+        return self.is_close() or self.kind == SUMMARY_OP_KIND
 
     def set_name(self, name):
         self.name = name
@@ -5094,20 +4959,14 @@ class Operation(object):
     def set_creator(self, creator, idx):
         # Better be an internal op kind
         assert self.kind == INTER_CLOSE_OP_KIND or \
-            self.kind == READ_ONLY_CLOSE_OP_KIND or \
             self.kind == POST_CLOSE_OP_KIND or \
-            self.kind == OPEN_OP_KIND or \
-            self.kind == ADVANCE_OP_KIND or self.kind == SUMMARY_OP_KIND
+            self.kind == SUMMARY_OP_KIND
         self.creator = creator
         self.internal_idx = idx
         # If our parent context created us we don't need to be recorded 
         if creator is not self.context.op:
             assert self.kind != POST_CLOSE_OP_KIND
-            if self.kind == OPEN_OP_KIND:
-                creator.add_open_operation(self)
-            elif self.kind == ADVANCE_OP_KIND:
-                creator.add_advance_operation(self)
-            elif self.kind == SUMMARY_OP_KIND:
+            if self.kind == SUMMARY_OP_KIND:
                 creator.add_summary_operation(self)
             else:
                 creator.add_close_operation(self)
@@ -5134,16 +4993,6 @@ class Operation(object):
         assert self.launch_rect
         return self.launch_rect
 
-    def add_open_operation(self, open_op):
-        if self.open_ops is None:
-            self.open_ops = list()
-        self.open_ops.append(open_op);
-
-    def add_advance_operation(self, advance):
-        if self.advance_ops is None:
-            self.advance_ops = list()
-        self.advance_ops.append(advance)
-
     def add_close_operation(self, close):
         if self.inter_close_ops is None:
             self.inter_close_ops = list()
@@ -5161,36 +5010,6 @@ class Operation(object):
     def get_logical_op(self):
         return self
 
-    def get_open_operation(self, req, node, field):
-        if self.open_ops is None:
-            return None
-        for open_op in self.open_ops:
-            if open_op.internal_idx != req.index:
-                continue
-            assert len(open_op.reqs) == 1
-            open_req = open_op.reqs[0]
-            if open_req.logical_node is not node:
-                continue
-            if field not in open_req.fields:
-                continue
-            return open_op
-        return None
-
-    def get_advance_operation(self, req, node, field):
-        if self.advance_ops is None:
-            return None
-        for advance in self.advance_ops:
-            if advance.internal_idx != req.index:
-                continue
-            assert len(advance.reqs) == 1
-            advance_req = advance.reqs[0]
-            if advance_req.logical_node is not node:
-                continue
-            if field not in advance_req.fields:
-                continue
-            return advance
-        return None
-
     def get_close_operation(self, req, node, field, read_only):
         if self.inter_close_ops is None:
             return None
@@ -5203,13 +5022,6 @@ class Operation(object):
                 continue
             if field not in close_req.fields:
                 continue 
-            if read_only and close.kind != READ_ONLY_CLOSE_OP_KIND:
-                if close.kind == INTER_CLOSE_OP_KIND:
-                    print(("WARNING: Runtime issued a full close operation "
-                          "when it could have only issued a read-only close "
-                          "for requirement %d of %s") % (req.index,str(self)))
-                    return close
-                continue
             if not read_only and close.kind != INTER_CLOSE_OP_KIND:
                 continue
             return close
@@ -5333,11 +5145,6 @@ class Operation(object):
         if not self.wait_barriers:
             self.wait_barriers = list()
         self.wait_barriers.append(bar)
-
-    def add_disjoint_close_field(self, fid):
-        if not self.disjoint_close_fields:
-            self.disjoint_close_fields = list()
-        self.disjoint_close_fields.append(fid)
 
     def add_created_future(self, future):
         if not self.created_futures:
@@ -5761,7 +5568,7 @@ class Operation(object):
             # use them for adding/checking dependences on close operations
             previous_deps = list()
             if not req.parent.perform_logical_analysis(0, path, self, req, field,
-                  False, True, None, previous_deps, aliased_children, perform_checks):
+                  False, True, False, previous_deps, aliased_children, perform_checks):
                 return False
         # Restore the privileges if necessary
         if copy_reduce:
@@ -5904,14 +5711,6 @@ class Operation(object):
                     continue
                 # We found a good mapping dependence, so all is good
                 return True
-        # Special case for advance ops and open ops
-        if prev_op.kind == OPEN_OP_KIND and self.advance_ops:
-            for advance in self.advance_ops:
-                if req.index != advance.internal_idx:
-                    continue
-                if advance.has_mapping_dependence(advance.reqs[0], prev_op, 
-                                                  prev_req, TRUE_DEPENDENCE, field):
-                    return True
         # Look for the dependence transitively
         if self.has_transitive_mapping_dependence(prev_op):
             return True
@@ -6206,17 +6005,6 @@ class Operation(object):
                 # Do our updates to the restricted set
                 if not self.update_context_restrictions():
                     return False
-        # If we have any internal operations (e.g. close operations, then
-        # see if they performed any physical analysis
-        if self.inter_close_ops:
-            assert not self.kind == INTER_CLOSE_OP_KIND and \
-                   not self.kind == READ_ONLY_CLOSE_OP_KIND
-            for close in self.inter_close_ops:
-                if close.kind == READ_ONLY_CLOSE_OP_KIND:
-                    continue
-                if not close.perform_op_physical_verification(perform_checks, 
-                                                              need_restrict_analysis):
-                    return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
             for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
@@ -6350,10 +6138,10 @@ class Operation(object):
             INDEX_TASK_KIND : "mediumslateblue",
             MAP_OP_KIND : "mediumseagreen",
             INTER_CLOSE_OP_KIND : "orangered", 
-            READ_ONLY_CLOSE_OP_KIND : "darkgreen",
+            #READ_ONLY_CLOSE_OP_KIND : "darkgreen",
             POST_CLOSE_OP_KIND : "darkslateblue",
-            OPEN_OP_KIND : "royalblue",
-            ADVANCE_OP_KIND : "magenta",
+            #OPEN_OP_KIND : "royalblue",
+            #ADVANCE_OP_KIND : "magenta",
             FENCE_OP_KIND : "darkorchid2",
             COPY_OP_KIND : "darkgoldenrod3",
             FILL_OP_KIND : "darkorange1",
@@ -6388,24 +6176,12 @@ class Operation(object):
         if self.inter_close_ops:
             for close in self.inter_close_ops:
                 close.print_dataflow_node(printer)
-        if self.open_ops:
-            for open_op in self.open_ops:
-                open_op.print_dataflow_node(printer)
-        if self.advance_ops:
-            for advance in self.advance_ops:
-                advance.print_dataflow_node(printer)
         self.print_base_node(printer, True) 
 
     def print_incoming_dataflow_edges(self, printer, previous):
         if self.inter_close_ops:
             for close in self.inter_close_ops:
                 close.print_incoming_dataflow_edges(printer, previous)
-        if self.open_ops:
-            for open_op in self.open_ops:
-                open_op.print_incoming_dataflow_edges(printer, previous)
-        if self.advance_ops:
-            for advance in self.advance_ops:
-                advance.print_incoming_dataflow_edges(printer, previous)
         if self.incoming:
             for dep in self.incoming:
                 dep.print_dataflow_edge(printer, previous)
@@ -7061,7 +6837,7 @@ class Task(object):
             return 0
         if len(self.operations) == 1:
             op = self.operations[0]
-            if not op.inter_close_ops and not op.open_ops and not op.advance_ops:
+            if not op.inter_close_ops:
                 return 0
         name = str(self)
         filename = 'dataflow_'+name.replace(' ', '_')+'_'+str(self.op.uid)
@@ -7078,12 +6854,6 @@ class Task(object):
                 if op.inter_close_ops:
                     for close in op.inter_close_ops:
                         all_ops.append(close)
-                if op.open_ops:
-                    for open_op in op.open_ops:
-                        all_ops.append(open_op)
-                if op.advance_ops:
-                    for advance in op.advance_ops:
-                        all_ops.append(advance)
                 # Then add the operation itself
                 all_ops.append(op)
                 # Print any phase barier edges now, since
@@ -8834,14 +8604,9 @@ index_task_pat           = re.compile(
 mapping_pat              = re.compile(
     prefix+"Mapping Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 close_pat                = re.compile(
-    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1]) "+
-           "(?P<is_read_only>[0-1])")
+    prefix+"Close Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+) (?P<is_inter>[0-1])")
 internal_creator_pat     = re.compile(
     prefix+"Internal Operation Creator (?P<uid>[0-9]+) (?P<cuid>[0-9]+) (?P<idx>[0-9]+)")
-open_pat                 = re.compile(
-    prefix+"Open Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
-advance_pat              = re.compile(
-    prefix+"Advance Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 fence_pat                = re.compile(
     prefix+"Fence Operation (?P<ctx>[0-9]+) (?P<uid>[0-9]+)")
 trace_pat                = re.compile(
@@ -8895,8 +8660,6 @@ op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
     prefix+"Close Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
-disjoint_close_pat       = re.compile(
-    prefix+"Disjoint Close Field (?P<uid>[0-9]+) (?P<fid>[0-9]+)")
 predicate_false_pat      = re.compile(
     prefix+"Predicate False (?P<uid>[0-9]+)")
 # Patterns for logical analysis and region requirements
@@ -9415,13 +9178,8 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         inter = True if int(m.group('is_inter')) == 1 else False
         if inter:
-            read_only = True if int(m.group('is_read_only')) == 1 else False
-            if read_only:
-                op.set_op_kind(READ_ONLY_CLOSE_OP_KIND)
-                op.set_name("Read Only Close Op "+m.group('uid'))
-            else:
-                op.set_op_kind(INTER_CLOSE_OP_KIND)
-                op.set_name("Inter Close Op "+m.group('uid'))
+            op.set_op_kind(INTER_CLOSE_OP_KIND)
+            op.set_name("Inter Close Op "+m.group('uid'))
         else:
             op.set_op_kind(POST_CLOSE_OP_KIND)
             op.set_name("Post Close Op "+m.group('uid'))
@@ -9437,22 +9195,6 @@ def parse_legion_spy_line(line, state):
         op = state.get_operation(int(m.group('uid')))
         creator = state.get_operation(int(m.group('cuid')))
         op.set_creator(creator, int(m.group('idx')))
-        return True
-    m = open_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(OPEN_OP_KIND)
-        op.set_name("Open Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
-        return True
-    m = advance_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.set_op_kind(ADVANCE_OP_KIND)
-        op.set_name("Advance Op "+m.group('uid'))
-        context = state.get_task(int(m.group('ctx')))
-        op.set_context(context, False)
         return True
     m = fence_pat.match(line)
     if m is not None:
@@ -9644,11 +9386,6 @@ def parse_legion_spy_line(line, state):
         task = state.get_task(int(m.group('parent')))
         task.add_close_index(int(m.group('index')),
                              int(m.group('child')))
-        return True
-    m = disjoint_close_pat.match(line)
-    if m is not None:
-        op = state.get_operation(int(m.group('uid')))
-        op.add_disjoint_close_field(int(m.group('fid')))     
         return True
     m = predicate_false_pat.match(line)
     if m is not None:
