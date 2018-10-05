@@ -6530,7 +6530,7 @@ namespace Legion {
     {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       true/*inter close*/, true/*read only*/);
+                                       true/*inter close*/);
       parent_req_index = creator->find_parent_index(close_idx);
       initialize_close(creator, close_idx, parent_req_index, req, trace_info);
       close_mask = close_m;
@@ -6632,7 +6632,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       false/*inter*/, false/*read only*/);
+                                       false/*inter*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),
@@ -6916,7 +6916,7 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_close_operation(ctx->get_unique_id(), unique_op_id,
-                                       false/*inter*/, false/*read only*/);
+                                       false/*inter*/);
         perform_logging();
         LegionSpy::log_internal_op_creator(unique_op_id,
                                            ctx->get_unique_id(),

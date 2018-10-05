@@ -223,7 +223,7 @@ namespace Legion {
             strcat(result, temp);
           }
           else
-            sprintf(result," %lld", sources[idx]);
+            sprintf(result,"%lld", sources[idx]);
         }
         log_spy.print("Index Space Union %lld %zd %s", result_id, 
                       sources.size(), result);
@@ -311,12 +311,10 @@ namespace Legion {
 
       static inline void log_close_operation(UniqueID context,
                                              UniqueID unique_id,
-                                             bool is_intermediate_close_op,
-                                             bool read_only_close_op)
+                                             bool is_intermediate_close_op)
       {
-        log_spy.print("Close Operation %llu %llu %u %u",
-		      context, unique_id, is_intermediate_close_op ? 1 : 0,
-		      read_only_close_op ? 1 : 0);
+        log_spy.print("Close Operation %llu %llu %u",
+		      context, unique_id, is_intermediate_close_op ? 1 : 0);
       }
 
       static inline void log_internal_op_creator(UniqueID internal_op_id,
@@ -770,13 +768,6 @@ namespace Legion {
         log_spy.print("Mapping Dependence %llu %llu %u %llu %u %d", 
 		      context, prev_id, prev_idx,
 		      next_id, next_idx, dep_type);
-      }
-
-      // Logger call for disjoint close operations
-      static inline void log_disjoint_close_field(UniqueID close_id,
-                                                  FieldID fid)
-      {
-        log_spy.print("Disjoint Close Field %llu %d", close_id, fid);
       }
 
       // Logger calls for realm events

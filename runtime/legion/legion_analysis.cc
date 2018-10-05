@@ -1836,8 +1836,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!src_mask);
       assert(!src_views.empty());
-      assert(!expr->is_empty());
 #endif
+      if (expr->is_empty())
+        return;
       FieldMaskSet<Update> &updates = sources[dst_view];
       record_view(dst_view);
       if (src_views.size() == 1)
@@ -2033,8 +2034,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(all_views.find(dst_view) != all_views.end());
       assert(!!fill_mask);
-      assert(!expr->is_empty());
 #endif
+      if (expr->is_empty())
+        return;
       record_view(src_view);
       FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
       if (helper == NULL)
@@ -2054,8 +2056,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!src_views.empty());
-      assert(!expr->is_empty());
 #endif 
+      if (expr->is_empty())
+        return;
       record_view(dst_view);
       for (std::vector<ReductionView*>::const_iterator it = 
             src_views.begin(); it != src_views.end(); it++)
