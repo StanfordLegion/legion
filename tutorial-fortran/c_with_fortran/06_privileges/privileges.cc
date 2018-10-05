@@ -230,9 +230,12 @@ void daxpy_task(const Task *task,
   LogicalRegion lr = regions[0].get_logical_region();
   IndexSpace id = lr.get_index_space();
   Rect<1> rect = runtime->get_index_space_domain(ctx, id);
-  const FieldAccessor<READ_ONLY,double,1> acc_x(regions[0], FID_X);
-  const FieldAccessor<READ_ONLY,double,1> acc_y(regions[0], FID_Y);
-  const FieldAccessor<WRITE_DISCARD,double,1> acc_z(regions[1], FID_Z);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_x(regions[0], FID_X);
+  const FieldAccessor<READ_ONLY,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_y(regions[0], FID_Y);
+  const FieldAccessor<WRITE_DISCARD,double,1,coord_t,
+          Realm::AffineAccessor<double,1,coord_t> > acc_z(regions[1], FID_Z);
   
   // Get dense pointers for use with thrust
   

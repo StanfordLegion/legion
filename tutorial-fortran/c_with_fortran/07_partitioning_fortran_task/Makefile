@@ -37,7 +37,7 @@ GEN_FORTRAN_SRC	?= daxpy_task_f.f90
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	?=
-CC_FLAGS	?=
+CC_FLAGS	?= -I/$(LG_RT_DIR)/legion
 NVCC_FLAGS	?=
 GASNET_FLAGS	?=
 LD_FLAGS	?=

@@ -49,6 +49,7 @@ module legion_fortran_c_interface
     
         ! Legion::Runtime::preregister_task_variant()
         function legion_runtime_preregister_task_variant_fnptr_f(id, task_name, &
+                                                                 variant_name, &
                                                                  execution_constraints, &
                                                                  layout_constraints, &
                                                                  options, &
@@ -64,6 +65,7 @@ module legion_fortran_c_interface
         
             integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_f
             character(kind=c_char), intent(in)                              :: task_name(*)
+            character(kind=c_char), intent(in)                              :: variant_name(*)
             integer(c_int), value, intent(in)                               :: id
             type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
             type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints

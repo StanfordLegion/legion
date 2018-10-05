@@ -420,7 +420,7 @@ Program Hello
     type(legion_task_config_options_f_t) :: config_options
     integer(c_int) :: proc_kind = 2
     integer(c_int) :: TOP_LEVEL_TASK_ID, INIT_TASK_ID, DAXPY_TASK_ID, CHECK_TASK_ID
-    integer(c_int) :: task_id_1, task_id_2, task_id_3
+    integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4
     integer(c_size_t) :: userlen = 0
     integer(c_int) :: runtime_start_rv
     logical(c_bool) :: background = .FALSE.
@@ -450,6 +450,7 @@ Program Hello
     c_func_ptr = c_funloc(top_level_task)
     
     task_id_1 = legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &
@@ -461,6 +462,7 @@ Program Hello
     c_func_ptr = c_funloc(init_task)
 
     task_id_2 = legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, c_char_"init_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &
@@ -471,6 +473,7 @@ Program Hello
     c_func_ptr = c_funloc(daxpy_task)
 
     task_id_3 = legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, c_char_"daxpy_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &
@@ -480,7 +483,8 @@ Program Hello
     
     c_func_ptr = c_funloc(check_task)
 
-    task_id_3 = legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, c_char_"check_task"//c_null_char, &
+    task_id_4 = legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, c_char_"check_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &

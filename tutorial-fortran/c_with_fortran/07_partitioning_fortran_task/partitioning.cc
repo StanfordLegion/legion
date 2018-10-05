@@ -36,7 +36,7 @@ enum FieldIDs {
 
 #ifdef __cplusplus
 extern "C" {
-void daxpy_task_f(const void *data, size_t datalen, const void *userdata, size_t userlen, legion_lowlevel_id_t p);
+void daxpy_task_f(const void *data, size_t datalen, const void *userdata, size_t userlen, realm_id_t p);
 }
 #endif
 
@@ -257,7 +257,7 @@ void init_field_task(const Task *task,
 
 
 
-void daxpy_task(const void *data, size_t datalen, const void *userdata, size_t userlen, legion_lowlevel_id_t p)
+void daxpy_task(const void *data, size_t datalen, const void *userdata, size_t userlen, realm_id_t p)
 {
     printf("daxpy task C\n");
     daxpy_task_f(data, datalen, userdata, userlen, p);
@@ -320,6 +320,7 @@ int main(int argc, char **argv)
   legion_task_config_options_t config_options = {.leaf = false, .inner = false, .idempotent = false};
   legion_runtime_preregister_task_variant_fnptr(DAXPY_TASK_ID,
                                                 "daxpy",
+                                                "cpu_variant",
                                                 execution_constraints,
                                                 layout_constraints,
                                                 config_options,

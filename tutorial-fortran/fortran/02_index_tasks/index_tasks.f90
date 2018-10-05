@@ -102,7 +102,7 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
         local_task_args(i)%args = c_loc(input)
         local_task_args(i)%arglen = c_sizeof(input)
         tmp_p%x(0) = i
-        dp = legion_domain_point_from_point_1d_f(tmp_p)
+        call legion_domain_point_from_point_1d_f(tmp_p, dp)
         call legion_argument_map_set_point_f(arg_map, dp, local_task_args(i), replace)
     end do
     
@@ -151,6 +151,7 @@ Program Hello
     c_func_ptr = c_funloc(top_level_task)
     
     task_id_1 = legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &
@@ -161,6 +162,7 @@ Program Hello
     c_func_ptr = c_funloc(hello_world_task)
 
     task_id_2 = legion_runtime_preregister_task_variant_fnptr_f(HELLO_WORLD_TASK_ID, c_char_"hello_world_task"//c_null_char, &
+                                                                c_char_"cpu_variant"//c_null_char, &
                                                                 execution_constraints, &
                                                                 layout_constraints, &
                                                                 config_options, &

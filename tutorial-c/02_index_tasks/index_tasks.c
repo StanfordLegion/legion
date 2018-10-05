@@ -28,7 +28,7 @@ enum TaskID {
 };
 
 void hello_world_task(const void *data, size_t datalen,
-		    const void *userdata, size_t userlen, legion_lowlevel_id_t p)
+		    const void *userdata, size_t userlen, realm_id_t p)
 {
   //  assert(task->arglen == sizeof(int));
 //    int rank = *(const int*)task->args; 
@@ -55,7 +55,7 @@ void hello_world_task(const void *data, size_t datalen,
 
 
 void top_level_task(const void *data, size_t datalen,
-		    const void *userdata, size_t userlen, legion_lowlevel_id_t p)
+		    const void *userdata, size_t userlen, realm_id_t p)
 {
     legion_task_t task;
     const legion_physical_region_t *regions;
@@ -126,6 +126,7 @@ int main(int argc, char **argv)
     legion_task_config_options_t config_options = {.leaf = false, .inner = false, .idempotent = false};
     legion_runtime_preregister_task_variant_fnptr(TOP_LEVEL_TASK_ID,
                                                   "top_leve_task",
+                                                  "cpu_variant",
                                                   execution_constraints,
                                                   layout_constraints,
                                                   config_options,
@@ -135,6 +136,7 @@ int main(int argc, char **argv)
                                                   
     legion_runtime_preregister_task_variant_fnptr(HELLO_WORLD_TASK_ID,
                                                   "hello_world_task",
+                                                  "cpu_variant",
                                                   execution_constraints,
                                                   layout_constraints,
                                                   config_options,
