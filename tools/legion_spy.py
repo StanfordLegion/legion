@@ -1919,6 +1919,91 @@ class PointSet(object):
         for p in self.points:
             yield p
 
+class NodeSet(object):
+    __slots__ = ['impl', 'bound', 'sparse']
+    def __init__(self, bound):
+        self.impl = None
+        self.bound = bound + 31 // 32
+        assert self.bound > 0
+        self.sparse = True
+
+    def densify(self):
+        assert self.impl
+        assert self.sparse
+        # Cross-over to dense
+        new_impl = array.array('I', (0,) * self.bound)
+        for node in self.impl:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            new_impl[index] |= mask
+        self.impl = new_impl
+        self.sparse = False
+
+    def add(self, node):
+        assert node < 32 * self.bound
+        if self.impl is None:
+            self.impl = set()
+            self.impl.add(node)
+        elif self.sparse:
+            self.impl.add(node)
+            # Check for cross-over to dense
+            if len(self.impl) > 32:
+                self.densify()
+        else:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            self.impl[index] |= mask
+
+    def union(self, other):
+        assert other.bound == self.bound
+        if other.impl is None:
+            return
+        if self.impl is None:
+            if other.sparse:
+                self.impl = other.impl.copy()
+            else:
+                self.impl = array.array('I', other.impl)
+                self.sparse = False
+        elif self.sparse:
+            if other.sparse:
+                for node in other.impl:
+                    self.impl.add(node)
+                if len(self.impl) > 32:
+                    self.densify()
+            else:
+                new_impl = array.array('I', other.impl)
+                for node in self.impl:
+                    index = node >> 5
+                    offset = node & 31
+                    mask = 1 << offset
+                    new_impl[index] |= mask
+                self.impl = new_impl
+                self.sparse = False
+        else:
+            if other.sparse:
+                for node in other.impl:
+                    index = node >> 5
+                    offset = node & 31
+                    mask = 1 << offset
+                    self.impl[index] |= mask
+            else:
+                for index in xrange(self.bound):
+                    self.impl[index] |= other.impl[index]
+
+    def contains(self, node):
+        assert node < 32 * self.bound
+        if self.impl is None:
+            return False
+        elif self.sparse:
+            return node in self.impl
+        else:
+            index = node >> 5
+            offset = node & 31
+            mask = 1 << offset
+            return self.impl[index] & mask != 0
+
 class Processor(object):
     __slots__ = ['state', 'uid', 'kind_num', 'kind', 'mem_latency', 
                  'mem_bandwidth', 'node_name']
@@ -4830,6 +4915,7 @@ class Operation(object):
     __slots__ = ['state', 'uid', 'kind', 'context', 'name', 'reqs', 'mappings', 
                  'incoming', 'outgoing', 'logical_incoming', 
                  'logical_outgoing', 'physical_incoming', 'physical_outgoing', 
+                 'eq_incoming', 'eq_outgoing', 'eq_privileges',
                  'start_event', 'finish_event', 'inter_close_ops', 
                  'summary_ops', 'task', 'task_id', 'predicate', 'predicate_result',
                  'futures', 'index_owner', 'points', 'launch_rect', 'creator', 
@@ -4853,6 +4939,9 @@ class Operation(object):
         self.logical_outgoing = None # Operation dependences
         self.physical_incoming = set() # op/realm
         self.physical_outgoing = set() # op/realm
+        self.eq_incoming = None
+        self.eq_outgoing = None
+        self.eq_privileges = None
         self.start_event = state.get_no_event() 
         self.finish_event = state.get_no_event()
         self.inter_close_ops = None
@@ -5121,6 +5210,22 @@ class Operation(object):
             self.logical_outgoing = set()
         self.logical_outgoing.add(dep.op2)
 
+    def add_equivalence_incoming(self, eq, src):
+        assert eq in self.eq_privileges
+        if self.eq_incoming is None:
+            self.eq_incoming = dict()
+        if eq not in self.eq_incoming:
+            self.eq_incoming[eq] = set()
+        self.eq_incoming[eq].add(src)
+
+    def add_equivalence_outgoing(self, eq, dst):
+        assert eq in self.eq_privileges
+        if self.eq_outgoing is None:
+            self.eq_outgoing = dict()
+        if eq not in self.eq_outgoing:
+            self.eq_outgoing[eq] = set()
+        self.eq_outgoing[eq].add(dst)
+
     def add_realm_copy(self, copy):
         if self.realm_copies is None:
             self.realm_copies = list()
@@ -5161,6 +5266,24 @@ class Operation(object):
         assert point in self.points
         return self.points[point]
 
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            if self.reqs is not None:
+                for req in self.reqs.itervalues():
+                    point_set = req.index_node.get_point_set()
+                    for point in point_set.iterator():
+                        for field in req.fields:
+                            # Point,Field,Tree ID
+                            key = (point,field,req.tid)
+                            if key not in self.eq_privileges:
+                                self.eq_privileges[key] = req.priv
+                            else:
+                                # If we have aliased region requirements
+                                # then they shouldn't interfere with each other
+                                assert self.eq_privileges[key] == req.priv 
+        return self.eq_privileges
+
     def get_logical_reachable(self, reachable, forward):
         if self in reachable:
             return 
@@ -5177,22 +5300,53 @@ class Operation(object):
                 op.get_logical_reachable(reachable, False)
 
     def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False):
-        if self is origin and not skip_first:
+                               origin = None, skip_first = False,
+                               stack = None):
+        if stack is None:
+            stack = list()
+        # Check for cycles
+        elif self in stack:
             return True
-        if self in reachable:
-            return False
         if not skip_first:
             reachable.add(self)
+        stack.append(self)
         if forward:
             for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin):
+                if op.get_physical_reachable(reachable, True, origin, False, stack):
                     return True
         else:
             for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin):
+                if op.get_physical_reachable(reachable, False, origin, False, stack):
                     return True
+        stack.pop()
         return False
+
+    def get_equivalence_reachable(self, reachable, eqs, forward, skip_first = False):
+        assert eqs is not None and len(eqs) > 0
+        new_eqs = None
+        if not skip_first:
+            privileges = self.get_equivalence_privileges()
+            for eq in eqs:
+                if eq in privileges:
+                    # Record that this is reachable
+                    if eq not in reachable:
+                        reachable[eq] = list()
+                    reachable[eq].append(self)
+                    # Start building a new eq set
+                    if new_eqs is None:
+                        new_eqs = eqs.copy()
+                    new_eqs.remove(eq)
+        # If the mask eq set didn't change, keep using the old one
+        if new_eqs is None:
+            new_eqs = eqs
+        elif len(new_eqs) == 0:
+            return
+        if forward:
+            for op in self.physical_outgoing:
+                op.get_equivalence_reachable(reachable, new_eqs, True)
+        else:
+            for op in self.physical_incoming:
+                op.get_equivalence_reachable(reachable, new_eqs, False)
 
     def merge(self, other):
         if self.kind == NO_OP_KIND:
@@ -5427,35 +5581,8 @@ class Operation(object):
         self.realm_copies.append(copy)
         return copy
 
-    def perform_cycle_check(self):
-        def traverse_node(node, traverser):
-            if node is traverser.origin:
-                traverser.cycle = True
-                print("WARNING: CYCLE DETECTED!")
-                for n in traverser.stack:
-                    print(str(n))
-                print(str(node))
-                if self.state.assert_on_warning:
-                    assert False
-                return False
-            if traverser.cycle:
-                return False
-            traverser.stack.append(node)
-            return True
-        def post_traverse(node, traverser):
-            assert traverser.stack
-            traverser.stack.pop()
-        traverser = EventGraphTraverser(forwards=False, use_gen=True,
-            generation=self.state.get_next_traversal_generation(),
-            op_fn=traverse_node, copy_fn=traverse_node, 
-            fill_fn=traverse_node, deppart_fn=traverse_node,
-            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
-            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
-        traverser.origin = self
-        traverser.cycle = False
-        traverser.stack = list()
-        traverser.visit_event(self.start_event)
-        return traverser.cycle
+    def perform_cycle_check(self, cycle_detector):
+        return cycle_detector.check_for_cycles(self, self.physical_outgoing) 
 
     def is_interfering_index_space_launch(self):
         assert self.kind == INDEX_TASK_KIND
@@ -6860,35 +6987,41 @@ class Task(object):
                 # we know they will all be printed
                 if self.state.detailed_graphs:
                     op.print_phase_barrier_edges(printer)
+            index_map = dict()
+            reachable = dict()
+            total_nodes = len(all_ops)
             # Now traverse the list in reverse order
-            while all_ops:
-                src = all_ops.pop()
-                if src.logical_outgoing is None:
+            for src_index in xrange(total_nodes-1,-1,-1):
+                src = all_ops[src_index]
+                index_map[src] = src_index
+                our_reachable = NodeSet(total_nodes)
+                reachable[src] = our_reachable
+                if src.logical_outgoing is None or len(src.logical_outgoing) == 0:
                     continue
-                actual_out = src.logical_outgoing.copy()
-                diff = False
-                for next_vert in src.logical_outgoing:
-                    if not next_vert in actual_out:
-                        continue
-                    reachable = set()
-                    next_vert.get_logical_reachable(reachable, True)
-                    # See which edges we can remove
-                    to_remove = list()
-                    for other in actual_out:
-                        if other == next_vert:
-                            continue
-                        if other in reachable:
-                            to_remove.append(other)
-                    del reachable
-                    if len(to_remove) > 0:
-                        diff = True
-                        for rem in to_remove:
-                            actual_out.remove(rem)
-                            rem.logical_incoming.remove(src)
-                    del to_remove
-                if diff:
-                    src.logical_outgoing = actual_out
-                for dst in actual_out:
+                # Otherwise iterate through our outgoing edges and get the set of 
+                # nodes reachable from all of them
+                for dst in src.logical_outgoing:
+                    assert dst in reachable
+                    our_reachable.union(reachable[dst])
+                # Now see which of our nodes can be reached indirectly
+                to_remove = None
+                for dst in src.logical_outgoing:
+                    assert dst in index_map
+                    dst_index = index_map[dst]
+                    if our_reachable.contains(dst_index):
+                        if to_remove is None:
+                            to_remove = list()
+                        to_remove.append(dst)
+                    else:
+                        # We need to add it to our reachable set
+                        our_reachable.add(dst_index)
+                if to_remove:
+                    for dst in to_remove:
+                        src.logical_outgoing.remove(dst)
+                        dst.logical_incoming.remove(src)
+                # We should never remove everything
+                assert len(src.logical_outgoing) > 0
+                for dst in src.logical_outgoing:
                     printer.println(src.node_name+' -> '+dst.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
             print("Done")
@@ -7794,8 +7927,8 @@ class Event(object):
 class RealmBase(object):
     __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space', 'tree_id', 
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
-                  'generation', 'event_context', 'analyzed', 'cluster_name', 
-                  'reachable_cache']
+                 'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
+                 'event_context', 'analyzed', 'cluster_name', 'reachable_cache']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -7805,6 +7938,9 @@ class RealmBase(object):
         self.tree_id = None
         self.physical_incoming = set()
         self.physical_outgoing = set()
+        self.eq_incoming = None
+        self.eq_outgoing = None
+        self.eq_privileges = None
         self.start_event = state.get_no_event()
         self.finish_event = state.get_no_event()
         self.generation = 0
@@ -7823,6 +7959,22 @@ class RealmBase(object):
 
     def is_physical_operation(self):
         return True
+
+    def add_equivalence_incoming(self, eq, src):
+        assert eq in self.eq_privileges
+        if self.eq_incoming is None:
+            self.eq_incoming = dict()
+        if eq not in self.eq_incoming:
+            self.eq_incoming[eq] = set()
+        self.eq_incoming[eq].add(src)
+
+    def add_equivalence_outgoing(self, eq, dst):
+        assert eq in self.eq_privileges
+        if self.eq_outgoing is None:
+            self.eq_outgoing = dict()
+        if eq not in self.eq_outgoing:
+            self.eq_outgoing[eq] = set()
+        self.eq_outgoing[eq].add(dst)
 
     def get_context(self):
         assert self.creator is not None
@@ -7861,54 +8013,57 @@ class RealmBase(object):
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
 
-    def perform_cycle_check(self):
-        def traverse_node(node, traverser):
-            if node is traverser.origin:
-                traverser.cycle = True
-                print("WARNING: CYCLE DETECTED!")
-                for n in traverser.stack:
-                    print(str(n))
-                print(str(node))
-                if self.state.assert_on_warning:
-                    assert False
-                return False
-            if traverser.cycle:
-                return False
-            traverser.stack.append(node)
-            return True
-        def post_traverse(node, traverser):
-            assert traverser.stack
-            traverser.stack.pop()
-        traverser = EventGraphTraverser(forwards=False, use_gen=True,
-            generation=self.state.get_next_traversal_generation(),
-            op_fn=traverse_node, copy_fn=traverse_node, 
-            fill_fn=traverse_node, deppart_fn=traverse_node,
-            post_op_fn=post_traverse, post_copy_fn=post_traverse, 
-            post_fill_fn=post_traverse, post_deppart_fn=post_traverse)
-        traverser.origin = self
-        traverser.cycle = False
-        traverser.stack = list()
-        traverser.visit_event(self.start_event)
-        return traverser.cycle
+    def perform_cycle_check(self, cycle_detector):
+        return cycle_detector.check_for_cycles(self, self.physical_outgoing)
 
     def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False):
+                               origin = None, skip_first = False,
+                               stack = None):
+        if stack is None:
+            stack = list()
         # Check for cycles
-        if self is origin and not skip_first:
+        elif self in stack:
             return True
-        if self in reachable:
-            return False 
         if not skip_first:
             reachable.add(self)
+        stack.append(self)
         if forward:
             for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin):
+                if op.get_physical_reachable(reachable, True, origin, False, stack):
                     return True
         else:
             for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin):
+                if op.get_physical_reachable(reachable, False, origin, False, stack):
                     return True
+        stack.pop()
         return False
+
+    def get_equivalence_reachable(self, reachable, eqs, forward, skip_first = False):
+        assert eqs is not None and len(eqs) > 0
+        new_eqs = None
+        if not skip_first:
+            privileges = self.get_equivalence_privileges()
+            for eq in eqs:
+                if eq in privileges:
+                    # Record that this is reachable
+                    if eq not in reachable:
+                        reachable[eq] = list()
+                    reachable[eq].append(self)
+                    # Start building a new eq set
+                    if new_eqs is None:
+                        new_eqs = eqs.copy()
+                    new_eqs.remove(eq)
+        # If the mask eq set didn't change, keep using the old one
+        if new_eqs is None:
+            new_eqs = eqs
+        elif len(new_eqs) == 0:
+            return
+        if forward:
+            for op in self.physical_outgoing:
+                op.get_equivalence_reachable(reachable, new_eqs, True)
+        else:
+            for op in self.physical_incoming:
+                op.get_equivalence_reachable(reachable, new_eqs, False)
 
     def print_incoming_event_edges(self, printer):
         for src in self.physical_incoming:
@@ -8029,6 +8184,16 @@ class RealmCopy(RealmBase):
         point_set = self.index_expr.get_point_set()
         return (field_size * point_set.volume())
 
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            point_set = self.index_expr.get_point_set()
+            for point in point_set.iterator():
+                for field in self.src_fields:
+                    key = (point,field,self.tree_id)
+                    assert key not in self.eq_privileges
+                    self.eq_privileges[key] = READ_ONLY
+        return self.eq_privileges
 
 class RealmFill(RealmBase):
     __slots__ = ['fields', 'dsts', 'node_name']
@@ -8105,6 +8270,17 @@ class RealmFill(RealmBase):
             shape = shape & self.intersect.index_space.shape
         return (field_size * shape.volume())
 
+    def get_equivalence_privileges(self):
+        if self.eq_privileges is None:
+            self.eq_privileges = dict()
+            point_set = self.index_expr.get_point_set()
+            for point in point_set.iterator():
+                for field in self.fields:
+                    key = (point,field,self.tree_id)
+                    assert key not in self.eq_privileges
+                    self.eq_privileges[key] = WRITE_ONLY
+        return self.eq_privileges
+
 class RealmDeppart(RealmBase):
     __slots__ = ['index_space', 'node_name']
     def __init__(self, state, finish, realm_num):
@@ -8152,6 +8328,12 @@ class RealmDeppart(RealmBase):
                 "".join([printer.wrap_with_trtd(line) for line in lines]) + '</table>'
         printer.println(self.node_name+' [label=<'+label+'>,fontsize='+str(size)+\
                 ',fontcolor=black,shape=record,penwidth=0];')
+
+    def get_equivalence_privileges(self):
+        assert self.creator is not None
+        if self.eq_privileges is None:
+            self.eq_privileges = self.creator.get_equivalence_privileges()
+        return self.eq_privileges
 
 class EventGraphTraverser(object):
     def __init__(self, forwards, use_gen, generation,
@@ -8326,7 +8508,6 @@ class PhysicalTraverser(object):
                     self.visit_node(next_node)
         if self.post_node_fn is not None:
             self.post_node_fn(node, self)
-
 
 class GraphPrinter(object):
     # Static member so we only issue this warning once
@@ -9809,8 +9990,6 @@ class State(object):
                 fill.compute_physical_reachable()
             for deppart in self.depparts.itervalues():
                 deppart.compute_physical_reachable()
-            if need_physical and simplify_graphs:
-                self.simplify_physical_graph()
         if self.verbose:
             print("Found %d processors" % len(self.processors))
             print("Found %d memories" % len(self.memories))
@@ -9827,20 +10006,18 @@ class State(object):
             print("Found %d copies" % len(self.copies))
             print("Found %d fills" % len(self.fills))
 
-    def simplify_physical_graph(self, need_cycle_check=True):
-        print("Simplifying event graph...")
+    def simplify_physical_graph(self, need_cycle_check=True, 
+                                make_equivalence_graphs=False):
         # Check for cycles first, if there are any, then we disable
         # the transitive reduction and print a warning
-        #
-        # This cycle check is slow so we're doing an improvised version that
-        # below that checks for cycles on individual operations instead
-        # of the full event graph
-        #
-        #if need_cycle_check and self.perform_cycle_checks(print_result=False):
-        #    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
-        #    print("  This usually indicates a runtime bug and should be reported.")
-        #    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
-        #    return
+        if need_cycle_check:
+            print("Checking for cycles...")
+            if self.perform_cycle_checks(print_result=True):
+                print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+                print("  This usually indicates a runtime bug and should be reported.")
+                print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
+                return
+        print("Simplifying event graph...")
         def post_traverse_node(node, traverser):
             traverser.postorder.append(node)
         # Build a topological order of everything 
@@ -9864,45 +10041,243 @@ class State(object):
         # Do the simplification in postorder so we simplify
         # the smallest subgraphs first and only do the largest
         # subgraphs later after the smallest ones are already simplified
-        count = 0;
+        count = 0
+        # Mapping from node to index
+        index_map = dict()
+        # Maintain a map of reachable sets for each of the nodes that
+        # we have traversed so far, we represent these as bit arrays
+        # so that they are easy to combine without using a full python
+        # set data structure
+        reachable = dict()
+        total_nodes = len(topological_sorter.postorder)
         for src in topological_sorter.postorder:
             if self.verbose:
-                print('Simplifying node %s %d of %d' % (str(src), count, 
-                                          len(topological_sorter.postorder)))
-                count += 1
-            if src.physical_outgoing is None:
+                print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
+            index_map[src] = count
+            count += 1
+            # Create our reachability set and store it
+            our_reachable = NodeSet(total_nodes)
+            reachable[src] = our_reachable
+            if src.physical_outgoing is None or len(src.physical_outgoing) == 0:
                 continue
-            actual_out = src.physical_outgoing.copy()
-            diff = False
-            for next_vert in src.physical_outgoing:
-                if not next_vert in actual_out:
-                    continue
-                reachable = set()
-                if next_vert.get_physical_reachable(reachable, True, next_vert, True):
-                    print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
-                    print("  This usually indicates a runtime bug and should be reported.")
-                    print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
-                    if self.assert_on_warning:
-                        assert False
-                    return
-                # See which edges we can remove
-                to_remove = list()
-                for other in actual_out:
-                    if other == next_vert:
-                        continue
-                    if other in reachable:
-                        to_remove.append(other)
-                del reachable
-                if len(to_remove) > 0:
-                    diff = True
-                    for rem in to_remove:
-                        actual_out.remove(rem)
-                        rem.physical_incoming.remove(src)
-                del to_remove
-            if diff:
-                src.physical_outgoing = actual_out
+            # Otherwise iterate through our outgoing edges and get the set of 
+            # nodes reachable from all of them
+            for dst in src.physical_outgoing:
+                assert dst in reachable
+                our_reachable.union(reachable[dst])
+            # Now see which of our nodes can be reached indirectly
+            to_remove = None
+            for dst in src.physical_outgoing:
+                assert dst in index_map
+                dst_index = index_map[dst]
+                if our_reachable.contains(dst_index):
+                    if to_remove is None:
+                        to_remove = list()
+                    to_remove.append(dst)
+                else:
+                    # We need to add it to our reachable set
+                    our_reachable.add(dst_index)
+            if to_remove:
+                for dst in to_remove:
+                    src.physical_outgoing.remove(dst)
+                    dst.physical_incoming.remove(src)
+            # We should never remove everything
+            assert len(src.physical_outgoing) > 0
         print("Done")
+        if make_equivalence_graphs:
+            self.compute_equivalence_graphs(topological_sorter.postorder, False)
 
+    def compute_equivalence_graphs(self, postorder=None, need_cycle_check=True):
+        if need_cycle_check:
+            print("Checking for cycles...")
+            if self.perform_cycle_checks(print_result=True):
+                print("WARNING: CYCLE DETECTED IN PHYSICAL EVENT GRAPH!!!")
+                print("  This usually indicates a runtime bug and should be reported.")
+                print("WARNING: DISABLING TRANSITIVE REDUCTION!!!")
+                return
+        print('Computing equivalence set graphs for verification...')
+        # The first thing we're going to do is BFS-like traversal of the
+        # graph to propagate reachability values for each equivalence set
+        # The main difference to BFS is that we can only traverse a node
+        # after we have traversed all the edges leading to that node so 
+        # we know we have a complete summary of the propagation of reachability
+        # information flowing into the node
+        incoming_sets = dict()
+        ready_nodes = collections.deque()
+        pending_nodes = dict()
+        # This is the function for processing a node during the traversal
+        def process_node(node):
+            if self.verbose:
+                print('Processing node '+str(node))
+            if node in incoming_sets:
+                local_sets = incoming_sets[node]
+                del incoming_sets[node]
+                for eq in node.get_equivalence_privileges().iterkeys():
+                    if eq in local_sets:
+                        # Add the incoming equivalence edges and update
+                        eq_incoming = local_sets[eq]
+                        assert len(eq_incoming) > 0
+                        for src in eq_incoming:
+                            node.add_equivalence_incoming(eq, src)
+                            src.add_equivalence_outgoing(eq, node)
+                        # Who knows why list doesn't have a clear method
+                        del eq_incoming[:]
+                        eq_incoming.append(node)
+                    else:
+                        # Update with ourself
+                        eq_incoming = list()
+                        eq_incoming.append(node)
+                        local_sets[eq] = eq_incoming
+            elif node.physical_outgoing:
+                local_sets = dict()
+                for eq in node.get_equivalence_privileges():
+                    # Update with ourself
+                    eq_incoming = list()
+                    eq_incoming.append(node)
+                    local_sets[eq] = eq_incoming
+            if not node.physical_outgoing:
+                return
+            for dst in node.physical_outgoing:
+                if not dst in incoming_sets:
+                    dst_sets = dict()
+                    incoming_sets[dst] = dst_sets
+                else:
+                    dst_sets = incoming_sets[dst]
+                for eq,eq_outgoing in local_sets.iteritems():
+                    assert len(eq_outgoing) > 0
+                    if eq in dst_sets:
+                        eq_target = dst_sets[eq]
+                        # Merge the two lists together
+                        for src in eq_outgoing:
+                            if src not in eq_target:
+                                eq_target.append(src)
+                    else:
+                        # Just assign, make sure that we make a copy of it
+                        # to prevent aliasing between destination nodes
+                        # if there is more than one of them
+                        if len(local_sets) > 1:
+                            dst_sets[eq] = list(eq_outgoing)
+                        else: # Only one outgoing so can just move it over
+                            dst_sets[eq] = eq_outgoing
+                # See if this destination node is ready or not
+                if len(dst.physical_incoming) > 1:
+                    if dst in pending_nodes:
+                        # Increment the number of received incoming edges
+                        pending_nodes[dst] += 1
+                        # Check to see if it is ready or not yet
+                        if pending_nodes[dst] == len(dst.physical_incoming):
+                            del pending_nodes[dst]
+                            ready_nodes.append(dst)
+                    else:
+                        # We've seen one edge so far
+                        pending_nodes[dst] = 1
+                else:
+                    # Only one incoming edge so we know it's ready
+                    assert len(dst.physical_incoming) == 1
+                    ready_nodes.append(dst)
+        # Seed the incoming sets with the roots
+        for op in self.ops.itervalues():
+            if not op.physical_incoming:
+                process_node(op)
+        for copy in self.copies.itervalues():
+            if not copy.physical_incoming:
+                process_node(copy)
+        for fill in self.fills.itervalues():
+            if not fill.physical_incoming:
+                process_node(fill)
+        for deppart in self.depparts.itervalues():
+            if not deppart.physical_incoming:
+                process_node(deppart)
+        # Iterate until we've walked the whole graph O(V + E)
+        while ready_nodes:
+            node = ready_nodes.popleft()
+            process_node(node)
+        # The pending nodes should be empty by the time we are done with this
+        assert not pending_nodes
+        print('Done')
+        print('Simplifying equivalence event graphs...')
+        # Now we need to transitively reduce each of the equivalence set graphs
+        # Do this in postorder for the same reason we transitively reduce
+        # the physical graph in post order
+        if postorder is None:
+            def post_traverse_node(node, traverser):
+                traverser.postorder.append(node)
+            # Build a topological order of everything 
+            topological_sorter = PhysicalTraverser(True, True,
+                self.get_next_traversal_generation(), None, post_traverse_node)
+            topological_sorter.postorder = list()
+            # Traverse all the sources 
+            for op in self.ops.itervalues():
+                if not op.physical_incoming:
+                    topological_sorter.visit_node(op)
+            for copy in self.copies.itervalues():
+                if not copy.physical_incoming:
+                    topological_sorter.visit_node(copy)
+            for fill in self.fills.itervalues():
+                if not fill.physical_incoming:
+                    topological_sorter.visit_node(fill)
+            for deppart in self.depparts.itervalues():
+                if not deppart.physical_incoming:
+                    topological_sorter.visit_node(deppart)
+            postorder = topological_sorter.postorder
+        # Transitively reduce the equivalence set graphs 
+        # We do this in one pass to avoid try and maximize efficiency
+        # and locality at the cost of a little bit of memory pressure
+        count = 0
+        index_map = dict()
+        # This will actually be a dict of dicts with one reachable set
+        # for each of the different equivalence sets
+        reachable = dict()
+        total_nodes = len(postorder)
+        for src in postorder:
+            if self.verbose:
+                print('Simplifying equivalence node %s %d of %d' % 
+                        (str(src), count, total_nodes)) 
+            index_map[src] = count
+            count += 1
+            # Create our reachability dict
+            our_reachable = dict()
+            reachable[src] = our_reachable
+            # if we have no outgoing equivalence edges then there is nothing to do
+            if src.eq_outgoing is None or len(src.eq_outgoing) == 0:
+                # Still need to populate it
+                for eq in src.get_equivalence_privileges().iterkeys():
+                    our_reachable[eq] = NodeSet(total_nodes)
+                continue
+            # Iterate over all the equivalence classes for this node
+            for eq in src.get_equivalence_privileges().iterkeys():
+                # No outgoing equivalence classes for this node so nothing to do
+                eq_reachable = NodeSet(total_nodes) 
+                our_reachable[eq] = eq_reachable
+                if eq not in src.eq_outgoing:
+                    continue
+                # Iterate through our outgoing edges and get the set of nodes
+                # reachable from all of them
+                outgoing_edges = src.eq_outgoing[eq]
+                for dst in outgoing_edges:
+                    assert dst in reachable
+                    assert eq in reachable[dst]
+                    eq_reachable.union(reachable[dst][eq])
+                # Now see which of our nodes can be reached directly
+                to_remove = None
+                for dst in outgoing_edges:
+                    assert dst in index_map
+                    dst_index = index_map[dst]
+                    if eq_reachable.contains(dst_index):
+                        if to_remove is None:
+                            to_remove = list()
+                        to_remove.append(dst)
+                    else:
+                        # We need to add it to our reachable set
+                        eq_reachable.add(dst_index)
+                if to_remove:
+                    for dst in to_remove:
+                        src.eq_outgoing[eq].remove(dst)
+                        dst.eq_incoming[eq].remove(src)
+                # We should never remove everything
+                assert len(src.eq_outgoing[eq]) > 0
+        print('Done')
+            
     def alias_individual_points(self, p1, p2):
         # These are two copies of the same individual
         # task from different nodes, merge them into
@@ -9998,14 +10373,63 @@ class State(object):
         print("Pass")
 
     def perform_cycle_checks(self, print_result=True):
+        # To perform our cycle checks we run a modified version of
+        # Tarjan's algorithm for strongly connected components since
+        # it runs in O(V + E) time. If we find a SCC that is larger
+        # than size 1 then that is a cycle.
+        class CycleDetector(object):
+            def __init__(self):
+                self.indexes = dict()
+                self.lowlink = dict()
+                self.index = 0
+                self.stack = list()
+
+            def check_for_cycles(self, node, edges):
+                # First see if we've already traversed this node before
+                if node in self.indexes:
+                    return False
+                # Check for self cycles
+                if node in edges:
+                    print('SELF CYCLE DETECTED! '+str(node))
+                    return True
+                # Now run Tarjan's algorithm
+                self.indexes[node] = self.index
+                self.lowlink[node] = self.index
+                self.index += 1
+                self.stack.append(node)
+                for next_node in edges:
+                    if next_node not in self.indexes:
+                        if next_node.perform_cycle_check(self):
+                            # Short circuit
+                            return True
+                        self.lowlink[node] = min(self.lowlink[node], 
+                                                 self.lowlink[next_node])
+                    elif next_node in self.stack:
+                        self.lowlink[node] = min(self.lowlink[node],
+                                                 self.indexes[next_node])
+                # If this node is the root of an SCC then we need to
+                # pop it off the stack. For an acyclic graph every node
+                # should be its own strongly connected component of size 1
+                if self.indexes[node] == self.lowlink[node]:
+                    last = self.stack.pop()
+                    if last is not node:
+                        print('CYCLE DETECTED!')
+                        print(str(last))
+                        while last is not node:
+                            last = self.stack.pop()
+                            print(str(last))
+                        return True
+                return False
+
+        cycle_detector = CycleDetector()
         for op in self.ops.itervalues(): 
-            if op.perform_cycle_check():
+            if op.perform_cycle_check(cycle_detector):
                 return True
         for copy in self.copies.itervalues():
-            if copy.perform_cycle_check():
+            if copy.perform_cycle_check(cycle_detector):
                 return True
         for fill in self.fills.itervalues():
-            if fill.perform_cycle_check():
+            if fill.perform_cycle_check(cycle_detector):
                 return True
         if print_result:
             print("No cycles detected")
@@ -10629,6 +11053,9 @@ def main(temp_dir):
         if state.assert_on_warning:
             assert False
         user_event_leaks = False
+    if cycle_checks:
+        print("Performing cycle checks...")
+        state.perform_cycle_checks()
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
     need_logical = dataflow_graphs and not state.detailed_logging 
@@ -10650,14 +11077,22 @@ def main(temp_dir):
             print("INFO: No physical dependence data was found so we are running "+
                   "physical analysis to show the event graph that the runtime "+
                   "should compute. This is not the actual event graph computed.")
+        elif (simplify_graphs):
+            # Simplify the graph before checking it, we need cycle checks
+            # if we didn't do them before
+            state.simplify_physical_graph(need_cycle_check=not cycle_checks,
+                                          make_equivalence_graphs=True)
+        else:
+            # Doing verification so we still need the equivalence class graphs
+            state.compute_equivalence_graphs()
         print("Performing physical analysis...")
-        state.perform_physical_analysis(physical_checks, sanity_checks, need_restrict_analysis)
+        state.perform_physical_analysis(physical_checks, sanity_checks, 
+                                        need_restrict_analysis)
         # If we generated the graph for printing, then simplify it 
-        if need_physical:
+        if need_physical and simplify_graphs:
             state.simplify_physical_graph(need_cycle_check=False)
-    if cycle_checks:
-        print("Performing cycle checks...")
-        state.perform_cycle_checks()
+    elif event_graphs and simplify_graphs:
+        state.simplify_physical_graph(need_cycle_check=not cycle_checks)
     if user_event_leaks:
         print("Performing user event leak checks...")
         state.perform_user_event_leak_checks()
