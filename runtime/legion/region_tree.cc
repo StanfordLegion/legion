@@ -5031,7 +5031,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
                                  FieldSpace handle,
-                                 RegionTreeID tree_id,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
@@ -5044,7 +5045,7 @@ namespace Legion {
 #endif
       return result->issue_copy(trace_info, dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                                handle, tree_id,
+                                handle, src_tree_id, dst_tree_id,
 #endif
                                 precondition, redop, reduction_fold);
     }

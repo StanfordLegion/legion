@@ -3709,7 +3709,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
                                              FieldSpace handle,
-                                             RegionTreeID tree_id,
+                                             RegionTreeID src_tree_id,
+                                             RegionTreeID dst_tree_id,
 #endif
                                              ApEvent precondition,
                                              ReductionOpID redop,
@@ -3764,7 +3765,7 @@ namespace Legion {
       instructions.push_back(new IssueCopy(
             *this, lhs_, expr, op_key, src_fields, dst_fields,
 #ifdef LEGION_SPY
-            handle, tree_id,
+            handle, src_tree_id, dst_tree_id,
 #endif
             precondition_idx, redop, reduction_fold));
 #ifdef DEBUG_LEGION
@@ -4646,12 +4647,12 @@ namespace Legion {
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
 #ifdef LEGION_SPY
-                         FieldSpace h, RegionTreeID tid,
+                         FieldSpace h,RegionTreeID src_tid,RegionTreeID dst_tid,
 #endif
                          unsigned pi, ReductionOpID ro, bool rf)
       : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
 #ifdef LEGION_SPY
-        handle(h), tree_id(tid), 
+        handle(h), src_tree_id(src_tid), dst_tree_id(dst_tid),
 #endif
         precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
@@ -4688,7 +4689,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
       events[lhs] = expr->issue_copy(trace_info, src_fields, dst_fields,
 #ifdef LEGION_SPY
-                                     handle, tree_id,
+                                     handle, src_tree_id, dst_tree_id,
 #endif
                                      precondition, redop, reduction_fold);
     }
@@ -4741,7 +4742,7 @@ namespace Legion {
       return new IssueCopy(tpl, lfinder->second, expr, owner, src_fields,
                            dst_fields, 
 #ifdef LEGION_SPY
-                           handle, tree_id,
+                           handle, src_tree_id, dst_tree_id,
 #endif
                            pfinder->second, redop, reduction_fold);
     }

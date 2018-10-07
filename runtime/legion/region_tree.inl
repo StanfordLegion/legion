@@ -99,7 +99,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
                                  FieldSpace handle,
-                                 RegionTreeID tree_id,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
@@ -135,7 +136,7 @@ namespace Legion {
       {
         trace_info.record_issue_copy(result, this, src_fields, dst_fields,
 #ifdef LEGION_SPY
-                                     handle, tree_id,
+                                     handle, src_tree_id, dst_tree_id,
 #endif
                                      precondition, redop, reduction_fold);
       }
@@ -149,7 +150,7 @@ namespace Legion {
           result = new_result;
         }
         LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
-            expr_id, handle, tree_id, precondition, result);
+            expr_id, handle, src_tree_id, dst_tree_id, precondition, result);
         for (unsigned idx = 0; idx < src_fields.size(); idx++)
           LegionSpy::log_copy_field(result, src_fields[idx].field_id,
                                     src_fields[idx].inst_event,
@@ -405,7 +406,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle, RegionTreeID tree_id,
+                                 FieldSpace handle, 
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
@@ -417,7 +420,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
             dst_fields, src_fields,
 #ifdef LEGION_SPY
-            handle, tree_id,
+            handle, src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
             redop, reduction_fold);
@@ -425,14 +428,14 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, tree_id,
+                handle, src_tree_id, dst_tree_id,
 #endif
                 space_ready, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, tree_id,
+                handle, src_tree_id, dst_tree_id,
 #endif
                 precondition, redop, reduction_fold);
     }
@@ -939,7 +942,9 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
-                                 FieldSpace handle, RegionTreeID tree_id,
+                                 FieldSpace handle, 
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
@@ -952,7 +957,7 @@ namespace Legion {
           return issue_copy_internal(context, realm_index_space, trace_info, 
               dst_fields, src_fields, 
 #ifdef LEGION_SPY
-              handle, tree_id,
+              handle, src_tree_id, dst_tree_id,
 #endif
               Runtime::merge_events(&trace_info, 
                 precondition, realm_index_space_ready), redop, reduction_fold);
@@ -960,7 +965,7 @@ namespace Legion {
           return issue_copy_internal(context, realm_index_space, trace_info, 
                              dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                             handle, tree_id,
+                             handle, src_tree_id, dst_tree_id,
 #endif
                              realm_index_space_ready, redop, reduction_fold);
       }
@@ -968,7 +973,7 @@ namespace Legion {
         return issue_copy_internal(context, realm_index_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, tree_id,
+                handle, src_tree_id, dst_tree_id,
 #endif
                 precondition, redop, reduction_fold);
     }
@@ -3259,7 +3264,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField> &src_fields,
 #ifdef LEGION_SPY
                                  FieldSpace handle,
-                                 RegionTreeID tree_id,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop, bool reduction_fold)
@@ -3271,7 +3277,7 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, dst_fields,
             src_fields,
 #ifdef LEGION_SPY
-            handle, tree_id,
+            handle, src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
             redop, reduction_fold);
@@ -3279,14 +3285,14 @@ namespace Legion {
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, tree_id,
+                handle, src_tree_id, dst_tree_id,
 #endif
                 space_ready, redop, reduction_fold);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                handle, tree_id,
+                handle, src_tree_id, dst_tree_id,
 #endif
                 precondition, redop, reduction_fold);
     }

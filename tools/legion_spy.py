@@ -7925,7 +7925,7 @@ class Event(object):
         self.phase_barrier = True
 
 class RealmBase(object):
-    __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space', 'tree_id', 
+    __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space',
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
                  'event_context', 'analyzed', 'cluster_name', 'reachable_cache']
@@ -7935,7 +7935,6 @@ class RealmBase(object):
         self.creator = None
         self.index_expr = None
         self.field_space = None
-        self.tree_id = None
         self.physical_incoming = set()
         self.physical_outgoing = set()
         self.eq_incoming = None
@@ -7947,12 +7946,7 @@ class RealmBase(object):
         self.event_context = None
         self.analyzed = False
         self.cluster_name = None # always none
-        self.reachable_cache = None
-
-    def set_tree_properties(self, index_expr, field_space, tid):
-        self.index_expr = index_expr
-        self.field_space = field_space
-        self.tree_id = tid
+        self.reachable_cache = None 
 
     def is_realm_operation(self):
         return True
@@ -8078,7 +8072,7 @@ class RealmBase(object):
 
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
-                 'srcs', 'dsts', 'redops', 'node_name']
+                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'redops', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8088,6 +8082,8 @@ class RealmCopy(RealmBase):
         self.dst_fields = list()
         self.srcs = list()
         self.dsts = list()
+        self.src_tree_id = None
+        self.dst_tree_id = None
         self.redops = list()
         self.node_name = 'realm_copy_'+str(realm_num)
 
@@ -8105,6 +8101,12 @@ class RealmCopy(RealmBase):
         assert self.creator is None
         self.creator = creator
         self.creator.add_realm_copy(self)
+
+    def set_tree_properties(self, index_expr, field_space, src_tid, dst_tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.src_tree_id = src_tid
+        self.dst_tree_id = dst_tid
 
     def update_creator(self, new_creator):
         assert self.creator
@@ -8190,13 +8192,21 @@ class RealmCopy(RealmBase):
             point_set = self.index_expr.get_point_set()
             for point in point_set.iterator():
                 for field in self.src_fields:
-                    key = (point,field,self.tree_id)
+                    key = (point,field,self.src_tree_id)
                     assert key not in self.eq_privileges
                     self.eq_privileges[key] = READ_ONLY
+            # If this is a copy across record that we 
+            # are writing to the destination fields
+            if self.dst_tree_id != self.src_tree_id:
+                for point in point_set.iterator():
+                    for field in self.dst_fields:
+                        key = (point,field,self.dst_tree_id)
+                        assert key not in self.eq_privileges
+                        self.eq_privileges[key] = WRITE_ONLY
         return self.eq_privileges
 
 class RealmFill(RealmBase):
-    __slots__ = ['fields', 'dsts', 'node_name']
+    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8204,6 +8214,7 @@ class RealmFill(RealmBase):
             finish.add_incoming_fill(self)
         self.fields = list()
         self.dsts = list()
+        self.dst_tree_id = None
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
@@ -8220,6 +8231,11 @@ class RealmFill(RealmBase):
         assert self.creator is None
         self.creator = creator
         self.creator.add_realm_fill(self)
+
+    def set_tree_properties(self, index_expr, field_space, dst_tid):
+        self.index_expr = index_expr
+        self.field_space = field_space
+        self.dst_tree_id = dst_tid
 
     def update_creator(self, new_creator):
         assert self.creator
@@ -8276,7 +8292,7 @@ class RealmFill(RealmBase):
             point_set = self.index_expr.get_point_set()
             for point in point_set.iterator():
                 for field in self.fields:
-                    key = (point,field,self.tree_id)
+                    key = (point,field,self.dst_tree_id)
                     assert key not in self.eq_privileges
                     self.eq_privileges[key] = WRITE_ONLY
         return self.eq_privileges
@@ -8942,7 +8958,8 @@ operation_event_pat     = re.compile(
     prefix+"Operation Events (?P<uid>[0-9]+) (?P<id1>[0-9a-f]+) (?P<id2>[0-9a-f]+)")
 realm_copy_pat          = re.compile(
     prefix+"Copy Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<src_tid>[0-9]+) (?P<dst_tid>[0-9]+) "+
+           "(?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
 realm_copy_field_pat    = re.compile(
     prefix+"Copy Field (?P<id>[0-9a-f]+) (?P<srcfid>[0-9]+) "+
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
@@ -9026,8 +9043,9 @@ def parse_legion_spy_line(line, state):
         copy.set_creator(op)
         index_expr = state.get_index_expr(int(m.group('ispace')))
         field_space = state.get_field_space(int(m.group('fspace')))
-        tree_id = int(m.group('tid'))
-        copy.set_tree_properties(index_expr, field_space, tree_id)
+        src_tree_id = int(m.group('src_tid'))
+        dst_tree_id = int(m.group('dst_tid'))
+        copy.set_tree_properties(index_expr, field_space, src_tree_id, dst_tree_id)
         return True
     m = realm_copy_field_pat.match(line)
     if m is not None:

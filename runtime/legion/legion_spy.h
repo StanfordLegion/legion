@@ -820,12 +820,13 @@ namespace Legion {
       static inline void log_copy_events(UniqueID op_unique_id,
                                          IndexSpaceExprID expr_id,
                                          FieldSpace handle,
-                                         RegionTreeID tree_id,
+                                         RegionTreeID src_tree_id,
+                                         RegionTreeID dst_tree_id,
                                          LgEvent pre, LgEvent post)
       {
-        log_spy.print("Copy Events %llu %lld %d %d " IDFMT " " IDFMT,
-                      op_unique_id, expr_id, handle.get_id(), tree_id,
-                      pre.id, post.id);
+        log_spy.print("Copy Events %llu %lld %d %d %d " IDFMT " " IDFMT,
+                      op_unique_id, expr_id, handle.get_id(), src_tree_id,
+                      dst_tree_id, pre.id, post.id);
       }
 
       static inline void log_copy_field(LgEvent post, FieldID src_fid,

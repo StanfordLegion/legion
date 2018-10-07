@@ -412,7 +412,8 @@ namespace Legion {
                                  const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
                                  FieldSpace handle,
-                                 RegionTreeID tree_id,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition,
                                  ReductionOpID redop,
@@ -426,7 +427,7 @@ namespace Legion {
 #endif
       tpl->record_issue_copy(op, result, expr, src_fields, dst_fields,
 #ifdef LEGION_SPY
-                             handle, tree_id,
+                             handle, src_tree_id, dst_tree_id,
 #endif
                              precondition, redop, reduction_fold);
     }
@@ -2548,6 +2549,7 @@ namespace Legion {
                                     dst_fields, src_fields, 
 #ifdef LEGION_SPY
                                     field_space_node->handle,
+                                    source->get_manager()->tree_id,
                                     manager->tree_id,
 #endif
                                     precondition, update->redop, false/*fold*/);
@@ -2606,6 +2608,7 @@ namespace Legion {
                                     dst_fields, src_fields, 
 #ifdef LEGION_SPY
                                     field_space_node->handle,
+                                    it->first->get_manager()->tree_id,
                                     manager->tree_id,
 #endif
                                     precondition, redop, false/*fold*/);
@@ -2704,6 +2707,7 @@ namespace Legion {
                                   dst_fields, src_fields, 
 #ifdef LEGION_SPY
                                   field_space_node->handle,
+                                  src_view->get_manager()->tree_id,
                                   manager->tree_id,
 #endif
                                   state.current_precondition, 
@@ -2783,7 +2787,9 @@ namespace Legion {
               ApEvent result = reduce_expr->issue_copy(trace_info,
                           dst_fields, src_fields, 
 #ifdef LEGION_SPY
-                          field_space_node->handle, manager->tree_id,
+                          field_space_node->handle, 
+                          git->first.second->get_manager()->tree_id,            
+                          manager->tree_id,
 #endif
                           git->first.first, eit->first.second, reduction_fold);
               if (result.exists())

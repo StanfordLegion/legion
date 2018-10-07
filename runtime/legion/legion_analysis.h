@@ -138,7 +138,8 @@ namespace Legion {
                              const std::vector<CopySrcDstField>& dst_fields,
 #ifdef LEGION_SPY
                              FieldSpace handle,
-                             RegionTreeID tree_id,
+                             RegionTreeID src_tree_id,
+                             RegionTreeID dst_tree_id,
 #endif
                              ApEvent precondition,
                              ReductionOpID redop,
