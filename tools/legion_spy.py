@@ -5274,55 +5274,6 @@ class Operation(object):
             for op in self.logical_incoming:
                 op.get_logical_reachable(reachable, False)
 
-    def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False,
-                               stack = None):
-        if stack is None:
-            stack = list()
-        # Check for cycles
-        elif self in stack:
-            return True
-        if not skip_first:
-            reachable.add(self)
-        stack.append(self)
-        if forward:
-            for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin, False, stack):
-                    return True
-        else:
-            for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin, False, stack):
-                    return True
-        stack.pop()
-        return False
-
-    def get_equivalence_reachable(self, reachable, eqs, forward, skip_first = False):
-        assert eqs is not None and len(eqs) > 0
-        new_eqs = None
-        if not skip_first:
-            privileges = self.get_equivalence_privileges()
-            for eq in eqs:
-                if eq in privileges:
-                    # Record that this is reachable
-                    if eq not in reachable:
-                        reachable[eq] = list()
-                    reachable[eq].append(self)
-                    # Start building a new eq set
-                    if new_eqs is None:
-                        new_eqs = eqs.copy()
-                    new_eqs.remove(eq)
-        # If the mask eq set didn't change, keep using the old one
-        if new_eqs is None:
-            new_eqs = eqs
-        elif len(new_eqs) == 0:
-            return
-        if forward:
-            for op in self.physical_outgoing:
-                op.get_equivalence_reachable(reachable, new_eqs, True)
-        else:
-            for op in self.physical_incoming:
-                op.get_equivalence_reachable(reachable, new_eqs, False)
-
     def merge(self, other):
         if self.kind == NO_OP_KIND:
             self.kind = other.kind
@@ -7944,55 +7895,6 @@ class RealmBase(object):
 
     def perform_cycle_check(self, cycle_detector):
         return cycle_detector.check_for_cycles(self, self.physical_outgoing)
-
-    def get_physical_reachable(self, reachable, forward, 
-                               origin = None, skip_first = False,
-                               stack = None):
-        if stack is None:
-            stack = list()
-        # Check for cycles
-        elif self in stack:
-            return True
-        if not skip_first:
-            reachable.add(self)
-        stack.append(self)
-        if forward:
-            for op in self.physical_outgoing:
-                if op.get_physical_reachable(reachable, True, origin, False, stack):
-                    return True
-        else:
-            for op in self.physical_incoming:
-                if op.get_physical_reachable(reachable, False, origin, False, stack):
-                    return True
-        stack.pop()
-        return False
-
-    def get_equivalence_reachable(self, reachable, eqs, forward, skip_first = False):
-        assert eqs is not None and len(eqs) > 0
-        new_eqs = None
-        if not skip_first:
-            privileges = self.get_equivalence_privileges()
-            for eq in eqs:
-                if eq in privileges:
-                    # Record that this is reachable
-                    if eq not in reachable:
-                        reachable[eq] = list()
-                    reachable[eq].append(self)
-                    # Start building a new eq set
-                    if new_eqs is None:
-                        new_eqs = eqs.copy()
-                    new_eqs.remove(eq)
-        # If the mask eq set didn't change, keep using the old one
-        if new_eqs is None:
-            new_eqs = eqs
-        elif len(new_eqs) == 0:
-            return
-        if forward:
-            for op in self.physical_outgoing:
-                op.get_equivalence_reachable(reachable, new_eqs, True)
-        else:
-            for op in self.physical_incoming:
-                op.get_equivalence_reachable(reachable, new_eqs, False)
 
     def print_incoming_event_edges(self, printer):
         for src in self.physical_incoming:
