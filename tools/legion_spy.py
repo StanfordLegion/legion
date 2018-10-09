@@ -3607,12 +3607,13 @@ class LogicalState(object):
                 assert self.projection_mode == OPEN_MULTI_REDUCE
                 assert self.current_redop != 0
                 if self.current_redop != req.redop:
-                    if not self.perform_close_operation(empty_children_to_close, False, 
-                            False, op, req, previous_deps, perform_checks, disjoint_close):
-                        return False
+                    
                     if disjoint_close:
                         self.projection_mode = OPEN_READ_WRITE
                     else:
+                        if not self.perform_close_operation(empty_children_to_close, False, 
+                             False, op, req, previous_deps, perform_checks, disjoint_close):
+                            return False
                         self.projection_mode = OPEN_NONE
         elif self.current_redop != 0 and self.current_redop != req.redop:
             children_to_close = set()
@@ -4132,6 +4133,8 @@ class DataflowTraverser(object):
             # the stack until we've gone through a reduction
             if not state.pending_reductions or state.valid_instances:
                 self.dataflow_stack.append(dst_inst)    
+        else:
+            self.dataflow_stack = None
         self.observed_reductions = dict()
         self.failed_analysis = False
         self.generation = None
@@ -4224,14 +4227,14 @@ class DataflowTraverser(object):
                         return
                     assert src not in self.observed_reductions
                     self.observed_reductions[src] = copy
-                    # See if we still need the dataflow path
-                    if self.found_dataflow_path:
-                        # Already have the dataflow path, so just analyze the copy
-                        self.perform_copy_analysis(copy, src, self.target)
-                    else:
+                    # Wait to do the copy analysis until we've seen
+                    # all the reductions so we can replay them in order
+                    if not self.found_dataflow_path:
                         # Otherwise we can now push the target on the stack
                         self.dataflow_stack.append(self.target)
-                        return True
+                    # Always keep going backwards for reductions in case
+                    # there are multiple of them chained together
+                    return True
         return False
 
     def post_visit_copy(self, copy):
@@ -4239,8 +4242,7 @@ class DataflowTraverser(object):
             self.dataflow_stack.pop()
             return
         if 0 in copy.redops:
-            # Normal copy, definitely do the analysis if this is part
-            # of the analysis
+            # Normal copy, definitely do the analysis
             if copy.region.get_point_set().has_point(self.point) and \
                 self.found_dataflow_path and (not copy.intersect or 
                     copy.intersect.get_point_set().has_point(self.point)): 
@@ -4248,22 +4250,9 @@ class DataflowTraverser(object):
                 # Perform the copy analysis
                 self.perform_copy_analysis(copy, self.dataflow_stack[-1], 
                                            self.dataflow_stack[-2])
-        else:
-            # Perform the reduction analysis if we found a path
-            if self.found_dataflow_path:
-                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                self.perform_copy_analysis(copy, src, self.target)
         # Always pop our instance off the stack
-        self.dataflow_stack.pop()
-        # Once we've analyzed the full dataflow path then we need to 
-        # analyze any pending reductions that we buffered earlier
-        if len(self.dataflow_stack) == 0 and self.found_dataflow_path and \
-                len(self.observed_reductions) > 0:
-            self.analyze_observed_reductions()
-
-    def analyze_observed_reductions(self):
-        for src,reduction in self.observed_reductions.iteritems():
-            self.perform_copy_analysis(reduction, src, self.target)
+        if self.dataflow_stack:
+            self.dataflow_stack.pop()
 
     def perform_copy_analysis(self, copy, src, dst):
         copy.record_analyzed_point(self.point)
@@ -4321,9 +4310,6 @@ class DataflowTraverser(object):
                 return
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
-            # If we had any pending reductions then analyze them now
-            if len(self.observed_reductions) > 0:
-                self.analyze_observed_reductions()
         return False
 
     def verified(self, last = False):
@@ -4342,16 +4328,26 @@ class DataflowTraverser(object):
                     assert False
             return False
         # See if we saw all the needed reductions
-        if self.state.pending_reductions and not self.state.valid_instances and \
-            len(self.state.pending_reductions) != len(self.observed_reductions):
-            if last:
-                print("ERROR: Missing reductions to apply to field "+
-                        str(self.dst_field)+" of instance "+str(self.target)+
-                        " of region requirement "+str(self.dst_req.index)+
-                        " of "+str(self.op))
-                if self.op.state.assert_on_error:
-                    assert False
-            return False
+        if self.state.pending_reductions and not self.state.valid_instances:
+            if len(self.state.pending_reductions) != len(self.observed_reductions):
+                if last:
+                    print("ERROR: Missing reductions to apply to field "+
+                            str(self.dst_field)+" of instance "+str(self.target)+
+                            " of region requirement "+str(self.dst_req.index)+
+                            " of "+str(self.op))
+                    if self.op.state.assert_on_error:
+                        assert False
+                return False
+            elif last:
+                # If this is the last check, replay the reductions in order
+                for src in self.state.pending_reductions:
+                    assert src in self.observed_reductions
+                    reduction = self.observed_reductions[src] 
+                    self.perform_copy_analysis(reduction, src, self.target)
+                    if self.failed_analysis:
+                        if self.op.state.assert_on_error:
+                            assert False
+                        return False
         return True
 
     def verify(self, op, restricted = False):
@@ -4446,7 +4442,8 @@ class EquivalenceSet(object):
         # State machine is write -> reduce -> read
         self.valid_instances = set()
         self.previous_instances = set()
-        self.pending_reductions = set()
+        # Reductions of different kinds must be kept in order
+        self.pending_reductions = list()
         self.pending_fill = False 
         self.version_number = 0
         
@@ -4458,7 +4455,7 @@ class EquivalenceSet(object):
         self.pending_fill = False
         self.previous_instances = set()
         self.valid_instances = set()
-        self.pending_reductions = set()
+        self.pending_reductions = list()
 
     def initialize_verification_state(self, inst):
         self.valid_instances.add(inst)
@@ -4479,11 +4476,13 @@ class EquivalenceSet(object):
             # and add ourselves to the reduction instances
             # See if we are the first reduction
             # The first reduction also bumps the version number
-            if not self.pending_reductions:
+            if self.valid_instances:
                 self.previous_instances = self.valid_instances
                 self.valid_instances = set()
                 self.version_number += 1
-            self.pending_reductions.add(inst)
+                # Clear our old stale reductions
+                self.pending_reductions = list()
+            self.pending_reductions.append(inst)
         elif req.is_write_only():
             assert inst.redop == 0
             # We overwrite everything else

@@ -167,13 +167,6 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields) = 0;
-      virtual bool reduce_to(ReductionOpID redop, 
-                             const FieldMask &reduce_mask,
-                     std::vector<CopySrcDstField> &src_fields,
-                             CopyAcrossHelper *across_helper = NULL) = 0;
-      virtual void reduce_from(ReductionOpID redop,
-                               const FieldMask &reduce_mask, 
-                       std::vector<CopySrcDstField> &src_fields) = 0;
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -227,12 +220,6 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields);
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<CopySrcDstField> &dst_fields,
-                             CopyAcrossHelper *across_helper = NULL);
-      virtual void reduce_from(ReductionOpID redop,
-                               const FieldMask &reduce_mask,
-                          std::vector<CopySrcDstField> &src_fields);
     public:
       void accumulate_events(std::set<ApEvent> &all_events);
     public:
@@ -499,17 +486,11 @@ namespace Legion {
                     std::set<RtEvent> &applied_events,
                     const PhysicalTraceInfo &trace_info);
     public:
-      virtual bool reduce_to(ReductionOpID redop, const FieldMask &copy_mask,
-                     std::vector<CopySrcDstField> &dst_fields,
-                             CopyAcrossHelper *across_helper = NULL);
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields);
-      virtual void reduce_from(ReductionOpID redop,
-                               const FieldMask &reduce_mask,
-                          std::vector<CopySrcDstField> &src_fields);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);

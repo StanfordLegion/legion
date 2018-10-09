@@ -423,7 +423,6 @@ namespace Legion {
                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
       class CopyUpdate;
       class FillUpdate;
-      class ReduceUpdate;
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
@@ -439,7 +438,6 @@ namespace Legion {
                LegionMap<ApEvent,FieldMask>::aligned &preconditions) const = 0;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
-                                  std::vector<ReduceUpdate*> &reduces,
                                   std::vector<FillUpdate*> &fills) = 0;
       public:
         IndexSpaceExpression *const expr;
@@ -471,7 +469,6 @@ namespace Legion {
                    LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
-                                  std::vector<ReduceUpdate*> &reduces,
                                   std::vector<FillUpdate*> &fills);
       public:
         InstanceView *const source;
@@ -500,55 +497,12 @@ namespace Legion {
                    LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
                                            std::vector<CopyUpdate*> > &copies,
-                                  std::vector<ReduceUpdate*> &reduces,
                                   std::vector<FillUpdate*> &fills);
       public:
         FillView *const source;
       };
-      class ReduceUpdate : public Update, public LegionHeapify<ReduceUpdate> {
-      public:
-        ReduceUpdate(const std::vector<ReductionView*> &srcs,
-                     unsigned srcf, unsigned dstf, 
-                     IndexSpaceExpression *expr,
-                     CopyAcrossHelper *helper = NULL,
-                     PredEvent guard = PredEvent::NO_PRED_EVENT)
-          : Update(expr, init_mask(srcf), helper, guard), sources(srcs), 
-            src_fidx(srcf), dst_fidx(dstf) { }
-        virtual ~ReduceUpdate(void) { }
-      private:
-        ReduceUpdate(const ReduceUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper,
-                   rhs.predicate_guard), 
-            sources(rhs.sources), src_fidx(rhs.src_fidx), 
-            dst_fidx(rhs.dst_fidx) { assert(false); }
-        ReduceUpdate& operator=(const ReduceUpdate &rhs)
-          { assert(false); return *this; }
-      public:
-        virtual void record_source_expressions(
-                        InstanceFieldExprs &src_exprs) const;
-        virtual void compute_source_preconditions(RegionTreeForest *forest,
-                   const std::map<InstanceView*,EventFieldExprs> &src_pre,
-                   LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
-        virtual void sort_updates(std::map<InstanceView*,
-                                           std::vector<CopyUpdate*> > &copies,
-                                  std::vector<ReduceUpdate*> &reduces,
-                                  std::vector<FillUpdate*> &fills);
-      private:
-        static inline FieldMask init_mask(unsigned fidx)
-          { FieldMask result; result.set_bit(fidx); return result; }
-      public:
-        const std::vector<ReductionView*> sources;
-        const unsigned src_fidx;
-        const unsigned dst_fidx;
-      };
       typedef LegionMap<ApEvent,
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
-      struct ReduceUpdateState {
-      public:
-        ReduceUpdate *reduce;
-        unsigned current_index;
-        ApEvent current_precondition;
-      };
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
                          std::set<RtEvent> &applied_events, bool track_events);
@@ -602,10 +556,6 @@ namespace Legion {
                                        std::vector<CopyUpdate*> > &copies,
                         ApEvent precondition, const FieldMask &copy_mask,
                         const PhysicalTraceInfo &trace_info);
-      void issue_reductions(InstanceView *target,
-                            const std::vector<ReduceUpdate*> &reduces,
-                            ApEvent precondition, const FieldMask &reduce_mask,
-                            const PhysicalTraceInfo &trace_info);
     public:
       RegionTreeForest *const forest;
       Operation *const op;
@@ -614,7 +564,12 @@ namespace Legion {
       const bool track_events;
     protected:
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
-      LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned reductions;
+      std::vector</*vector over reduction epochs*/
+        LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned> reductions;
+      // Figure out the reduction operator is for each epoch of a
+      // given destination instance and field
+      std::map<std::pair<InstanceView*,unsigned/*dst fidx*/>,
+               std::vector<ReductionOpID> > reduction_epochs;
       std::set<LogicalView*> all_views; // used for reference counting
     protected:
       mutable LocalLock pre_lock; 

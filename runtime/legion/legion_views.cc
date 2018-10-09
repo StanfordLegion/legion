@@ -448,29 +448,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool MaterializedView::reduce_to(ReductionOpID redop, 
-                                     const FieldMask &copy_mask,
-                                     std::vector<CopySrcDstField> &dst_fields,
-                                     CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-      if (across_helper == NULL)
-        manager->compute_copy_offsets(copy_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(copy_mask, dst_fields);
-      return false; // not a fold
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::reduce_from(ReductionOpID redop,
-                                       const FieldMask &reduce_mask, 
-                                       std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-      manager->compute_copy_offsets(reduce_mask, src_fields);
-    }
-
-    //--------------------------------------------------------------------------
     void MaterializedView::accumulate_events(std::set<ApEvent> &all_events)
     //--------------------------------------------------------------------------
     {
@@ -2608,44 +2585,16 @@ namespace Legion {
     } 
  
     //--------------------------------------------------------------------------
-    bool ReductionView::reduce_to(ReductionOpID redop, 
-                                  const FieldMask &reduce_mask,
-                                  std::vector<CopySrcDstField> &dst_fields,
-                                  CopyAcrossHelper *across_helper)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == manager->redop);
-#endif
-      // Get the destination fields for this copy
-      if (across_helper == NULL)
-        manager->find_field_offsets(reduce_mask, dst_fields);
-      else
-        across_helper->compute_across_offsets(reduce_mask, dst_fields);
-      return manager->is_foldable();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReductionView::reduce_from(ReductionOpID redop,
-                                    const FieldMask &reduce_mask,
-                                    std::vector<CopySrcDstField> &src_fields)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(redop == manager->redop);
-      assert(FieldMask::pop_count(reduce_mask) == 1); // only one field
-#endif
-      manager->find_field_offsets(reduce_mask, src_fields);
-    }
-
-    //--------------------------------------------------------------------------
     void ReductionView::copy_to(const FieldMask &copy_mask,
                                 std::vector<CopySrcDstField> &dst_fields,
                                 CopyAcrossHelper *across_helper)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+      // Get the destination fields for this copy
+      if (across_helper == NULL)
+        manager->find_field_offsets(copy_mask, dst_fields);
+      else
+        across_helper->compute_across_offsets(copy_mask, dst_fields);
     }
 
     //--------------------------------------------------------------------------
@@ -2653,8 +2602,10 @@ namespace Legion {
                                   std::vector<CopySrcDstField> &src_fields)
     //--------------------------------------------------------------------------
     {
-      // should never be called
-      assert(false);
+#ifdef DEBUG_LEGION
+      assert(FieldMask::pop_count(copy_mask) == 1); // only one field
+#endif
+      manager->find_field_offsets(copy_mask, src_fields);
     }
 
     //--------------------------------------------------------------------------
