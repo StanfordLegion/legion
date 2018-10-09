@@ -2104,7 +2104,7 @@ namespace Legion {
         perfect = false;
         break;
       }
-      CopyFillAggregator across_aggregator(this, op, dst_index,
+      CopyFillAggregator across_aggregator(this, op, src_index, dst_index,
                                            map_applied, true/*track*/);
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;

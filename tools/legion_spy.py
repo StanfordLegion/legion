@@ -167,7 +167,7 @@ def compute_dependence_type(req1, req2):
         assert False
         return NO_DEPENDENCE
 
-def check_preconditions(preconditions, op, eq_key):
+def check_preconditions(preconditions, op):
     to_traverse = collections.deque()
     to_traverse.append(op)
     backward_reachable = set()
@@ -180,15 +180,15 @@ def check_preconditions(preconditions, op, eq_key):
         found = False
         while to_traverse:
             node = to_traverse.popleft()
-            for prev in node.eq_incoming[eq_key]:
+            for prev in node.physical_incoming:
                 if prev not in backward_reachable:
                     backward_reachable.add(prev)
-                    # Only traverse past this if it's not writing
-                    if prev.get_equivalence_privileges()[eq_key] == READ_ONLY:
-                        to_traverse.append(prev)
+                    to_traverse.append(prev)
                     # If it's what we're looking for then record that
-                    if pre is prev:
+                    if not found and pre is prev:
                         found = True
+                        # Don't break, still need to add the other
+                        # backward reachable nodes from this node
             if found:
                 break
         if not found:
@@ -4095,7 +4095,7 @@ class Acquisition(object):
             return True
         return False
 
-class VerificationTraverser(object):
+class DataflowTraverser(object):
     def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst,
                  op, src_req, src_version, dst_version, error_str):
         self.state = state
@@ -4116,7 +4116,6 @@ class VerificationTraverser(object):
         # Across is either different fields or same field in different trees
         self.across = self.src_field.fid != self.dst_field.fid or \
                         self.src_tree != self.dst_tree
-        self.eq_key = (self.point, self.src_field, self.src_tree)
         # There is an implicit assumption here that if we did a close
         # to flush a bunch of reductions then copies will always come
         # from the newly created instance and not from an composite
@@ -4133,7 +4132,7 @@ class VerificationTraverser(object):
             # the stack until we've gone through a reduction
             if not state.pending_reductions or state.valid_instances:
                 self.dataflow_stack.append(dst_inst)    
-        self.observed_reductions = set()
+        self.observed_reductions = dict()
         self.failed_analysis = False
         self.generation = None
 
@@ -4146,9 +4145,9 @@ class VerificationTraverser(object):
         if isinstance(node, Operation):
             pass
         elif isinstance(node, RealmCopy):
-            self.visit_copy(node)
+            return self.visit_copy(node)
         elif isinstance(node, RealmFill):
-            self.visit_fill(node)
+            return self.visit_fill(node)
         elif isinstance(node, RealmDeppart):
             pass
         else:
@@ -4159,24 +4158,27 @@ class VerificationTraverser(object):
         if isinstance(node, RealmCopy):
             self.post_visit_copy(node)
 
-    def traverse_node(self, node, first = False):
+    def traverse_node(self, node, eq_key, first = True):
         if first:
             self.generation = node.state.get_next_traversal_generation()
         if not self.visit_node(node):
-            return
+            return False
         eq_privileges = node.get_equivalence_privileges()
-        privilege = eq_privileges[self.eq_key]
+        privilege = eq_privileges[eq_key]
         # We can't traverse past any operation that writes this field 
         # unless this is the first operation which we're trying to
         # traverse backwards from
         if privilege == READ_ONLY or first:
-            incoming = node.eq_incoming[self.eq_key]
-            if incoming:
-                for next_node in incoming:
-                    self.visit_node(next_node)
-                    if self.verified() or self.failed_analysis:
-                        break
+            if node.eq_incoming:
+                incoming = node.eq_incoming[eq_key]
+                if incoming:
+                    for next_node in incoming:
+                        # Short-circuit if we're done for better or worse
+                        if self.traverse_node(next_node, eq_key, first=False):
+                            return True
         self.post_visit_node(node)
+        # See if we are done
+        return self.failed_analysis or self.verified()
 
     def visit_copy(self, copy):
         # Check to see if this is a reduction copy or not
@@ -4201,6 +4203,7 @@ class VerificationTraverser(object):
                         else:
                             # Push it on the stack and continue traversal
                             self.dataflow_stack.append(src)
+                            return True
                     else:
                         if src in self.state.previous_instances:
                             self.found_dataflow_path = True             
@@ -4209,6 +4212,7 @@ class VerificationTraverser(object):
                         else:
                             # Push it on the stack and continue traversal
                             self.dataflow_stack.append(src)
+                            return True
         else:
             # Reduction copy
             if self.dst_field in copy.dst_fields and \
@@ -4218,7 +4222,8 @@ class VerificationTraverser(object):
                 if src.redop != 0:
                     if src not in self.state.pending_reductions:
                         return
-                    self.observed_reductions.add(src)
+                    assert src not in self.observed_reductions
+                    self.observed_reductions[src] = copy
                     # See if we still need the dataflow path
                     if self.found_dataflow_path:
                         # Already have the dataflow path, so just analyze the copy
@@ -4226,6 +4231,8 @@ class VerificationTraverser(object):
                     else:
                         # Otherwise we can now push the target on the stack
                         self.dataflow_stack.append(self.target)
+                        return True
+        return False
 
     def post_visit_copy(self, copy):
         if self.failed_analysis:
@@ -4248,13 +4255,22 @@ class VerificationTraverser(object):
                 self.perform_copy_analysis(copy, src, self.target)
         # Always pop our instance off the stack
         self.dataflow_stack.pop()
+        # Once we've analyzed the full dataflow path then we need to 
+        # analyze any pending reductions that we buffered earlier
+        if len(self.dataflow_stack) == 0 and self.found_dataflow_path and \
+                len(self.observed_reductions) > 0:
+            self.analyze_observed_reductions()
+
+    def analyze_observed_reductions(self):
+        for src,reduction in self.observed_reductions.iteritems():
+            self.perform_copy_analysis(reduction, src, self.target)
 
     def perform_copy_analysis(self, copy, src, dst):
-        copy.analyzed = True
+        copy.record_analyzed_point(self.point)
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
                                         self.src_field, self.point, self.op, 
                                         self.src_req.index, True, 0, self.src_version)
-        bad = check_preconditions(src_preconditions, copy, self.eq_key)
+        bad = check_preconditions(src_preconditions, copy)
         if bad is not None:
             print("ERROR: Missing source precondition for "+str(copy)+
                 " on field "+str(self.src_field)+" for op "+self.error_str+
@@ -4266,11 +4282,7 @@ class VerificationTraverser(object):
         dst_preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
                             False, src.redop, self.dst_version)
-        if self.across:
-            dst_eq_key = (self.point, self.dst_field, self.dst_tree)
-            bad = check_preconditions(dst_preconditions, copy, dst_eq_key)
-        else:
-            bad = check_preconditions(dst_preconditions, copy, self.eq_key)
+        bad = check_preconditions(dst_preconditions, copy)
         if bad is not None:
             print("ERROR: Missing destination precondition for "+str(copy)+
                 " on field "+str(self.dst_field)+" for op "+self.error_str+
@@ -4293,16 +4305,12 @@ class VerificationTraverser(object):
             if not self.state.pending_fill:
                 return
             self.found_dataflow_path = True
-            fill.analyzed = True
+            fill.record_analyzed_point(self.point)
             dst = fill.dsts[fill.fields.index(self.dst_field)]
             preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
                             False, 0, self.dst_version)
-            if self.across:
-                dst_eq_key = (self.point, self.dst_field, self.dst_tree)
-                bad = check_preconditions(preconditions, fill, dst_eq_key)
-            else:
-                bad = check_preconditions(preconditions, fill, self.eq_key)
+            bad = check_preconditions(preconditions, fill)
             if bad is not None:
                 print("ERROR: Missing destination precondition for "+
                     str(fill)+" on field "+str(self.dst_field)+" for op "+
@@ -4313,6 +4321,10 @@ class VerificationTraverser(object):
                 return
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
+            # If we had any pending reductions then analyze them now
+            if len(self.observed_reductions) > 0:
+                self.analyze_observed_reductions()
+        return False
 
     def verified(self, last = False):
         if self.failed_analysis:
@@ -4343,38 +4355,50 @@ class VerificationTraverser(object):
         return True
 
     def verify(self, op, restricted = False):
+        src_key = (self.point, self.src_field, self.src_tree)
+        dst_key = (self.point, self.dst_field, self.dst_tree)
         # Copies are a little weird in that they don't actually
         # depend on their region requirements so we just need
         # to traverse from their finish event
         if op.kind == COPY_OP_KIND:
             # Find the latest copies that we generated
-            # and start our traversal by skipping those "across" copies
-            dst_key = (self.point, self.dst_field, self.dst_tree)
             if op.realm_copies:
                 # If we are across, we start by visiting the last
                 # copies because they are the across ones, otherwise
                 # we just traverse them
                 if self.across:
                     for copy in op.realm_copies:
+                        # Skip non-across copies
+                        if copy.src_tree_id == copy.dst_tree_id:
+                            continue
                         eq_privileges = copy.get_equivalence_privileges()
-                        if self.eq_key in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(copy, True)
+                        if src_key in eq_privileges and dst_key in eq_privileges:
+                            self.traverse_node(copy, src_key)
                 else:
                     for copy in op.realm_copies:
+                        # Skip across copies
+                        if copy.src_tree_id != copy.dst_tree_id:
+                            continue
                         eq_privileges = copy.get_equivalence_privileges()
-                        if self.eq_key in eq_privileges and dst_key not in eq_privileges:
-                            self.traverse_node(copy, True)
+                        if src_key in eq_privileges:
+                            self.traverse_node(copy, src_key)
             if op.realm_fills:
                 if self.across:
                     for fill in op.realm_fills:
+                        # Skip non-across fills
+                        if fill.dst_tree_id != self.dst_tree:
+                            continue
                         eq_privileges = fill.get_equivalence_privileges()
-                        if self.eq_key in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(fill, True)
+                        if src_key not in eq_privileges and dst_key in eq_privileges:
+                            self.traverse_node(fill, dst_key)
                 else:
                     for fill in op.realm_fills:
+                        # Skip across fills
+                        if fill.dst_tree_id != self.src_tree:
+                            continue
                         eq_privileges = fill.get_equivalence_privileges()
-                        if self.eq_key in eq_privileges and dst_key not in eq_privileges:
-                            self.traverse_node(fill, True)
+                        if src_key in eq_privileges:
+                            self.traverse_node(fill, src_key)
         elif op.kind == INTER_CLOSE_OP_KIND or op.kind == POST_CLOSE_OP_KIND:
             # Close operations are similar to copies in that they don't
             # wait for data to be ready before starting, so we can't
@@ -4384,29 +4408,30 @@ class VerificationTraverser(object):
             if op.realm_copies:
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
-                    if self.eq_key in eq_privileges:
-                        self.traverse_node(copy, True)
+                    if src_key in eq_privileges:
+                        self.traverse_node(copy, src_key)
             if op.realm_fills:
                 for fill in op.realm_fills:
                     eq_privileges = fill.get_equivalence_privileges()
-                    if self.eq_key in eq_privileges:
-                        self.traverse_node(fill, True)
+                    if src_key in eq_privileges:
+                        self.traverse_node(fill, src_key)
         elif restricted:
+            assert not self.across
             # If this is restricted, do the traversal from the copies
             # themselves since they might have occurred after the op
             if op.realm_copies:
                 for copy in op.realm_copies:
                     eq_privileges = copy.get_equivalence_privileges()
-                    if self.eq_key not in eq_privileges:
+                    if src_key not in eq_privileges:
                         continue
                     # Only look at these if the destination is correct
                     if self.target in copy.dsts and \
                             self.dst_tree == copy.dst_tree_id and \
                             self.dst_field in copy.dsts:
-                        self.traverser_node(copy, True)
+                        self.traverse_node(copy, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
-            self.traverse_node(op, True)
+            self.traverse_node(op, src_key)
         return self.verified(True)
 
 class EquivalenceSet(object):
@@ -4521,7 +4546,7 @@ class EquivalenceSet(object):
             # Special case for the first access with uninitialized state
             if not self.is_initialized():
                 return True
-            traverser = VerificationTraverser(self, self.depth, self.field, req, inst, 
+            traverser = DataflowTraverser(self, self.depth, self.field, req, inst, 
                          op, req, self.version_number, self.version_number, error_str)
             return traverser.verify(op, restricted)
         # First see if we have a valid instance we can copy from  
@@ -4552,7 +4577,7 @@ class EquivalenceSet(object):
                                 error_str, restricted = False):
         assert self.pending_reductions
         if perform_checks:
-            traverser = VerificationTraverser(self, self.depth, self.field, req, inst, 
+            traverser = DataflowTraverser(self, self.depth, self.field, req, inst, 
                           op, req, self.version_number, self.version_number, error_str)
             return traverser.verify(op, restricted)
         # Make sure a reduction was issued from each reduction instance
@@ -4564,8 +4589,7 @@ class EquivalenceSet(object):
         preconditions = inst.find_verification_use_dependences(self.depth, 
                                           self.field, self.point, op, req)
         if perform_checks:
-            eq_key = (self.point, self.field, req.tid)
-            bad = check_preconditions(preconditions, op, eq_key)
+            bad = check_preconditions(preconditions, op)
             if bad is not None:
                 print("ERROR: Missing use precondition for field "+str(self.field)+
                       " of region requirement "+str(req.index)+" of "+str(op)+
@@ -4617,7 +4641,7 @@ class EquivalenceSet(object):
                 assert redop == 0
                 error_str = "copy across from "+str(src_req.index)+" to "+\
                     str(dst_req.index)+" of "+str(op)
-                traverser = VerificationTraverser(self, dst_depth, 
+                traverser = DataflowTraverser(self, dst_depth, 
                     dst_field, dst_req, dst_inst, op, src_req, 
                     self.version_number, dst_version_number, error_str)
                 return traverser.verify(op)
@@ -4634,12 +4658,11 @@ class EquivalenceSet(object):
                     if op.state.assert_on_error:
                         assert False
                     return False
-                copy.analyzed = True
+                copy.record_analyzed_point(self.point)
                 src_preconditions = src_inst.find_verification_copy_dependences(
                                     src_depth, src_field, self.point, op, 
                                     src_req.index, True, 0, self.version_number)
-                src_eq_key = (self.point, src_field, src_req.tid)
-                bad = check_preconditions(src_preconditions, copy, src_eq_key)
+                bad = check_preconditions(src_preconditions, copy)
                 if bad is not None:
                     print("ERROR: Missing source precondition for "+str(copy)+
                           " on field "+str(src_field)+" for "+str(op)+
@@ -4650,8 +4673,7 @@ class EquivalenceSet(object):
                 dst_preconditions = dst_inst.find_verification_copy_dependences(
                                     dst_depth, dst_field, self.point, op, 
                                     dst_req.index, False, redop, dst_version_number)
-                dst_eq_key = (self.point, dst_field, dst_req.tid)  
-                bad = check_preconditions(dst_preconditions, copy, dst_eq_key)
+                bad = check_preconditions(dst_preconditions, copy)
                 if bad is not None:
                     print("ERROR: Missing destination precondition for "+str(copy)+
                           " on field "+str(dst_field)+" for "+str(op)+
@@ -5835,29 +5857,18 @@ class Operation(object):
                 continue
         return result
 
-    def check_for_unanalyzed_realm_ops(self, perform_checks):
+    def check_for_spurious_realm_ops(self, perform_checks):
+        if not perform_checks:
+            return True
         if self.realm_copies:
-            count = 0
             for copy in self.realm_copies:
-                if not copy.analyzed:
-                    count += 1
-            if perform_checks and count > 0:
-                print("WARNING: "+str(self)+" generated "+str(count)+
-                      " unnecessary Realm copies")
-                for copy in self.realm_copies:
-                    if not copy.analyzed:
-                        print('    '+str(copy)+' was unnecessary')
+                if not copy.check_for_spurious_points():
+                    return False
         if self.realm_fills:
-            count = 0
             for fill in self.realm_fills:
-                if not fill.analyzed:
-                    count += 1
-            if perform_checks and count > 0:
-                print("WARNING: "+str(self)+" generated "+str(count)+\
-                      " unnecessary Realm fills")
-                for fill in self.realm_fills:
-                    if not fill.analyzed:
-                        print('    '+str(fill)+' was unnecessary')
+                if not fill.check_for_spurious_points():
+                    return False
+        return True
 
     def compute_current_version_numbers(self):
         assert self.context
@@ -6103,8 +6114,7 @@ class Operation(object):
                     if not self.task.perform_task_physical_verification(perform_checks,
                                                                 need_restrict_analysis):
                         return False
-        self.check_for_unanalyzed_realm_ops(perform_checks)
-        return True
+        return self.check_for_spurious_realm_ops(perform_checks)
 
     def print_op_mapping_decisions(self, depth):
         if self.inter_close_ops:
@@ -6888,12 +6898,19 @@ class Task(object):
                 # Otherwise iterate through our outgoing edges and get the set of 
                 # nodes reachable from all of them
                 for dst in src.logical_outgoing:
-                    assert dst in reachable
+                    # Some nodes won't appear in the list of all operations
+                    # such as must epoch operations which we can safely skip
+                    if dst not in reachable:
+                        assert dst not in all_ops
+                        continue
                     our_reachable.union(reachable[dst])
                 # Now see which of our nodes can be reached indirectly
                 to_remove = None
                 for dst in src.logical_outgoing:
-                    assert dst in index_map
+                    # See comment above for why we can skip some edges
+                    if dst not in index_map:
+                        assert dst not in all_ops
+                        continue
                     dst_index = index_map[dst]
                     if our_reachable.contains(dst_index):
                         if to_remove is None:
@@ -6909,6 +6926,10 @@ class Task(object):
                 # We should never remove everything
                 assert len(src.logical_outgoing) > 0
                 for dst in src.logical_outgoing:
+                    # Skip any edges to nodes not in the reachable list
+                    # (e.g. must epoch operations)
+                    if dst not in reachable:
+                        continue
                     printer.println(src.node_name+' -> '+dst.node_name+
                                     ' [style=solid,color=black,penwidth=2];')
             print("Done")
@@ -7815,7 +7836,7 @@ class RealmBase(object):
     __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space',
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
-                 'event_context', 'analyzed', 'cluster_name']
+                 'event_context', 'analyzed_points', 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -7831,7 +7852,7 @@ class RealmBase(object):
         self.finish_event = state.get_no_event()
         self.generation = 0
         self.event_context = None
-        self.analyzed = False
+        self.analyzed_points = None
         self.cluster_name = None # always none
 
     def is_realm_operation(self):
@@ -7863,6 +7884,34 @@ class RealmBase(object):
     def get_logical_op(self):
         assert self.creator is not None
         return self.creator
+
+    def record_analyzed_point(self, point):
+        if self.analyzed_points is None:
+            self.analyzed_points = set()
+        self.analyzed_points.add(point)
+
+    def check_for_spurious_points(self):
+        point_set = self.index_expr.get_point_set()
+        point_set_size = point_set.size()
+        assert point_set_size > 0
+        if self.analyzed_points is None:
+            print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
+            if self.state.assert_on_error:
+                assert False
+            return False
+        else:
+            # Check the points individually
+            assert point_set_size >= len(self.analyzed_points)
+            for point in point_set.iterator():
+                if point not in self.analyzed_points:
+                    print('ERROR: '+str(creator)+' generated spurious '+
+                            str(self)+' for point '+str(point))
+                    if self.state.assert_on_error:
+                        assert False
+                    return False
+        # We can clear this now that we no longer need it
+        self.analyzed_points = None
+        return True
 
     def compute_physical_reachable(self):
         # Once we reach something that is not an event
@@ -8040,7 +8089,7 @@ class RealmCopy(RealmBase):
                         key = (point,field,self.dst_tree_id)
                         assert key not in self.eq_privileges
                         self.eq_privileges[key] = WRITE_ONLY
-        return self.eq_privileges
+        return self.eq_privileges 
 
 class RealmFill(RealmBase):
     __slots__ = ['fields', 'dsts', 'dst_tree_id', 'node_name']
@@ -9547,11 +9596,11 @@ def parse_legion_spy_line(line, state):
     m = union_expr_pat.match(line)
     if m is not None:
         index_expr = state.get_index_expr(int(m.group('expr')))
-        remainder = line[m.end()+2:]
-        expr_ids = re.split('\W+', remainder)
+        remainder = line[m.end()+1:]
+        expr_ids = list(filter(None, re.split('\W+', remainder)))
         count = int(m.group('count'))
         # Don't handle end-of-line characters well
-        assert len(expr_ids) == count + 1
+        assert len(expr_ids) == count
         for expr_id in expr_ids[:count]:
             sub_expr = state.get_index_expr(int(expr_id))
             index_expr.add_union_expr(sub_expr)
@@ -9559,11 +9608,11 @@ def parse_legion_spy_line(line, state):
     m = intersect_expr_pat.match(line)
     if m is not None:
         index_expr = state.get_index_expr(int(m.group('expr')))
-        remainder = line[m.end()+2:]
-        expr_ids = re.split('\W+', remainder)
+        remainder = line[m.end()+1:]
+        expr_ids = list(filter(None, re.split('\W+', remainder)))
         count = int(m.group('count'))
         # Don't handle end-of-line characters well
-        assert len(expr_ids) == count + 1
+        assert len(expr_ids) == count
         for expr_id in expr_ids[:count]:
             sub_expr = state.get_index_expr(int(expr_id))
             index_expr.add_intersect_expr(sub_expr)

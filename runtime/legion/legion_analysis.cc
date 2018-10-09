@@ -1604,8 +1604,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o,
                                     unsigned idx, std::set<RtEvent> &ev, bool t)
-      : WrapperReferenceMutator(ev), forest(f), op(o), index(idx), 
-        track_events(t), effects(ev)
+      : WrapperReferenceMutator(ev), forest(f), op(o), src_index(idx), 
+        dst_index(idx), track_events(t), effects(ev)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o,
+                                           unsigned src_idx, unsigned dst_idx,
+                                           std::set<RtEvent> &ev, bool t)
+      : WrapperReferenceMutator(ev), forest(f), op(o), src_index(src_idx), 
+        dst_index(dst_idx), track_events(t), effects(ev)
     //--------------------------------------------------------------------------
     {
     }
@@ -1613,7 +1623,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(const CopyFillAggregator &rhs)
       : WrapperReferenceMutator(rhs.effects), forest(rhs.forest), op(rhs.op),
-        index(rhs.index), track_events(rhs.track_events), effects(rhs.effects)
+        src_index(rhs.src_index), dst_index(rhs.dst_index), 
+        track_events(rhs.track_events), effects(rhs.effects)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -2179,7 +2190,7 @@ namespace Legion {
           const FieldMask &copy_mask = dit->second.get_valid_mask();
           RtEvent pre_ready = dit->first->find_copy_preconditions(
                                 false/*reading*/, copy_mask, copy_expr,
-                                op_id, index, *this, trace_info);
+                                op_id, dst_index, *this, trace_info);
           if (pre_ready.exists())
             preconditions_ready.insert(pre_ready);
         }
@@ -2198,7 +2209,7 @@ namespace Legion {
               forest->union_index_spaces(it->elements);
             RtEvent pre_ready = dit->first->find_copy_preconditions(
                                   false/*reading*/, copy_mask, copy_expr,
-                                  op_id, index, *this, trace_info);
+                                  op_id, dst_index, *this, trace_info);
             if (pre_ready.exists())
               preconditions_ready.insert(pre_ready);
           }
@@ -2214,7 +2225,7 @@ namespace Legion {
           const FieldMask &copy_mask = sit->second.get_valid_mask();
           RtEvent pre_ready = sit->first->find_copy_preconditions(
                                 true/*reading*/, copy_mask, copy_expr,
-                                op_id, index, *this, trace_info);
+                                op_id, src_index, *this, trace_info);
           if (pre_ready.exists())
             preconditions_ready.insert(pre_ready);
         }
@@ -2233,7 +2244,7 @@ namespace Legion {
               forest->union_index_spaces(it->elements);
             RtEvent pre_ready = sit->first->find_copy_preconditions(
                                   true/*reading*/, copy_mask, copy_expr,
-                                  op_id, index, *this, trace_info);
+                                  op_id, src_index, *this, trace_info);
             if (pre_ready.exists())
               preconditions_ready.insert(pre_ready);
           }
@@ -2459,7 +2470,7 @@ namespace Legion {
         {
           target->add_copy_user(false/*reading*/,
                                 result, fill_mask, fill_expr,
-                                op_id, index, effects, trace_info); 
+                                op_id, dst_index, effects, trace_info); 
           if (track_events)
             events.insert(result);
         }
@@ -2501,7 +2512,7 @@ namespace Legion {
           {
             target->add_copy_user(false/*reading*/,
                                   result, fill_mask, fill_expr,
-                                  op_id, index, effects, trace_info);
+                                  op_id, dst_index, effects, trace_info);
             if (track_events)
               events.insert(result);
           }
@@ -2557,19 +2568,19 @@ namespace Legion {
           {
             source->add_copy_user(true/*reading*/,
                                   result, copy_mask, copy_expr,
-                                  op_id, index, effects, trace_info);
+                                  op_id, src_index, effects, trace_info);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
               target->add_copy_user(false/*reading*/,
                                     result, dst_mask, copy_expr,
-                                    op_id, index, effects, trace_info);
+                                    op_id, dst_index, effects, trace_info);
             }
             else
               target->add_copy_user(false/*reading*/,
                                     result, copy_mask, copy_expr,
-                                    op_id, index, effects, trace_info);
+                                    op_id, dst_index, effects, trace_info);
             if (track_events)
               events.insert(result);
           }
@@ -2616,10 +2627,10 @@ namespace Legion {
             {
               it->first->add_copy_user(true/*reading*/,
                                     result, copy_mask, copy_expr,
-                                    op_id, index, effects, trace_info);
+                                    op_id, src_index, effects, trace_info);
               target->add_copy_user(false/*reading*/,
                                     result, dst_mask, copy_expr,
-                                    op_id, index, effects, trace_info);
+                                    op_id, dst_index, effects, trace_info);
               if (track_events)
                 events.insert(result);
             }
@@ -2714,9 +2725,8 @@ namespace Legion {
                                   eit->first.second, reduction_fold); 
                 if (result.exists())
                 {
-                  src_view->add_copy_user(true/*reading*/,
-                                          result, src_mask, update->expr, 
-                                          op_id, index, effects, trace_info);
+                  src_view->add_copy_user(true/*reading*/, result, src_mask, 
+                        update->expr, op_id, src_index, effects, trace_info);
                   result_events.insert(result);
                 }
               }
@@ -2796,7 +2806,7 @@ namespace Legion {
               {
                 // Record the source user
                 git->first.second->add_copy_user(true/*reading*/, result, 
-                    src_mask, reduce_expr, op_id, index, effects, trace_info);
+                  src_mask, reduce_expr, op_id, src_index, effects, trace_info);
                 for (unsigned idx = 0; idx < git->second.size(); idx++)
                   result_events[git->second[idx]].insert(result);
               }
@@ -2833,7 +2843,7 @@ namespace Legion {
           FieldMask reduce_mask;
           reduce_mask.set_bit(update->dst_fidx);
           target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
-                                reduce_expr, op_id, index, effects, trace_info);
+                      reduce_expr, op_id, dst_index, effects, trace_info);
         }
         else
         {
@@ -2857,7 +2867,7 @@ namespace Legion {
             IndexSpaceExpression *reduce_expr = reduce_sets.begin()->first;
             const FieldMask &reduce_mask = reduce_sets.get_valid_mask();
             target->add_copy_user(false/*reading*/, git->first, reduce_mask, 
-                            reduce_expr, op_id, index, effects, trace_info);
+                        reduce_expr, op_id, dst_index, effects, trace_info);
           }
           else
           {
@@ -2871,7 +2881,7 @@ namespace Legion {
                 *(it->elements.begin()) : 
                 forest->union_index_spaces(it->elements);
               target->add_copy_user(false/*reading*/, git->first, it->set_mask,
-                               reduce_expr, op_id, index, effects, trace_info);
+                           reduce_expr, op_id, dst_index, effects, trace_info);
             }
           }
         }

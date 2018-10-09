@@ -552,6 +552,9 @@ namespace Legion {
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, unsigned idx,
                          std::set<RtEvent> &applied_events, bool track_events);
+      CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
+                         unsigned src_idx, unsigned dst_idx,
+                         std::set<RtEvent> &applied_events, bool track_events);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       ~CopyFillAggregator(void);
     public:
@@ -606,7 +609,8 @@ namespace Legion {
     public:
       RegionTreeForest *const forest;
       Operation *const op;
-      const unsigned index;
+      const unsigned src_index;
+      const unsigned dst_index;
       const bool track_events;
     protected:
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
