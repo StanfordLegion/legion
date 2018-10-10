@@ -5411,7 +5411,7 @@ class Operation(object):
         # Run through our copies and see if we can find one that matches
         if self.realm_fills:
             for fill in self.realm_fills:
-                if req.logical_node is not fill.region:
+                if req.tid != fill.dst_tree_id:
                     continue
                 if field not in fill.fields:
                     continue
@@ -5422,7 +5422,7 @@ class Operation(object):
         else:
             self.realm_fills = list()
         fill = self.state.create_fill(self)
-        fill.set_region(req.logical_node)
+        fill.set_tree_properties(req.index_node, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
         return fill
@@ -5452,8 +5452,7 @@ class Operation(object):
         # Run through our copies and see if we can find one that matches
         if self.realm_copies:
             for copy in self.realm_copies:
-                # See if the regions are the same
-                if req.logical_node is not copy.region:
+                if req.tid != copy.src_tree_id or req.tid != copy.dst_tree_id:
                     continue
                 if field not in copy.src_fields:
                     continue
@@ -5469,7 +5468,7 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
-        copy.set_region(req.logical_node)
+        copy.set_tree_properties(req.index_node, req.field_space, req.tid, req.tid)
         copy.add_field(field.fid, src, field.fid, dst, src.redop)
         self.realm_copies.append(copy)
         return copy
@@ -5478,8 +5477,7 @@ class Operation(object):
                                    dst_inst, dst_field, dst_req, redop):
         if self.realm_copies:
             for copy in self.realm_copies:
-                # See if the regions are the same 
-                if dst_req.logical_node is not copy.region:
+                if src_req.tid != copy.src_tree_id or dst_req.tid != copy.dst_tree_id:
                     continue
                 if src_field.fid not in copy.src_fields:
                     continue
@@ -5495,7 +5493,8 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
-        copy.set_region(dst_req.logical_node)
+        copy.set_tree_properties(dst_req.index_node, dst_req.field_space,
+                                 src_req.tid, dst_req.tid)
         copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
         self.realm_copies.append(copy)
         return copy
@@ -5655,7 +5654,7 @@ class Operation(object):
             else:
                 dep = MappingDependence(prev_op, self, 0, 0, TRUE_DEPENDENCE)
                 prev_op.add_outgoing(dep)
-                self.add_incoming(prev_op)
+                self.add_incoming(dep)
         return True
 
     def analyze_logical_deletion(self, index, perform_checks):
@@ -6049,8 +6048,12 @@ class Operation(object):
                                                               need_restrict_analysis):
                     return False
             return True
-        print((prefix+"Performing physical verification analysis "+
-                     "for %s (UID %d)...") % (str(self),self.uid))
+        if perform_checks:
+            print((prefix+"Performing physical verification analysis "+
+                         "for %s (UID %d)...") % (str(self),self.uid))
+        else:
+            print((prefix+"Performing physical emulation analysis "+
+                         "for %s (UID %d)...") % (str(self),self.uid))
         # Handle special cases
         if self.kind == COPY_OP_KIND:
             # Check to see if this is an index copy
@@ -10301,6 +10304,12 @@ class State(object):
     def perform_physical_analysis(self, perform_checks, sanity_checks, need_restrict_analysis):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
+        if perform_checks:
+            print(("Performing physical verification analysis "+
+                   "for %s (UID %d)...") % (str(top_task),top_task.op.uid))
+        else:
+            print(("Performing physical emulation analysis "+
+                   "for %s (UID %d)...") % (str(top_task),top_task.op.uid))
         # Perform the physical analysis on all the operations in program order
         if not top_task.perform_task_physical_verification(perform_checks, need_restrict_analysis):
             print("FAIL")
@@ -11020,7 +11029,6 @@ def main(temp_dir):
         else:
             # Doing verification so we still need the equivalence class graphs
             state.compute_equivalence_graphs()
-        print("Performing physical analysis...")
         state.perform_physical_analysis(physical_checks, sanity_checks, 
                                         need_restrict_analysis)
         # If we generated the graph for printing, then simplify it 
