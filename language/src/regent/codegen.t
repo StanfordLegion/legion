@@ -8578,7 +8578,7 @@ function codegen.stat_index_launch_num(cx, node)
     var [domain] = c.legion_domain_from_rect_1d(
       c.legion_rect_1d_t {
         lo = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[1].value]) },
-        hi = c.legion_point_1d_t { x = arrayof(c.coord_t, [values[2].value] - 1) },
+        hi = c.legion_point_1d_t { x = arrayof(c.coord_t, c.coord_t([values[2].value]) - 1) },
       })
   end
 
