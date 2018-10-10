@@ -2398,12 +2398,13 @@ namespace Legion {
 #endif
       if (fills.size() == 1)
       {
+        FillUpdate *update = fills[0];
 #ifdef DEBUG_LEGION
         // Should cover all the fields
-        assert(!(fill_mask - fills[0]->src_mask));
+        assert(!(fill_mask - update->src_mask));
 #endif
-        IndexSpaceExpression *fill_expr = fills[0]->expr;
-        FillView *fill_view = fills[0]->source;
+        IndexSpaceExpression *fill_expr = update->expr;
+        FillView *fill_view = update->source;
         const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
                                                      fill_view->value->value,
                                                    fill_view->value->value_size,
@@ -2416,9 +2417,18 @@ namespace Legion {
         // Record the fill result in the destination 
         if (result.exists())
         {
-          target->add_copy_user(false/*reading*/,
-                                result, fill_mask, fill_expr,
-                                op_id, dst_index, effects, trace_info); 
+          if (update->across_helper != NULL)
+          {
+            const FieldMask dst_mask = 
+                update->across_helper->convert_src_to_dst(fill_mask);
+            target->add_copy_user(false/*reading*/,
+                                  result, dst_mask, fill_expr,
+                                  op_id, dst_index, effects, trace_info);
+          }
+          else
+            target->add_copy_user(false/*reading*/,
+                                  result, fill_mask, fill_expr,
+                                  op_id, dst_index, effects, trace_info); 
           if (track_events)
             events.insert(result);
         }
@@ -2439,9 +2449,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           // Should cover all the fields
           assert(!(fill_mask - (*it)->src_mask));
+          // Should also have the same across helper as the first one
+          assert(fills[0]->across_helper == (*it)->across_helper);
 #endif
           exprs[(*it)->source].insert((*it)->expr);
         }
+        const FieldMask dst_mask = 
+          (fills[0]->across_helper == NULL) ? fill_mask : 
+           fills[0]->across_helper->convert_src_to_dst(fill_mask);
         for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
               const_iterator it = exprs.begin(); it != exprs.end(); it++)
         {
@@ -2459,7 +2474,7 @@ namespace Legion {
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
-                                  result, fill_mask, fill_expr,
+                                  result, dst_mask, fill_expr,
                                   op_id, dst_index, effects, trace_info);
             if (track_events)
               events.insert(result);
@@ -5194,7 +5209,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::issue_across_copies(const RegionUsage &usage,
-                const FieldMask &src_mask, const InstanceSet &target_instances,
+                const FieldMask &src_mask, 
+                const InstanceSet &source_instances,
+                const InstanceSet &target_instances,
+                const std::vector<InstanceView*> &source_views,
                 const std::vector<InstanceView*> &target_views,
                 IndexSpaceExpression *overlap, CopyFillAggregator &aggregator, 
                 PredEvent pred_guard, ReductionOpID redop,
@@ -5247,13 +5265,31 @@ namespace Legion {
           }
           // Now find all the source instances for this destination
           FieldMaskSet<LogicalView> src_views;
-          for (FieldMaskSet<LogicalView>::const_iterator it =
-                valid_instances.begin(); it != valid_instances.end(); it++)
+          if (!source_views.empty())
           {
-            const FieldMask overlap = it->second & src_mask;
-            if (!overlap)
-              continue;
-            src_views.insert(it->first, overlap);
+#ifdef DEBUG_LEGION
+            assert(source_instances.size() == source_views.size());
+#endif
+            // We already know the answers because they were mapped
+            for (unsigned idx2 = 0; idx2 < source_views.size(); idx2++)
+            {
+              const FieldMask &mask = source_instances[idx2].get_valid_fields();
+              const FieldMask overlap = mask & src_mask;
+              if (!overlap)
+                continue;
+              src_views.insert(source_views[idx2], overlap);
+            }
+          }
+          else
+          {
+            for (FieldMaskSet<LogicalView>::const_iterator it =
+                  valid_instances.begin(); it != valid_instances.end(); it++)
+            {
+              const FieldMask overlap = it->second & src_mask;
+              if (!overlap)
+                continue;
+              src_views.insert(it->first, overlap);
+            }
           }
           aggregator.record_updates(target_views[idx], src_views,
               src_mask, overlap, redop, (*across_helpers)[idx]);
@@ -5296,8 +5332,32 @@ namespace Legion {
       {
         // Fields align and we're not doing a reduction so we can just 
         // do a normal update copy analysis to figure out what to do
-        issue_update_copies_and_fills(aggregator, src_mask, target_instances,
-                                      target_views, overlap,true/*skip check*/);
+        if (!source_views.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(source_instances.size() == source_views.size());
+#endif
+          // We already know the instances that we need to use as
+          // the source instances for the copy across
+          FieldMaskSet<LogicalView> src_views;
+          for (unsigned idx = 0; idx < source_views.size(); idx++)
+          {
+            const FieldMask &mask = source_instances[idx].get_valid_fields();
+            const FieldMask overlap = mask & src_mask;
+            if (!overlap)
+              continue;
+            src_views.insert(source_views[idx], overlap);
+          }
+          for (unsigned idx = 0; idx < target_views.size(); idx++)
+          {
+            const FieldMask &mask = target_instances[idx].get_valid_fields(); 
+            aggregator.record_updates(target_views[idx], src_views, mask,
+                                      overlap, redop, NULL/*across*/);
+          }
+        }
+        else
+          issue_update_copies_and_fills(aggregator, src_mask, target_instances,
+                                    target_views, overlap, true/*skip check*/);
         // We also need to check for any reductions that need to be applied
         const FieldMask reduce_mask = reduction_fields & src_mask;
         if (!!reduce_mask)
@@ -5329,13 +5389,33 @@ namespace Legion {
         // Fields align but we're doing a reduction across
         // Find the valid views that we need for issuing the updates  
         FieldMaskSet<LogicalView> src_views;
-        for (FieldMaskSet<LogicalView>::const_iterator it = 
-              valid_instances.begin(); it != valid_instances.end(); it++)
+        if (!source_views.empty())
         {
-          const FieldMask overlap = it->second & src_mask;
-          if (!overlap)
-            continue;
-          src_views.insert(it->first, overlap);
+          // We already know what the answers should be because
+          // they were already mapped by copy operation
+#ifdef DEBUG_LEGION
+          assert(source_instances.size() == source_views.size());
+#endif
+          // We already know the answers because they were mapped
+          for (unsigned idx = 0; idx < source_views.size(); idx++)
+          {
+            const FieldMask &mask = source_instances[idx].get_valid_fields();
+            const FieldMask overlap = mask & src_mask;
+            if (!overlap)
+              continue;
+            src_views.insert(source_views[idx], overlap);
+          }
+        }
+        else
+        {
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            const FieldMask overlap = it->second & src_mask;
+            if (!overlap)
+              continue;
+            src_views.insert(it->first, overlap);
+          }
         }
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {

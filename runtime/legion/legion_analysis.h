@@ -778,7 +778,10 @@ namespace Legion {
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
                                 std::set<RtEvent> &ready_events);
       void issue_across_copies(const RegionUsage &usage,
-              const FieldMask &src_mask, const InstanceSet &target_instances,
+              const FieldMask &src_mask, 
+              const InstanceSet &source_instances,
+              const InstanceSet &target_instances,
+              const std::vector<InstanceView*> &source_views,
               const std::vector<InstanceView*> &target_views,
               IndexSpaceExpression *overlap, CopyFillAggregator &aggregator,
               PredEvent pred_guard, ReductionOpID redop, FieldMask &initialized,

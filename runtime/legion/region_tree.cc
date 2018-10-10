@@ -2058,6 +2058,7 @@ namespace Legion {
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
                                         VersionInfo &src_version_info,
+                                        const InstanceSet &src_targets,
                                         const InstanceSet &dst_targets,
                                         Operation *op, 
                                         unsigned src_index, unsigned dst_index,
@@ -2088,7 +2089,9 @@ namespace Legion {
         dst_mask.set_bit(dst_indexes[idx]);
       } 
       InnerContext *context = op->find_physical_context(dst_index);
-      std::vector<InstanceView*> target_views;
+      std::vector<InstanceView*> source_views, target_views;
+      if (!src_targets.empty())
+        context->convert_target_views(src_targets, source_views);
       context->convert_target_views(dst_targets, target_views);
       // Perform the copies/reductions across
       IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
@@ -2118,9 +2121,9 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
-                                     target_views, overlap, across_aggregator,
-                                     guard, dst_req.redop, initialized);
+          (*it)->issue_across_copies(usage, src_mask, src_targets, dst_targets,
+                         source_views, target_views, overlap, 
+                         across_aggregator, guard, dst_req.redop, initialized);
         } 
       }
       else
@@ -2142,10 +2145,11 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(usage, src_mask, dst_targets, 
-                                     target_views, overlap, across_aggregator,
-                                     guard, dst_req.redop, initialized,
-                                     &src_indexes,&dst_indexes,&across_helpers);
+          (*it)->issue_across_copies(usage, src_mask, src_targets, dst_targets,
+                                     source_views, target_views, overlap, 
+                                     across_aggregator, guard, dst_req.redop, 
+                                     initialized, &src_indexes,
+                                     &dst_indexes, &across_helpers);
         } 
       }
       if (initialized != src_mask)

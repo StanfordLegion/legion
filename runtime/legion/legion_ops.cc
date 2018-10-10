@@ -3823,8 +3823,8 @@ namespace Legion {
         ApEvent across_done = 
           runtime->forest->copy_across( 
                                 src_requirements[idx], dst_requirements[idx],
-                                src_versions[idx], dst_targets, this, idx,
-                                idx + src_requirements.size(),
+                                src_versions[idx], src_targets, dst_targets, 
+                                this, idx, idx + src_requirements.size(),
                                 local_init_precondition, predication_guard, 
                                 map_applied_conditions, trace_info);
         Runtime::trigger_event(local_completion, across_done);

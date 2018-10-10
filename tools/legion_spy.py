@@ -2190,7 +2190,7 @@ class IndexExpr(object):
             return result + ")"
         else:
             assert self.kind == DIFFERENCE_EXPR
-            return "(" + self.base[0] + " - " + self.base[1] + ")"
+            return "(" + str(self.base[0]) + " - " + str(self.base[1]) + ")"
 
     __repr__ = __str__
 
@@ -4365,15 +4365,15 @@ class DataflowTraverser(object):
                 if self.across:
                     for copy in op.realm_copies:
                         # Skip non-across copies
-                        if copy.src_tree_id == copy.dst_tree_id:
+                        if not copy.is_across():
                             continue
                         eq_privileges = copy.get_equivalence_privileges()
                         if src_key in eq_privileges and dst_key in eq_privileges:
-                            self.traverse_node(copy, src_key)
+                            self.traverse_node(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
                         # Skip across copies
-                        if copy.src_tree_id != copy.dst_tree_id:
+                        if copy.is_across():
                             continue
                         eq_privileges = copy.get_equivalence_privileges()
                         if src_key in eq_privileges:
@@ -4382,7 +4382,7 @@ class DataflowTraverser(object):
                 if self.across:
                     for fill in op.realm_fills:
                         # Skip non-across fills
-                        if fill.dst_tree_id != self.dst_tree:
+                        if not fill.is_across():
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key not in eq_privileges and dst_key in eq_privileges:
@@ -4390,7 +4390,7 @@ class DataflowTraverser(object):
                 else:
                     for fill in op.realm_fills:
                         # Skip across fills
-                        if fill.dst_tree_id != self.src_tree:
+                        if fill.is_across():
                             continue
                         eq_privileges = fill.get_equivalence_privileges()
                         if src_key in eq_privileges:
@@ -4423,7 +4423,7 @@ class DataflowTraverser(object):
                     # Only look at these if the destination is correct
                     if self.target in copy.dsts and \
                             self.dst_tree == copy.dst_tree_id and \
-                            self.dst_field in copy.dsts:
+                            self.dst_field in copy.dst_fields:
                         self.traverse_node(copy, src_key)
         else:
             # Traverse the node and then see if we satisfied everything
@@ -7858,7 +7858,7 @@ class RealmBase(object):
         return True
 
     def is_physical_operation(self):
-        return True
+        return True 
 
     def add_equivalence_incoming(self, eq, src):
         assert eq in self.eq_privileges
@@ -7957,7 +7957,8 @@ class RealmBase(object):
 
 class RealmCopy(RealmBase):
     __slots__ = ['start_event', 'finish_event', 'src_fields', 'dst_fields', 
-                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'redops', 'node_name']
+                 'srcs', 'dsts', 'src_tree_id', 'dst_tree_id', 'redops', 
+                 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -7970,6 +7971,7 @@ class RealmCopy(RealmBase):
         self.src_tree_id = None
         self.dst_tree_id = None
         self.redops = list()
+        self.across = None
         self.node_name = 'realm_copy_'+str(realm_num)
 
     def __str__(self):
@@ -7985,13 +7987,27 @@ class RealmCopy(RealmBase):
     def set_creator(self, creator):
         assert self.creator is None
         self.creator = creator
-        self.creator.add_realm_copy(self)
+        self.creator.add_realm_copy(self) 
 
     def set_tree_properties(self, index_expr, field_space, src_tid, dst_tid):
         self.index_expr = index_expr
         self.field_space = field_space
         self.src_tree_id = src_tid
         self.dst_tree_id = dst_tid
+
+    def is_across(self):
+        if self.across is not None:
+            return self.across
+        if self.src_tree_id != self.dst_tree_id:
+            self.across = True
+        else:
+            self.across = False
+            assert len(self.src_fields) == len(self.dst_fields)
+            for idx in xrange(len(self.src_fields)):
+                if self.src_fields[idx] != self.dst_fields[idx]:
+                    self.across = True
+                    break
+        return self.across
 
     def update_creator(self, new_creator):
         assert self.creator
@@ -8082,7 +8098,7 @@ class RealmCopy(RealmBase):
                     self.eq_privileges[key] = READ_ONLY
             # If this is a copy across record that we 
             # are writing to the destination fields
-            if self.dst_tree_id != self.src_tree_id:
+            if self.is_across():
                 for point in point_set.iterator():
                     for field in self.dst_fields:
                         key = (point,field,self.dst_tree_id)
@@ -8091,7 +8107,7 @@ class RealmCopy(RealmBase):
         return self.eq_privileges 
 
 class RealmFill(RealmBase):
-    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'node_name']
+    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8100,6 +8116,7 @@ class RealmFill(RealmBase):
         self.fields = list()
         self.dsts = list()
         self.dst_tree_id = None
+        self.across = None
         self.node_name = 'realm_fill_'+str(realm_num)
 
     def __str__(self):
@@ -8121,6 +8138,21 @@ class RealmFill(RealmBase):
         self.index_expr = index_expr
         self.field_space = field_space
         self.dst_tree_id = dst_tid
+
+    def is_across(self):
+        if self.across is not None:
+            return self.across
+        assert self.creator is not None
+        req = self.creator.reqs[0]
+        if req.tid != self.dst_tree_id:
+            self.across = True
+        else:
+            self.across = False
+            for field in self.fields:
+                if field not in req.fields:
+                    self.across = True
+                    break
+        return self.across
 
     def update_creator(self, new_creator):
         assert self.creator
