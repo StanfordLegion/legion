@@ -294,14 +294,17 @@ namespace Realm {
   public:
     static const ptrdiff_t STACK_SIZE_DEFAULT = -1;
     static const ptrdiff_t HEAP_SIZE_DEFAULT = -1;
+    static const ptrdiff_t ALTSTACK_SIZE_DEFAULT = -1;
 
     WithDefault<ptrdiff_t, STACK_SIZE_DEFAULT> stack_size;
     WithDefault<ptrdiff_t, HEAP_SIZE_DEFAULT> heap_size;
+    WithDefault<ptrdiff_t, ALTSTACK_SIZE_DEFAULT> alt_stack_size;
 
     ThreadLaunchParameters(void);
 
     ThreadLaunchParameters& set_stack_size(ptrdiff_t new_stack_size);
     ThreadLaunchParameters& set_heap_size(ptrdiff_t new_heap_size);
+    ThreadLaunchParameters& set_alt_stack_size(ptrdiff_t new_alt_stack_size);
   };
 
   // Kernel threads will generally be much happier if they decide up front which core(s)
@@ -325,6 +328,7 @@ namespace Realm {
     static const int NUMA_DOMAIN_DONTCARE = -1;
     static const ptrdiff_t STACK_SIZE_DEFAULT = -1;
     static const ptrdiff_t HEAP_SIZE_DEFAULT = -1;
+    static const ptrdiff_t ALTSTACK_SIZE_DEFAULT = -1;
 
     WithDefault<int, 1>                        num_cores;   // how many cores are requested
     WithDefault<int, NUMA_DOMAIN_DONTCARE>     numa_domain; // which NUMA domain the cores should come from
@@ -333,6 +337,7 @@ namespace Realm {
     WithDefault<CoreUsage, CORE_USAGE_SHARED>  ldst_usage;  // "memory" datapath usage
     WithDefault<ptrdiff_t, STACK_SIZE_DEFAULT> max_stack_size;
     WithDefault<ptrdiff_t, HEAP_SIZE_DEFAULT>  max_heap_size;
+    WithDefault<ptrdiff_t, ALTSTACK_SIZE_DEFAULT> alt_stack_size;
 
     CoreReservationParameters(void);
 
@@ -343,6 +348,7 @@ namespace Realm {
     CoreReservationParameters& set_ldst_usage(CoreUsage new_ldst_usage);
     CoreReservationParameters& set_max_stack_size(ptrdiff_t new_max_stack_size);
     CoreReservationParameters& set_max_heap_size(ptrdiff_t new_max_heap_size);
+    CoreReservationParameters& set_alt_stack_size(ptrdiff_t new_alt_stack_size);
   };
 
   class CoreReservationSet;
