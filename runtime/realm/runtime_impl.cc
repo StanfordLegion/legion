@@ -166,6 +166,15 @@ namespace Realm {
       fprintf(stderr,"Process %d on node %s is frozen!\n", 
                       process_id, hostname);
       fflush(stderr);
+
+      // now that we've stopped, don't catch any further SIGINTs
+      struct sigaction action;
+      action.sa_handler = SIG_DFL;
+      sigemptyset(&action.sa_mask);
+      action.sa_flags = 0;
+
+      CHECK_LIBC( sigaction(SIGINT, &action, 0) );
+
       while (true)
         sleep(1);
     }
