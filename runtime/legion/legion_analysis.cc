@@ -6502,8 +6502,10 @@ namespace Legion {
 
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       target->record_equivalence_set(set);
-      Runtime::trigger_event(done_event, ready);
+      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------

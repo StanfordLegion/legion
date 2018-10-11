@@ -11886,7 +11886,7 @@ namespace Legion {
       LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit);
       REPORT_LEGION_WARNING(LEGION_WARNING_REGION_REQUIREMENT_OPERATION_USING,
-        "WARNING: Region requirement %d of operation %s "
+                      "Region requirement %d of operation %s "
                       "(UID %lld) is using uninitialized data for field(s) %s "
                       "of logical region (%d,%d,%d)", idx, 
                       op->get_logging_name(), op->get_unique_op_id(),
