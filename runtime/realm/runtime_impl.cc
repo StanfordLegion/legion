@@ -198,26 +198,31 @@ namespace Realm {
 	   e->remote_waiters.empty())
 	  continue;
 
+	size_t clw_size = 0;
+	for(EventWaiter *pos = e->current_local_waiters.head.next;
+	    pos;
+	    pos = pos->ew_list_link.next)
+	  clw_size++;
 	os << "Event " << e->me <<": gen=" << e->generation
 	   << " subscr=" << e->gen_subscribed
-	   << " local=" << e->current_local_waiters.size()
+	   << " local=" << clw_size //e->current_local_waiters.size()
 	   << "+" << e->future_local_waiters.size()
 	   << " remote=" << e->remote_waiters.size() << "\n";
-	for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
-	    it != e->current_local_waiters.end();
-	    it++) {
-	  os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
-	  (*it)->print(os);
+	for(EventWaiter *pos = e->current_local_waiters.head.next;
+	    pos;
+	    pos = pos->ew_list_link.next) {
+	  os << "  [" << (e->generation+1) << "] L:" << pos/*(*it)*/ << " - ";
+	  pos/*(*it)*/->print(os);
 	  os << "\n";
 	}
-	for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	for(std::map<EventImpl::gen_t, EventWaiter::EventWaiterList>::const_iterator it = e->future_local_waiters.begin();
 	    it != e->future_local_waiters.end();
 	    it++) {
-	  for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
-	      it2 != it->second.end();
-	      it2++) {
-	    os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
-	    (*it2)->print(os);
+	  for(EventWaiter *pos = it->second.head.next;
+	      pos;
+	      pos = pos->ew_list_link.next) {
+	    os << "  [" << (it->first) << "] L:" << pos/*(*it2)*/ << " - ";
+	    pos/*(*it2)*/->print(os);
 	    os << "\n";
 	  }
 	}
@@ -244,11 +249,12 @@ namespace Realm {
 	   << " subscr=" << b->gen_subscribed << "\n";
 	for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
 	       b->generations.begin(); git != b->generations.end(); git++) {
-	  const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
-	  for (std::vector<EventWaiter*>::const_iterator it = 
-		 waiters.begin(); it != waiters.end(); it++) {
-	    os << "  [" << (git->first) << "] L:" << (*it) << " - ";
-	    (*it)->print(os);
+	  const EventWaiter::EventWaiterList &waiters = git->second->local_waiters;
+	  for(EventWaiter *pos = waiters.head.next;
+	      pos;
+	      pos = pos->ew_list_link.next) {
+	    os << "  [" << (git->first) << "] L:" << pos/*(*it)*/ << " - ";
+	    pos/*(*it)*/->print(os);
 	    os << "\n";
 	  }
 	}

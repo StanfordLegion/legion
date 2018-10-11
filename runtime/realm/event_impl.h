@@ -25,6 +25,9 @@
 
 #include "realm/activemsg.h"
 
+#include "realm/lists.h"
+#include "realm/threads.h"
+
 #include <vector>
 #include <map>
 
@@ -53,6 +56,9 @@ namespace Realm {
       virtual bool event_triggered(Event e, bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
       virtual Event get_finish_event(void) const = 0;
+
+      IntrusiveListLink<EventWaiter> ew_list_link;
+      typedef IntrusiveList<EventWaiter, &EventWaiter::ew_list_link, DummyLock> EventWaiterList;
     };
 
     // parent class of GenEventImpl and BarrierImpl
@@ -73,6 +79,47 @@ namespace Realm {
       static bool add_waiter(Event needed, EventWaiter *waiter);
 
       static bool detect_event_chain(Event search_from, Event target, int max_depth, bool print_chain);
+    };
+
+    class GenEventImpl;
+
+    class EventMerger {
+    public:
+      EventMerger(GenEventImpl *_event_impl);
+      ~EventMerger(void);
+
+      bool is_active(void) const;
+
+      void prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions);
+
+      void add_precondition(Event wait_for);
+
+      void arm_merger(void);
+
+    protected:
+      void precondition_triggered(bool poisoned);
+
+      friend class MergeEventPrecondition;
+
+      class MergeEventPrecondition : public EventWaiter {
+      public:
+	EventMerger *merger;
+
+	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+      };
+
+      GenEventImpl *event_impl;
+      EventImpl::gen_t finish_gen;
+      bool ignore_faults;
+      int count_needed;
+      int faults_observed;
+
+      static const size_t MAX_INLINE_PRECONDITIONS = 6;
+      MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
+      MergeEventPrecondition *preconditions;
+      unsigned num_preconditions, max_preconditions;
     };
 
     class GenEventImpl : public EventImpl {
@@ -134,6 +181,9 @@ namespace Realm {
       // this is only manipulated when the event is "idle"
       GenEventImpl *next_free;
 
+      // used for merge_events and delayed UserEvent triggers
+      EventMerger merger;
+
       // everything below here protected by this mutex
       GASNetHSL mutex;
 
@@ -141,8 +191,8 @@ namespace Realm {
       //  for the "current" generation, whereas a map-by-generation-id is used for
       //  "future" generations (i.e. ones ahead of what we've heard about if we're
       //  not the owner)
-      std::vector<EventWaiter *> current_local_waiters;
-      std::map<gen_t, std::vector<EventWaiter *> > future_local_waiters;
+      EventWaiter::EventWaiterList current_local_waiters;
+      std::map<gen_t, EventWaiter::EventWaiterList> future_local_waiters;
 
       // remote waiters are kept in a bitmask for the current generation - this is
       //  only maintained on the owner, who never has to worry about more than one
@@ -165,6 +215,12 @@ namespace Realm {
       //  done until our view of the distributed event catches up
       // value stored in map is whether generation was poisoned
       std::map<gen_t, bool> local_triggers;
+
+      // these resolve a race condition between the early trigger of a
+      //  poisoned merge and the last precondition
+      bool free_list_insertion_delayed;
+      friend class EventMerger;
+      void perform_delayed_free_list_insertion(void);
     };
 
     class BarrierImpl : public EventImpl {
@@ -222,7 +278,7 @@ namespace Realm {
 	};
 
 	int unguarded_delta;
-	std::vector<EventWaiter *> local_waiters;
+	EventWaiter::EventWaiterList local_waiters;
 	std::map<int, PerNodeUpdates *> pernode;
       
 	

@@ -145,6 +145,7 @@ namespace Realm {
   protected:
     void event_triggered(Event e);
 
+#if 0
     class TableCleaner : public EventWaiter {
     public:
       TableCleaner(OperationTable *_table);
@@ -155,8 +156,14 @@ namespace Realm {
     protected:
       OperationTable *table;
     };
+#endif
 
-    struct TableEntry {
+    struct TableEntry : public EventWaiter {
+      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+      OperationTable *table;
       //Event finish_event;
       Operation *local_op;
       int remote_node;
@@ -173,7 +180,7 @@ namespace Realm {
     
     GASNetHSL mutexes[NUM_TABLES];
     Table tables[NUM_TABLES];
-    TableCleaner cleaner;
+    //TableCleaner cleaner;
 #endif
   };
 

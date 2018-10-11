@@ -94,7 +94,8 @@ namespace Realm {
     class UserEvent : public Event {
     public:
       static UserEvent create_user_event(void);
-      void trigger(Event wait_on = Event::NO_EVENT) const;
+      void trigger(Event wait_on = Event::NO_EVENT,
+		   bool ignore_faults = false) const;
 
       // cancels (poisons) the event
       void cancel(void) const;

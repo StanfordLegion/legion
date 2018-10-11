@@ -30,13 +30,14 @@ namespace Realm {
   // used in places that don't currently propagate poison but should
   static const bool POISON_FIXME = false;
 
+#if 0
   ////////////////////////////////////////////////////////////////////////
   //
   // class DeferredEventTrigger
   //
 
   class DeferredEventTrigger : public EventWaiter {
-  public:
+ public:
     DeferredEventTrigger(Event _after_event);
 
     virtual ~DeferredEventTrigger(void);
@@ -79,7 +80,7 @@ namespace Realm {
   {
     return after_event;
   }
-
+#endif
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -360,7 +361,7 @@ namespace Realm {
     int event_loop_detection_limit = 0;
   };
 
-  void UserEvent::trigger(Event wait_on) const
+  void UserEvent::trigger(Event wait_on, bool ignore_faults) const
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
@@ -373,7 +374,11 @@ namespace Realm {
 #endif
 
     bool poisoned = false;
-    if(!wait_on.has_triggered_faultaware(poisoned)) {
+    if(wait_on.has_triggered_faultaware(poisoned)) {
+      log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on
+		       << (poisoned ? " (poisoned)" : "");
+      GenEventImpl::trigger(*this, poisoned && !ignore_faults);
+    } else {
       // deferred trigger
       log_event.info() << "deferring user event trigger: event=" << *this << " wait_on=" << wait_on;
       if(Config::event_loop_detection_limit > 0) {
@@ -385,13 +390,13 @@ namespace Realm {
 	  assert(0);
 	}
       }
-      EventImpl::add_waiter(wait_on, new DeferredEventTrigger(*this));
-      return;
-    }
 
-    log_event.info() << "user event trigger: event=" << *this << " wait_on=" << wait_on
-		     << (poisoned ? " (poisoned)" : "");
-    GenEventImpl::trigger(*this, poisoned);
+      // use the event's merger to wait for this precondition
+      GenEventImpl *event_impl = get_genevent_impl(*this);
+      event_impl->merger.prepare_merger(*this, ignore_faults, 1);
+      event_impl->merger.add_precondition(wait_on);
+      event_impl->merger.arm_merger();
+    }
   }
 
   void UserEvent::cancel(void) const
@@ -538,7 +543,7 @@ namespace Realm {
 
     Event e = search_from;
     while(true) {
-      std::vector<EventWaiter *> waiters_copy;
+      EventWaiter *waiters_head = 0;
 
       ID id(e);
       if(id.is_event()) {
@@ -551,12 +556,11 @@ namespace Realm {
 	    assert(0);
 	  } else if((impl->generation + 1) == id.event_generation()) {
 	    // current generation
-	    waiters_copy.assign(impl->current_local_waiters.begin(),
-				impl->current_local_waiters.end());
+	    waiters_head = impl->current_local_waiters.head.next;
 	  } else {
-	    std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = impl->future_local_waiters.find(id.event_generation());
+	    std::map<EventImpl::gen_t, EventWaiter::EventWaiterList>::const_iterator it = impl->future_local_waiters.find(id.event_generation());
 	    if(it != impl->future_local_waiters.end())
-	      waiters_copy.assign(it->second.begin(), it->second.end());
+	      waiters_head = it->second.head.next;
 	  }
 	}
       } else if(id.is_barrier()) {
@@ -569,10 +573,8 @@ namespace Realm {
       // record all of these event waiters as seen before traversing, so that we find the
       //  shortest possible path
       int count = 0;
-      for(std::vector<EventWaiter *>::const_iterator it = waiters_copy.begin();
-	  it != waiters_copy.end();
-	  it++) {
-	Event e2 = (*it)->get_finish_event();
+      for(EventWaiter *pos = waiters_head; pos; pos = pos->ew_list_link.next) {
+	Event e2 = pos->get_finish_event();
 	if(!e2.exists()) continue;
 	if(e2 == target) {
 	  if(print_chain) {
@@ -580,7 +582,7 @@ namespace Realm {
 	    if(msg.is_active()) {
 	      msg << "event chain found!";
 	      events.push_back(e2);
-	      waiters.push_back(*it);
+	      waiters.push_back(pos);
 	      for(size_t i = 0; i < events.size(); i++) {
 		msg << "\n  " << events[i];
 		if(waiters[i]) {
@@ -599,7 +601,7 @@ namespace Realm {
 	if(inserted) {
 	  if(count++ == 0)
 	    todo.push_back(0); // marker so we know when to "pop" the stack
-	  todo.push_back(*it);
+	  todo.push_back(pos);
 	}
       }
 
@@ -629,80 +631,74 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class GenEventImpl
+  // class EventMerger::MergeEventPrecondition
   //
 
-  GenEventImpl::GenEventImpl(void)
-    : me((ID::IDType)-1), owner(-1)
+  bool EventMerger::MergeEventPrecondition::event_triggered(Event e, bool poisoned)
   {
-    generation = 0;
-    gen_subscribed = 0;
-    next_free = 0;
-    num_poisoned_generations = 0;
-    poisoned_generations = 0;
-    has_local_triggers = false;
+    merger->precondition_triggered(poisoned);
+    return false;
   }
 
-  void GenEventImpl::init(ID _me, unsigned _init_owner)
+  void EventMerger::MergeEventPrecondition::print(std::ostream& os) const
   {
-    me = _me;
-    owner = _init_owner;
-    generation = 0;
-    gen_subscribed = 0;
-    next_free = 0;
-    num_poisoned_generations = 0;
-    poisoned_generations = 0;
-    has_local_triggers = false;
+    os << "event merger: " << get_finish_event()
+       << " left=" << merger->count_needed;
+  }
+
+  Event EventMerger::MergeEventPrecondition::get_finish_event(void) const
+  {
+    return merger->event_impl->make_event(merger->finish_gen);
   }
 
 
-    // Perform our merging events in a lock free way
-    class EventMerger : public EventWaiter {
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventMerger
+  //
+
+#if 0
+    class EventMerger {
     public:
-      EventMerger(Event _finish_event, bool _ignore_faults)
-	: finish_event(_finish_event)
-	, ignore_faults(_ignore_faults)
-	, count_needed(1)
-	, faults_observed(0)
-      {
-      }
+      EventMerger(GenEventImpl *_event_impl);
+      ~EventMerger(void);
 
-      virtual ~EventMerger(void)
-      {
-      }
+      bool is_active(void) const;
 
-      void add_event(Event wait_for)
-      {
-	bool poisoned = false;
-	if(wait_for.has_triggered_faultaware(poisoned)) {
-	  if(poisoned) {
-	    // always count faults, but don't necessarily propagate
-	    bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
-	    if(first_fault && !ignore_faults) {
-	      log_poison.info() << "event merger early poison: after=" << finish_event;
-	      GenEventImpl::trigger(finish_event, true /*poisoned*/);
-	    }
-	  }
-	  // either way we return to the caller without updating the count_needed
-	  return;
+      void prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions);
+
+      void add_precondition(Event wait_for);
+
+      void arm_merger(void);
+
+    protected:
+      void precondition_triggered(bool poisoned);
+
+      friend class MergeEventPrecondition;
+
+      class MergeEventPrecondition : public EventWaiter {
+      public:
+	EventMerger *merger;
+
+	virtual bool event_triggered(Event e, bool poisoned)
+	{
+	  merger->precondition_triggered(poisoned);
+	  return false;
 	}
 
-        // Increment the count and then add ourselves
-        __sync_fetch_and_add(&count_needed, 1);
-	// step 2: enqueue ourselves on the input event
-	EventImpl::add_waiter(wait_for, this);
-      }
+	virtual void print(std::ostream& os) const
+	{
+	  os << "event merger: " << merger->finish_event 
+	     << " left=" << merger->count_needed;
+	}
 
-      // arms the merged event once you're done adding input events - just
-      //  decrements the count for the implicit 'init done' event
-      // return a boolean saying whether it triggered upon arming (which
-      //  means the caller should delete this EventMerger)
-      bool arm(void)
-      {
-	bool nuke = event_triggered(Event::NO_EVENT, false /*!poisoned*/);
-        return nuke;
-      }
+	virtual Event get_finish_event(void) const
+	{
+	  return merger->event_impl->make_event(merger->finish_gen);
+	}
+      };
 
+#if 0
       virtual bool event_triggered(Event triggered, bool poisoned)
       {
 	// if the input is poisoned, we propagate that poison eagerly
@@ -730,23 +726,159 @@ namespace Realm {
         // caller can delete us if this was the last trigger
         return last_trigger;
       }
+#endif
 
-      virtual void print(std::ostream& os) const
-      {
-	os << "event merger: " << finish_event << " left=" << count_needed;
-      }
-
-      virtual Event get_finish_event(void) const
-      {
-	return finish_event;
-      }
-
-    protected:
-      Event finish_event;
+      GenEventImpl *event_impl;
+      Event::gen_t finish_gen;
       bool ignore_faults;
       int count_needed;
       int faults_observed;
+
+      static const size_t MAX_INLINE_PRECONDITIONS = 6;
+      MergeEventPrecondition inline_preconditions[MAX_INLINE_PRECONDITIONS];
+      MergeEventPrecondition *preconditions;
+      unsigned num_preconditions, max_preconditions;
     };
+#endif
+
+    EventMerger::EventMerger(GenEventImpl *_event_impl)
+      : event_impl(_event_impl)
+      , count_needed(0)
+      , preconditions(inline_preconditions)
+      , max_preconditions(MAX_INLINE_PRECONDITIONS)
+    {
+      for(unsigned i = 0; i < MAX_INLINE_PRECONDITIONS; i++)
+	inline_preconditions[i].merger = this;
+    }
+
+    EventMerger::~EventMerger(void)
+    {
+      assert(!is_active());
+      if(max_preconditions > MAX_INLINE_PRECONDITIONS)
+	delete[] preconditions;
+    }
+
+    bool EventMerger::is_active(void) const
+    {
+      return(count_needed != 0);
+    }
+
+    void EventMerger::prepare_merger(Event _finish_event, bool _ignore_faults, unsigned _max_preconditions)
+    {
+      assert(!is_active());
+      finish_gen = ID(_finish_event).event_generation();
+      assert(event_impl->make_event(finish_gen) == _finish_event);
+      ignore_faults = _ignore_faults;
+      count_needed = 1;  // this matches the subsequent call to arm()
+      faults_observed = 0;
+      num_preconditions = 0;
+      // resize the precondition array if needed
+      if(_max_preconditions > max_preconditions) {
+	if(max_preconditions > MAX_INLINE_PRECONDITIONS)
+	  delete[] preconditions;
+	max_preconditions = _max_preconditions;
+	preconditions = new MergeEventPrecondition[max_preconditions];
+	for(unsigned i = 0; i < max_preconditions; i++)
+	  preconditions[i].merger = this;
+      }
+    }
+
+    void EventMerger::add_precondition(Event wait_for)
+    {
+      assert(is_active());
+
+      bool poisoned = false;
+      if(wait_for.has_triggered_faultaware(poisoned)) {
+	if(poisoned) {
+	  // always count faults, but don't necessarily propagate
+	  bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	  if(first_fault && !ignore_faults) {
+            log_poison.info() << "event merger early poison: after=" << event_impl->make_event(finish_gen);
+	    event_impl->trigger(finish_gen, my_node_id, true /*poisoned*/);
+	  }
+	}
+	// either way we return to the caller without updating the count_needed
+	return;
+      }
+
+      // figure out which precondition slot we'll use
+      assert(num_preconditions < max_preconditions);
+      MergeEventPrecondition *p = &preconditions[num_preconditions++];
+
+      // increment count first, then add the waiter
+      __sync_fetch_and_add(&count_needed, 1);
+      EventImpl::add_waiter(wait_for, p);
+    }
+
+    void EventMerger::arm_merger(void)
+    {
+      assert(is_active());
+      precondition_triggered(false /*!poisoned*/);
+    }
+
+    void EventMerger::precondition_triggered(bool poisoned)
+    {
+      // if the input is poisoned, we propagate that poison eagerly
+      if(poisoned) {
+	bool first_fault = (__sync_fetch_and_add(&faults_observed, 1) == 0);
+	if(first_fault && !ignore_faults) {
+	  log_poison.info() << "event merger poisoned: after=" << event_impl->make_event(finish_gen);
+	  event_impl->trigger(finish_gen, my_node_id, true /*poisoned*/);
+	}
+      }
+
+      int count_left = __sync_fetch_and_add(&count_needed, -1);
+
+      // Put the logging first to avoid segfaults
+      log_event.debug() << "received trigger merged event=" << event_impl->make_event(finish_gen)
+			<< " left=" << count_left << " poisoned=" << poisoned;
+
+      // count is the value before the decrement, so it was 1, it's now 0
+      bool last_trigger = (count_left == 1);
+
+      // trigger on the last input event, unless we did an early poison propagation
+      if(last_trigger && (ignore_faults || (faults_observed == 0))) {
+	event_impl->trigger(finish_gen, my_node_id, false /*!poisoned*/);
+      }
+
+      // if the event was triggered early due to poison, its insertion on 
+      //  the free list is delayed until we know that the event merger is
+      //  inactive (i.e. when last_trigger is true)
+      if(last_trigger)
+	event_impl->perform_delayed_free_list_insertion();
+    }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class GenEventImpl
+  //
+
+  GenEventImpl::GenEventImpl(void)
+    : me((ID::IDType)-1), owner(-1)
+    , merger(this)
+  {
+    generation = 0;
+    gen_subscribed = 0;
+    next_free = 0;
+    num_poisoned_generations = 0;
+    poisoned_generations = 0;
+    has_local_triggers = false;
+    free_list_insertion_delayed = false;
+  }
+
+  void GenEventImpl::init(ID _me, unsigned _init_owner)
+  {
+    me = _me;
+    owner = _init_owner;
+    generation = 0;
+    gen_subscribed = 0;
+    next_free = 0;
+    num_poisoned_generations = 0;
+    poisoned_generations = 0;
+    has_local_triggers = false;
+  }
+
 
     // creates an event that won't trigger until all input events have
     /*static*/ Event GenEventImpl::merge_events(const std::set<Event>& wait_for,
@@ -791,8 +923,11 @@ namespace Realm {
         return *(wait_for.begin());
 #endif
       // counts of 2+ require building a new event and a merger to trigger it
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
-      EventMerger *m = new EventMerger(finish_event, ignore_faults);
+      GenEventImpl *event_impl = GenEventImpl::create_genevent();
+      Event finish_event = event_impl->current_event();
+
+      EventMerger *m = &(event_impl->merger);
+      m->prepare_merger(finish_event, ignore_faults, wait_for.size());
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
@@ -803,7 +938,7 @@ namespace Realm {
 	  it != wait_for.end();
 	  it++) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
-	m->add_event(*it);
+	m->add_precondition(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
                              finish_event.id, finish_event.gen,
@@ -812,8 +947,7 @@ namespace Realm {
       }
 
       // once they're all added - arm the thing (it might go off immediately)
-      if(m->arm())
-        delete m;
+      m->arm_merger();
 
       return finish_event;
     }
@@ -861,8 +995,11 @@ namespace Realm {
         return *(wait_for.begin());
 #endif
       // counts of 2+ require building a new event and a merger to trigger it
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
-      EventMerger *m = new EventMerger(finish_event, ignore_faults);
+      GenEventImpl *event_impl = GenEventImpl::create_genevent();
+      Event finish_event = event_impl->current_event();
+      EventMerger *m = &(event_impl->merger);
+
+      m->prepare_merger(finish_event, ignore_faults, wait_for.size());
 
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) %ld", 
@@ -873,7 +1010,7 @@ namespace Realm {
 	  it != wait_for.end();
 	  it++) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << *it;
-	m->add_event(*it);
+	m->add_precondition(*it);
 #ifdef EVENT_GRAPH_TRACE
         log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
                              finish_event.id, finish_event.gen,
@@ -882,8 +1019,7 @@ namespace Realm {
       }
 
       // once they're all added - arm the thing (it might go off immediately)
-      if(m->arm())
-        delete m;
+      m->arm_merger();
 
       return finish_event;
     }
@@ -894,22 +1030,23 @@ namespace Realm {
       // poisoned or not, we return no event if it is done
       if(wait_for.has_triggered_faultaware(poisoned))
         return Event::NO_EVENT;
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
-      EventMerger *m = new EventMerger(finish_event, true/*ignore faults*/);
+      GenEventImpl *event_impl = GenEventImpl::create_genevent();
+      Event finish_event = event_impl->current_event();
+      EventMerger *m = &(event_impl->merger);
+      m->prepare_merger(finish_event, true/*ignore faults*/, 1);
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Merge: (" IDFMT ",%d) 1", 
 			   finish_event.id, finish_event.gen);
 #endif
       log_event.info() << "event merging: event=" << finish_event 
                        << " wait_on=" << wait_for;
-      m->add_event(wait_for);
+      m->add_precondition(wait_for);
 #ifdef EVENT_GRAPH_TRACE
       log_event_graph.info("Event Precondition: (" IDFMT ",%d) (" IDFMT ",%d)",
                            finish_event.id, finish_event.gen,
                            wait_for.id, wait_for.gen);
 #endif
-      if(m->arm())
-        delete m;
+      m->arm_merger();
       return finish_event;
     }
 
@@ -971,32 +1108,34 @@ namespace Realm {
 #endif
 
       // counts of 2+ require building a new event and a merger to trigger it
-      Event finish_event = GenEventImpl::create_genevent()->current_event();
-      EventMerger *m = new EventMerger(finish_event, false /*!ignore faults*/);
+      GenEventImpl *event_impl = GenEventImpl::create_genevent();
+      Event finish_event = event_impl->current_event();
+      EventMerger *m = &(event_impl->merger);
+      m->prepare_merger(finish_event, false/*!ignore faults*/, 6);
 
       if(ev1.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev1;
-	m->add_event(ev1);
+	m->add_precondition(ev1);
       }
       if(ev2.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev2;
-	m->add_event(ev2);
+	m->add_precondition(ev2);
       }
       if(ev3.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev3;
-	m->add_event(ev3);
+	m->add_precondition(ev3);
       }
       if(ev4.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev4;
-	m->add_event(ev4);
+	m->add_precondition(ev4);
       }
       if(ev5.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev5;
-	m->add_event(ev5);
+	m->add_precondition(ev5);
       }
       if(ev6.exists()) {
 	log_event.info() << "event merging: event=" << finish_event << " wait_on=" << ev6;
-	m->add_event(ev6);
+	m->add_precondition(ev6);
       }
 
 #ifdef EVENT_GRAPH_TRACE
@@ -1023,8 +1162,7 @@ namespace Realm {
 #endif
 
       // once they're all added - arm the thing (it might go off immediately)
-      if(m->arm())
-        delete m;
+      m->arm_merger();
 
       return finish_event;
     }
@@ -1276,7 +1414,7 @@ namespace Realm {
 
     // the result of the update may trigger multiple generations worth of waiters - keep their
     //  generation IDs straight (we'll look up the poison bits later)
-    std::map<gen_t, std::vector<EventWaiter *> > to_wake;
+    std::map<gen_t, EventWaiter::EventWaiterList> to_wake;
 
     {
       AutoHSLLock a(mutex);
@@ -1317,7 +1455,7 @@ namespace Realm {
 
       // now any future waiters up to and including the triggered gen
       if(!future_local_waiters.empty()) {
-	std::map<gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.begin();
+	std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
 	while((it != future_local_waiters.end()) && (it->first <= current_gen)) {
 	  to_wake[it->first].swap(it->second);
 	  future_local_waiters.erase(it);
@@ -1349,18 +1487,17 @@ namespace Realm {
 
     // now trigger anybody that needs to be triggered
     if(!to_wake.empty()) {
-      for(std::map<gen_t, std::vector<EventWaiter *> >::const_iterator it = to_wake.begin();
+      for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = to_wake.begin();
 	  it != to_wake.end();
 	  it++) {
 	Event e = make_event(it->first);
 	bool poisoned = is_generation_poisoned(it->first);
-	for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
-	    it2 != it->second.end();
-	    it2++) {
-	  bool nuke = (*it2)->event_triggered(e, poisoned);
+	while(!it->second.empty()) {
+	  EventWaiter *w = it->second.pop_front();
+	  bool nuke = w->event_triggered(e, poisoned);
 	  if(nuke) {
 	    //printf("deleting: "); (*it)->print_info(); fflush(stdout);
-	    delete (*it2);
+	    delete w;
 	  }
 	}
       }
@@ -1501,7 +1638,7 @@ namespace Realm {
       }
 #endif
 
-      std::vector<EventWaiter *> to_wake;
+      EventWaiter::EventWaiterList to_wake;
 
       if(my_node_id == owner) {
 	// we own this event
@@ -1537,6 +1674,12 @@ namespace Realm {
 	  //  or generation count
 	  free_event = ((num_poisoned_generations < POISONED_GENERATION_LIMIT) &&
 			(generation < ((1U << ID::EVENT_GENERATION_WIDTH) - 1)));
+	  // special case: if the merger is still active, defer the
+	  //  re-insertion until all the preconditions have triggered
+	  if(free_event && merger.is_active()) {
+	    free_list_insertion_delayed = true;
+	    free_event = false;
+	  }
 	}
 
 	// any remote nodes to notify?
@@ -1577,7 +1720,7 @@ namespace Realm {
 	    to_wake.swap(current_local_waiters);
 	    // any future waiters?
 	    if(!future_local_waiters.empty()) {
-	      std::map<gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.begin();
+	      std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
 	      log_event.debug() << "future waiters non-empty: first=" << it->first << " (= " << (gen_triggered + 1) << "?)";
 	      if(it->first == (gen_triggered + 1)) {
 		current_local_waiters.swap(it->second);
@@ -1603,7 +1746,7 @@ namespace Realm {
 	      //  future waiter list to see who we can wake, and update the local trigger
 	      //  list
 
-	      std::map<gen_t, std::vector<EventWaiter *> >::iterator it = future_local_waiters.find(gen_triggered);
+	      std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.find(gen_triggered);
 	      if(it != future_local_waiters.end()) {
 		to_wake.swap(it->second);
 		future_local_waiters.erase(it);
@@ -1629,16 +1772,31 @@ namespace Realm {
       // finally, trigger any local waiters
       if(!to_wake.empty()) {
 	Event e = make_event(gen_triggered);
-	for(std::vector<EventWaiter *>::iterator it = to_wake.begin();
-	    it != to_wake.end();
-	    it++) {
-	  bool nuke = (*it)->event_triggered(e, poisoned);
+	while(!to_wake.empty()) {
+	  EventWaiter *ew = to_wake.pop_front();
+	  bool nuke = ew->event_triggered(e, poisoned);
           if(nuke) {
             //printf("deleting: "); (*it)->print_info(); fflush(stdout);
-            delete (*it);
+            delete ew;
           }
         }
       }
+    }
+
+    void GenEventImpl::perform_delayed_free_list_insertion(void)
+    {
+      bool free_event = false;
+
+      {
+	AutoHSLLock a(mutex);
+	if(free_list_insertion_delayed) {
+	  free_event = true;
+	  free_list_insertion_delayed = false;
+	}
+      }
+
+      if(free_event)
+	get_runtime()->local_event_free_list->free_entry(this);
     }
 
     /*static*/ BarrierImpl *BarrierImpl::create_barrier(unsigned expected_arrivals,
@@ -1960,7 +2118,7 @@ static void *bytedup(const void *data, size_t datalen)
       // can't actually trigger while holding the lock, so remember which generation(s),
       //  if any, to trigger and do it at the end
       gen_t trigger_gen = 0;
-      std::vector<EventWaiter *> local_notifications;
+      EventWaiter::EventWaiterList local_notifications;
       std::vector<RemoteNotification> remote_notifications;
       gen_t oldest_previous = 0;
       void *final_values_copy = 0;
@@ -2010,8 +2168,7 @@ static void *bytedup(const void *data, size_t datalen)
 		(it->first == (generation + 1)) &&
 		((base_arrival_count + it->second->unguarded_delta) == 0)) {
 	    // keep the list of local waiters to wake up once we release the lock
-	    local_notifications.insert(local_notifications.end(), 
-				       it->second->local_waiters.begin(), it->second->local_waiters.end());
+	    local_notifications.absorb_append(it->second->local_waiters);
 	    trigger_gen = generation = it->first;
 	    delete it->second;
 	    generations.erase(it);
@@ -2125,12 +2282,11 @@ static void *bytedup(const void *data, size_t datalen)
 
 	// notify local waiters first
 	Barrier b = make_barrier(trigger_gen);
-	for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
-	    it != local_notifications.end();
-	    it++) {
-	  bool nuke = (*it)->event_triggered(b, POISON_FIXME);
+	while(!local_notifications.empty()) {
+	  EventWaiter *ew = local_notifications.pop_front();
+	  bool nuke = ew->event_triggered(b, POISON_FIXME);
 	  if(nuke)
-	    delete (*it);
+	    delete ew;
 	}
 
 	// now do remote notifications
@@ -2365,7 +2521,7 @@ static void *bytedup(const void *data, size_t datalen)
       BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
       // we'll probably end up with a list of local waiters to notify
-      std::vector<EventWaiter *> local_notifications;
+      EventWaiter::EventWaiterList local_notifications;
       {
 	AutoHSLLock a(impl->mutex);
 
@@ -2402,9 +2558,7 @@ static void *bytedup(const void *data, size_t datalen)
 	    std::map<EventImpl::gen_t, BarrierImpl::Generation *>::iterator it = impl->generations.begin();
 	    if(it->first > trigger_gen) break;
 
-	    local_notifications.insert(local_notifications.end(),
-				       it->second->local_waiters.begin(),
-				       it->second->local_waiters.end());
+	    local_notifications.absorb_append(it->second->local_waiters);
 	    delete it->second;
 	    impl->generations.erase(it);
 	  }
@@ -2439,12 +2593,11 @@ static void *bytedup(const void *data, size_t datalen)
       }
 
       // with lock released, perform any local notifications
-      for(std::vector<EventWaiter *>::const_iterator it = local_notifications.begin();
-	  it != local_notifications.end();
-	  it++) {
-	bool nuke = (*it)->event_triggered(b, POISON_FIXME);
+      while(!local_notifications.empty()) {
+	EventWaiter *ew = local_notifications.pop_front();
+	bool nuke = ew->event_triggered(b, POISON_FIXME);
 	if(nuke)
-	  delete (*it);
+	  delete ew;
       }
     }
 
