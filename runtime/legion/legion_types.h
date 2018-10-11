@@ -323,6 +323,7 @@ namespace Legion {
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
       LG_REFINEMENT_TASK_ID,
+      LG_REMOTE_REF_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -395,6 +396,7 @@ namespace Legion {
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
         "Refinement",                                             \
+        "Remove Remote References",                               \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

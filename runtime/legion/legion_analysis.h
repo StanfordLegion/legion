@@ -621,6 +621,17 @@ namespace Legion {
       public:
         EquivalenceSet *const target;
       };
+      struct RemoteRefTaskArgs : public LgTaskArgs<RemoteRefTaskArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_REMOTE_REF_TASK_ID;
+      public:
+        RemoteRefTaskArgs(EquivalenceSet *s, RtEvent d)
+          : LgTaskArgs<RemoteRefTaskArgs>(implicit_provenance), 
+            set(s), done(d) { }
+      public:
+        EquivalenceSet *const set;
+        const RtEvent done;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -818,6 +829,7 @@ namespace Legion {
       void advance_version_numbers(FieldMask advance_mask);
     protected:
       void perform_refinements(void);
+      void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
       void launch_refinement_task(void); // call with lock
@@ -825,6 +837,10 @@ namespace Legion {
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
       void invalidate_remote_state(RtUserEvent to_trigger);
+      void pack_state(Serializer &rez, RtUserEvent &handled_event,
+                      PendingRequest *pending_request,
+                      const FieldMask &pack_mask, 
+                      ReductionOpID skip_redop, bool invalidate);
     protected:
       void update_exclusive_copies(FieldMask &to_update,
                                    AddressSpaceID request_space,
@@ -885,6 +901,7 @@ namespace Legion {
 #endif
     public:
       static void handle_refinement(const void *args);
+      static void handle_remote_references(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
@@ -964,6 +981,9 @@ namespace Legion {
       FieldMaskSet<PendingRequest> outstanding_requests;
       // Deferred update requests
       FieldMaskSet<DeferredRequest> deferred_requests;
+      // Track references for inflight messages so we only remove them
+      // once we know that they have successfully handled 
+      std::map<RtEvent,std::vector<LogicalView*> > inflight_references;
     public:
       static const VersionID init_version = 1;
     };

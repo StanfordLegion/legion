@@ -20085,6 +20085,11 @@ namespace Legion {
             EquivalenceSet::handle_refinement(args);
             break;
           }
+        case LG_REMOTE_REF_TASK_ID:
+          {
+            EquivalenceSet::handle_remote_references(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

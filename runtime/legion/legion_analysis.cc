@@ -3977,232 +3977,13 @@ namespace Legion {
           deferred_requests.insert(deferred, needed_mask);
           return;
         }
+        // Make an event that will be triggered once the message is
+        // handled on the remote node
+        RtUserEvent handled_event = Runtime::create_rt_user_event();
         // Pack up the message
         Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(pending_request);
-          // Pack the valid instances
-          if (!valid_instances.empty() &&
-              !(valid_instances.get_valid_mask() * update_mask))
-          {
-            if (valid_instances.size() == 1)
-            {
-              rez.serialize<size_t>(1);
-              FieldMaskSet<LogicalView>::iterator it = 
-                valid_instances.begin();
-              rez.serialize(it->first->did);
-              const FieldMask overlap = it->second & update_mask;
-              rez.serialize(overlap);
-              if (invalidate)
-              {
-                it.filter(overlap);
-                if (!it->second)
-                {
-                  if (it->first->remove_nested_valid_ref(did))
-                    delete it->first;
-                  valid_instances.erase(it);
-                }
-              }
-            }
-            else
-            {
-              std::vector<DistributedID> dids;
-              LegionVector<FieldMask>::aligned masks;
-              std::vector<LogicalView*> to_delete;
-              for (FieldMaskSet<LogicalView>::iterator it = 
-                    valid_instances.begin(); it != valid_instances.end(); it++)
-              {
-                const FieldMask overlap = update_mask & it->second;
-                if (!overlap)
-                  continue;
-                dids.push_back(it->first->did);
-                masks.push_back(overlap);
-                if (invalidate)
-                {
-                  it.filter(overlap);
-                  if (!it->second)
-                    to_delete.push_back(it->first);
-                }
-              }
-              rez.serialize<size_t>(dids.size());
-              for (unsigned idx = 0; idx < dids.size(); idx++)
-              {
-                rez.serialize(dids[idx]);
-                rez.serialize(masks[idx]);
-              }
-              if (!to_delete.empty())
-              {
-                for (std::vector<LogicalView*>::const_iterator it = 
-                      to_delete.begin(); it != to_delete.end(); it++)
-                {
-                  valid_instances.erase(*it);
-                  if ((*it)->remove_nested_valid_ref(did))
-                    delete (*it);
-                }
-              }
-            }
-          }
-          else
-            rez.serialize<size_t>(0);
-          // Pack the reduction instances
-          if (!reduction_instances.empty())
-          {
-            const FieldMask redop_overlap = reduction_fields & update_mask;
-            if (!!redop_overlap)
-            {
-              rez.serialize<size_t>(redop_overlap.pop_count());
-              int fidx = redop_overlap.find_first_set();
-              while (fidx >= 0)
-              {
-                rez.serialize(fidx);
-                std::map<unsigned,std::vector<ReductionView*> >::iterator
-                  finder = reduction_instances.find(fidx);
-#ifdef DEBUG_LEGION
-                assert(finder != reduction_instances.end());
-                assert(!finder->second.empty());
-#endif
-                if (skip_redop > 0)
-                {
-                  size_t send_size = finder->second.size(); 
-                  // Skip any reduction views with the same redop
-                  // at the end of the list (e.g. ones in the same epoch)
-                  while (finder->second[send_size-1]->get_redop() == skip_redop)
-                  {
-                    send_size--;
-                    if (send_size == 0)
-                      break;
-                  }
-                  rez.serialize<size_t>(send_size);
-                  for (unsigned idx = 0; idx < send_size; idx++)
-                    rez.serialize(finder->second[idx]->did);
-                }
-                else
-                {
-                  rez.serialize<size_t>(finder->second.size());
-                  for (std::vector<ReductionView*>::const_iterator it = 
-                       finder->second.begin(); it != finder->second.end(); it++)
-                    rez.serialize((*it)->did);
-                }
-                if (invalidate)
-                {
-                  for (std::vector<ReductionView*>::const_iterator it = 
-                       finder->second.begin(); it != finder->second.end(); it++)
-                    if ((*it)->remove_nested_valid_ref(did))
-                      delete (*it);
-                  reduction_instances.erase(finder);
-                }
-                fidx = redop_overlap.find_next_set(fidx+1);
-              }
-              if (invalidate)
-                reduction_fields -= redop_overlap;
-            }
-            else
-              rez.serialize<size_t>(0);
-          }
-          else
-            rez.serialize<size_t>(0);
-          // Pack the restricted instances
-          if (!restricted_instances.empty() && 
-              !(restricted_instances.get_valid_mask() * update_mask))
-          {
-            if (restricted_instances.size() == 1)
-            {
-              rez.serialize<size_t>(1);
-              FieldMaskSet<InstanceView>::iterator it = 
-                restricted_instances.begin();
-              rez.serialize(it->first->did);
-              const FieldMask overlap = it->second & update_mask;
-              rez.serialize(overlap);
-              if (invalidate)
-              {
-                it.filter(overlap);
-                if (!it->second)
-                {
-                  if (it->first->remove_nested_valid_ref(did))
-                    delete it->first;
-                  restricted_instances.erase(it);
-                }
-              }
-            }
-            else
-            {
-              std::vector<DistributedID> dids;
-              LegionVector<FieldMask>::aligned masks;
-              std::vector<InstanceView*> to_delete;
-              for (FieldMaskSet<InstanceView>::iterator it = 
-                    restricted_instances.begin(); it != 
-                    restricted_instances.end(); it++)
-              {
-                const FieldMask overlap = update_mask & it->second;
-                if (!overlap)
-                  continue;
-                dids.push_back(it->first->did);
-                masks.push_back(overlap);
-                if (invalidate)
-                {
-                  it.filter(overlap);
-                  if (!it->second)
-                    to_delete.push_back(it->first);
-                }
-              }
-              rez.serialize<size_t>(dids.size());
-              for (unsigned idx = 0; idx < dids.size(); idx++)
-              {
-                rez.serialize(dids[idx]);
-                rez.serialize(masks[idx]);
-              }
-              if (!to_delete.empty())
-              {
-                for (std::vector<InstanceView*>::const_iterator it = 
-                      to_delete.begin(); it != to_delete.end(); it++)
-                {
-                  restricted_instances.erase(*it);
-                  if ((*it)->remove_nested_valid_ref(did))
-                    delete (*it);
-                }
-              }
-            }
-            const FieldMask restricted_mask = update_mask & restricted_fields;
-            rez.serialize(restricted_mask);
-            if (invalidate && !!restricted_mask)
-              restricted_fields -= restricted_mask;
-          }
-          else
-            rez.serialize<size_t>(0);
-          // Pack the version numbers
-          std::vector<VersionID> versions;
-          LegionVector<FieldMask>::aligned masks;
-          std::vector<VersionID> to_delete;
-          for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
-                version_numbers.begin(); it != version_numbers.end(); it++)
-          {
-            const FieldMask overlap = update_mask & it->second;
-            if (!overlap)
-              continue;
-            versions.push_back(it->first);
-            masks.push_back(overlap);
-            if (invalidate)
-            {
-              it->second -= overlap;
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-          }
-          rez.serialize<size_t>(versions.size());
-          for (unsigned idx = 0; idx < versions.size(); idx++)
-          {
-            rez.serialize(versions[idx]);
-            rez.serialize(masks[idx]);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<VersionID>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              version_numbers.erase(*it);
-          }
-        }
+        pack_state(rez, handled_event, pending_request, 
+                   update_mask, skip_redop, invalidate);
         // Do any invalidation meta-updates before we send the message
         if (!is_owner())
         {
@@ -4212,6 +3993,23 @@ namespace Legion {
             shared_fields -= update_mask;
             single_redop_fields -= update_mask;
             multi_redop_fields -= update_mask;
+            if (!redop_modes.empty())
+            {
+              std::vector<ReductionOpID> to_delete;
+              for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
+                    redop_modes.begin(); it != redop_modes.end(); it++)
+              {
+                it->second -= update_mask;
+                if (!it->second)
+                  to_delete.push_back(it->first);
+              }
+              if (!to_delete.empty())
+              {
+                for (std::vector<ReductionOpID>::const_iterator it = 
+                      to_delete.begin(); it != to_delete.end(); it++)
+                  redop_modes.erase(*it);
+              }
+            }
           }
           else
           {
@@ -4230,7 +4028,281 @@ namespace Legion {
             }
           }
         }
+        // If we still have clean-up to do then launch that task now
+        if (handled_event.exists())
+        {
+          // Add a resource reference to this to prevent it being collected
+          add_base_resource_ref(REMOTE_DID_REF);
+          RemoteRefTaskArgs args(this, handled_event);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_WORK_PRIORITY, handled_event);
+        }
         runtime->send_equivalence_set_update_response(invalid_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::pack_state(Serializer &rez, RtUserEvent &handled_event,
+                                    PendingRequest *pending_request,
+                                    const FieldMask &pack_mask, 
+                                    ReductionOpID skip_redop, bool invalidate)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(did);
+      rez.serialize(pending_request);
+      std::vector<LogicalView*> &inflight_refs = 
+        inflight_references[handled_event];
+      // Pack the valid instances
+      if (!valid_instances.empty() &&
+          !(valid_instances.get_valid_mask() * pack_mask))
+      {
+        if (valid_instances.size() == 1)
+        {
+          rez.serialize<size_t>(1);
+          FieldMaskSet<LogicalView>::iterator it = 
+            valid_instances.begin();
+          // Add a remote reference to this that will be
+          // removed when the message is received
+          it->first->add_nested_valid_ref(did);
+          inflight_refs.push_back(it->first);
+          rez.serialize(it->first->did);
+          const FieldMask overlap = it->second & pack_mask;
+          rez.serialize(overlap);
+          if (invalidate)
+          {
+            it.filter(overlap);
+            if (!it->second)
+            {
+              if (it->first->remove_nested_valid_ref(did))
+                delete it->first;
+              valid_instances.erase(it);
+            }
+          }
+        }
+        else
+        {
+          std::vector<DistributedID> dids;
+          LegionVector<FieldMask>::aligned masks;
+          std::vector<LogicalView*> to_delete;
+          for (FieldMaskSet<LogicalView>::iterator it = 
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            const FieldMask overlap = pack_mask & it->second;
+            if (!overlap)
+              continue;
+            // Add a remote reference to this that will be
+            // removed when the message is received
+            it->first->add_nested_valid_ref(did);
+            inflight_refs.push_back(it->first);
+            dids.push_back(it->first->did);
+            masks.push_back(overlap);
+            if (invalidate)
+            {
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+          }
+          rez.serialize<size_t>(dids.size());
+          for (unsigned idx = 0; idx < dids.size(); idx++)
+          {
+            rez.serialize(dids[idx]);
+            rez.serialize(masks[idx]);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<LogicalView*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              valid_instances.erase(*it);
+              if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+          }
+        }
+      }
+      else
+        rez.serialize<size_t>(0);
+      // Pack the reduction instances
+      if (!reduction_instances.empty())
+      {
+        const FieldMask redop_overlap = reduction_fields & pack_mask;
+        if (!!redop_overlap)
+        {
+          rez.serialize<size_t>(redop_overlap.pop_count());
+          int fidx = redop_overlap.find_first_set();
+          while (fidx >= 0)
+          {
+            rez.serialize(fidx);
+            std::map<unsigned,std::vector<ReductionView*> >::iterator
+              finder = reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+            assert(finder != reduction_instances.end());
+            assert(!finder->second.empty());
+#endif
+            if (skip_redop > 0)
+            {
+              size_t send_size = finder->second.size(); 
+              // Skip any reduction views with the same redop
+              // at the end of the list (e.g. ones in the same epoch)
+              while (finder->second[send_size-1]->get_redop() == skip_redop)
+              {
+                send_size--;
+                if (send_size == 0)
+                  break;
+              }
+              rez.serialize<size_t>(send_size);
+              for (unsigned idx = 0; idx < send_size; idx++)
+                rez.serialize(finder->second[idx]->did);
+            }
+            else
+            {
+              rez.serialize<size_t>(finder->second.size());
+              for (std::vector<ReductionView*>::const_iterator it = 
+                   finder->second.begin(); it != finder->second.end(); it++)
+              {
+                // Add a remote reference to this that will be
+                // removed when the message is received
+                (*it)->add_nested_valid_ref(did);
+                inflight_refs.push_back(*it);
+                rez.serialize((*it)->did);
+              }
+            }
+            if (invalidate)
+            {
+              for (std::vector<ReductionView*>::const_iterator it = 
+                   finder->second.begin(); it != finder->second.end(); it++)
+                if ((*it)->remove_nested_valid_ref(did))
+                  delete (*it);
+              reduction_instances.erase(finder);
+            }
+            fidx = redop_overlap.find_next_set(fidx+1);
+          }
+          if (invalidate)
+            reduction_fields -= redop_overlap;
+        }
+        else
+          rez.serialize<size_t>(0);
+      }
+      else
+        rez.serialize<size_t>(0);
+      // Pack the restricted instances
+      if (!restricted_instances.empty() && 
+          !(restricted_instances.get_valid_mask() * pack_mask))
+      {
+        if (restricted_instances.size() == 1)
+        {
+          rez.serialize<size_t>(1);
+          FieldMaskSet<InstanceView>::iterator it = 
+            restricted_instances.begin();
+          // Add a remote reference to this that will be
+          // removed when the message is received
+          it->first->add_nested_valid_ref(did);
+          inflight_refs.push_back(it->first);
+          rez.serialize(it->first->did);
+          const FieldMask overlap = it->second & pack_mask;
+          rez.serialize(overlap);
+          if (invalidate)
+          {
+            it.filter(overlap);
+            if (!it->second)
+            {
+              if (it->first->remove_nested_valid_ref(did))
+                delete it->first;
+              restricted_instances.erase(it);
+            }
+          }
+        }
+        else
+        {
+          std::vector<DistributedID> dids;
+          LegionVector<FieldMask>::aligned masks;
+          std::vector<InstanceView*> to_delete;
+          for (FieldMaskSet<InstanceView>::iterator it = 
+                restricted_instances.begin(); it != 
+                restricted_instances.end(); it++)
+          {
+            const FieldMask overlap = pack_mask & it->second;
+            if (!overlap)
+              continue;
+            // Add a remote reference to this that will be
+            // removed when the message is received
+            it->first->add_nested_valid_ref(did);
+            inflight_refs.push_back(it->first);
+            dids.push_back(it->first->did);
+            masks.push_back(overlap);
+            if (invalidate)
+            {
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+            }
+          }
+          rez.serialize<size_t>(dids.size());
+          for (unsigned idx = 0; idx < dids.size(); idx++)
+          {
+            rez.serialize(dids[idx]);
+            rez.serialize(masks[idx]);
+          }
+          if (!to_delete.empty())
+          {
+            for (std::vector<InstanceView*>::const_iterator it = 
+                  to_delete.begin(); it != to_delete.end(); it++)
+            {
+              restricted_instances.erase(*it);
+              if ((*it)->remove_nested_valid_ref(did))
+                delete (*it);
+            }
+          }
+        }
+        const FieldMask restricted_mask = pack_mask & restricted_fields;
+        rez.serialize(restricted_mask);
+        if (invalidate && !!restricted_mask)
+          restricted_fields -= restricted_mask;
+      }
+      else
+        rez.serialize<size_t>(0);
+      // Pack the version numbers
+      std::vector<VersionID> versions;
+      LegionVector<FieldMask>::aligned masks;
+      std::vector<VersionID> to_delete;
+      for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
+            version_numbers.begin(); it != version_numbers.end(); it++)
+      {
+        const FieldMask overlap = pack_mask & it->second;
+        if (!overlap)
+          continue;
+        versions.push_back(it->first);
+        masks.push_back(overlap);
+        if (invalidate)
+        {
+          it->second -= overlap;
+          if (!it->second)
+            to_delete.push_back(it->first);
+        }
+      }
+      rez.serialize<size_t>(versions.size());
+      for (unsigned idx = 0; idx < versions.size(); idx++)
+      {
+        rez.serialize(versions[idx]);
+        rez.serialize(masks[idx]);
+      }
+      if (!to_delete.empty())
+      {
+        for (std::vector<VersionID>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          version_numbers.erase(*it);
+      }
+      // Finally record the event to trigger when it is finally handled
+      rez.serialize(handled_event);
+      // If we don't have any references to deal with then we can
+      // remove the entry now and mark that we don't need to 
+      // launch the reference clean up task later
+      if (inflight_refs.empty())
+      {
+        inflight_references.erase(handled_event);
+        handled_event = RtUserEvent::NO_RT_USER_EVENT;
       }
     }
 
@@ -4242,7 +4314,7 @@ namespace Legion {
       AutoLock eq(eq_lock);
       std::set<RtEvent> wait_for;
       std::vector<LogicalView*> need_references;
-      WrapperReferenceMutator mutator(pending_request->applied_events);
+      LocalReferenceMutator mutator;
 
       size_t num_valid;
       derez.deserialize(num_valid);
@@ -4339,6 +4411,25 @@ namespace Legion {
         else
           derez.deserialize(restricted_fields);
       }
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
+          version_numbers.find(vid);
+        if (finder != version_numbers.end())
+        {
+          FieldMask mask;
+          derez.deserialize(mask);
+          finder->second |= mask;
+        }
+        else // can do it in-place
+          derez.deserialize(version_numbers[vid]);
+      }
+      RtUserEvent handled_event;
+      derez.deserialize(handled_event);
       if (!wait_for.empty())
       {
         RtEvent wait_on = Runtime::merge_events(wait_for);
@@ -4351,9 +4442,19 @@ namespace Legion {
               need_references.begin(); it != need_references.end(); it++)
           (*it)->add_nested_valid_ref(did, &mutator);
       }
-      pending_request->remaining_count -= 1;
-      if (pending_request->remaining_count == 0)
-        finalize_pending_request(pending_request);
+      const RtEvent handled_precondition = mutator.get_done_event(); 
+      Runtime::trigger_event(handled_event, handled_precondition);
+      // The pending request could be NULL if this is actually an 
+      // invalidation coming back from a remote node in order to 
+      // do a refinement
+      if (pending_request != NULL)
+      {
+        if (handled_precondition.exists())
+          pending_request->applied_events.insert(handled_precondition);
+        pending_request->remaining_count -= 1;
+        if (pending_request->remaining_count == 0)
+          finalize_pending_request(pending_request);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5957,6 +6058,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_remote_references(RtEvent done)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<LogicalView*> to_remove;
+      {
+        AutoLock eq(eq_lock);
+        std::map<RtEvent,std::vector<LogicalView*> >::iterator finder = 
+          inflight_references.find(done);
+#ifdef DEBUG_LEGION
+        assert(finder != inflight_references.end());
+#endif
+        to_remove.swap(finder->second);
+        inflight_references.erase(finder);
+      }
+      for (std::vector<LogicalView*>::const_iterator it = 
+            to_remove.begin(); it != to_remove.end(); it++)
+      {
+        if ((*it)->remove_nested_valid_ref(did))
+          delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::send_equivalence_set(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -6195,8 +6319,28 @@ namespace Legion {
       {
         // We had a mapping lease so we need to send back any state
         // to the owner node in order to be considered invalidated
-        // TODO
-        assert(false);
+        // We need to invalidate all our fields
+        const FieldMask pack_mask = exclusive_fields | shared_fields | 
+                                    single_redop_fields | multi_redop_fields;
+        Serializer rez;
+        pack_state(rez, to_trigger, NULL/*pending request*/,
+                   pack_mask, 0/*skip redop*/, true/*invalidte*/);
+        exclusive_fields.clear();
+        shared_fields.clear();
+        single_redop_fields.clear();
+        multi_redop_fields.clear();
+        redop_modes.clear();
+        // If we still have clean-up to do then launch that task now
+        if (to_trigger.exists())
+        {
+          // Add a resource reference to this to prevent it being collected
+          add_base_resource_ref(REMOTE_DID_REF);
+          RemoteRefTaskArgs args(this, to_trigger);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_WORK_PRIORITY, to_trigger);
+        }
+        // Send back the message to the owner node
+        runtime->send_equivalence_set_update_response(owner_space, rez);
       }
     }
 
@@ -6206,6 +6350,17 @@ namespace Legion {
     {
       const RefinementTaskArgs *rargs = (const RefinementTaskArgs*)args;
       rargs->target->perform_refinements();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_remote_references(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const RemoteRefTaskArgs *rargs = (const RemoteRefTaskArgs*)args;
+      rargs->set->remove_remote_references(rargs->done);
+      // Remove the reference that we added before launching the task
+      if (rargs->set->remove_base_resource_ref(REMOTE_DID_REF))
+        delete rargs->set;
     }
 
     //--------------------------------------------------------------------------
