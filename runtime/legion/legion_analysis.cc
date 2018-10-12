@@ -3349,6 +3349,7 @@ namespace Legion {
         const FieldMask orig_mask = request_mask;
         if (request_space == owner_space)
         {
+          // First see which ones we already have outstanding requests for
           if (!outstanding_requests.empty() && 
               !(request_mask * outstanding_requests.get_valid_mask()))
           {
@@ -3366,45 +3367,33 @@ namespace Legion {
                 break;
             }
           }
-          // First see which ones we already have outstanding requests for
           if (!!request_mask)
           {
             if (IS_REDUCE(usage))
             {
-              // See if we have it in exclusive mode
-              if (!(request_mask * exclusive_fields))
+              // Check to see if we have it in a reduction mode
+              FieldMask redop_mask;
+              if (!(request_mask * single_redop_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = exclusive_copies.find(owner_space);
-                if (finder != exclusive_copies.end())
-                  request_mask -= finder->second;
+                  finder = single_reduction_copies.find(owner_space);
+                if (finder != single_reduction_copies.end())
+                  redop_mask |= finder->second & request_mask;
               }
-              if (!!request_mask)
+              if (!(request_mask * multi_redop_fields))
               {
-                // Check to see if we have it in a reduction mode
-                FieldMask redop_mask;
-                if (!(request_mask * single_redop_fields))
-                {
-                  LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                    finder = single_reduction_copies.find(owner_space);
-                  if (finder != single_reduction_copies.end())
-                    redop_mask |= finder->second & request_mask;
-                }
-                if (!(request_mask * multi_redop_fields))
-                {
-                  LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                    finder = multi_reduction_copies.find(owner_space);
-                  if (finder != multi_reduction_copies.end())
-                    redop_mask |= finder->second & request_mask;
-                }
-                if (!!redop_mask)
-                {
-                  // Has to be in the right reduction mode too
-                  LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
-                    redop_finder = redop_modes.find(usage.redop);
-                  if (redop_finder != redop_modes.end())
-                    request_mask -= (redop_finder->second & redop_mask);
-                }
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = multi_reduction_copies.find(owner_space);
+                if (finder != multi_reduction_copies.end())
+                  redop_mask |= finder->second & request_mask;
+              }
+              if (!!redop_mask)
+              {
+                // Has to be in the right reduction mode too
+                LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
+                  redop_finder = redop_modes.find(usage.redop);
+                if (redop_finder != redop_modes.end())
+                  request_mask -= (redop_finder->second & redop_mask);
               }
             }
             else 
@@ -3461,8 +3450,10 @@ namespace Legion {
               {
                 // Remove these fields from the request mask
                 request_mask -= same_redop_mask;
-                update_reduction_copies(same_redop_mask, request_space, 
-                        pending_request, pending_updates, usage.redop);
+                upgrade_single_to_multi(same_redop_mask, request_space, 
+                        pending_request, pending_updates, usage.redop,
+                        single_redop_fields, single_reduction_copies,
+                        multi_redop_fields, multi_reduction_copies);
               }
             }
             // See if we still have request fields
@@ -3521,10 +3512,11 @@ namespace Legion {
             {
               if (IS_READ_ONLY(usage))
               {
-                // Filter anything in exclusive mode going to shared mode
-                filter_single_copies(request_mask, exclusive_fields,
-                                     exclusive_copies, request_space,
-                                     pending_request, pending_updates);
+                // Upgrade exclusive to shared
+                upgrade_single_to_multi(request_mask, request_space,
+                      pending_request, pending_updates, 0/*redop*/,
+                      exclusive_fields, exclusive_copies,
+                      shared_fields, shared_copies);
                 // If we still have fields we can record a new shared user
                 if (!!request_mask)
                   record_shared_copy(request_space, request_mask);
@@ -3636,25 +3628,26 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::update_reduction_copies(FieldMask &to_update,
+    void EquivalenceSet::upgrade_single_to_multi(FieldMask &to_update,
                                                 AddressSpaceID request_space,
                                                 PendingRequest *pending_request,
                                                 unsigned &pending_updates,
-                                                ReductionOpID redop)
+                                                ReductionOpID redop,
+                                                FieldMask &single_fields,
+                    LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
+                                                FieldMask &multi_fields,
+                    LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(redop != 0);
-#endif
       // Check to the multi-case first
-      FieldMask multi_overlap = to_update & multi_redop_fields;
+      FieldMask multi_overlap = to_update & multi_fields;
       if (!!multi_overlap)
       {
         to_update -= multi_overlap;
         // Add it to the set, none of the fields should be valid currently
         LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          multi_reduction_copies.find(request_space);
-        if (finder != multi_reduction_copies.end())
+          multi_copies.find(request_space);
+        if (finder != multi_copies.end())
         {
 #ifdef DEBUG_LEGION
           assert(finder->second * multi_overlap);
@@ -3662,11 +3655,10 @@ namespace Legion {
           finder->second |= multi_overlap; 
         }
         else
-          multi_reduction_copies[request_space] = multi_overlap;
-        // Request updates for all the fields
+          multi_copies[request_space] = multi_overlap;
+        // Request one update for all the fields
         for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-              it = multi_reduction_copies.begin(); 
-              it != multi_reduction_copies.end(); it++)
+              it = multi_copies.begin(); it != multi_copies.end(); it++)
         {
           if (it->first == request_space)
             continue;
@@ -3684,15 +3676,15 @@ namespace Legion {
       if (!!to_update)
       {
 #ifdef DEBUG_LEGION
-        assert(!(to_update - single_redop_fields));
+        assert(!(to_update - single_fields));
 #endif
         // All these fields are about to become multi-reduction fields
-        single_redop_fields -= to_update;
-        multi_redop_fields |= to_update;
+        single_fields -= to_update;
+        multi_fields |= to_update;
         // Add it to the set, none of the fields should be valid currently
         LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          multi_reduction_copies.find(request_space);
-        if (finder != multi_reduction_copies.end())
+          multi_copies.find(request_space);
+        if (finder != multi_copies.end())
         {
 #ifdef DEBUG_LEGION
           assert(finder->second * to_update);
@@ -3700,12 +3692,11 @@ namespace Legion {
           finder->second |= to_update; 
         }
         else
-          multi_reduction_copies[request_space] = to_update;
+          multi_copies[request_space] = to_update;
         // Filter any single reduction nodes to multi-nodes
         std::vector<AddressSpaceID> to_delete;
         for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
-              single_reduction_copies.begin(); it != 
-              single_reduction_copies.end(); it++)
+              single_copies.begin(); it != single_copies.end(); it++)
         {
           const FieldMask overlap = to_update & it->second;
           if (!overlap)
@@ -3713,6 +3704,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(it->first != request_space);
 #endif
+          // Note that on reception of this update request, the remote
+          // copy will realize that it needs to go to multi-reduce
           request_update(it->first, request_space, overlap, pending_request, 
                          pending_updates, false/*invalidate*/, redop);
           it->second -= overlap;
@@ -3720,8 +3713,8 @@ namespace Legion {
             to_delete.push_back(it->first);
           // Move it to multi reduction
           LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-            multi_reduction_copies.find(it->first);
-          if (finder != multi_reduction_copies.end())
+            multi_copies.find(it->first);
+          if (finder != multi_copies.end())
           {
 #ifdef DEBUG_LEGION
             assert(finder->second * overlap);
@@ -3729,11 +3722,17 @@ namespace Legion {
             finder->second |= overlap;
           }
           else
-            multi_reduction_copies[it->first] = overlap;
+            multi_copies[it->first] = overlap;
           // Fields should only appear once for single reductions
           to_update -= overlap;
           if (!to_update)
             break;
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            single_copies.erase(*it);
         }
       }
     }
@@ -5951,6 +5950,7 @@ namespace Legion {
     {
       RtUserEvent to_trigger;
       std::vector<RefinementThunk*> to_perform;
+      bool first = true;
       do 
       {
         std::vector<EquivalenceSet*> to_add;
@@ -5970,6 +5970,38 @@ namespace Legion {
         assert(is_owner());
         assert(eq_state == REFINING_STATE);
 #endif
+        // On the first iteration update our data structures to 
+        // reflect that we now have all the valid data
+        if (first)
+        {
+          // We now hold all the fields in exclusive mode
+          // since the request to invalidate the subsets will also 
+          // send back any meta-data for these remote copies
+          if (!exclusive_copies.empty())
+            exclusive_copies.clear();
+          if (!!shared_fields)
+          {
+            exclusive_fields |= shared_fields;
+            shared_fields.clear();
+            shared_copies.clear();
+          }
+          if (!!single_redop_fields)
+          {
+            exclusive_fields |= single_redop_fields;
+            single_redop_fields.clear();
+            single_reduction_copies.clear();
+          }
+          if (!!multi_redop_fields)
+          {
+            exclusive_fields |= multi_redop_fields;
+            multi_redop_fields.clear();
+            multi_reduction_copies.clear();
+          }
+          redop_modes.clear();
+          // We now have all the fields in exclusive mode
+          exclusive_copies[owner_space] = exclusive_fields;
+          first = false;
+        }
         if (!to_add.empty())
           subsets.insert(subsets.end(), to_add.begin(), to_add.end());
         // Add these refinements to our subsets and delete the thunks
@@ -6153,14 +6185,9 @@ namespace Legion {
           refinement_preconditions.insert(remote_done);
         }
         runtime->send_equivalence_set_subset_invalidation(*it, rez);
-      }
+      } 
       // There are no more remote subsets
       remote_subsets.clear();
-      // We now hold all the fields in exclusive mode
-      exclusive_fields |= shared_fields;
-      shared_fields.clear();
-      exclusive_copies.clear();
-      shared_copies.clear();
       RefinementTaskArgs args(this);      
       if (!refinement_preconditions.empty())
       {

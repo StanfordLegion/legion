@@ -846,11 +846,15 @@ namespace Legion {
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
                                    unsigned &pending_updates);
-      void update_reduction_copies(FieldMask &to_update,
+      void upgrade_single_to_multi(FieldMask &to_update,
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
                                    unsigned &pending_updates,
-                                   ReductionOpID redop);
+                                   ReductionOpID redop,
+                                   FieldMask &single_fields,
+              LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
+                                   FieldMask &multi_fields,
+              LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies);
       void record_exclusive_copy(AddressSpaceID request_space,
                                  const FieldMask &request_mask);
       void record_shared_copy(AddressSpaceID request_space,
