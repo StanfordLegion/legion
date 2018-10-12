@@ -2106,9 +2106,10 @@ namespace Legion {
                      empty_equivalence_sets.find(key);
           if (finder == empty_equivalence_sets.end())
           {
-            root = new EquivalenceSet(runtime, 
+            const AddressSpaceID local_space = runtime->address_space;
+            root = new EquivalenceSet(runtime,
               runtime->get_available_distributed_id(),
-              runtime->address_space, expr, true/*register now*/); 
+              local_space, local_space, expr, true/*register now*/); 
             empty_equivalence_sets[key] = root;
             root->add_base_resource_ref(CONTEXT_REF);
           }
@@ -2156,9 +2157,10 @@ namespace Legion {
         {
           // Didn't loose the race so we have to make the top-level
           // equivalence set for this region tree
+          const AddressSpaceID local_space = runtime->address_space;
           root = new EquivalenceSet(runtime, 
               runtime->get_available_distributed_id(),
-              runtime->address_space, root_expr, true/*register now*/); 
+              local_space, local_space, root_expr, true/*register now*/); 
           tree_equivalence_sets[tree_id] = root;
           root->add_base_resource_ref(CONTEXT_REF);
         }

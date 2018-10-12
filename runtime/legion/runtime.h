@@ -2276,10 +2276,6 @@ namespace Legion {
                                                   Serializer &rez);
       void send_equivalence_set_ray_trace_response(AddressSpaceID target,
                                                    Serializer &rez);
-      void send_equivalence_set_create_remote_request(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_equivalence_set_create_remote_response(AddressSpaceID target,
-                                                       Serializer &rez);
       void send_equivalence_set_valid_request(AddressSpaceID target,
                                                Serializer &rez);
       void send_equivalence_set_valid_response(AddressSpaceID target,
@@ -2477,9 +2473,6 @@ namespace Legion {
       void handle_equivalence_set_ray_trace_request(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_equivalence_set_ray_trace_response(Deserializer &derez);
-      void handle_equivalence_set_create_remote_request(Deserializer &derez,
-                                                        AddressSpaceID source);
-      void handle_equivalence_set_create_remote_response(Deserializer &derez);
       void handle_equivalence_set_valid_request(Deserializer &derez,
                                                 AddressSpaceID source);
       void handle_equivalence_set_valid_response(Deserializer &derez);

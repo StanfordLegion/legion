@@ -657,8 +657,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION,
       SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
       SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
-      SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
-      SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
       SEND_EQUIVALENCE_SET_VALID_REQUEST,
       SEND_EQUIVALENCE_SET_VALID_RESPONSE,
       SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
@@ -797,8 +795,6 @@ namespace Legion {
         "Send Equivalence Set Subset Invalidation",                   \
         "Send Equivalence Set Ray Trace Request",                     \
         "Send Equivalence Set Ray Trace Response",                    \
-        "Send Equivalence Set Remote Create Request",                 \
-        "Send Equivalence Set Remote Create Response",                \
         "Send Equivalence Set Valid Request",                         \
         "Send Equivalence Set Valid Response",                        \
         "Send Equivalence Set Update Request",                        \

@@ -672,8 +672,9 @@ namespace Legion {
       };
       class LocalRefinement : public RefinementThunk {
       public:
-        LocalRefinement(IndexSpaceExpression *expr, EquivalenceSet *owner);
-        LocalRefinement(const LocalRefinement &rhs) 
+        LocalRefinement(IndexSpaceExpression *expr, 
+            EquivalenceSet *owner, AddressSpaceID source);
+      LocalRefinement(const LocalRefinement &rhs) 
           : RefinementThunk(rhs) { assert(false); }
         virtual ~LocalRefinement(void) { }
       public:
@@ -723,12 +724,16 @@ namespace Legion {
       };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
-                     AddressSpaceID owner_space, 
+                     AddressSpaceID owner_space,
+                     AddressSpaceID logical_owner,
                      IndexSpaceExpression *expr, bool register_now);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
     public:
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
+    public:
+      inline bool is_logical_owner(void) const 
+        { return (local_space == logical_owner_space); }
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
@@ -917,10 +922,6 @@ namespace Legion {
       static void handle_ray_trace_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_ray_trace_response(Deserializer &derez, Runtime *rt);
-      static void handle_create_remote_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_create_remote_response(Deserializer &derez, 
-                                                Runtime *runtime);
       static void handle_valid_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_valid_response(Deserializer &derez, Runtime *rt);
@@ -930,6 +931,7 @@ namespace Legion {
       static void handle_invalidate_response(Deserializer &derez, Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
+      const AddressSpaceID logical_owner_space;
     protected:
       LocalLock &eq_lock;
     protected:

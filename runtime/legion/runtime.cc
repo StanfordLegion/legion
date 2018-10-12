@@ -6236,17 +6236,6 @@ namespace Legion {
               runtime->handle_equivalence_set_ray_trace_response(derez);
               break;
             }
-          case SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST:
-            {
-              runtime->handle_equivalence_set_create_remote_request(derez,
-                                                      remote_address_space);
-              break;
-            }
-          case SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE:
-            {
-              runtime->handle_equivalence_set_create_remote_response(derez);
-              break;
-            }
           case SEND_EQUIVALENCE_SET_VALID_REQUEST:
             {
               runtime->handle_equivalence_set_valid_request(derez,
@@ -14216,26 +14205,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_create_remote_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-          SEND_EQUIVALENCE_SET_REMOTE_CREATE_REQUEST,
-          VERSION_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_create_remote_response(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-          SEND_EQUIVALENCE_SET_REMOTE_CREATE_RESPONSE,
-          VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_valid_request(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -15353,22 +15322,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_ray_trace_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_create_remote_request(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_create_remote_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_create_remote_response(
-                                                            Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      EquivalenceSet::handle_create_remote_response(derez, this);
     }
 
     //--------------------------------------------------------------------------

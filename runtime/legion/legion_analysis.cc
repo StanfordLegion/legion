@@ -2611,19 +2611,30 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
-                 AddressSpaceID owner, IndexSpaceExpression *expr, bool reg_now)
+                                   AddressSpaceID owner, AddressSpace logical,
+                                   IndexSpaceExpression *expr, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
-        eq_lock(gc_lock), eq_state(is_owner() ? MAPPING_STATE : INVALID_STATE),
+        logical_owner_space(logical), eq_lock(gc_lock), 
+        eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE),
         unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
-      if (is_owner())
+      if (is_logical_owner())
       {
-        // If we're the owner, we hold everything in exclusive mode
+        // If we're the logical owner then whoever is the actual owner
+        // is the node where the equivalence class was first made which
+        // is where the refinement took place so that is where all the
+        // data is initially
         exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         exclusive_copies[owner_space] = exclusive_fields;
       }
+      else if (is_owner())
+        // Otherwise we're not the owner, but we're where the refinement
+        // took place so that is where the metadata all starts
+        exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      // If we're not the owner then we will set our exclusive fields
+      // on refinement in EquivalenceSet::clone_from
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -2631,7 +2642,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
-      : DistributedCollectable(rhs), set_expr(NULL), eq_lock(gc_lock)
+      : DistributedCollectable(rhs), set_expr(NULL), 
+        logical_owner_space(rhs.logical_owner_space), eq_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2697,25 +2709,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = owner->runtime;
-      // If we're not the owner send a request to make the refinement set
-      if (source != runtime->address_space)
-      {
-        refinement_ready = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(this);
-          expr->pack_expression(rez, source);
-        }
-        runtime->send_equivalence_set_create_remote_request(source, rez);
-      }
-      else
-      {
-        // We're the owner so we can make the refinement set now
-        DistributedID did = runtime->get_available_distributed_id();
-        refinement = new EquivalenceSet(runtime, did, source, 
-                                        expr, true/*register*/);
-      }
+      DistributedID did = runtime->get_available_distributed_id();
+      refinement = new EquivalenceSet(runtime, did, runtime->address_space, 
+                                      source, expr, true/*register*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2759,8 +2755,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::LocalRefinement::LocalRefinement(IndexSpaceExpression *expr, 
-                                                     EquivalenceSet *owner) 
-      : RefinementThunk(expr, owner, owner->runtime->address_space)
+                                                     EquivalenceSet *owner,
+                                                     AddressSpaceID source) 
+      : RefinementThunk(expr, owner, source)
     //--------------------------------------------------------------------------
     {
     }
@@ -2863,7 +2860,7 @@ namespace Legion {
       if (unrefined_remainder != NULL)
       {
         LocalRefinement *refinement = 
-          new LocalRefinement(unrefined_remainder, this);
+          new LocalRefinement(unrefined_remainder, this,runtime->address_space);
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
@@ -2898,13 +2895,14 @@ namespace Legion {
           }
         }
         // We need to iterate until we get a valid lease while holding the lock
-        if (is_owner())
+        if (is_logical_owner())
         {
           // If we have an unrefined remainder then we need to do that now
           if (unrefined_remainder != NULL)
           {
             LocalRefinement *refinement = 
-              new LocalRefinement(unrefined_remainder, this);
+              new LocalRefinement(unrefined_remainder, this, 
+                                  runtime->address_space);
             // We can clear the unrefined remainder now
             unrefined_remainder = NULL;
             add_pending_refinement(refinement);
@@ -2951,7 +2949,8 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(did);
               }
-              runtime->send_equivalence_set_subset_request(owner_space, rez);
+              runtime->send_equivalence_set_subset_request(logical_owner_space,
+                                                           rez);
             }
             wait_on.wait();
             eq.reacquire();
@@ -2963,7 +2962,7 @@ namespace Legion {
         {
           // We're going to record ourself so add the mapping guard
 #ifdef DEBUG_LEGION
-          if (is_owner())
+          if (is_logical_owner())
             assert((eq_state == MAPPING_STATE) || 
                     (eq_state == PENDING_REFINED_STATE));
           else
@@ -3000,7 +2999,7 @@ namespace Legion {
       AutoLock eq(eq_lock);
       std::map<Operation*,unsigned>::iterator finder = mapping_guards.find(op);
 #ifdef DEBUG_LEGION
-      if (is_owner())
+      if (is_logical_owner())
         assert((eq_state == MAPPING_STATE) || 
                 (eq_state == PENDING_REFINED_STATE));
       else
@@ -3015,13 +3014,13 @@ namespace Legion {
         mapping_guards.erase(finder);
         if (mapping_guards.empty())
         {
-          if (is_owner() && (eq_state == PENDING_REFINED_STATE))
+          if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
             eq_state = REFINED_STATE;
             // Kick off the refinement task now that we're transitioning
             launch_refinement_task();
           }
-          else if (!is_owner() && (eq_state == PENDING_INVALID_STATE))
+          else if (!is_logical_owner() && (eq_state == PENDING_INVALID_STATE))
           {
             eq_state = INVALID_STATE;
 #ifdef DEBUG_LEGION
@@ -3041,7 +3040,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // If this is not the owner node then send the request there
-      if (!is_owner())
+      if (!is_logical_owner())
       {
         RtUserEvent done_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -3049,11 +3048,12 @@ namespace Legion {
           RezCheck z(rez);
           rez.serialize(did);
           rez.serialize(target);
-          expr->pack_expression(rez, owner_space);
+          expr->pack_expression(rez, logical_owner_space);
           rez.serialize(source);
           rez.serialize(done_event);
         }
-        runtime->send_equivalence_set_ray_trace_request(owner_space, rez);
+        runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
+                                                        rez);
         return done_event;
       }
 #ifdef DEBUG_LEGION
@@ -3130,7 +3130,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(unrefined_remainder != NULL);
 #endif
-            LocalRefinement *refinement = new LocalRefinement(expr, this);
+            LocalRefinement *refinement = new LocalRefinement(expr,this,source);
             refinement->add_reference();
             refinements_to_traverse[refinement] = expr;
             add_pending_refinement(refinement);
@@ -3165,7 +3165,7 @@ namespace Legion {
           if ((diff != NULL) && !diff->is_empty())
           {
             // Time to refine this since we only need a subset of it
-            LocalRefinement *refinement = new LocalRefinement(expr, this);
+            LocalRefinement *refinement = new LocalRefinement(expr,this,source);
             refinement->add_reference();
             refinements_to_traverse[refinement] = expr;
             add_pending_refinement(refinement);
@@ -3256,7 +3256,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
-      if (!is_owner())
+      if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
         assert(pending_request == NULL);
@@ -3335,7 +3335,8 @@ namespace Legion {
               rez.serialize(usage);
               rez.serialize(request);
             }
-            runtime->send_equivalence_set_valid_request(owner_space, rez);
+            runtime->send_equivalence_set_valid_request(logical_owner_space,
+                                                        rez);
             outstanding_requests.insert(request, request_mask);
             ready_events.insert(ready);
             applied_events.insert(applied);
@@ -3347,7 +3348,7 @@ namespace Legion {
         // If the request is local then check to see which fields are already
         // valid, if its remote this check was already done on the remote node
         const FieldMask orig_mask = request_mask;
-        if (request_space == owner_space)
+        if (request_space == logical_owner_space)
         {
           // First see which ones we already have outstanding requests for
           if (!outstanding_requests.empty() && 
@@ -3376,14 +3377,14 @@ namespace Legion {
               if (!(request_mask * single_redop_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = single_reduction_copies.find(owner_space);
+                  finder = single_reduction_copies.find(logical_owner_space);
                 if (finder != single_reduction_copies.end())
                   redop_mask |= finder->second & request_mask;
               }
               if (!(request_mask * multi_redop_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = multi_reduction_copies.find(owner_space);
+                  finder = multi_reduction_copies.find(logical_owner_space);
                 if (finder != multi_reduction_copies.end())
                   redop_mask |= finder->second & request_mask;
               }
@@ -3402,7 +3403,7 @@ namespace Legion {
               if (!(request_mask * exclusive_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = exclusive_copies.find(owner_space);
+                  finder = exclusive_copies.find(logical_owner_space);
                 if (finder != exclusive_copies.end())
                   request_mask -= finder->second;
               }
@@ -3410,7 +3411,7 @@ namespace Legion {
               if (IS_READ_ONLY(usage) && !!request_mask)
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = shared_copies.find(owner_space);
+                  finder = shared_copies.find(logical_owner_space);
                 if (finder != shared_copies.end())
                   request_mask -= finder->second;
               }
@@ -3425,6 +3426,8 @@ namespace Legion {
               pending_request = 
                 new PendingRequest(ready, applied, usage.redop);
               outstanding_requests.insert(pending_request, request_mask); 
+              ready_events.insert(ready);
+              applied_events.insert(applied);
             }
           }
         }
@@ -3984,7 +3987,7 @@ namespace Legion {
         pack_state(rez, handled_event, pending_request, 
                    update_mask, skip_redop, invalidate);
         // Do any invalidation meta-updates before we send the message
-        if (!is_owner())
+        if (!is_logical_owner())
         {
           if (invalidate)
           {
@@ -4582,7 +4585,7 @@ namespace Legion {
         }
         // We only need to invalidate meta-state on remote nodes
         // since the update logic will handle it on the owner node
-        if (!is_owner())
+        if (!is_logical_owner())
         {
           exclusive_fields -= invalidate_mask;
           shared_fields -= invalidate_mask;
@@ -4653,7 +4656,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != outstanding_requests.end());
 #endif
-      if (!is_owner())
+      if (!is_logical_owner())
       {
         const FieldMask &update_mask = finder->second;
         // If we're not the owner then we have to update the state 
@@ -4780,7 +4783,7 @@ namespace Legion {
       }
       else
         assert(redop_modes.empty());
-      if (is_owner())
+      if (is_logical_owner())
       {
         // Summary masks should match their sets
         if (!!exclusive_fields)
@@ -4857,7 +4860,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      assert(is_logical_owner());
       assert(sources.size() == corresponding.size());
 #endif
       WrapperReferenceMutator mutator(applied_events);
@@ -5967,7 +5970,7 @@ namespace Legion {
         }
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
-        assert(is_owner());
+        assert(is_logical_owner());
         assert(eq_state == REFINING_STATE);
 #endif
         // On the first iteration update our data structures to 
@@ -5999,7 +6002,7 @@ namespace Legion {
           }
           redop_modes.clear();
           // We now have all the fields in exclusive mode
-          exclusive_copies[owner_space] = exclusive_fields;
+          exclusive_copies[logical_owner_space] = exclusive_fields;
           first = false;
         }
         if (!to_add.empty())
@@ -6126,6 +6129,7 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(logical_owner_space);
         set_expr->pack_expression(rez, target);
       }
       runtime->send_equivalence_set_response(target, rez);
@@ -6136,7 +6140,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      assert(is_logical_owner());
 #endif
       thunk->add_reference();
       pending_refinements.push_back(thunk);
@@ -6163,7 +6167,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      assert(is_logical_owner());
       assert(eq_state == REFINED_STATE);
       assert(!pending_refinements.empty());
 #endif
@@ -6211,7 +6215,7 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
-      assert(is_owner());
+      assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
       // First check to see if we need to complete this refinement
@@ -6250,7 +6254,7 @@ namespace Legion {
     {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
       assert(subsets.empty());
       assert(eq_state == PENDING_VALID_STATE);
       assert(transition_event.exists());
@@ -6303,7 +6307,7 @@ namespace Legion {
     {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
       assert(eq_state == VALID_STATE);
       assert(!transition_event.exists());
 #endif
@@ -6327,7 +6331,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!is_owner());
+      assert(!is_logical_owner());
       assert(to_trigger.exists());
       assert(eq_state == INVALID_STATE);
 #endif
@@ -6367,7 +6371,7 @@ namespace Legion {
               LG_THROUGHPUT_WORK_PRIORITY, to_trigger);
         }
         // Send back the message to the owner node
-        runtime->send_equivalence_set_update_response(owner_space, rez);
+        runtime->send_equivalence_set_update_response(logical_owner_space, rez);
       }
     }
 
@@ -6416,15 +6420,17 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      AddressSpaceID logical_owner;
+      derez.deserialize(logical_owner);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
-        set = new(location) EquivalenceSet(runtime, did, source, 
+        set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
                                            expr, false/*register now*/);
       else
-        set = new EquivalenceSet(runtime, did, source, 
+        set = new EquivalenceSet(runtime, did, source, logical_owner,
                                  expr, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
@@ -6438,13 +6444,10 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
-      assert(set != NULL);
-#else
-      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
-#endif
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       set->process_subset_request(source);
     }
 
@@ -6494,6 +6497,9 @@ namespace Legion {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+
       VersionManager *target;
       derez.deserialize(target);
       IndexSpaceExpression *expr = 
@@ -6503,13 +6509,8 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      DistributedCollectable *dc = runtime->find_distributed_collectable(did);
-#ifdef DEBUG_LEGION
-      EquivalenceSet *set = dynamic_cast<EquivalenceSet*>(dc);
-      assert(set != NULL);
-#else
-      EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
-#endif
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
       RtEvent done = set->ray_trace_equivalence_sets(target, expr, origin);
       Runtime::trigger_event(done_event, done);
     }
@@ -6533,46 +6534,6 @@ namespace Legion {
         ready.wait();
       target->record_equivalence_set(set);
       Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_create_remote_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RefinementThunk *thunk;
-      derez.deserialize(thunk);
-      IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
-
-      DistributedID did = runtime->get_available_distributed_id();
-      EquivalenceSet *result = new EquivalenceSet(runtime, did, 
-                                runtime->address_space, expr, true/*register*/);
-      Serializer rez;
-      {
-        RezCheck z2(rez);
-        rez.serialize(thunk);
-        rez.serialize(result->did);
-      }
-      runtime->send_equivalence_set_create_remote_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_create_remote_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      RefinementThunk *thunk;
-      derez.deserialize(thunk);
-      DistributedID did;
-      derez.deserialize(did);
-
-      RtEvent ready;
-      EquivalenceSet *result = 
-        runtime->find_or_request_equivalence_set(did, ready);
-      thunk->record_refinement(result, ready);
     }
 
     //--------------------------------------------------------------------------
