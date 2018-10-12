@@ -2633,8 +2633,6 @@ namespace Legion {
         // Otherwise we're not the owner, but we're where the refinement
         // took place so that is where the metadata all starts
         exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-      // If we're not the owner then we will set our exclusive fields
-      // on refinement in EquivalenceSet::clone_from
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -3508,6 +3506,7 @@ namespace Legion {
               filter_multi_copies(filter_mask, multi_redop_fields,
                                   multi_reduction_copies, request_space,
                                   pending_request, pending_updates);
+              filter_redop_modes(redop_overlap);
               record_exclusive_copy(request_space, redop_overlap);
               request_mask -= redop_overlap;
             }
@@ -3993,23 +3992,18 @@ namespace Legion {
           {
             exclusive_fields -= update_mask;
             shared_fields -= update_mask;
-            single_redop_fields -= update_mask;
-            multi_redop_fields -= update_mask;
-            if (!redop_modes.empty())
+            if (!!single_redop_fields || !!multi_redop_fields)
             {
-              std::vector<ReductionOpID> to_delete;
-              for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
-                    redop_modes.begin(); it != redop_modes.end(); it++)
+              const FieldMask redop_overlap = update_mask &
+                (single_redop_fields | multi_redop_fields);
+              if (!!redop_overlap)
               {
-                it->second -= update_mask;
-                if (!it->second)
-                  to_delete.push_back(it->first);
-              }
-              if (!to_delete.empty())
-              {
-                for (std::vector<ReductionOpID>::const_iterator it = 
-                      to_delete.begin(); it != to_delete.end(); it++)
-                  redop_modes.erase(*it);
+                single_redop_fields -= redop_overlap;
+                multi_redop_fields -= redop_overlap;
+                if (!single_redop_fields && !multi_redop_fields)
+                  redop_modes.clear();
+                else
+                  filter_redop_modes(redop_overlap);
               }
             }
           }
@@ -4589,8 +4583,20 @@ namespace Legion {
         {
           exclusive_fields -= invalidate_mask;
           shared_fields -= invalidate_mask;
-          single_redop_fields -= invalidate_mask;
-          multi_redop_fields -= invalidate_mask;
+          if (!!single_redop_fields || !!multi_redop_fields)
+          {
+            const FieldMask redop_overlap = invalidate_mask &
+              (single_redop_fields | multi_redop_fields);
+            if (!!redop_overlap)
+            {
+              single_redop_fields -= redop_overlap;
+              multi_redop_fields -= redop_overlap;
+              if (!single_redop_fields && !multi_redop_fields)
+                redop_modes.clear();
+              else
+                filter_redop_modes(redop_overlap);
+            }
+          }
         }
         // Then send the response to the source node telling it that
         // the invalidation was done successfully
@@ -5130,7 +5136,8 @@ namespace Legion {
       if (initialized != NULL)
       {
         FieldMask &initialized_fields = *initialized;
-        if (!!initialized_fields)
+        // Don't report uninitialized warnings for empty equivalence classes
+        if (!!initialized_fields && !set_expr->is_empty())
           initialized_fields &= valid_instances.get_valid_mask(); 
       }
       if (IS_REDUCE(usage))
