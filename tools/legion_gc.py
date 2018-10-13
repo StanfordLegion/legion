@@ -1089,7 +1089,7 @@ class State(object):
             future_map.check_for_cycles()
         for did,eq in self.equivalence_sets.iteritems():
             print "Checking for cycles in "+repr(eq)
-            version.check_for_cycles()
+            eq.check_for_cycles()
         for did,constraint in self.constraints.iteritems():
             print "Checking for cycles in "+repr(constraint)
             constraint.check_for_cycles()
