@@ -2614,7 +2614,7 @@ namespace Legion {
                                    AddressSpaceID owner, AddressSpace logical,
                                    IndexSpaceExpression *expr, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
-        logical_owner_space(logical), eq_lock(gc_lock), 
+        logical_owner_space(logical),
         eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE),
         unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
@@ -2641,7 +2641,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
       : DistributedCollectable(rhs), set_expr(NULL), 
-        logical_owner_space(rhs.logical_owner_space), eq_lock(gc_lock)
+        logical_owner_space(rhs.logical_owner_space)
     //--------------------------------------------------------------------------
     {
       // should never be called

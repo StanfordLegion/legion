@@ -738,7 +738,7 @@ namespace Legion {
       assert(is_owner()); // should always be on the owner node
 #endif
       context->add_reference();
-      AutoLock gc(gc_lock);
+      AutoLock inst(inst_lock);
 #ifdef DEBUG_LEGION
       assert(active_contexts.find(context) == active_contexts.end());
 #endif
@@ -753,7 +753,7 @@ namespace Legion {
       assert(is_owner()); // should always be on the owner node
 #endif
       {
-        AutoLock gc(gc_lock);
+        AutoLock inst(inst_lock);
         std::set<InnerContext*>::iterator finder = 
           active_contexts.find(context);
         // We could already have removed this context if this
@@ -928,7 +928,7 @@ namespace Legion {
       // will be no more additions because we are being deleted
       std::set<InnerContext*> copy_active_contexts;
       {
-        AutoLock gc(gc_lock);
+        AutoLock inst(inst_lock);
         if (active_contexts.empty())
           return;
         copy_active_contexts = active_contexts;

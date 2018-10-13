@@ -263,6 +263,7 @@ namespace Legion {
 #endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
+      mutable LocalLock future_lock;
       ApUserEvent ready_event;
       void *result; 
       size_t result_size;
@@ -327,6 +328,7 @@ namespace Legion {
       Operation *const op;
       const GenerationID op_gen;
     private:
+      mutable LocalLock future_map_lock;
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
       bool valid;
@@ -1322,8 +1324,7 @@ namespace Legion {
       const bool internal;
     protected:
       char *constraints_name;
-      // Use the base gc_lock as the layout_lock too
-      LocalLock &layout_lock;
+      mutable LocalLock layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;

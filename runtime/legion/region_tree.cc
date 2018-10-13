@@ -5417,8 +5417,7 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, INDEX_TREE_NODE_DC), 
           owner, false/*register*/),
-        context(ctx), depth(d), color(c), destroyed(false),
-        node_lock(this->gc_lock)
+        context(ctx), depth(d), color(c), destroyed(false)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5719,14 +5718,10 @@ namespace Legion {
       std::vector<IndexPartNode*> to_destroy;
       if (is_owner())
       {
-        // Need read-only lock while accessing these structures, 
-        // we know they won't change while accessing them
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        // Remove gc references from our remote nodes
-        if (!!remote_instances)
+        if (has_remote_instances())
         {
           DestructionFunctor functor(this, mutator);
-          remote_instances.map(functor);
+          map_over_remote_instances(functor);
         }
         for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
@@ -6277,7 +6272,7 @@ namespace Legion {
         parent->send_node(target, true/*up*/);
       {
         AutoLock n_lock(node_lock);
-        if (!remote_instances.contains(target))
+        if (!has_remote_instance(target))
         {
           Serializer rez;
           {
@@ -6305,7 +6300,7 @@ namespace Legion {
             }
           }
           context->runtime->send_index_space_node(target, rez); 
-          remote_instances.add(target);
+          update_remote_instances(target);
         }
       }
     }
@@ -6820,14 +6815,11 @@ namespace Legion {
         // Remove the valid reference that we hold on the color space
         // No need to check for deletion since we have a resource ref too
         color_space->remove_nested_valid_ref(did, mutator);
-        // Need read-only lock while accessing these structures, 
-        // we know they won't change while accessing them
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
         // Remove gc references from our remote nodes
-        if (!!remote_instances)
+        if (has_remote_instances())
         {
           DestructionFunctor functor(this, mutator);
-          remote_instances.map(functor);
+          map_over_remote_instances(functor);
         }
         for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it = 
               color_map.begin(); it != color_map.end(); it++)
@@ -7774,7 +7766,7 @@ namespace Legion {
         // Make sure we know if this is disjoint or not yet
         bool disjoint_result = is_disjoint();
         AutoLock n_lock(node_lock);
-        if (!remote_instances.contains(target))
+        if (!has_remote_instance(target))
         {
           Serializer rez;
           {
@@ -7814,7 +7806,7 @@ namespace Legion {
             }
           }
           context->runtime->send_index_partition_node(target, rez);
-          remote_instances.add(target);
+          update_remote_instances(target);
         }
       }
     }
@@ -8008,7 +8000,7 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), node_lock(this->gc_lock), destroyed(false)
+        handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
@@ -8028,7 +8020,7 @@ namespace Legion {
       : DistributedCollectable(ctx->runtime, 
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FIELD_SPACE_DC), 
           get_owner_space(sp, ctx->runtime), false/*register with runtime*/),
-        handle(sp), context(ctx), node_lock(this->gc_lock), destroyed(false)
+        handle(sp), context(ctx), destroyed(false)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
@@ -8146,14 +8138,11 @@ namespace Legion {
     {
       if (is_owner())
       {
-        // Need read-only lock while accessing these structures, 
-        // we know they won't change while accessing them
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
         // Remove gc references from our remote nodes
-        if (!!remote_instances)
+        if (has_remote_instances())
         {
           DestructionFunctor functor(this, mutator);
-          remote_instances.map(functor);
+          map_over_remote_instances(functor);
         }
       }
       else // Remove the valid reference that we have on the owner
@@ -8835,10 +8824,10 @@ namespace Legion {
                           "recompile.", handle.id, MAX_FIELDS)
         index = result;
         fields[fid] = FieldInfo(size, index, serdez_id);
-        if (!!remote_instances)
+        if (has_remote_instances())
         {
           FindTargetsFunctor functor(targets);
-          remote_instances.map(functor);   
+          map_over_remote_instances(functor);
         }
       }
       if (!targets.empty())
@@ -8920,10 +8909,10 @@ namespace Legion {
           fields[fid] = FieldInfo(sizes[idx], index, serdez_id);
           indexes[idx] = index;
         }
-        if (!!remote_instances)
+        if (has_remote_instances())
         {
           FindTargetsFunctor functor(targets);
-          remote_instances.map(functor);   
+          map_over_remote_instances(functor);
         }
       }
       if (!targets.empty())
@@ -8981,10 +8970,10 @@ namespace Legion {
         finder->second.destroyed = true;
         if (is_owner())
           free_index(finder->second.idx);
-        if (is_owner() && !!remote_instances)
+        if (is_owner() && has_remote_instances())
         {
           FindTargetsFunctor functor(targets);
-          remote_instances.map(functor);
+          map_over_remote_instances(functor);
         }
       }
       if (!targets.empty())
@@ -9036,10 +9025,10 @@ namespace Legion {
           if (is_owner())
             free_index(finder->second.idx);
         }
-        if (is_owner() && !!remote_instances)
+        if (is_owner() && has_remote_instances())
         {
           FindTargetsFunctor functor(targets);
-          remote_instances.map(functor);
+          map_over_remote_instances(functor);
         }
       }
       if (!targets.empty())
@@ -9359,11 +9348,11 @@ namespace Legion {
         logical_trees.insert(inst);
         if (is_owner())
         {
-          if (!!remote_instances)
+          if (has_remote_instances())
           {
             // Send messages to everyone except the source
             FindTargetsFunctor functor(targets);
-            remote_instances.map(functor);
+            map_over_remote_instances(functor);
           }
         }
         else if (source != owner_space)
@@ -9874,7 +9863,7 @@ namespace Legion {
     {
       // See if this is in our creation set, if not, send it and all the fields
       AutoLock n_lock(node_lock);
-      if (!remote_instances.contains(target))
+      if (!has_remote_instance(target))
       {
         // First send the node info and then send all the fields
         Serializer rez;
@@ -9920,7 +9909,7 @@ namespace Legion {
         }
         context->runtime->send_field_space_node(target, rez);
         // Finally add it to the creation set
-        remote_instances.add(target);
+        update_remote_instances(target);
       }
     }
 
@@ -10221,11 +10210,10 @@ namespace Legion {
               REGION_TREE_NODE_DC),
             ctx->runtime->address_space, false/*register with runtime*/),
         context(ctx), column_source(column_src), 
-        registered(false), destroyed(false), 
+        registered(false), destroyed(false) 
 #ifdef DEBUG_LEGION
-        currently_active(true),
+        , currently_active(true)
 #endif
-        node_lock(this->gc_lock)
     //--------------------------------------------------------------------------
     {
     }

@@ -1117,7 +1117,7 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
         Runtime::trigger_event(realm_index_space_set);
-        if (!remote_instances.empty())
+        if (has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
           // sent this node to except the source
@@ -1128,7 +1128,7 @@ namespace Legion {
             pack_index_space(rez, false/*include size*/);
           }
           IndexSpaceSetFunctor functor(context->runtime, source, rez);
-          remote_instances.map(functor); 
+          map_over_remote_instances(functor);
         }
       }
       // Now we can tighten it

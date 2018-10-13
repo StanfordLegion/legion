@@ -217,6 +217,7 @@ namespace Legion {
       const RegionTreeID tree_id;
       const PointerConstraint pointer_constraint;
     protected:
+      mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
     };
 

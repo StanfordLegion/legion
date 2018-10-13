@@ -1216,7 +1216,7 @@ namespace Legion {
       NodeSet child_creation;
       bool destroyed;
     protected:
-      LocalLock &node_lock;
+      mutable LocalLock node_lock;
     protected:
       std::map<IndexTreeNode*,bool> dominators;
     protected:
@@ -2421,7 +2421,7 @@ namespace Legion {
       const FieldSpace handle;
       RegionTreeForest *const context;
     private:
-      LocalLock &node_lock;
+      mutable LocalLock node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<LogicalRegion> logical_trees;
       std::set<RegionNode*> local_trees;
@@ -2665,7 +2665,7 @@ namespace Legion {
       DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
-      LocalLock &node_lock;
+      mutable LocalLock node_lock;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };

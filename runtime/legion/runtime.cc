@@ -587,7 +587,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       // Need to hold the lock when reading the set of remote spaces
-      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
       if (!registered_waiters.empty())
       {
         Serializer rez;
@@ -613,7 +613,7 @@ namespace Legion {
       {
         bool send_result;
         {
-          AutoLock gc(gc_lock);
+          AutoLock f_lock(future_lock);
           if (registered_waiters.find(sid) == registered_waiters.end())
           {
             send_result = ready_event.has_triggered();
@@ -840,7 +840,7 @@ namespace Legion {
       {
         // See if we already have it
         {
-          AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+          AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
           std::map<DomainPoint,Future>::const_iterator finder = 
                                                 futures.find(point);
           if (finder != futures.end())
@@ -860,7 +860,7 @@ namespace Legion {
         runtime->send_future_map_request_future(owner_space, rez);
         ready_event.wait(); 
         // When we wake up it should be here
-        AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+        AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
         if (allow_empty && (finder == futures.end()))
@@ -897,7 +897,7 @@ namespace Legion {
         {
           Future result;
           {
-            AutoLock gc(gc_lock);
+            AutoLock fm_lock(future_map_lock);
             // Check to see if we already have a future for the point
             std::map<DomainPoint,Future>::const_iterator finder = 
                                                   futures.find(point);
@@ -932,7 +932,7 @@ namespace Legion {
 #endif
       // Add the reference first and then set the future
       impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-      AutoLock g_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       futures[point] = Future(impl, false/*need reference*/);
     }
 
@@ -984,7 +984,7 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -1001,7 +1001,7 @@ namespace Legion {
       assert(valid);
 #endif
       bool result = false;
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -7981,7 +7981,7 @@ namespace Legion {
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
           (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
-        constraints_name(NULL), layout_lock(gc_lock)
+        constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -7996,8 +7996,7 @@ namespace Legion {
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
             rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(registrar.handle), internal(inter), 
-        layout_lock(gc_lock)
+        layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8019,7 +8018,7 @@ namespace Legion {
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
+        layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
@@ -8033,8 +8032,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
       : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
-        layout_id(rhs.layout_id), handle(rhs.handle), internal(false),
-        layout_lock(gc_lock)
+        layout_id(rhs.layout_id), handle(rhs.handle), internal(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8114,9 +8112,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_constraint_response(target, rez);
-      // Hold our lock when updating our se of remote instances
-      AutoLock lay_lock(layout_lock);
-      remote_instances.add(target);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------

@@ -452,7 +452,7 @@ namespace Legion {
       const DistributedID did;
       const AddressSpaceID owner_space;
       const AddressSpaceID local_space;
-    protected: // derived users can get the gc lock
+    private: // derived users can't get the gc lock
       mutable LocalLock gc_lock;
     private: // derived users can't see the state information
       State current_state;
@@ -480,7 +480,7 @@ namespace Legion {
       std::map<ReferenceSource,int> detailed_base_resource_references;
       std::map<DistributedID,int> detailed_nested_resource_references;
 #endif
-    protected:
+    private:
       // Track all the remote instances (relative to ourselves) we know about
       NodeSet                  remote_instances;
     protected:

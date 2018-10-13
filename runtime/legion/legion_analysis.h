@@ -933,7 +933,7 @@ namespace Legion {
       IndexSpaceExpression *const set_expr;
       const AddressSpaceID logical_owner_space;
     protected:
-      LocalLock &eq_lock;
+      mutable LocalLock eq_lock;
     protected:
       // This is the actual physical state of the equivalence class
       FieldMaskSet<LogicalView>                           valid_instances;
