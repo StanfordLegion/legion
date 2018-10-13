@@ -1555,11 +1555,19 @@ namespace Legion {
       // the application reference
       if (!is_owner())
       {
-        runtime->send_index_space_destruction(handle, owner_space);
+        if (source != owner_space)
+          runtime->send_index_space_destruction(handle, owner_space);
         return false;
       }
       else
+      {
+        if (has_remote_instances())
+        {
+          DestroyNodeFunctor functor(handle, source, runtime);
+          map_over_remote_instances(functor);
+        }
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
+      }
     }
 
     //--------------------------------------------------------------------------

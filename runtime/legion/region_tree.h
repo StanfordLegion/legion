@@ -1286,6 +1286,17 @@ namespace Legion {
         const AddressSpaceID source;
         Serializer &rez;
       };
+      class DestroyNodeFunctor {
+      public:
+        DestroyNodeFunctor(IndexSpace h, AddressSpaceID src, Runtime *rt)
+          : handle(h), source(src), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const IndexSpace handle;
+        const AddressSpaceID source;
+        Runtime *const runtime;
+      };
       class DestructionFunctor {
       public:
         DestructionFunctor(IndexSpaceNode *n, ReferenceMutator *m)

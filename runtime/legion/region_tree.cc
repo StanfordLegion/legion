@@ -5697,6 +5697,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexSpaceNode::DestroyNodeFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target == source)
+        return;
+      runtime->send_index_space_destruction(handle, target);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
