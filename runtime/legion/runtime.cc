@@ -4807,11 +4807,11 @@ namespace Legion {
     {
       std::vector<unsigned> *target;
       derez.deserialize(target);
-      size_t num_failures;
-      derez.deserialize(num_failures);
+      size_t num_successes;
+      derez.deserialize(num_successes);
       std::set<RtEvent> preconditions;
       WrapperReferenceMutator mutator(preconditions);
-      for (unsigned idx = 0; idx < num_failures; idx++)
+      for (unsigned idx = 0; idx < num_successes; idx++)
       {
         unsigned index;
         derez.deserialize(index);

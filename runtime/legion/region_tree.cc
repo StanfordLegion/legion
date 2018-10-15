@@ -2537,19 +2537,8 @@ namespace Legion {
                 req_it->second.instances.end(); it++, idx++)
           {
             if (req_it->second.results[idx])
-            {
               acquired.insert(std::pair<PhysicalManager*,std::pair<unsigned,
                   bool> >(*it,std::pair<unsigned,bool>(1,false)));
-              // make the reference a local reference and 
-              // remove our remote did reference
-              LocalReferenceMutator local_mutator;
-              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
-              const RtEvent reference_effects = local_mutator.get_done_event();
-              (*it)->send_remote_valid_decrement(req_it->first->owner_space,
-                                                 reference_effects);
-              if (reference_effects.exists())
-                op->record_reference_mutation_effect(reference_effects);
-            }
           }
         }
       }
