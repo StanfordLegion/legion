@@ -880,7 +880,8 @@ namespace Legion {
          LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies,
                                AddressSpaceID request_space,
                                PendingRequest *pending_request,
-                               unsigned &pending_updates);
+                               unsigned &pending_updates,
+                               const bool updates_from_all);
       void filter_redop_modes(FieldMask to_filter);
       void request_update(AddressSpaceID valid_space, 
                           AddressSpaceID invalid_space,

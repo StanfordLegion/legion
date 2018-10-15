@@ -3471,7 +3471,8 @@ namespace Legion {
                                    exclusive_copies, request_space, 
                                    pending_request, pending_updates);
               filter_multi_copies(filter_mask, shared_fields, shared_copies,
-                            request_space, pending_request, pending_updates);
+                                  request_space, pending_request, 
+                                  pending_updates, false/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
               if (!!redop_overlap)
@@ -3481,7 +3482,7 @@ namespace Legion {
                     pending_request, pending_updates);
                 filter_multi_copies(filter_mask, multi_redop_fields,
                     multi_reduction_copies, request_space,
-                    pending_request, pending_updates);
+                    pending_request, pending_updates, true/*updates from all*/);
                 filter_redop_modes(redop_overlap);
               }
 #ifdef DEBUG_LEGION
@@ -3505,7 +3506,8 @@ namespace Legion {
                                    pending_request, pending_updates);
               filter_multi_copies(filter_mask, multi_redop_fields,
                                   multi_reduction_copies, request_space,
-                                  pending_request, pending_updates);
+                                  pending_request, pending_updates,
+                                  true/*updates from all*/);
               filter_redop_modes(redop_overlap);
               record_exclusive_copy(request_space, redop_overlap);
               request_mask -= redop_overlap;
@@ -3530,7 +3532,8 @@ namespace Legion {
                 if (!!shared_overlap)
                 {
                   filter_multi_copies(request_mask, shared_fields,shared_copies,
-                              request_space, pending_request, pending_updates);
+                                    request_space, pending_request, 
+                                    pending_updates, false/*updates from all*/);
                   record_exclusive_copy(request_space, shared_overlap);
                 }
                 if (!!request_mask)
@@ -3820,7 +3823,8 @@ namespace Legion {
                 LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies,
                                              AddressSpaceID request_space,
                                              PendingRequest *pending_request,
-                                             unsigned &pending_updates)
+                                             unsigned &pending_updates,
+                                             const bool updates_from_all)
     //--------------------------------------------------------------------------
     {
       if (!to_filter)
@@ -3828,6 +3832,7 @@ namespace Legion {
       const FieldMask multi_overlap = to_filter & multi_fields;
       if (!multi_overlap)
         return;
+      // Track which fields still need updates
       FieldMask update_mask = multi_overlap;
       // Handle the same node case now to avoid unnecessary communication
       LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator finder = 
@@ -3839,7 +3844,8 @@ namespace Legion {
         {
           request_invalidate(request_space, request_space, overlap,
               pending_request, pending_updates, true/*meta only*/);
-          update_mask -= overlap;
+          if (!updates_from_all)
+            update_mask -= overlap;
         }
       }
       std::vector<AddressSpaceID> to_delete;
@@ -3858,7 +3864,8 @@ namespace Legion {
           {
             request_update(it->first, request_space, update, pending_request,
                            pending_updates, true/*invalidate*/);
-            update_mask -= update;
+            if (!updates_from_all)
+              update_mask -= update;
             const FieldMask invalidate = overlap - update;
             if (!!invalidate)
               request_invalidate(it->first, request_space, invalidate,
