@@ -4176,6 +4176,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner); // should never be called on the owner
+      assert(results.empty());
 #endif
       results.resize(managers.size(), false/*assume everything fails*/);
       // Package everything up and send the request 
@@ -4771,7 +4772,7 @@ namespace Legion {
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
         }
       }
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -4805,12 +4806,11 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
       size_t num_successes;
       derez.deserialize(num_successes);
       std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
       for (unsigned idx = 0; idx < num_successes; idx++)
       {
         unsigned index;
@@ -4823,7 +4823,7 @@ namespace Legion {
         const RtEvent reference_effects = local_mutator.get_done_event();
         manager->send_remote_valid_decrement(source, reference_effects);  
         if (reference_effects.exists())
-          mutator.record_reference_mutation_effect(reference_effects);
+          preconditions.insert(reference_effects);
       }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
