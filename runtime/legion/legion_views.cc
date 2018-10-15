@@ -218,8 +218,8 @@ namespace Legion {
           rez.serialize(remote_aggregator);
           rez.serialize<bool>(reading);
           rez.serialize(done_event);
-          runtime->send_view_find_copy_preconditions_response(source, rez);
         }
+        runtime->send_view_find_copy_preconditions_response(source, rez);
       }
       else
         Runtime::trigger_event(done_event);
