@@ -2195,8 +2195,6 @@ namespace Legion {
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_resource_update(AddressSpaceID target,
                                            Serializer &rez);
-      void send_did_remote_invalidate(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_deactivate(AddressSpaceID target, Serializer &rez);
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
@@ -2387,8 +2385,6 @@ namespace Legion {
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
       void handle_did_remote_resource_update(Deserializer &derez);
-      void handle_did_remote_invalidate(Deserializer &derez);
-      void handle_did_remote_deactivate(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);

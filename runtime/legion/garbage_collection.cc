@@ -1012,22 +1012,6 @@ namespace Legion {
 #endif // DEBUG_LEGION_GC
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::notify_remote_inactive(ReferenceMutator *m)
-    //--------------------------------------------------------------------------
-    {
-      // Should only called for classes that override this method
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::notify_remote_invalid(ReferenceMutator *m)
-    //--------------------------------------------------------------------------
-    {
-      // Should only called for classes that override this method
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     bool DistributedCollectable::has_remote_instance(
                                                AddressSpaceID remote_inst) const
     //--------------------------------------------------------------------------
@@ -1231,54 +1215,6 @@ namespace Legion {
       runtime->send_did_remote_resource_update(target, rez);
     }
 
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_invalidate(AddressSpaceID target,
-                                                      ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      if (mutator == NULL)
-      {
-        rez.serialize(did);
-        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      else
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        rez.serialize(did);
-        rez.serialize(done);
-        mutator->record_reference_mutation_effect(done);
-      }
-      runtime->send_did_remote_invalidate(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_deactivate(AddressSpaceID target,
-                                                      ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_owner());
-#endif
-      Serializer rez;
-      if (mutator == NULL)
-      {
-        rez.serialize(did);
-        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
-      }
-      else
-      {
-        RtUserEvent done = Runtime::create_rt_user_event();
-        rez.serialize(did);
-        rez.serialize(done);
-        mutator->record_reference_mutation_effect(done);
-      }
-      runtime->send_did_remote_deactivate(target, rez);
-    }
-
 #ifdef USE_REMOTE_REFERENCES
     //--------------------------------------------------------------------------
     ReferenceKind DistributedCollectable::send_create_reference(
@@ -1468,66 +1404,6 @@ namespace Legion {
       else if (target->remove_base_resource_ref(REMOTE_DID_REF, 
                                                 unsigned(-count)))
         delete target;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_invalidate(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done;
-      derez.deserialize(done);
-      // We know we are not the owner so we might have to wait 
-      RtEvent ready;
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      if (done.exists())
-      {
-        std::set<RtEvent> preconditions;
-        WrapperReferenceMutator mutator(preconditions);
-        target->notify_remote_invalid(&mutator);
-        if (!preconditions.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(preconditions));
-        else
-          Runtime::trigger_event(done);
-      }
-      else
-        target->notify_remote_invalid(NULL);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_deactivate(
-                                          Runtime *runtime, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtUserEvent done;
-      derez.deserialize(done);
-      // We know we are not the owner so we might have to wait 
-      RtEvent ready;
-      DistributedCollectable *target = 
-        runtime->find_distributed_collectable(did, ready);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      if (done.exists())
-      {
-        std::set<RtEvent> preconditions;
-        WrapperReferenceMutator mutator(preconditions);
-        target->notify_remote_inactive(&mutator);
-        if (!preconditions.empty())
-          Runtime::trigger_event(done, Runtime::merge_events(preconditions));
-        else
-          Runtime::trigger_event(done);
-      }
-      else
-        target->notify_remote_inactive(NULL);
     }
 
     //--------------------------------------------------------------------------
