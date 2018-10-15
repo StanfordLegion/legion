@@ -6278,6 +6278,7 @@ namespace Legion {
               rez.serialize(IndexPartition::NO_PART);
             rez.serialize(color);
             rez.serialize(index_space_ready);
+            rez.serialize(expr_id);
             if (realm_index_space_set.has_triggered())
               pack_index_space(rez, true/*include size*/);
             else
@@ -6314,6 +6315,8 @@ namespace Legion {
       derez.deserialize(color);
       ApEvent ready_event;
       derez.deserialize(ready_event);
+      IndexSpaceExprID expr_id;
+      derez.deserialize(expr_id);
       size_t index_space_size;
       derez.deserialize(index_space_size);
       const void *index_space_ptr = 
@@ -6328,7 +6331,7 @@ namespace Legion {
 #endif
       }
       IndexSpaceNode *node = context->create_node(handle, index_space_ptr,
-                                     parent_node, color, did, ready_event);
+                               parent_node, color, did, ready_event, expr_id);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
