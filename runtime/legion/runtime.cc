@@ -532,7 +532,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -557,7 +557,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -804,7 +804,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -829,7 +829,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4064,9 +4064,13 @@ namespace Legion {
           bool remove_duplicate = false;
           if (success)
           {
+            LocalReferenceMutator local_mutator;
             // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-            manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
+            manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
+            const RtEvent reference_effects = local_mutator.get_done_event();
+            manager->send_remote_valid_decrement(owner_space,reference_effects);
+            if (reference_effects.exists())
+              mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -4534,8 +4538,12 @@ namespace Legion {
       // and then remove the remote DID
       if (acquire)
       {
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);
+        LocalReferenceMutator local_mutator;
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+        const RtEvent reference_effects = local_mutator.get_done_event();
+        manager->send_remote_valid_decrement(source, reference_effects);
+        if (reference_effects.exists())
+          mutator.record_reference_mutation_effect(reference_effects);
       }
       *target = MappingInstance(manager);
       *success = true;
@@ -4810,8 +4818,12 @@ namespace Legion {
         (*target)[index] = true;
         PhysicalManager *manager;
         derez.deserialize(manager);
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);  
+        LocalReferenceMutator local_mutator;
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+        const RtEvent reference_effects = local_mutator.get_done_event();
+        manager->send_remote_valid_decrement(source, reference_effects);  
+        if (reference_effects.exists())
+          mutator.record_reference_mutation_effect(reference_effects);
       }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -5921,11 +5933,6 @@ namespace Legion {
           case DISTRIBUTED_GC_UPDATE:
             {
               runtime->handle_did_remote_gc_update(derez); 
-              break;
-            }
-          case DISTRIBUTED_RESOURCE_UPDATE:
-            {
-              runtime->handle_did_remote_resource_update(derez);
               break;
             }
           case DISTRIBUTED_CREATE_ADD:
@@ -8052,7 +8059,7 @@ namespace Legion {
     {
       // If we're not the owner add a remote reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8062,7 +8069,7 @@ namespace Legion {
       if (is_owner())
         runtime->unregister_layout(layout_id);
       else
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -13702,15 +13709,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_did_add_create_reference(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14801,13 +14799,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DistributedCollectable::handle_did_remote_gc_update(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
     }
 
     //--------------------------------------------------------------------------
@@ -19995,6 +19986,11 @@ namespace Legion {
         case LG_REMOTE_REF_TASK_ID:
           {
             EquivalenceSet::handle_remote_references(args);
+            break;
+          }
+        case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
+          {
+            DistributedCollectable::handle_defer_remote_decrement(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

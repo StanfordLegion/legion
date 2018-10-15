@@ -265,6 +265,22 @@ namespace Legion {
         const VirtualChannelKind vc;
         std::set<RtEvent> &done_events;
       };
+      struct DeferRemoteDecrementArgs : 
+        public LgTaskArgs<DeferRemoteDecrementArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_DECREMENT_TASK_ID;
+      public:
+        DeferRemoteDecrementArgs(DistributedCollectable *d, AddressSpaceID t,
+                                 ReferenceMutator *m, unsigned c, bool v)
+          : LgTaskArgs<DeferRemoteDecrementArgs>(implicit_provenance),
+            dc(d), target(t), mutator(m), count(c), valid(v) { } 
+      public:
+        DistributedCollectable *const dc;
+        const AddressSpaceID target;
+        ReferenceMutator *const mutator;
+        const unsigned count;
+        const bool valid;
+      };
     public:
       DistributedCollectable(Runtime *rt, DistributedID did,
                              AddressSpaceID owner_space,
@@ -366,14 +382,20 @@ namespace Legion {
                                                 Deserializer &derez);
     public:
       virtual void send_remote_registration(ReferenceMutator *mutator);
-      void send_remote_valid_update(AddressSpaceID target, 
+      void send_remote_valid_increment(AddressSpaceID target,
+                                       ReferenceMutator *mutator,
+                                       unsigned count = 1);
+      void send_remote_valid_decrement(AddressSpaceID target,
+                                       RtEvent precondition,
+                                       ReferenceMutator *mutator = NULL,
+                                       unsigned count = 1);
+      void send_remote_gc_increment(AddressSpaceID target,
                                     ReferenceMutator *mutator,
-                                    unsigned count, bool add);
-      void send_remote_gc_update(AddressSpaceID target,
-                                 ReferenceMutator *mutator,
-                                 unsigned count, bool add);
-      void send_remote_resource_update(AddressSpaceID target,
-                                       unsigned count, bool add);
+                                    unsigned count = 1);
+      void send_remote_gc_decrement(AddressSpaceID target,
+                                    RtEvent precondition,
+                                    ReferenceMutator *mutator = NULL,
+                                    unsigned count = 1);
 #ifdef USE_REMOTE_REFERENCES
     public:
       ReferenceKind send_create_reference(AddressSpaceID target);
@@ -388,8 +410,7 @@ namespace Legion {
                                                  Deserializer &derez);
       static void handle_did_remote_gc_update(Runtime *runtime,
                                               Deserializer &derez);
-      static void handle_did_remote_resource_update(Runtime *runtime,
-                                                    Deserializer &derez);
+      static void handle_defer_remote_decrement(const void *args);
     public:
       static void handle_did_add_create(Runtime *runtime, 
                                         Deserializer &derez);

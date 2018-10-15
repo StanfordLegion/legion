@@ -662,7 +662,7 @@ namespace Legion {
         memory_manager->activate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -677,7 +677,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->deactivate_instance(this);
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -694,7 +694,7 @@ namespace Legion {
         memory_manager->validate_instance(this);
       // If we are not the owner, send a reference
       if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -709,7 +709,7 @@ namespace Legion {
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
       if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------

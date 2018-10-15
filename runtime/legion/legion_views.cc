@@ -809,7 +809,7 @@ namespace Legion {
       if (is_owner())
         manager->add_nested_gc_ref(did, mutator);
       else
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -820,7 +820,7 @@ namespace Legion {
       if (is_owner())
         manager->remove_nested_gc_ref(did, mutator);
       else
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1650,7 +1650,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1658,7 +1658,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
     
     //--------------------------------------------------------------------------
@@ -1814,7 +1814,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -1822,7 +1822,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -2615,7 +2615,7 @@ namespace Legion {
       if (is_owner())
         manager->add_nested_gc_ref(did, mutator);
       else
-        send_remote_gc_update(owner_space, mutator, 1, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -2625,7 +2625,7 @@ namespace Legion {
       if (is_owner())
         manager->remove_nested_gc_ref(did, mutator);
       else
-        send_remote_gc_update(owner_space, mutator, 1, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------

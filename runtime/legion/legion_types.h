@@ -324,6 +324,7 @@ namespace Legion {
       LG_DELETE_TEMPLATE_ID,
       LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
+      LG_DEFER_REMOTE_DECREMENT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -397,6 +398,7 @@ namespace Legion {
         "Delete Physical Template",                               \
         "Refinement",                                             \
         "Remove Remote References",                               \
+        "Defer Remote Decrement",                                 \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -600,7 +602,6 @@ namespace Legion {
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
@@ -736,7 +737,6 @@ namespace Legion {
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \

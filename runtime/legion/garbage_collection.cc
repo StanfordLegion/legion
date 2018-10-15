@@ -1136,8 +1136,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_valid_update(AddressSpaceID target,
-                            ReferenceMutator *mutator, unsigned count, bool add)
+    void DistributedCollectable::send_remote_valid_increment(
+               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1146,27 +1146,53 @@ namespace Legion {
 #endif
       int signed_count = count;
       RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
-      if (!add)
-        signed_count = -signed_count;
-      else
+      if (mutator != NULL)
+      {
         done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
-        if (add)
-          rez.serialize(done_event);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_valid_update(target, rez);
-      if (add && (mutator != NULL))
-        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_gc_update(AddressSpaceID target,
-                            ReferenceMutator *mutator, unsigned count, bool add)
+    void DistributedCollectable::send_remote_valid_decrement(
+                                    AddressSpaceID target, RtEvent precondition,
+                                    ReferenceMutator *mutator, unsigned count)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(count != 0);
+      assert(registered_with_runtime);
+#endif
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteDecrementArgs args(this,target,mutator,count,true/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                                         precondition);
+        return;
+      }
+      int signed_count = -(int(count));
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(signed_count);
+        rez.serialize<bool>(target == owner_space);
+      }
+      runtime->send_did_remote_valid_update(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void DistributedCollectable::send_remote_gc_increment(
+               AddressSpaceID target, ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1175,36 +1201,40 @@ namespace Legion {
 #endif
       int signed_count = count;
       RtUserEvent done_event = RtUserEvent::NO_RT_USER_EVENT;
-      if (!add)
-        signed_count = -signed_count;
-      else
+      if (mutator != NULL)
+      {
         done_event = Runtime::create_rt_user_event();
+        mutator->record_reference_mutation_effect(done_event);
+      }
       Serializer rez;
       {
         RezCheck z(rez);
         rez.serialize(did);
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
-        if (add)
-          rez.serialize(done_event);
+        rez.serialize(done_event);
       }
       runtime->send_did_remote_gc_update(target, rez);
-      if (add && (mutator != NULL))
-        mutator->record_reference_mutation_effect(done_event);
     }
 
     //--------------------------------------------------------------------------
-    void DistributedCollectable::send_remote_resource_update(
-                                AddressSpaceID target, unsigned count, bool add)
+    void DistributedCollectable::send_remote_gc_decrement(
+                                    AddressSpaceID target, RtEvent precondition,
+                                    ReferenceMutator *mutator, unsigned count)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(count != 0);
       assert(registered_with_runtime);
 #endif
-      int signed_count = count;
-      if (!add)
-        signed_count = -signed_count;
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        DeferRemoteDecrementArgs args(this,target,mutator,count,false/*valid*/);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
+                                         precondition);
+        return;
+      }
+      int signed_count = -(int(count));
       Serializer rez;
       {
         RezCheck z(rez);
@@ -1212,7 +1242,7 @@ namespace Legion {
         rez.serialize(signed_count);
         rez.serialize<bool>(target == owner_space);
       }
-      runtime->send_did_remote_resource_update(target, rez);
+      runtime->send_did_remote_gc_update(target, rez);
     }
 
 #ifdef USE_REMOTE_REFERENCES
@@ -1326,11 +1356,14 @@ namespace Legion {
         target->add_base_valid_ref(REMOTE_DID_REF, &mutator, unsigned(count));
         RtUserEvent done_event;
         derez.deserialize(done_event);
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event, 
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
+        if (done_event.exists())
+        {
+          if (!mutator_events.empty())
+            Runtime::trigger_event(done_event, 
+                Runtime::merge_events(mutator_events));
+          else
+            Runtime::trigger_event(done_event);
+        }
       }
       else if (target->remove_base_valid_ref(REMOTE_DID_REF, NULL,
                                              unsigned(-count)))
@@ -1366,11 +1399,14 @@ namespace Legion {
         target->add_base_gc_ref(REMOTE_DID_REF, &mutator, unsigned(count));
         RtUserEvent done_event;
         derez.deserialize(done_event);
-        if (!mutator_events.empty())
-          Runtime::trigger_event(done_event,
-              Runtime::merge_events(mutator_events));
-        else
-          Runtime::trigger_event(done_event);
+        if (done_event.exists())
+        {
+          if (!mutator_events.empty())
+            Runtime::trigger_event(done_event,
+                Runtime::merge_events(mutator_events));
+          else
+            Runtime::trigger_event(done_event);
+        }
       }
       else if (target->remove_base_gc_ref(REMOTE_DID_REF, NULL,
                                           unsigned(-count)))
@@ -1378,32 +1414,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void DistributedCollectable::handle_did_remote_resource_update(
-                                         Runtime *runtime, Deserializer &derez)
+    /*static*/ void DistributedCollectable::handle_defer_remote_decrement(
+                                                               const void *args)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      int count;
-      derez.deserialize(count);
-      bool is_owner;
-      derez.deserialize(is_owner);
-      DistributedCollectable *target = NULL;
-      if (!is_owner)
-      {
-        RtEvent ready;
-        target = runtime->find_distributed_collectable(did, ready);
-        if (ready.exists() && !ready.has_triggered())
-          ready.wait();
-      }
+      const DeferRemoteDecrementArgs *dargs = 
+        (const DeferRemoteDecrementArgs*)args;
+      if (dargs->valid)
+        dargs->dc->send_remote_valid_decrement(dargs->target, 
+            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
       else
-        target = runtime->find_distributed_collectable(did);
-      if (count > 0)
-        target->add_base_resource_ref(REMOTE_DID_REF, unsigned(count));
-      else if (target->remove_base_resource_ref(REMOTE_DID_REF, 
-                                                unsigned(-count)))
-        delete target;
+        dargs->dc->send_remote_gc_decrement(dargs->target,
+            RtEvent::NO_RT_EVENT, dargs->mutator, dargs->count);
     }
 
     //--------------------------------------------------------------------------

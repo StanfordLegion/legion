@@ -2542,9 +2542,13 @@ namespace Legion {
                   bool> >(*it,std::pair<unsigned,bool>(1,false)));
               // make the reference a local reference and 
               // remove our remote did reference
-              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, op);
-              (*it)->send_remote_valid_update(req_it->first->owner_space,
-                                          NULL, 1, false/*add*/);
+              LocalReferenceMutator local_mutator;
+              (*it)->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+              const RtEvent reference_effects = local_mutator.get_done_event();
+              (*it)->send_remote_valid_decrement(req_it->first->owner_space,
+                                                 reference_effects);
+              if (reference_effects.exists())
+                op->record_reference_mutation_effect(reference_effects);
             }
           }
         }
@@ -5692,7 +5696,7 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5708,7 +5712,7 @@ namespace Legion {
     void IndexSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_update(target, mutator, 1/*count*/, false/*add*/);
+      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -5729,7 +5733,7 @@ namespace Legion {
       }
       else // Remove the valid reference that we have on the owner
       {
-        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
         return;
       }
       for (std::vector<IndexPartNode*>::const_iterator it = 
@@ -6795,14 +6799,14 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
     void IndexPartNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_update(target, mutator, 1/*count*/, false/*add*/);
+      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -6827,7 +6831,7 @@ namespace Legion {
       }
       else // Remove the valid reference that we have on the owner
       {
-        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
         return;
       }
       for (std::vector<IndexSpaceNode*>::const_iterator it = 
@@ -8122,14 +8126,14 @@ namespace Legion {
     {
       // If we're not the owner, we add a valid reference to the owner
       if (!is_owner())
-        send_remote_valid_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_valid_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
     void FieldSpaceNode::DestructionFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      node->send_remote_gc_update(target, mutator, 1/*count*/, false/*add*/);
+      node->send_remote_gc_decrement(target, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8146,7 +8150,7 @@ namespace Legion {
         }
       }
       else // Remove the valid reference that we have on the owner
-        send_remote_valid_update(owner_space, mutator, 1/*count*/,false/*add*/);
+        send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
