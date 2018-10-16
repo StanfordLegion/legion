@@ -1886,6 +1886,9 @@ class PointSet(object):
             result.points.add(point)
         return result
 
+    def __len__(self):
+        return self.size()
+
     # Set intersection
     def __and__(self, other):
         result = self.copy()
@@ -2100,7 +2103,7 @@ class Memory(object):
                 (self.node_name, mem.node_name, label))
 
 class IndexExpr(object):
-    __slot__ = ['state', 'expr_id', 'kind', 'base', 'point_set', 'node_name']
+    __slot__ = ['state', 'expr_id', 'kind', 'base', 'point_set', 'node_name', 'expr_str']
     def __init__(self, state, expr_id):
         self.state = state
         self.expr_id = expr_id
@@ -2108,6 +2111,7 @@ class IndexExpr(object):
         self.base = None
         self.point_set = None
         self.node_name = None
+        self.expr_str = None
 
     def set_index_space(self, index_space):
         if self.kind is None:
@@ -2168,28 +2172,95 @@ class IndexExpr(object):
         return self.point_set
 
     def __str__(self):
+        if self.expr_str is not None:
+            return self.expr_str
         assert self.kind is not None
         if self.kind == INDEX_SPACE_EXPR:
-            return str(self.base)
-        elif self.kind == UNION_EXPR:
-            result = None
-            for expr in self.base:
-                if result is None:
-                    result = "(" + str(expr)
-                else:
-                    result += " u " + str(expr)
-            return result + ")"
-        elif self.kind == INTERSECT_EXPR:
-            result = None
-            for expr in self.base:
-                if result is None:
-                    result = "(" + str(expr)
-                else:
-                    result += " ^ "+str(expr)
-            return result + ")"
+            self.expr_str = str(self.base)
         else:
-            assert self.kind == DIFFERENCE_EXPR
-            return "(" + str(self.base[0]) + " - " + str(self.base[1]) + ")"
+            # Compute the point set
+            point_set = self.get_point_set()
+            # Easy case if this empty
+            if len(point_set) == 0:
+                self.expr_str = 'Empty'
+                return self.expr_str
+            # Check to see if there are any index spaces which
+            # appear in all the points. If so, check to see if 
+            # our set of points is equivalent to the point set
+            # for any of those index spaces
+            spaces_for_all_points = None
+            for point in point_set.iterator():
+                if spaces_for_all_points is None:
+                    spaces_for_all_points = point.index_set
+                else:
+                    # Note that this makes a new set
+                    spaces_for_all_points = spaces_for_all_points & point.index_set
+                if not spaces_for_all_points:
+                    break
+            if spaces_for_all_points:
+                same_spaces = None
+                for space in spaces_for_all_points:
+                    # Check to see if the points are the same
+                    other_points = space.get_point_set()
+                    if len(point_set) != len(other_points):
+                        continue
+                    same = True
+                    for point in point_set.iterator():
+                        if not other_points.has_point(point):
+                            same = False
+                            break
+                    if same:
+                        # It's possible for there to be multiple spaces with 
+                        # the same shape but different names
+                        if same_spaces is None:
+                            same_spaces = list()
+                        same_spaces.append(space)
+                if same_spaces:
+                    for space in same_spaces:
+                        if self.expr_str is None:
+                            self.expr_str = str(space)
+                        else:
+                            self.expr_str += ' u ' + str(space)
+            # If we didn't find an index space to represent this
+            # set of points then we express this as a union of intersections
+            if self.expr_str is None:
+                for point in point_set.iterator():
+                    point_str = None
+                    # Only report the bottom-most index spaces for 
+                    # this particular point
+                    bottom_spaces = set()
+                    parent_spaces = set()
+                    for space in point.index_set:
+                        if space in parent_spaces:
+                            continue
+                        bottom_spaces.add(space)
+                        if space.parent:
+                            parent = space.parent.parent
+                            while True:
+                                if parent in parent_spaces:
+                                    break
+                                parent_spaces.add(parent)
+                                if parent in bottom_spaces:
+                                    bottom_spaces.remove(parent)
+                                if parent.parent:
+                                    parent = parent.parent.parent
+                                else:
+                                    break
+                    # Should have at least one bottom space
+                    assert bottom_spaces
+                    for space in bottom_spaces:
+                        if point_str is None:
+                            point_str = '(' + str(space)
+                        else:
+                            point_str += ' ^ ' + str(space)
+                    point_str += ')'
+                    if self.expr_str is None:
+                        self.expr_str = point_str
+                    else:
+                        # Put each point on it's own line
+                        self.expr_str += ' u <br/>' + point_str
+        assert self.expr_str is not None
+        return self.expr_str
 
     __repr__ = __str__
 
@@ -8048,7 +8119,7 @@ class RealmCopy(RealmBase):
         if self.state.detailed_graphs:
             label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.index_expr)
         else:
-            label = "Realm Copy of "+str(self.index_expr)
+            label = "Realm Copy ("+str(self.realm_num)+")"
         if self.creator is not None:
             label += " generated by "+str(self.creator)
             if self.creator.kind == SINGLE_TASK_KIND:
@@ -8180,7 +8251,7 @@ class RealmFill(RealmBase):
         if self.state.detailed_graphs:
             label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.index_expr)
         else:
-            label = "Realm Fill of "+str(self.index_expr)
+            label = "Realm Fill ("+str(self.realm_num)+")"
         if self.creator is not None:
             label += " generated by "+str(self.creator)
         lines = [[{ "label" : label, "colspan" : 3 }]]
