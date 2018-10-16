@@ -2615,7 +2615,10 @@ namespace Legion {
                                    IndexSpaceExpression *expr, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
         logical_owner_space(logical),
-        eq_state(is_logical_owner() ? MAPPING_STATE : INVALID_STATE),
+        eq_state(is_logical_owner() ? MAPPING_STATE : 
+            // If we're not the logical owner but we are the owner
+            // then we have a valid remote lease of the subsets
+            is_owner() ? VALID_STATE : INVALID_STATE),
         unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
@@ -2628,6 +2631,8 @@ namespace Legion {
         // data is initially
         exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         exclusive_copies[owner_space] = exclusive_fields;
+        if (owner_space != local_space)
+          remote_subsets.insert(owner_space);
       }
       else if (is_owner())
         // Otherwise we're not the owner, but we're where the refinement
@@ -2812,6 +2817,10 @@ namespace Legion {
     void EquivalenceSet::clone_from(EquivalenceSet *parent)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      // Should be cloning from the parent on it's owner space
+      assert(parent->logical_owner_space == this->local_space);
+#endif
       // No need to hold a lock on the parent since we know that
       // no one else will be modifying these data structures
       this->valid_instances = parent->valid_instances;
