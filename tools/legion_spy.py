@@ -4242,9 +4242,8 @@ class DataflowTraverser(object):
             return
         if 0 in copy.redops:
             # Normal copy, definitely do the analysis
-            if copy.region.get_point_set().has_point(self.point) and \
-                self.found_dataflow_path and (not copy.intersect or 
-                    copy.intersect.get_point_set().has_point(self.point)): 
+            if copy.index_expr.get_point_set().has_point(self.point) and \
+                    self.found_dataflow_path: 
                 assert len(self.dataflow_stack) > 1
                 # Perform the copy analysis
                 self.perform_copy_analysis(copy, self.dataflow_stack[-1], 
@@ -4254,7 +4253,9 @@ class DataflowTraverser(object):
             self.dataflow_stack.pop()
 
     def perform_copy_analysis(self, copy, src, dst):
-        copy.record_analyzed_point(self.point)
+        # If we've already traversed this then we can skip the verification
+        if copy.record_analyzed_point(self.point):
+            return
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
                                         self.src_field, self.point, self.op, 
                                         self.src_req.index, True, 0, self.src_version)
@@ -4293,7 +4294,9 @@ class DataflowTraverser(object):
             if not self.state.pending_fill:
                 return
             self.found_dataflow_path = True
-            fill.record_analyzed_point(self.point)
+            # If we've already traversed this then we can skip the verification
+            if fill.record_analyzed_point(self.point):
+                return
             dst = fill.dsts[fill.fields.index(self.dst_field)]
             preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
@@ -4656,7 +4659,9 @@ class EquivalenceSet(object):
                     if op.state.assert_on_error:
                         assert False
                     return False
-                copy.record_analyzed_point(self.point)
+                # If we already preformed the verification then we can skip this
+                if copy.record_analyzed_point(self.point):
+                    return True
                 src_preconditions = src_inst.find_verification_copy_dependences(
                                     src_depth, src_field, self.point, op, 
                                     src_req.index, True, 0, self.version_number)
@@ -7889,7 +7894,11 @@ class RealmBase(object):
     def record_analyzed_point(self, point):
         if self.analyzed_points is None:
             self.analyzed_points = set()
-        self.analyzed_points.add(point)
+        if point not in self.analyzed_points:
+            self.analyzed_points.add(point)
+            return False
+        else:
+            return True
 
     def check_for_spurious_points(self):
         point_set = self.index_expr.get_point_set()
@@ -9870,13 +9879,15 @@ class State(object):
                     index_owners.add(op.index_owner)
                     point_termination = op.finish_event
                     index_termination = op.index_owner.finish_event
-                    assert point_termination.exists()
-                    assert index_termination.exists()
+                    if point_termination.exists() and index_termination.exists():
+                        assert point_termination.exists()
+                        assert index_termination.exists()
                     index_termination.add_incoming(point_termination)
                     point_termination.add_outgoing(index_termination)
             # Remove index operations from the event graph
             for op in index_owners:
-                op.finish_event.incoming_ops.remove(op)
+                if op.finish_event.incoming_ops:
+                    op.finish_event.incoming_ops.remove(op)
         # Check for any interfering index space launches
         for op in self.ops.itervalues():
             if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
