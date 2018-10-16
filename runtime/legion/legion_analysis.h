@@ -866,7 +866,8 @@ namespace Legion {
       void update_exclusive_copies(FieldMask &to_update,
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
-                                   unsigned &pending_updates);
+                                   unsigned &pending_updates,
+                                   const bool needs_updates);
       void upgrade_single_to_multi(FieldMask &to_update,
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
@@ -889,7 +890,8 @@ namespace Legion {
           LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
                                 AddressSpaceID request_space,
                                 PendingRequest *pending_request,
-                                unsigned &pending_updates);
+                                unsigned &pending_updates,
+                                const bool needs_udpates);
       // For filtering shared and multi redop
       void filter_multi_copies(FieldMask &to_filter,
                                FieldMask &multi_fields,
@@ -897,6 +899,7 @@ namespace Legion {
                                AddressSpaceID request_space,
                                PendingRequest *pending_request,
                                unsigned &pending_updates,
+                               const bool needs_updates,
                                const bool updates_from_all);
       void filter_redop_modes(FieldMask to_filter);
       void request_update(AddressSpaceID valid_space, 

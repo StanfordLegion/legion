@@ -3469,20 +3469,23 @@ namespace Legion {
               // an update from one of them as well
               filter_single_copies(filter_mask, exclusive_fields, 
                                    exclusive_copies, request_space, 
-                                   pending_request, pending_updates);
+                                   pending_request, pending_updates,
+                                   true/*needs updates*/);
               filter_multi_copies(filter_mask, shared_fields, shared_copies,
                                   request_space, pending_request, 
-                                  pending_updates, false/*updates from all*/);
+                                  pending_updates, true/*needs updates*/,
+                                  false/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
               if (!!redop_overlap)
               {
                 filter_single_copies(filter_mask, single_redop_fields, 
                     single_reduction_copies, request_space, 
-                    pending_request, pending_updates);
+                    pending_request, pending_updates, true/*needs updates*/);
                 filter_multi_copies(filter_mask, multi_redop_fields,
                     multi_reduction_copies, request_space,
-                    pending_request, pending_updates, true/*updates from all*/);
+                    pending_request, pending_updates, 
+                    true/*needs updates*/, true/*updates from all*/);
                 filter_redop_modes(redop_overlap);
               }
 #ifdef DEBUG_LEGION
@@ -3494,6 +3497,9 @@ namespace Legion {
           }
           else
           {
+            // If we're discarding everything from before we don't need
+            // updates we just need to send invalidates to everyone
+            const bool needs_updates = !IS_DISCARD(usage);
             // Any reduction modes are going to exclusive regardless of
             // whether we are reading or writing 
             const FieldMask redop_overlap = request_mask &
@@ -3503,11 +3509,12 @@ namespace Legion {
               FieldMask filter_mask = redop_overlap;
               filter_single_copies(filter_mask, single_redop_fields,
                                    single_reduction_copies, request_space,
-                                   pending_request, pending_updates);
+                                   pending_request, pending_updates,
+                                   needs_updates);
               filter_multi_copies(filter_mask, multi_redop_fields,
                                   multi_reduction_copies, request_space,
                                   pending_request, pending_updates,
-                                  true/*updates from all*/);
+                                  needs_updates, true/*updates from all*/);
               filter_redop_modes(redop_overlap);
               record_exclusive_copy(request_space, redop_overlap);
               request_mask -= redop_overlap;
@@ -3516,6 +3523,10 @@ namespace Legion {
             {
               if (IS_READ_ONLY(usage))
               {
+#ifdef DEBUG_LEGION
+                // Should not have read-only discard
+                assert(needs_updates);
+#endif
                 // Upgrade exclusive to shared
                 upgrade_single_to_multi(request_mask, request_space,
                       pending_request, pending_updates, 0/*redop*/,
@@ -3533,12 +3544,13 @@ namespace Legion {
                 {
                   filter_multi_copies(request_mask, shared_fields,shared_copies,
                                     request_space, pending_request, 
-                                    pending_updates, false/*updates from all*/);
+                                    pending_updates, needs_updates, 
+                                    false/*updates from all*/);
                   record_exclusive_copy(request_space, shared_overlap);
                 }
                 if (!!request_mask)
                   update_exclusive_copies(request_mask, request_space,
-                                          pending_request, pending_updates);
+                      pending_request, pending_updates, needs_updates);
               }
             }
           }
@@ -3587,7 +3599,8 @@ namespace Legion {
     void EquivalenceSet::update_exclusive_copies(FieldMask &to_update,
                                                AddressSpaceID request_space,
                                                PendingRequest *pending_request,
-                                               unsigned &pending_updates)
+                                               unsigned &pending_updates,
+                                               const bool needs_updates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3605,8 +3618,13 @@ namespace Legion {
         // If it's already valid then there's nothing to do
         if (it->first == request_space)
           continue;
-        request_update(it->first, request_space, overlap, 
-                       pending_request, pending_updates, true/*invalidate*/);
+        if (needs_updates)
+          request_update(it->first, request_space, overlap, 
+                         pending_request, pending_updates, true/*invalidate*/);
+        else
+          request_invalidate(it->first, request_space, overlap,
+                             pending_request, pending_updates, 
+                             false/*meta only*/);
         to_add |= overlap;
         it->second -= overlap;
         if (!it->second)
@@ -3777,7 +3795,8 @@ namespace Legion {
               LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
                                               AddressSpaceID request_space,
                                               PendingRequest *pending_request,
-                                              unsigned &pending_updates)
+                                              unsigned &pending_updates,
+                                              const bool needs_updates)
     //--------------------------------------------------------------------------
     {
       if (!to_filter)
@@ -3799,9 +3818,12 @@ namespace Legion {
           // it will restore it to being valid
           request_invalidate(request_space, request_space, overlap, 
               pending_request, pending_updates, true/*meta only*/);
-        else
+        else if (needs_updates)
           request_update(it->first, request_space, overlap, pending_request, 
                          pending_updates, true/*invalidate*/);
+        else
+          request_invalidate(it->first, request_space, overlap, pending_request,
+                             pending_updates, false/*meta only*/);
         it->second -= overlap;
         if (!it->second)
           to_delete.push_back(it->first);
@@ -3824,6 +3846,7 @@ namespace Legion {
                                              AddressSpaceID request_space,
                                              PendingRequest *pending_request,
                                              unsigned &pending_updates,
+                                             const bool needs_updates,
                                              const bool updates_from_all)
     //--------------------------------------------------------------------------
     {
@@ -3859,7 +3882,10 @@ namespace Legion {
         if (it->first != request_space)
         {
           // See if we need an update
-          const FieldMask update = update_mask & overlap;
+          FieldMask update;
+          // Only compute an update mask if we actually need it
+          if (needs_updates)
+            update = update_mask & overlap;
           if (!!update)
           {
             request_update(it->first, request_space, update, pending_request,
