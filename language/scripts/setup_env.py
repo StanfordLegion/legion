@@ -238,7 +238,6 @@ def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
         llvm_build_dir = tempfile.mkdtemp(prefix='setup_env_llvm_build', dir=scratch_dir or llvm_dir)
-        os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
         build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
 
