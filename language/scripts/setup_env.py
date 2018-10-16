@@ -16,7 +16,7 @@
 #
 
 from __future__ import print_function
-import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys, traceback
+import argparse, hashlib, multiprocessing, os, platform, re, subprocess, sys, tempfile, traceback
 
 def discover_llvm_version():
     if platform.node().startswith('titan'):
@@ -191,7 +191,7 @@ def build_regent(root_dir, use_cmake, cmake_exe,
              if use_cmake else ['--no-cmake']),
         env=env)
 
-def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, cache, is_cray, insecure):
+def install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, cache, is_cray, insecure):
     try:
         os.mkdir(llvm_dir)
     except OSError:
@@ -237,7 +237,7 @@ def install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake
             apply_patch(llvm_source_dir, os.path.join(os.path.dirname(os.path.realpath(__file__)), 'llvm-3.5-gcc.patch'))
         os.rename(clang_source_dir, os.path.join(llvm_source_dir, 'tools', 'clang'))
 
-        llvm_build_dir = os.path.join(llvm_dir, 'build')
+        llvm_build_dir = tempfile.mkdtemp(prefix='setup_env_llvm_build', dir=scratch_dir or llvm_dir)
         os.mkdir(llvm_build_dir)
         os.mkdir(llvm_install_dir)
         build_llvm(llvm_source_dir, llvm_build_dir, llvm_install_dir, llvm_use_cmake, cmake_exe, thread_count, is_cray)
@@ -300,7 +300,8 @@ def check_dirty_build(name, build_result, component_dir):
         print_advice(component_dir)
         sys.exit(1)
 
-def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=None,
+def driver(prefix_dir=None, scratch_dir=None, cache=False,
+           legion_use_cmake=False, llvm_version=None,
            terra_url=None, terra_branch=None, insecure=False):
     if not cache:
         if 'CC' not in os.environ:
@@ -401,7 +402,7 @@ def driver(prefix_dir=None, cache=False, legion_use_cmake=False, llvm_version=No
     llvm_build_result = os.path.join(llvm_install_dir, 'bin', 'llvm-config')
     if not os.path.exists(llvm_install_dir):
         try:
-            install_llvm(llvm_dir, llvm_install_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, cache, is_cray, insecure)
+            install_llvm(llvm_dir, llvm_install_dir, scratch_dir, llvm_version, llvm_use_cmake, cmake_exe, thread_count, cache, is_cray, insecure)
         except Exception as e:
             report_build_failure('llvm', llvm_dir, e)
     else:
@@ -450,6 +451,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--prefix', dest='prefix_dir', required=False,
         help='Directory in which to install dependencies.')
+    parser.add_argument(
+        '--scratch', dest='scratch_dir', required=False,
+        help='Directory in which to store temporary build files.')
     parser.add_argument(
         '--cache-only', dest='cache', action='store_true',
         help='Only cache downloads (do not install).')
