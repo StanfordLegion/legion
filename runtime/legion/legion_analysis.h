@@ -778,13 +778,11 @@ namespace Legion {
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
         { return !(mask * restricted_fields); }
-      void initialize_set(ApEvent term_event,
-                          const RegionUsage &usage,
+      void initialize_set(const RegionUsage &usage,
                           const FieldMask &user_mask,
                           const bool restricted,
                           const InstanceSet &sources,
             const std::vector<InstanceView*> &corresponding,
-                          UniqueID ctx_uid, unsigned index,
                           std::set<RtEvent> &applied_events);
       bool find_valid_instances(FieldMaskSet<LogicalView> &insts,
                                 const FieldMask &user_mask) const;

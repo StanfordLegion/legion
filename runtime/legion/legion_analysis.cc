@@ -4897,13 +4897,11 @@ namespace Legion {
 #endif
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::initialize_set(ApEvent term_event,
-                                        const RegionUsage &usage,
+    void EquivalenceSet::initialize_set(const RegionUsage &usage,
                                         const FieldMask &user_mask,
                                         const bool restricted,
                                         const InstanceSet &sources,
                                 const std::vector<InstanceView*> &corresponding,
-                                        UniqueID context_uid, unsigned index,
                                         std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -4948,9 +4946,6 @@ namespace Legion {
           }
           else
             restricted_finder.merge(view_mask);
-          // Record the user for the instance
-          view->add_initial_user(term_event, usage, view_mask, 
-                                 set_expr, context_uid, index);
         }
       }
       else
@@ -4984,9 +4979,6 @@ namespace Legion {
             else
               restricted_finder.merge(view_mask);
           }
-          // Record the user for the instance
-          view->add_initial_user(term_event, usage, view_mask, 
-                                 set_expr, context_uid, index);
         }
       }
       // Update any restricted fields 

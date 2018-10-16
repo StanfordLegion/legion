@@ -1512,6 +1512,8 @@ namespace Legion {
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
+      const UniqueID context_uid = context->get_unique_id();
+      IndexSpaceExpression *reg_expr = top_node->get_index_space_expression();
       // Build our set of corresponding views
       if (IS_REDUCE(req))
       {
@@ -1521,6 +1523,10 @@ namespace Legion {
           PhysicalManager *manager = src_ref.get_manager();
 #ifdef DEBUG_LEGION
           assert(manager->is_reduction_manager());
+#endif
+          const FieldMask &view_mask = src_ref.get_valid_fields();
+#ifdef DEBUG_LEGION
+          assert(!(view_mask - user_mask)); // should be dominated
 #endif
           // Check to see if the view exists yet or not
           std::map<PhysicalManager*,InstanceView*>::const_iterator 
@@ -1532,9 +1538,17 @@ namespace Legion {
                   local_space)->as_reduction_view();
             top_views[manager] = new_view;
             corresponding[idx] = new_view;
+            // Record the initial user for the instance
+            new_view->add_initial_user(term_event, usage, view_mask,
+                                       reg_expr, context_uid, init_index);
           }
           else
+          {
             corresponding[idx] = finder->second;
+            // Record the initial user for the instance
+            finder->second->add_initial_user(term_event, usage, view_mask,
+                                             reg_expr, context_uid, init_index);
+          }
         }
       }
       else
@@ -1546,6 +1560,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(manager->is_instance_manager());
 #endif
+          const FieldMask &view_mask = src_ref.get_valid_fields();
+#ifdef DEBUG_LEGION
+          assert(!(view_mask - user_mask)); // should be dominated
+#endif
           // Check to see if the view exists yet or not
           std::map<PhysicalManager*,InstanceView*>::const_iterator 
             finder = top_views.find(manager);
@@ -1556,9 +1574,17 @@ namespace Legion {
                  local_space)->as_materialized_view();
             top_views[manager] = new_view;
             corresponding[idx] = new_view;
+            // Record the initial user for the instance
+            new_view->add_initial_user(term_event, usage, view_mask,
+                                       reg_expr, context_uid, init_index);
           }
           else
+          {
             corresponding[idx] = finder->second;
+            // Record the initial user for the instance
+            finder->second->add_initial_user(term_event, usage, view_mask,
+                                             reg_expr, context_uid, init_index);
+          }
         }
       }
       // Wait for the equivalence classes to be ready
@@ -1571,11 +1597,10 @@ namespace Legion {
       // Iterate over the equivalence classes and initialize them
       const std::set<EquivalenceSet*> &eq_sets = 
         init_version_info.get_equivalence_sets();
-      const UniqueID context_uid = context->get_unique_id();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->initialize_set(term_event, usage, user_mask, restricted,
-         sources, corresponding, context_uid, init_index, applied_events);
+        (*it)->initialize_set(usage, user_mask, restricted,
+                              sources, corresponding, applied_events);
       init_version_info.finalize_mapping();
     }
 
@@ -2091,7 +2116,10 @@ namespace Legion {
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> source_views, target_views;
       if (!src_targets.empty())
-        context->convert_target_views(src_targets, source_views);
+      {
+        InnerContext *src_context = op->find_physical_context(src_index);
+        src_context->convert_target_views(src_targets, source_views);
+      }
       context->convert_target_views(dst_targets, target_views);
       // Perform the copies/reductions across
       IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
