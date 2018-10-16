@@ -6409,6 +6409,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_ray_trace(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
+      const RtEvent traced = dargs->set->ray_trace_equivalence_sets(
+                              dargs->target, dargs->expr, dargs->origin);
+      Runtime::trigger_event(dargs->done, traced);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_equivalence_set_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -6523,10 +6533,11 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      RtEvent done = set->ray_trace_equivalence_sets(target, expr, origin);
-      Runtime::trigger_event(done_event, done);
+      // This operation could always block so in order to avoid head of 
+      // line blocking on the virtual channel we always defer it into a 
+      // meta-task on the local processor
+      DeferRayTraceArgs args(set, target, expr, origin, done_event);
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,ready);
     }
 
     //--------------------------------------------------------------------------

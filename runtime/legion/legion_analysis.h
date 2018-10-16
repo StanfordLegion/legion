@@ -632,6 +632,22 @@ namespace Legion {
         EquivalenceSet *const set;
         const RtEvent done;
       };
+      struct DeferRayTraceArgs : public LgTaskArgs<DeferRayTraceArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_RAY_TRACE_TASK_ID;
+      public:
+        DeferRayTraceArgs(EquivalenceSet *s, VersionManager *t,
+                          IndexSpaceExpression *e, AddressSpaceID o,
+                          RtUserEvent d)
+          : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
+            set(s), target(t), expr(e), origin(o), done(d) { }
+      public:
+        EquivalenceSet *const set;
+        VersionManager *const target;
+        IndexSpaceExpression *const expr;
+        const AddressSpaceID origin;
+        const RtUserEvent done;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -912,6 +928,7 @@ namespace Legion {
     public:
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
+      static void handle_ray_trace(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,

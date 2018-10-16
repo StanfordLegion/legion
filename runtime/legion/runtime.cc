@@ -19988,6 +19988,11 @@ namespace Legion {
             EquivalenceSet::handle_remote_references(args);
             break;
           }
+        case LG_DEFER_RAY_TRACE_TASK_ID:
+          {
+            EquivalenceSet::handle_ray_trace(args);
+            break;
+          }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_decrement(args);

@@ -324,6 +324,7 @@ namespace Legion {
       LG_DELETE_TEMPLATE_ID,
       LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
+      LG_DEFER_RAY_TRACE_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
@@ -398,6 +399,7 @@ namespace Legion {
         "Delete Physical Template",                               \
         "Refinement",                                             \
         "Remove Remote References",                               \
+        "Defer Ray Trace",                                        \
         "Defer Remote Decrement",                                 \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
