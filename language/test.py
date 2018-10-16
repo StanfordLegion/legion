@@ -216,7 +216,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_python, short, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -271,6 +271,18 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),
     ]
+    py_env = {
+        'PYTHONPATH': ':'.join(
+            os.environ.get('PYTHONPATH', '').split(':') + [
+                os.path.join(legion_dir, 'bindings', 'python'),
+                '.',
+            ]),
+    }
+    python = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, py_env)),
+         (os.path.join('tests', 'python', 'run_pass'),
+         )),
+    ]
 
     result = []
     if not use_run and not use_spy and not use_hdf5:
@@ -286,15 +298,19 @@ def get_test_specs(use_run, use_spy, use_hdf5, use_openmp, short, extra_flags):
         result.extend(hdf5)
     if use_openmp:
         result.extend(openmp)
+    if use_python:
+        result.extend(python)
     return result
 
-def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, short):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
+    legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
     # Run tests asynchronously.
-    tests = get_test_specs(run, spy, hdf5, openmp, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, hdf5, openmp, python, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -423,6 +439,10 @@ def test_driver(argv):
                         action='store_true',
                         help='run OpenMP tests',
                         dest='openmp')
+    parser.add_argument('--python',
+                        action='store_true',
+                        help='run Python tests',
+                        dest='python')
     parser.add_argument('--extra',
                         action='append',
                         default=[],
@@ -464,6 +484,7 @@ def test_driver(argv):
         args.spy,
         args.hdf5,
         args.openmp,
+        args.python,
         args.extra_flags,
         args.verbose,
         args.quiet,
