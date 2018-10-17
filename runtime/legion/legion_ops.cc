@@ -2208,8 +2208,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -2250,7 +2249,6 @@ namespace Legion {
                                                 this, 0/*idx*/, 
                                                 init_precondition,
                                                 termination_event,
-                                                map_applied_conditions,
                                                 mapped_instances, 
                                                 trace_info
 #ifdef DEBUG_LEGION
@@ -2274,7 +2272,6 @@ namespace Legion {
                                                 this, 0/*idx*/,
                                                 init_precondition,
                                                 termination_event, 
-                                                map_applied_conditions,
                                                 mapped_instances,
                                                 trace_info
 #ifdef DEBUG_LEGION
@@ -2284,7 +2281,7 @@ namespace Legion {
                                                 );
       }
       // We're also done with our mapper so tell it that
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
       {
@@ -3562,7 +3559,6 @@ namespace Legion {
                                                      src_requirements[idx],
                                                      src_versions[idx],
                                                      preconditions,
-                                                     map_applied_conditions,
                                                      true/*defer*/);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
@@ -3576,7 +3572,6 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      preconditions,
-                                                     map_applied_conditions,
                                                      true/*defer*/);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3590,7 +3585,6 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
                                                  preconditions,
-                                                 map_applied_conditions,
                                                  true/*defer*/);
       }
       if (!dst_indirect_requirements.empty())
@@ -3601,7 +3595,6 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_versions[idx],
                                                  preconditions,
-                                                 map_applied_conditions,
                                                  true/*defer*/);
       }
       // Since we have multiple region requirements we know that we have
@@ -3609,8 +3602,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->make_versions_ready(src_requirements[idx],
                                              src_versions[idx],
-                                             preconditions,
-                                             map_applied_conditions);
+                                             preconditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -3620,8 +3612,7 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->make_versions_ready(dst_requirements[idx],
                                              dst_versions[idx],
-                                             preconditions,
-                                             map_applied_conditions);
+                                             preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -3631,16 +3622,14 @@ namespace Legion {
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->make_versions_ready(src_indirect_requirements[idx],
                                                gather_versions[idx],
-                                               preconditions,
-                                               map_applied_conditions);
+                                               preconditions);
       }
       if (!dst_indirect_requirements.empty())
       {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->make_versions_ready(dst_indirect_requirements[idx],
                                                scatter_versions[idx],
-                                               preconditions,
-                                               map_applied_conditions);
+                                               preconditions);
       }
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -3773,7 +3762,6 @@ namespace Legion {
                                                   this, idx, 
                                                   local_init_precondition,
                                                   ApEvent::NO_AP_EVENT,
-                                                  map_applied_conditions,
                                                   src_targets,
                                                   trace_info
 #ifdef DEBUG_LEGION
@@ -3800,7 +3788,6 @@ namespace Legion {
                                                 idx + src_requirements.size(),
                                                 local_init_precondition,
                                                 ApEvent::NO_AP_EVENT,
-                                                map_applied_conditions,
                                                 dst_targets,
                                                 trace_info
 #ifdef DEBUG_LEGION
@@ -3823,10 +3810,11 @@ namespace Legion {
         ApEvent across_done = 
           runtime->forest->copy_across( 
                                 src_requirements[idx], dst_requirements[idx],
-                                src_versions[idx], src_targets, dst_targets, 
-                                this, idx, idx + src_requirements.size(),
+                                src_versions[idx], dst_versions[idx],
+                                src_targets, dst_targets, this, idx, 
+                                idx + src_requirements.size(),
                                 local_init_precondition, predication_guard, 
-                                map_applied_conditions, trace_info);
+                                trace_info);
         Runtime::trigger_event(local_completion, across_done);
         if (is_recording())
         {
@@ -3835,8 +3823,8 @@ namespace Legion {
 #endif
           tpl->record_trigger_event(local_completion, across_done);
         }
-        src_versions[idx].finalize_mapping();
-        dst_versions[idx].finalize_mapping();
+        src_versions[idx].finalize_mapping(map_applied_conditions);
+        dst_versions[idx].finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
         dump_physical_state(&src_requirements[idx], idx);
         dump_physical_state(&dst_requirements[idx], 
@@ -5473,8 +5461,7 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
-            src_requirements[idx], src_versions[idx], 
-            preconditions, map_applied_conditions);
+            src_requirements[idx], src_versions[idx], preconditions);
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -5484,7 +5471,7 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_versioning_analysis(this,
             src_requirements.size() + idx, dst_requirements[idx],
-            dst_versions[idx], preconditions, map_applied_conditions);
+            dst_versions[idx], preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -5494,8 +5481,7 @@ namespace Legion {
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           src_indirect_requirements[idx], gather_versions[idx], 
-           preconditions, map_applied_conditions);
+           src_indirect_requirements[idx], gather_versions[idx], preconditions);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -5503,8 +5489,7 @@ namespace Legion {
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
-           dst_indirect_requirements[idx], scatter_versions[idx],
-           preconditions, map_applied_conditions);
+           dst_indirect_requirements[idx], scatter_versions[idx],preconditions);
       }
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
@@ -6707,8 +6692,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -6729,7 +6713,6 @@ namespace Legion {
                                               this, 0/*idx*/,
                                               ApEvent::NO_AP_EVENT,
                                               close_event,
-                                              map_applied_conditions,
                                               target_instances, 
                                               trace_info
 #ifdef DEBUG_LEGION
@@ -6766,7 +6749,7 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Finalize our mapping
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
       // No need to apply our mapping because we are done!
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
@@ -7236,8 +7219,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -7254,7 +7236,6 @@ namespace Legion {
       InstanceSet restricted_instances;
       runtime->forest->acquire_restrictions(requirement, version_info,
                                             this, 0/*idx*/, completion_event,
-                                            map_applied_conditions,
                                             restricted_instances,
                                             trace_info
 #ifdef DEBUG_LEGION
@@ -7262,7 +7243,7 @@ namespace Legion {
                                             , unique_op_id
 #endif
                                             );
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -7907,8 +7888,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -7927,14 +7907,13 @@ namespace Legion {
       runtime->forest->release_restrictions(requirement, version_info,
                                             this, 0/*idx*/, init_precondition,
                                             completion_event,
-                                            map_applied_conditions,
                                             restricted_instances, trace_info
 #ifdef DEBUG_LEGION
                                             , get_logging_name()
                                             , unique_op_id
 #endif
                                             );
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -11004,8 +10983,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                      requirement,
                                                      version_info,
-                                                     preconditions,
-                                                     map_applied_conditions);
+                                                     preconditions);
         // Give these operations slightly higher priority since
         // they are likely needed for other operations
         if (!preconditions.empty())
@@ -11043,7 +11021,6 @@ namespace Legion {
                                               this, 0/*idx*/,
                                               ApEvent::NO_AP_EVENT,
                                               completion_event,
-                                              map_applied_conditions,
                                               mapped_instances,
                                               trace_info
 #ifdef DEBUG_LEGION
@@ -11053,7 +11030,7 @@ namespace Legion {
                                               );
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                          mapped_instances, trace_info);
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
       // Once we are done running these routines, we can mark
       // that the handles have all been completed
       if (!map_applied_conditions.empty())
@@ -11644,7 +11621,7 @@ namespace Legion {
       // Perform the version analysis for our point
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-            requirement, version_info, preconditions, map_applied_conditions);
+                        requirement, version_info, preconditions);
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
@@ -12006,8 +11983,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -12031,8 +12007,7 @@ namespace Legion {
         ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        value, value_size, version_info, 
-                                       init_precondition,map_applied_conditions,
-                                       true_guard, trace_info);
+                                       init_precondition,true_guard,trace_info);
         if (runtime->legion_spy_enabled)
         {
 #ifdef LEGION_SPY
@@ -12040,7 +12015,7 @@ namespace Legion {
                                           completion_event);
 #endif
         }
-        version_info.finalize_mapping();
+        version_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
         dump_physical_state(&requirement, 0);
 #endif
@@ -12099,13 +12074,12 @@ namespace Legion {
       ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
                                        result, result_size, version_info,
-                                       init_precondition,map_applied_conditions,
-                                       true_guard, trace_info);
+                                       init_precondition,true_guard,trace_info);
 #ifdef LEGION_SPY
       LegionSpy::log_operation_events(unique_op_id, done_event,
                                       completion_event);
 #endif
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -12803,7 +12777,7 @@ namespace Legion {
       // Perform the version info
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-            requirement, version_info, preconditions, map_applied_conditions);
+                        requirement, version_info, preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13089,8 +13063,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13112,12 +13085,11 @@ namespace Legion {
                                                         requirement,
                                                         external_instance,
                                                         version_info,
-                                                        map_applied_conditions,
                                                         trace_info);
 #ifdef DEBUG_LEGION
       assert(external_instance.has_ref());
 #endif
-      version_info.finalize_mapping();
+      version_info.finalize_mapping(map_applied_conditions);
       // This operation is ready once the file is attached
       region.impl->set_reference(external_instance);
       // Once we have created the instance, then we are done
@@ -13564,8 +13536,7 @@ namespace Legion {
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                                                    requirement, 
                                                    version_info,
-                                                   preconditions,
-                                                   map_applied_conditions);
+                                                   preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -13593,8 +13564,8 @@ namespace Legion {
 #endif
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                     version_info, reference, map_applied_conditions);
-      version_info.finalize_mapping();
+                                         version_info, reference);
+      version_info.finalize_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();

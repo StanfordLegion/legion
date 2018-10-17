@@ -1773,8 +1773,7 @@ namespace Legion {
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      requirements[idx],
                                                      version_infos[idx],
-                                                     preconditions,
-                                                     map_applied_conditions);
+                                                     preconditions);
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
@@ -1792,7 +1791,6 @@ namespace Legion {
                                                 this, idx,
                                                 ApEvent::NO_AP_EVENT,
                                                 completion_event,
-                                                map_applied_conditions,
                                                 instances[idx],
                                                 trace_info
 #ifdef DEBUG_LEGION
@@ -1801,7 +1799,7 @@ namespace Legion {
 #endif
                                                 );
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        version_infos[idx].finalize_mapping();
+        version_infos[idx].finalize_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else

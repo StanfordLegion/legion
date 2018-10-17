@@ -19998,6 +19998,11 @@ namespace Legion {
             DistributedCollectable::handle_defer_remote_decrement(args);
             break;
           }
+        case LG_DEFER_VERSION_FINALIZE_TASK_ID:
+          {
+            VersionInfo::handle_defer_finalize(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

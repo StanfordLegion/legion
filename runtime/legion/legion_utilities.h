@@ -10806,6 +10806,7 @@ namespace Legion {
         { return single && (entries.single_entry == NULL); }
       inline const FieldMask& get_valid_mask(void) const 
         { return valid_fields; }
+      inline const FieldMask& tighten_valid_mask(void);
     public:
       inline const FieldMask& operator[](T *entry) const;
     public:
@@ -10903,6 +10904,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
+    inline const FieldMask& FieldMaskSet<T>::tighten_valid_mask(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're single then there is nothing to do as we're already tight
+      if (single)
+        return valid_fields;
+      valid_fields.clear();
+      for (typename LegionMap<T*,FieldMask>::aligned::const_iterator it = 
+            entries.multi_entries->begin(); it !=
+            entries.multi_entries->end(); it++)
+        valid_fields |= it->second;
+      return valid_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
     inline const FieldMask& FieldMaskSet<T>::operator[](T *entry) const
     //--------------------------------------------------------------------------
     {
@@ -10929,9 +10946,6 @@ namespace Legion {
     inline bool FieldMaskSet<T>::insert(T *entry, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
       bool result = true;
       if (single)
       {

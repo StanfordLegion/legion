@@ -1843,7 +1843,7 @@ namespace Legion {
         if (version_info.has_version_info())
           continue;
         runtime->forest->perform_versioning_analysis(this, *it, regions[*it],
-                      version_info, version_ready_events, applied_conditions);
+                                         version_info, version_ready_events);
       }
       Mapper::PremapTaskInput input;
       Mapper::PremapTaskOutput output;
@@ -2017,14 +2017,14 @@ namespace Legion {
         ApEvent effects_done = 
           runtime->forest->physical_register_only(regions[*it], version_info, 
                               this, *it, init_precondition, completion_event,
-                              applied_conditions, chosen_instances, trace_info
+                              chosen_instances, trace_info
 #ifdef DEBUG_LEGION
                               , get_logging_name(), unique_op_id
 #endif
                               );
         if (effects_done.exists())
           effects_postconditions.insert(effects_done);
-        version_info.finalize_mapping();
+        version_info.finalize_mapping(applied_conditions);
       }
     }
 
@@ -2545,7 +2545,7 @@ namespace Legion {
             continue;
           }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-            version_info, ready_events, map_applied_conditions, multiple_reqs);
+                                    version_info, ready_events, multiple_reqs);
         }
       }
       else
@@ -2566,7 +2566,7 @@ namespace Legion {
             continue;
           }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-             version_info, ready_events, map_applied_conditions, multiple_reqs);
+                                    version_info, ready_events, multiple_reqs);
         }
       }
       if (multiple_reqs && (to_skip.size() < regions.size()))
@@ -2580,7 +2580,7 @@ namespace Legion {
               skip_index++;
             else
               runtime->forest->make_versions_ready(regions[idx], 
-                  version_infos[idx], ready_events, map_applied_conditions);
+                                version_infos[idx], ready_events);
           }
 #ifdef DEBUG_LEGION
           assert(skip_index == to_skip.size());
@@ -2591,7 +2591,7 @@ namespace Legion {
           // Easy case with no skip indexes
           for (unsigned idx = 0; idx < regions.size(); idx++)
             runtime->forest->make_versions_ready(regions[idx], 
-                version_infos[idx], ready_events, map_applied_conditions);
+                              version_infos[idx], ready_events);
         }
       }
       if (!ready_events.empty())
@@ -3445,7 +3445,7 @@ namespace Legion {
         // If we virtual mapped it, there is nothing to do
         if (virtual_mapped[idx])
         {
-          local_info.finalize_mapping();
+          local_info.finalize_mapping(map_applied_conditions);
           continue;
         }
         // Set the current mapping index before doing anything
@@ -3456,7 +3456,6 @@ namespace Legion {
           runtime->forest->physical_register_only(regions[idx], local_info, 
                                     this, idx, init_precondition,
                                     local_termination_event, 
-                                    map_applied_conditions,
                                     physical_instances[idx],
                                     trace_info,
 #ifdef DEBUG_LEGION
@@ -3466,11 +3465,15 @@ namespace Legion {
                                     multiple_requirements/*read only locks*/);
         if (effects.exists())
           effects_postconditions.insert(effects);
-        local_info.finalize_mapping();
+        // We'll finalize in post mapping if we're doing that
+        if (!perform_postmap)
+          local_info.finalize_mapping(map_applied_conditions);
 #ifdef DEBUG_LEGION
         dump_physical_state(&regions[idx], idx);
 #endif
       }
+      if (perform_postmap)
+        perform_post_mapping(trace_info);
       // Release any read-only reservations that we're holding
       if (!read_only_reservations.empty())
       {
@@ -3495,8 +3498,6 @@ namespace Legion {
             it->release();
         }
       }
-      if (perform_postmap)
-        perform_post_mapping(trace_info);
 
       if (is_recording())
       {
@@ -3526,6 +3527,10 @@ namespace Legion {
       std::vector<InstanceSet> postmap_valid(regions.size());
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          continue;
+        if (no_access_regions[idx] || virtual_mapped[idx])
+          continue;
         // Don't need to actually traverse very far, but we do need the
         // valid instances for all the regions
         RegionTreePath path;
@@ -3544,6 +3549,10 @@ namespace Legion {
       // Check and register the results
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
+        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          continue;
+        if (no_access_regions[idx] || virtual_mapped[idx])
+          continue;
         if (output.chosen_instances.empty())
           continue;
         RegionRequirement &req = regions[idx];
@@ -3669,12 +3678,13 @@ namespace Legion {
         // invalidate the other valid instances
         const PrivilegeMode mode = regions[idx].privilege;
         regions[idx].privilege = READ_ONLY; 
+        VersionInfo &local_version_info = get_version_info(idx);
         ApEvent effects_done = 
           runtime->forest->physical_register_only(regions[idx], 
-                            get_version_info(idx), this, idx,
+                            local_version_info, this, idx,
                             completion_event/*wait for task to be done*/,
                             ApEvent::NO_AP_EVENT/*done immediately*/, 
-                            map_applied_conditions, result, trace_info
+                            result, trace_info
 #ifdef DEBUG_LEGION
                             , get_logging_name(), unique_op_id
 #endif
@@ -3682,6 +3692,7 @@ namespace Legion {
         if (effects_done.exists())
           effects_postconditions.insert(effects_done);
         regions[idx].privilege = mode; 
+        local_version_info.finalize_mapping(map_applied_conditions);
       }
     } 
 

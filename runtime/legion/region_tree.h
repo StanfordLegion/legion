@@ -302,12 +302,10 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       std::set<RtEvent> &applied_events,
                                        bool defer_make_ready = false);
       void make_versions_ready(const RegionRequirement &req,
                                VersionInfo &version_info,
-                               std::set<RtEvent> &ready_events,
-                               std::set<RtEvent> &applied_events);
+                               std::set<RtEvent> &ready_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
@@ -334,7 +332,6 @@ namespace Legion {
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
                                      ApEvent precondition, ApEvent term_event,
-                                     std::set<RtEvent> &map_applied,
                                      InstanceSet &targets,
                                      const PhysicalTraceInfo &trace_info,
 #ifdef DEBUG_LEGION
@@ -346,7 +343,6 @@ namespace Legion {
                                 VersionInfo &version_info,
                                 Operation *op, unsigned index,
                                 ApEvent term_event,
-                                std::set<RtEvent> &map_applied,
                                 InstanceSet &restricted_instances,
                                 const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
@@ -358,7 +354,6 @@ namespace Legion {
                                 VersionInfo &version_info,
                                 Operation *op, unsigned index,
                                 ApEvent precondition, ApEvent term_event,
-                                std::set<RtEvent> &map_applied,
                                 InstanceSet &restricted_instances,
                                 const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
@@ -369,11 +364,11 @@ namespace Legion {
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
                           VersionInfo &src_version_info,
+                          VersionInfo &dst_version_info,
                           const InstanceSet &src_targets,
                           const InstanceSet &dst_targets, Operation *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
-                          std::set<RtEvent> &map_applied,
                           const PhysicalTraceInfo &trace_info);
       // This takes ownership of the value buffer
       ApEvent fill_fields(Operation *op,
@@ -381,7 +376,6 @@ namespace Legion {
                           const unsigned index,
                           const void *value, size_t value_size,
                           VersionInfo &version_info, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events,
                           PredEvent true_guard,
                           const PhysicalTraceInfo &trace_info);
       InstanceRef create_external_instance(AttachOp *attach_op,
@@ -391,12 +385,10 @@ namespace Legion {
                               const RegionRequirement &req,
                               const InstanceRef &ext_instance,
                               VersionInfo &version_info,
-                              std::set<RtEvent> &map_applied_events,
                               const PhysicalTraceInfo &trace_info);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
-                              const InstanceRef &ref, 
-                              std::set<RtEvent> &map_applied_events);
+                              const InstanceRef &ref); 
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,

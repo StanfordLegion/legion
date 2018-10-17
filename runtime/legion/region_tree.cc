@@ -1406,7 +1406,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     std::set<RtEvent> &applied_events, bool defer_make_ready)
+                     bool defer_make_ready)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1425,13 +1425,12 @@ namespace Legion {
       region_node->perform_versioning_analysis(ctx.get_id(),
                                                context, version_info);
       if (!defer_make_ready)
-        version_info.make_ready(req, user_mask, ready_events, applied_events);
+        version_info.make_ready(req, user_mask, ready_events);
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::make_versions_ready(const RegionRequirement &req,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     std::set<RtEvent> &applied_events)
+                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       if (IS_NO_ACCESS(req))
@@ -1442,7 +1441,7 @@ namespace Legion {
       FieldSpaceNode *field_space_node = get_node(req.region.get_field_space());
       FieldMask user_mask = 
         field_space_node->get_field_mask(req.privilege_fields);
-      version_info.make_ready(req, user_mask, ready_events, applied_events);
+      version_info.make_ready(req, user_mask, ready_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1507,8 +1506,7 @@ namespace Legion {
       top_node->perform_versioning_analysis(ctx.get_id(), context,
                                             init_version_info);
       std::set<RtEvent> eq_ready_events;
-      init_version_info.make_ready(req, user_mask, eq_ready_events, 
-                                   applied_events);
+      init_version_info.make_ready(req, user_mask, eq_ready_events); 
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1597,11 +1595,13 @@ namespace Legion {
       // Iterate over the equivalence classes and initialize them
       const std::set<EquivalenceSet*> &eq_sets = 
         init_version_info.get_equivalence_sets();
+      std::set<RtEvent> &version_applied_events = 
+        init_version_info.get_applied_events();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->initialize_set(usage, user_mask, restricted,
-                              sources, corresponding, applied_events);
-      init_version_info.finalize_mapping();
+                              sources, corresponding, version_applied_events);
+      init_version_info.finalize_mapping(applied_events);
     }
 
     //--------------------------------------------------------------------------
@@ -1805,7 +1805,6 @@ namespace Legion {
                                            Operation *op, unsigned index,
                                            ApEvent precondition, 
                                            ApEvent term_event,
-                                           std::set<RtEvent> &map_applied,
                                            InstanceSet &targets,
                                            const PhysicalTraceInfo &trace_info,
 #ifdef DEBUG_LEGION
@@ -1947,7 +1946,7 @@ namespace Legion {
                 read_only_locks.begin(); it != read_only_locks.end(); it++)
             it->release(done_event);
         }
-        map_applied.insert(done_event);
+        version_info.record_applied_event(done_event);
       }
       else if (!read_only_locks.empty())
       {
@@ -1964,7 +1963,6 @@ namespace Legion {
                                            VersionInfo &version_info,
                                            Operation *op, unsigned index,
                                            ApEvent term_event,
-                                           std::set<RtEvent> &map_applied,
                                            InstanceSet &restricted_instances,
                                            const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
@@ -1998,6 +1996,7 @@ namespace Legion {
 #endif
       restricted_instances.resize(inst_exprs.size());
       unsigned inst_index = 0;
+      std::set<RtEvent> &applied_events = version_info.get_applied_events();
       for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
            const_iterator it = inst_exprs.begin(); it != inst_exprs.end(); it++)
       {
@@ -2008,7 +2007,7 @@ namespace Legion {
         assert(finder != instances.end());
 #endif
         ApEvent ready = it->first->register_user(usage, finder->second,
-            union_expr, op_id, index, term_event, map_applied, trace_info);
+            union_expr, op_id, index, term_event, applied_events, trace_info);
         // Record this in the acquired_instances
         restricted_instances[inst_index++] = 
           InstanceRef(it->first->get_manager(), finder->second, ready);
@@ -2022,7 +2021,6 @@ namespace Legion {
                                            Operation *op, unsigned index,
                                            ApEvent precondition,
                                            ApEvent term_event,
-                                           std::set<RtEvent> &map_applied,
                                            InstanceSet &restricted_instances,
                                            const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
@@ -2044,12 +2042,13 @@ namespace Legion {
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
+      std::set<RtEvent> &applied_events = version_info.get_applied_events();
       CopyFillAggregator release_aggregator(this, op, index, 
-                                            map_applied, false/*track*/);
+                                            applied_events, false/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->release_restrictions(user_mask, release_aggregator, 
-                                    instances, inst_exprs, map_applied);
+                                    instances, inst_exprs, applied_events);
       const UniqueID op_id = op->get_unique_op_id();
       // Issue any release copies/fills that need to be done
       if (release_aggregator.has_updates())
@@ -2071,7 +2070,7 @@ namespace Legion {
         assert(finder != instances.end());
 #endif
         ApEvent ready = it->first->register_user(usage, finder->second,
-            union_expr, op_id, index, term_event, map_applied, trace_info);
+            union_expr, op_id, index, term_event, applied_events, trace_info);
         // Record this in the acquired_instances
         restricted_instances[inst_index++] = 
           InstanceRef(it->first->get_manager(), finder->second, ready);
@@ -2083,12 +2082,12 @@ namespace Legion {
                                         const RegionRequirement &src_req,
                                         const RegionRequirement &dst_req,
                                         VersionInfo &src_version_info,
+                                        VersionInfo &dst_version_info,
                                         const InstanceSet &src_targets,
                                         const InstanceSet &dst_targets,
                                         Operation *op, 
                                         unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, PredEvent guard, 
-                                        std::set<RtEvent> &map_applied,
                                         const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -2135,8 +2134,9 @@ namespace Legion {
         perfect = false;
         break;
       }
+      std::set<RtEvent> local_applied;
       CopyFillAggregator across_aggregator(this, op, src_index, dst_index,
-                                           map_applied, true/*track*/);
+                                           local_applied, true/*track*/);
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;
       if (perfect)
@@ -2196,6 +2196,12 @@ namespace Legion {
         for (unsigned idx = 0; idx < across_helpers.size(); idx++)
           delete across_helpers[idx];
       }
+      if (!local_applied.empty())
+      {
+        const RtEvent applied = Runtime::merge_events(local_applied);
+        src_version_info.record_applied_event(applied);
+        dst_version_info.record_applied_event(applied);
+      }
       return result;
     }
 
@@ -2206,7 +2212,6 @@ namespace Legion {
                                           const void *value, size_t value_size,
                                           VersionInfo &version_info,
                                           ApEvent precondition,
-                                          std::set<RtEvent> &map_applied,
                                           PredEvent true_guard, 
                                           const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -2236,11 +2241,13 @@ namespace Legion {
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
+      std::set<RtEvent> &applied_events = version_info.get_applied_events();
       CopyFillAggregator output_aggregator(this, op, index, 
-                                           map_applied, true/*track*/);
+                                           applied_events, true/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->overwrite_set(fill_view,fill_mask,output_aggregator,map_applied);
+        (*it)->overwrite_set(fill_view, fill_mask,
+                             output_aggregator, applied_events);
       if (output_aggregator.has_updates())
       {
         output_aggregator.issue_updates(trace_info, precondition);
@@ -2270,7 +2277,6 @@ namespace Legion {
                                             const RegionRequirement &req,
                                             const InstanceRef &ext_instance, 
                                             VersionInfo &version_info,
-                                            std::set<RtEvent> &map_applied,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -2288,13 +2294,14 @@ namespace Legion {
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
+      std::set<RtEvent> &applied_events = version_info.get_applied_events();
       CopyFillAggregator output_aggregator(this, attach_op, index,
-                                           map_applied, true/*track*/);
+                                           applied_events, true/*track*/);
       const FieldMask &ext_mask = ext_instance.get_valid_fields();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->overwrite_set(external_views[0], ext_mask, output_aggregator,
-                             map_applied, PredEvent::NO_PRED_EVENT, 
+                             applied_events, PredEvent::NO_PRED_EVENT, 
                              true/*add restriction*/);
       if (output_aggregator.has_updates())
       {
@@ -2310,8 +2317,7 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          const InstanceRef &ext_instance,
-                                          std::set<RtEvent> &map_applied_events)
+                                          const InstanceRef &ext_instance)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);

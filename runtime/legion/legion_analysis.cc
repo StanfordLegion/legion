@@ -182,8 +182,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(op == NULL);
-      assert(equivalence_sets.empty());
       assert(owner == NULL);
+      assert(applied_events.empty());
+      assert(equivalence_sets.empty());
 #endif
     }
 
@@ -195,6 +196,8 @@ namespace Legion {
       assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
+      assert(applied_events.empty());
+      assert(rhs.applied_events.empty());
 #endif
       return *this;
     }
@@ -225,7 +228,6 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
       {
-        (*it)->add_base_resource_ref(VERSION_INFO_REF);
         // Check for unrefined remainders here before we record it
         if ((*it)->has_unrefined_remainder())
           (*it)->refine_remainder();
@@ -235,8 +237,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionInfo::make_ready(const RegionRequirement &req, 
                                  const FieldMask &ready_mask,
-                                 std::set<RtEvent> &ready_events,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -248,14 +249,12 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
-        if ((*it)->acquire_mapping_guard(op, alt_sets))
+        if ((*it)->acquire_mapping_guard(op, ready_mask, alt_sets))
         {
 #ifdef DEBUG_LEGION
           assert(!alt_sets.empty());
 #endif
           std::set<EquivalenceSet*>::iterator to_delete = it++;
-          if ((*to_delete)->remove_base_resource_ref(VERSION_INFO_REF))
-            delete (*to_delete);
           equivalence_sets.erase(to_delete); 
         }
         else
@@ -270,7 +269,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(equivalence_sets.find(*it) == equivalence_sets.end());
 #endif
-          (*it)->add_base_resource_ref(VERSION_INFO_REF);
           equivalence_sets.insert(*it);
         }
         // This means that refinement has changed for this region so update it
@@ -289,25 +287,57 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::finalize_mapping(void)
+    void VersionInfo::finalize_mapping(std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(op != NULL);
 #endif
+      // It's not safe to remove our mapping guards until all our applied
+      // events have triggered since they indicate that effects have propagated
+      if (!applied_events.empty())
+      {
+        const RtEvent applied = Runtime::merge_events(applied_events); 
+        applied_events.clear();
+        if (applied.exists() && !applied.has_triggered())
+        {
+          // Defer the finalization until the effects are done
+          const DeferredVersionFinalizeArgs args(this, op->get_unique_op_id());
+          const RtEvent done = op->runtime->issue_runtime_meta_task(args,
+                                LG_LATENCY_DEFERRED_PRIORITY, applied);
+          map_applied_events.insert(done);
+          return;
+        }
+      }
+      perform_finalize();
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::perform_finalize(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(op != NULL);
+      assert(applied_events.empty());
+#endif
       if (!equivalence_sets.empty())
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        {
           (*it)->remove_mapping_guard(op);
-          if ((*it)->remove_base_resource_ref(VERSION_INFO_REF))
-            delete (*it);
-        }
         equivalence_sets.clear();
       }
       op = NULL;
       owner = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionInfo::handle_defer_finalize(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredVersionFinalizeArgs *dargs = 
+        (const DeferredVersionFinalizeArgs*)args;
+      dargs->proxy_this->perform_finalize();
     }
 
     /////////////////////////////////////////////////////////////
@@ -2876,6 +2906,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_mapping_guard(Operation *op,
+                                               const FieldMask &guard_mask,
                std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -2891,11 +2922,17 @@ namespace Legion {
         // from a different operation between the two acquires.
         if (!mapping_guards.empty())
         {
-          std::map<Operation*,unsigned>::iterator finder = 
-            mapping_guards.find(op);
+          FieldMaskSet<Operation>::iterator finder = mapping_guards.find(op);
           if (finder != mapping_guards.end())
           {
-            finder->second++;
+            finder.merge(guard_mask);
+            // Multiple acquires so we need to start counting
+            std::map<Operation*,unsigned>::iterator count_finder = 
+              mapping_guard_counts.find(op);
+            if (count_finder == mapping_guard_counts.end())
+              mapping_guard_counts[op] = 2;
+            else
+              count_finder->second++;
             if (recursed)
               alt_sets.push_back(this);
             return false;
@@ -2979,7 +3016,7 @@ namespace Legion {
           // Should have been handled above
           assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
-          mapping_guards[op] = 1;
+          mapping_guards.insert(op, guard_mask);
         }
         else // Our set of subsets are now what we need
           to_recurse = subsets;
@@ -2989,7 +3026,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->acquire_mapping_guard(op, alt_sets, true/*recursed*/);
+          (*it)->acquire_mapping_guard(op,guard_mask,alt_sets,true/*recursed*/);
         // We've been refined so return true indicating that we changed
         return true;
       }
@@ -3004,7 +3041,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      std::map<Operation*,unsigned>::iterator finder = mapping_guards.find(op);
+      std::map<Operation*,unsigned>::iterator finder = 
+        mapping_guard_counts.find(op);
 #ifdef DEBUG_LEGION
       if (is_logical_owner())
         assert((eq_state == MAPPING_STATE) || 
@@ -3012,30 +3050,123 @@ namespace Legion {
       else
         assert((eq_state == VALID_STATE) ||
                 (eq_state == PENDING_INVALID_STATE));
-      assert(finder != mapping_guards.end());
-      assert(finder->second > 0);
+      assert(mapping_guards.find(op) != mapping_guards.end());
 #endif
-      finder->second--;
-      if (finder->second == 0)
+      if ((finder == mapping_guard_counts.end()) || (finder->second == 1))
       {
-        mapping_guards.erase(finder);
+        if (finder != mapping_guard_counts.end())
+          mapping_guard_counts.erase(finder);
+        mapping_guards.erase(op);
         if (mapping_guards.empty())
         {
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
+#ifdef DEBUG_LEGION
+            assert(deferred_requests.empty());
+#endif
             eq_state = REFINED_STATE;
             // Kick off the refinement task now that we're transitioning
             launch_refinement_task();
           }
           else if (!is_logical_owner() && (eq_state == PENDING_INVALID_STATE))
           {
-            eq_state = INVALID_STATE;
 #ifdef DEBUG_LEGION
+            assert(deferred_requests.empty());
             assert(transition_event.exists());
 #endif
+            eq_state = INVALID_STATE;
             invalidate_remote_state(transition_event);
             transition_event = RtUserEvent::NO_RT_USER_EVENT;
           }
+          else if (!deferred_requests.empty())
+          {
+            // We have no more mapping guards so we can just perform
+            // all the deferred requests
+            perform_all_deferred_requests();
+          }
+        }
+        else if (!deferred_requests.empty())
+        {
+          // Tighten the mask and then use it to find any requests
+          // which are now free to be performed
+          const FieldMask &guard_mask = mapping_guards.tighten_valid_mask();
+          if (guard_mask * deferred_requests.get_valid_mask())
+            // We can just perform all of them
+            perform_all_deferred_requests();
+          else
+            // Only perform those that are not protected anymore
+            perform_ready_deferred_requests(guard_mask);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(finder->second > 1);
+#endif
+        finder->second--;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::perform_all_deferred_requests(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!deferred_requests.empty());
+#endif
+      for (FieldMaskSet<DeferredRequest>::const_iterator it = 
+            deferred_requests.begin(); it != deferred_requests.end(); it++)
+      {
+        unsigned dummy_updates = 0;
+        request_update(local_space, it->first->invalid_space,
+                       it->second, it->first->pending_request,
+                       dummy_updates, it->first->invalidate,
+                       it->first->skip_redop, false/*needs lock*/);
+        delete it->first;
+      }
+      deferred_requests.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::perform_ready_deferred_requests(
+                                                    const FieldMask &guard_mask)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!deferred_requests.empty());
+#endif
+      std::vector<DeferredRequest*> to_delete;
+      for (FieldMaskSet<DeferredRequest>::const_iterator it = 
+            deferred_requests.begin(); it != deferred_requests.end(); it++)
+      {
+        if (it->second * guard_mask)
+        {
+          unsigned dummy_updates = 0;
+          request_update(local_space, it->first->invalid_space,
+                         it->second, it->first->pending_request,
+                         dummy_updates, it->first->invalidate,
+                         it->first->skip_redop, false/*needs lock*/);
+          to_delete.push_back(it->first);
+        }
+      }
+      if (!to_delete.empty())
+      {
+        if (to_delete.size() == deferred_requests.size())
+        {
+          deferred_requests.clear();
+          for (std::vector<DeferredRequest*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            delete (*it);
+        }
+        else
+        {
+          for (std::vector<DeferredRequest*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+          {
+            deferred_requests.erase(*it);
+            delete (*it);
+          }
+          deferred_requests.tighten_valid_mask();
         }
       }
     }
@@ -3995,29 +4126,21 @@ namespace Legion {
         assert(invalid_space != local_space);
 #endif
         // Before we going packing things up and sending them off
-        // see if we need to defer this response until we get all
-        // of our own responses back, this can happen with some
-        // collapses for reduction modes
-        if (!outstanding_requests.empty() && 
-            !(outstanding_requests.get_valid_mask() * update_mask))
+        // see if we need to defer this response until all the current
+        // interfering guards of this equivalence class are done
+        // This is important since it's not safe for other copies
+        // to use the meta-data until all the effects of the operations
+        // mapping here are applied. This is especially important
+        // for multiple readers are mapping the same equivalence set
+        // at the same time.
+        if (!mapping_guards.empty() && 
+            !(mapping_guards.get_valid_mask() * update_mask))
         {
-          // We need the precise set of fields that we are
-          // going to depend on for this request
-          FieldMask needed_mask;
-          for (FieldMaskSet<PendingRequest>::const_iterator it = 
-                outstanding_requests.begin(); it != 
-                outstanding_requests.end(); it++)
-          {
-            const FieldMask overlap = it->second & update_mask;
-            if (!overlap)
-              continue;
-            needed_mask |= overlap;
-          }
-          // Defer this update
+          // Defer this request until later
           DeferredRequest *deferred = 
             new DeferredRequest(invalid_space, pending_request, 
-                                update_mask, invalidate, skip_redop);
-          deferred_requests.insert(deferred, needed_mask);
+                                invalidate, skip_redop);
+          deferred_requests.insert(deferred, update_mask);
           return;
         }
         // Make an event that will be triggered once the message is
@@ -4765,40 +4888,13 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
+      outstanding_requests.erase(finder);
       if (!pending_request->applied_events.empty())
         Runtime::trigger_event(pending_request->applied_event,
             Runtime::merge_events(pending_request->applied_events));
       else
         Runtime::trigger_event(pending_request->applied_event);
       Runtime::trigger_event(pending_request->ready_event);
-      // See if there are any deferred requests that we need to handle
-      if (!deferred_requests.empty() &&
-          !(finder->second * deferred_requests.get_valid_mask()))
-      {
-        std::vector<DeferredRequest*> to_perform;
-        for (FieldMaskSet<DeferredRequest>::iterator it = 
-              deferred_requests.begin(); it != deferred_requests.end(); it++)
-        {
-          it.filter(finder->second);
-          if (!it->second)
-            to_perform.push_back(it->first);
-        }
-        if (!to_perform.empty())
-        {
-          for (std::vector<DeferredRequest*>::const_iterator it = 
-                to_perform.begin(); it != to_perform.end(); it++)
-          {
-            deferred_requests.erase(*it);
-            unsigned dummy_updates = 0;
-            request_update(local_space, (*it)->invalid_space,
-                           (*it)->update_mask, (*it)->pending_request,
-                           dummy_updates, (*it)->invalidate,
-                           (*it)->skip_redop, false/*needs lock*/);
-            delete (*it);
-          }
-        }
-      }
-      outstanding_requests.erase(finder);
       delete pending_request;
     }
 

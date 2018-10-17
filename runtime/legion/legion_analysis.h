@@ -77,6 +77,18 @@ namespace Legion {
      */
     class VersionInfo {
     public:
+      struct DeferredVersionFinalizeArgs : 
+        public LgTaskArgs<DeferredVersionFinalizeArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_VERSION_FINALIZE_TASK_ID;
+      public:
+        DeferredVersionFinalizeArgs(VersionInfo *info, UniqueID uid)
+          : LgTaskArgs<DeferredVersionFinalizeArgs>(uid),
+            proxy_this(info) { } 
+      public:
+        VersionInfo *const proxy_this;
+      };
+    public:
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
       virtual ~VersionInfo(void);
@@ -86,17 +98,26 @@ namespace Legion {
       inline bool has_version_info(void) const { return (op != NULL); }
       inline const std::set<EquivalenceSet*>& get_equivalence_sets(void) const
         { return equivalence_sets; }
+      inline std::set<RtEvent>& get_applied_events(void) 
+        { return applied_events; }
+      inline void record_applied_event(RtEvent applied)
+        { applied_events.insert(applied); }
     public:
       void initialize_mapping(Operation *op);
       void record_equivalence_sets(VersionManager *owner,
                                    const std::set<EquivalenceSet*> &sets);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
-          std::set<RtEvent> &ready_events, std::set<RtEvent> &applied_events);
-      void finalize_mapping(void);
+                      std::set<RtEvent> &ready_events);
+      void finalize_mapping(std::set<RtEvent> &map_applied_events);
+    protected:
+      void perform_finalize(void);
+    public:
+      static void handle_defer_finalize(const void *args);
     protected:
       Operation *op;
-      std::set<EquivalenceSet*> equivalence_sets;
       VersionManager *owner;
+      std::set<RtEvent> applied_events;
+      std::set<EquivalenceSet*> equivalence_sets;
     };
 
     /**
@@ -725,16 +746,15 @@ namespace Legion {
         int remaining_count;
       };
       // Deferred update reqeusts
-      struct DeferredRequest : public LegionHeapify<DeferredRequest> {
+      struct DeferredRequest {
       public:
         DeferredRequest(AddressSpaceID invalid, PendingRequest *pending,
-                        const FieldMask &m, bool inval, ReductionOpID skip)
+                        bool inval, ReductionOpID skip)
           : invalid_space(invalid), pending_request(pending),
-            update_mask(m), skip_redop(skip), invalidate(inval) { }
+            skip_redop(skip), invalidate(inval) { }
       public:
         const AddressSpaceID invalid_space;
         PendingRequest *const pending_request;
-        const FieldMask update_mask;
         const ReductionOpID skip_redop;
         const bool invalidate;
       };
@@ -762,6 +782,7 @@ namespace Legion {
         { return (unrefined_remainder != NULL); }
       void refine_remainder(void);
       bool acquire_mapping_guard(Operation *op,
+                                 const FieldMask &guard_mask,
                                  std::vector<EquivalenceSet*> &alt_sets,
                                  bool recursed = false);
       void remove_mapping_guard(Operation *op);
@@ -923,6 +944,8 @@ namespace Legion {
       void record_invalidation(PendingRequest *pending_request,
                                bool needs_lock = false);
       void finalize_pending_request(PendingRequest *pending_request);
+      void perform_all_deferred_requests(void);
+      void perform_ready_deferred_requests(const FieldMask &guard_mask);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -969,7 +992,10 @@ namespace Legion {
       EqState eq_state;
       // Track the mapping events of the current operations that
       // are using this equivalence class to map
-      std::map<Operation*,unsigned> mapping_guards;
+      FieldMaskSet<Operation> mapping_guards;
+      // We use this structure to track when there are multiple
+      // acquires of the equivalence class by the same operation
+      std::map<Operation*,unsigned> mapping_guard_counts;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready

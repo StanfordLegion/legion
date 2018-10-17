@@ -326,6 +326,7 @@ namespace Legion {
       LG_REMOTE_REF_TASK_ID,
       LG_DEFER_RAY_TRACE_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
+      LG_DEFER_VERSION_FINALIZE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -401,6 +402,7 @@ namespace Legion {
         "Remove Remote References",                               \
         "Defer Ray Trace",                                        \
         "Defer Remote Decrement",                                 \
+        "Defer Version Info Finalize",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
