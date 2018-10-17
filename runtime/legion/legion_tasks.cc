@@ -2523,7 +2523,7 @@ namespace Legion {
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
       const bool multiple_reqs = (regions.size() > 1);
-      bool needs_make_ready = false;
+      std::vector<unsigned> needs_make_ready;
       if (is_remote())
       {
         // If we're remote and origin mapped, then we are already done
@@ -2538,7 +2538,8 @@ namespace Legion {
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
             version_info, ready_events, map_applied_conditions, multiple_reqs);
-          needs_make_ready = true;
+          if (multiple_reqs)
+            needs_make_ready.push_back(idx);
         }
       }
       else
@@ -2552,13 +2553,15 @@ namespace Legion {
             continue;
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
              version_info, ready_events, map_applied_conditions, multiple_reqs);
-          needs_make_ready = true;
+          if (multiple_reqs)
+            needs_make_ready.push_back(idx);
         }
       }
-      if (multiple_reqs && needs_make_ready)
+      if (multiple_reqs && !needs_make_ready.empty())
       {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-          runtime->forest->make_versions_ready(regions[idx], version_infos[idx],
+        for (std::vector<unsigned>::const_iterator it = 
+              needs_make_ready.begin(); it != needs_make_ready.end(); it++)
+          runtime->forest->make_versions_ready(regions[*it], version_infos[*it],
                                           ready_events, map_applied_conditions);
       }
       if (!ready_events.empty())
