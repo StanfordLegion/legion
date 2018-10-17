@@ -5763,6 +5763,9 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
           const FieldMask &dst_mask = target_instances[idx].get_valid_fields();
+          // Can happen in cases with uninitialized data
+          if (dst_mask * update_mask)
+            continue;
           FieldMaskSet<LogicalView> src_views;
           for (FieldMaskSet<LogicalView>::const_iterator it = 
                 valid_views.begin(); it != valid_views.end(); it++)
