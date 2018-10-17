@@ -1886,8 +1886,7 @@ class PointSet(object):
             result.points.add(point)
         return result
 
-    def __len__(self):
-        return self.size()
+    # Don't implement __len__ or you risk a stack overflow
 
     # Set intersection
     def __and__(self, other):
@@ -2181,7 +2180,7 @@ class IndexExpr(object):
             # Compute the point set
             point_set = self.get_point_set()
             # Easy case if this empty
-            if len(point_set) == 0:
+            if point_set.size() == 0:
                 self.expr_str = 'Empty'
                 return self.expr_str
             # Check to see if there are any index spaces which
@@ -2202,7 +2201,7 @@ class IndexExpr(object):
                 for space in spaces_for_all_points:
                     # Check to see if the points are the same
                     other_points = space.get_point_set()
-                    if len(point_set) != len(other_points):
+                    if point_set.size() != other_points.size():
                         continue
                     same = True
                     for point in point_set.iterator():
