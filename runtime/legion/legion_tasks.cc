@@ -2523,7 +2523,7 @@ namespace Legion {
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
       const bool multiple_reqs = (regions.size() > 1);
-      std::vector<unsigned> needs_make_ready;
+      std::vector<unsigned> to_skip;
       if (is_remote())
       {
         // If we're remote and origin mapped, then we are already done
@@ -2532,14 +2532,20 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          {
+            if (multiple_reqs)
+              to_skip.push_back(idx);
             continue;
+          }
           VersionInfo &version_info = version_infos[idx];
           if (version_info.has_version_info())
+          {
+            if (multiple_reqs)
+              to_skip.push_back(idx);
             continue;
+          }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
             version_info, ready_events, map_applied_conditions, multiple_reqs);
-          if (multiple_reqs)
-            needs_make_ready.push_back(idx);
         }
       }
       else
@@ -2547,22 +2553,46 @@ namespace Legion {
         for (unsigned idx = 0; idx < regions.size(); idx++)
         {
           if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+          {
+            if (multiple_reqs)
+              to_skip.push_back(idx);
             continue;
+          }
           VersionInfo &version_info = version_infos[idx];
           if (version_info.has_version_info())
+          {
+            if (multiple_reqs)
+              to_skip.push_back(idx);
             continue;
+          }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
              version_info, ready_events, map_applied_conditions, multiple_reqs);
-          if (multiple_reqs)
-            needs_make_ready.push_back(idx);
         }
       }
-      if (multiple_reqs && !needs_make_ready.empty())
+      if (multiple_reqs && (to_skip.size() < regions.size()))
       {
-        for (std::vector<unsigned>::const_iterator it = 
-              needs_make_ready.begin(); it != needs_make_ready.end(); it++)
-          runtime->forest->make_versions_ready(regions[*it], version_infos[*it],
-                                          ready_events, map_applied_conditions);
+        if (!to_skip.empty())
+        {
+          unsigned skip_index = 0;
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            if ((skip_index < to_skip.size()) && (idx == to_skip[skip_index]))
+              skip_index++;
+            else
+              runtime->forest->make_versions_ready(regions[idx], 
+                  version_infos[idx], ready_events, map_applied_conditions);
+          }
+#ifdef DEBUG_LEGION
+          assert(skip_index == to_skip.size());
+#endif
+        }
+        else
+        {
+          // Easy case with no skip indexes
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            runtime->forest->make_versions_ready(regions[idx], 
+                version_infos[idx], ready_events, map_applied_conditions);
+        }
       }
       if (!ready_events.empty())
         return Runtime::merge_events(ready_events);
