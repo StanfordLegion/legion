@@ -1329,7 +1329,7 @@ namespace Realm {
       start_dma_worker_threads(dma_worker_threads,
 			       *core_reservations);
 
-      PartitioningOpQueue::start_worker_threads(*core_reservations);
+      PartitioningOpQueue::start_worker_threads(*core_reservations, &bgwork);
 
 #ifdef EVENT_TRACING
       // Always initialize even if we won't dump to file, otherwise segfaults happen

@@ -43,7 +43,7 @@ namespace Realm {
 
   namespace DeppartConfig {
 
-    int cfg_num_partitioning_workers = 1;
+    int cfg_num_partitioning_workers = 0; // use bgwork by default
     bool cfg_disable_intersection_optimization = false;
     int cfg_max_rects_in_approximation = 32;
     size_t cfg_max_bytes_per_packet = 2048;//32768;
@@ -804,9 +804,14 @@ namespace Realm {
   //
   // class PartitioningOpQueue
 
-  PartitioningOpQueue::PartitioningOpQueue( CoreReservation *_rsrv)
-    : shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
-  {}
+  PartitioningOpQueue::PartitioningOpQueue( CoreReservation *_rsrv,
+					    BackgroundWorkManager *_bgwork)
+    : BackgroundWorkItem("deppart op queue")
+    , shutdown_flag(false), rsrv(_rsrv), condvar(mutex)
+  {
+    if(_bgwork)
+      add_to_manager(_bgwork);
+  }
   
   PartitioningOpQueue::~PartitioningOpQueue(void)
   {
@@ -825,12 +830,15 @@ namespace Realm {
     cp.parse_command_line(cmdline);
   }
 
-  /*static*/ void PartitioningOpQueue::start_worker_threads(CoreReservationSet& crs)
+  /*static*/ void PartitioningOpQueue::start_worker_threads(CoreReservationSet& crs,
+				     BackgroundWorkManager *_bgwork)
   {
     assert(op_queue == 0);
-    CoreReservation *rsrv = new CoreReservation("partitioning", crs,
-						CoreReservationParameters());
-    op_queue = new PartitioningOpQueue(rsrv);
+    CoreReservation *rsrv = 0;
+    if(DeppartConfig::cfg_num_partitioning_workers > 0)
+      rsrv = new CoreReservation("partitioning", crs,
+				 CoreReservationParameters());
+    op_queue = new PartitioningOpQueue(rsrv, _bgwork);
     ThreadLaunchParameters tlp;
     for(int i = 0; i < DeppartConfig::cfg_num_partitioning_workers; i++) {
       Thread *t = Thread::create_kernel_thread<PartitioningOpQueue,
@@ -844,6 +852,10 @@ namespace Realm {
   /*static*/ void PartitioningOpQueue::stop_worker_threads(void)
   {
     assert(op_queue != 0);
+
+#ifdef DEBUG_REALM
+    op_queue->shutdown_work_item();
+#endif
 
     op_queue->shutdown_flag.store(true);
     {
@@ -864,20 +876,78 @@ namespace Realm {
   {
     op->mark_ready();
 
-    AutoLock<> al(mutex);
+    bool was_empty;
+    {
+      AutoLock<> al(mutex);
 
-    queued_ops.put(op, OPERATION_PRIORITY);
+      was_empty = queued_ops.empty();
+      queued_ops.put(op, OPERATION_PRIORITY);
 
-    op_queue->condvar.broadcast();
+      if(!workers.empty())
+	op_queue->condvar.broadcast();
+    }
+
+    if(was_empty)
+      make_active();
   }
 
   void PartitioningOpQueue::enqueue_partitioning_microop(PartitioningMicroOp *uop)
   {
-    AutoLock<> al(mutex);
+    bool was_empty;
+    {
+      AutoLock<> al(mutex);
 
-    queued_ops.put(uop, MICROOP_PRIORITY);
+      was_empty = queued_ops.empty();
+      queued_ops.put(uop, MICROOP_PRIORITY);
 
-    op_queue->condvar.broadcast();
+      if(!workers.empty())
+	op_queue->condvar.broadcast();
+    }
+
+    if(was_empty)
+      make_active();
+  }
+
+  void PartitioningOpQueue::do_work(TimeLimit work_until)
+  {
+    // attempt to take one item off the work queue - readvertise work if
+    //  more remains
+    void *op = 0;
+    int priority;
+    bool work_left = false;
+    {
+      AutoLock<> al(mutex);
+      op = queued_ops.get(&priority);
+      work_left = !queued_ops.empty();
+    }
+    if(!op) return;
+    if(op && work_left && manager)
+      make_active();
+
+    // now we can work on the op we got in parallel with everybody else
+    switch(priority) {
+    case OPERATION_PRIORITY:
+      {
+	PartitioningOperation *p_op = static_cast<PartitioningOperation *>(op);
+	log_part.info() << "worker " << this << " starting op " << p_op;
+	p_op->mark_started();
+	p_op->execute();
+	log_part.info() << "worker " << this << " finished op " << p_op;
+	p_op->mark_finished(true /*successful*/);
+	break;
+      }
+    case MICROOP_PRIORITY:
+      {
+	PartitioningMicroOp *p_uop = static_cast<PartitioningMicroOp *>(op);
+	log_part.info() << "worker " << this << " starting uop " << p_uop;
+	p_uop->mark_started();
+	p_uop->execute();
+	log_part.info() << "worker " << this << " finished uop " << p_uop;
+	p_uop->mark_finished();
+	break;
+      }
+    default: assert(0);
+    }
   }
 
   void PartitioningOpQueue::worker_thread_loop(void)

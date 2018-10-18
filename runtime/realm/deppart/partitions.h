@@ -31,6 +31,7 @@
 #include "realm/dynamic_templates.h"
 #include "realm/deppart/sparsity_impl.h"
 #include "realm/deppart/inst_helper.h"
+#include "realm/bgwork.h"
 
 namespace Realm {
 
@@ -178,13 +179,15 @@ namespace Realm {
   ////////////////////////////////////////
   //
 
-  class PartitioningOpQueue {
+  class PartitioningOpQueue : public BackgroundWorkItem {
   public:
-    PartitioningOpQueue(CoreReservation *_rsrv);
-    ~PartitioningOpQueue(void);
+    PartitioningOpQueue(CoreReservation *_rsrv,
+			BackgroundWorkManager *_bgwork);
+    virtual ~PartitioningOpQueue(void);
 
     static void configure_from_cmdline(std::vector<std::string>& cmdline);
-    static void start_worker_threads(CoreReservationSet& crs);
+    static void start_worker_threads(CoreReservationSet& crs,
+				     BackgroundWorkManager *_bgwork);
     static void stop_worker_threads(void);
 
     enum {
@@ -196,6 +199,9 @@ namespace Realm {
     void enqueue_partitioning_microop(PartitioningMicroOp *uop);
 
     void worker_thread_loop(void);
+
+    // called by BackgroundWorkers
+    void do_work(TimeLimit work_until);
 
   protected:
     atomic<bool> shutdown_flag;
