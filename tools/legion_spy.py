@@ -1871,9 +1871,6 @@ class PointSet(object):
     def empty(self):
         return not self.points
 
-    def size(self):
-        return len(self.points)
-
     def has_point(self, point):
         for p in self.points:
             if p == point:
@@ -1886,7 +1883,11 @@ class PointSet(object):
             result.points.add(point)
         return result
 
-    # Don't implement __len__ or you risk a stack overflow
+    def __len__(self):
+        return len(self.points)
+
+    def __nonzero__(self):
+        return len(self.points) > 0
 
     # Set intersection
     def __and__(self, other):
@@ -2180,7 +2181,7 @@ class IndexExpr(object):
             # Compute the point set
             point_set = self.get_point_set()
             # Easy case if this empty
-            if point_set.size() == 0:
+            if len(point_set) == 0:
                 self.expr_str = 'Empty'
                 return self.expr_str
             # Check to see if there are any index spaces which
@@ -2201,7 +2202,7 @@ class IndexExpr(object):
                 for space in spaces_for_all_points:
                     # Check to see if the points are the same
                     other_points = space.get_point_set()
-                    if point_set.size() != other_points.size():
+                    if len(point_set) != len(other_points):
                         continue
                     same = True
                     for point in point_set.iterator():
@@ -2584,7 +2585,7 @@ class IndexPartition(object):
             total = PointSet()
             for child in self.children.itervalues():
                 total |= child.get_point_set()
-            if total.size() != self.parent.get_point_set().size():
+            if len(total) != len(self.parent.get_point_set()):
                 print(('WARNING: %s was logged complete '+
                         'but there are missing points. This '+
                         'is definitely an application bug.') % self)
@@ -2933,7 +2934,7 @@ class LogicalRegion(object):
         return field_point_dict[key]
 
     def initialize_verification_state(self, depth, field, inst, point_set=None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             self.initialize_verification_state(depth, field, inst, self.get_point_set())
         elif self.parent:
@@ -2946,7 +2947,7 @@ class LogicalRegion(object):
                 state.initialize_verification_state(inst)
 
     def compute_current_version_numbers(self, depth, field, op, index, point_set = None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             self.compute_current_version_numbers(depth, field, op, index, 
                                                  self.get_point_set())
@@ -2961,7 +2962,7 @@ class LogicalRegion(object):
                 op.record_current_version(index, field, point, state.version_number)
 
     def perform_fill_verification(self, depth, field, op, req, point_set=None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_fill_verification(depth, field, op, req,
                                                   self.get_point_set())
@@ -2980,7 +2981,7 @@ class LogicalRegion(object):
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks, 
                                       perform_registration, point_set = None,
                                       version_numbers = None):
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_physical_verification(depth, field, op, req, inst,
               perform_checks, perform_registration, self.get_point_set(), version_numbers)
@@ -3002,7 +3003,7 @@ class LogicalRegion(object):
 
     def perform_verification_registration(self, depth, field, op, req, inst, 
                                           perform_checks, point_set=None): 
-        if not point_set:
+        if point_set is None:
             # First get the point set
             return self.perform_verification_registration(depth, field, op, req, inst,
                     perform_checks, self.get_point_set())
@@ -7972,7 +7973,7 @@ class RealmBase(object):
 
     def check_for_spurious_points(self):
         point_set = self.index_expr.get_point_set()
-        point_set_size = point_set.size()
+        point_set_size = len(point_set)
         assert point_set_size > 0
         if self.analyzed_points is None:
             print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
