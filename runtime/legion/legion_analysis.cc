@@ -287,7 +287,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::finalize_mapping(std::set<RtEvent> &map_applied_events)
+    void VersionInfo::finalize_mapping(std::set<RtEvent> &map_applied_events,
+                                       bool block/*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -301,12 +302,17 @@ namespace Legion {
         applied_events.clear();
         if (applied.exists() && !applied.has_triggered())
         {
-          // Defer the finalization until the effects are done
-          const DeferredVersionFinalizeArgs args(this, op->get_unique_op_id());
-          const RtEvent done = op->runtime->issue_runtime_meta_task(args,
-                                LG_LATENCY_DEFERRED_PRIORITY, applied);
-          map_applied_events.insert(done);
-          return;
+          if (!block)
+          {
+            // Defer the finalization until the effects are done
+            const DeferredVersionFinalizeArgs args(this,op->get_unique_op_id());
+            const RtEvent done = op->runtime->issue_runtime_meta_task(args,
+                                  LG_LATENCY_DEFERRED_PRIORITY, applied);
+            map_applied_events.insert(done);
+            return;
+          }
+          else
+            applied.wait();
         }
       }
       perform_finalize();

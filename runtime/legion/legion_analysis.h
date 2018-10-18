@@ -108,7 +108,8 @@ namespace Legion {
                                    const std::set<EquivalenceSet*> &sets);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
                       std::set<RtEvent> &ready_events);
-      void finalize_mapping(std::set<RtEvent> &map_applied_events);
+      void finalize_mapping(std::set<RtEvent> &map_applied_events, 
+                            bool block = false);
     protected:
       void perform_finalize(void);
     public:

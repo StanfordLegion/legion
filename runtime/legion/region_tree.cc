@@ -1601,7 +1601,9 @@ namespace Legion {
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->initialize_set(usage, user_mask, restricted,
                               sources, corresponding, version_applied_events);
-      init_version_info.finalize_mapping(applied_events);
+      // Need to block in finalize mapping since the VersionInfo is
+      // going to be destructed after this
+      init_version_info.finalize_mapping(applied_events, true/*block*/);
     }
 
     //--------------------------------------------------------------------------
