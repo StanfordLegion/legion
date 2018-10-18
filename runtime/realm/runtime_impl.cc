@@ -1185,6 +1185,8 @@ namespace Realm {
 
       sampling_profiler.configure_from_cmdline(cmdline, *core_reservations);
 
+      bgwork.configure_from_cmdline(cmdline);
+
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp.store((((Barrier::timestamp_t)(Network::my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1);
 
@@ -1322,6 +1324,8 @@ namespace Realm {
 	}
       }
       
+      bgwork.start_dedicated_workers(*core_reservations);
+
       start_dma_worker_threads(dma_worker_threads,
 			       *core_reservations);
 
@@ -2134,6 +2138,8 @@ namespace Realm {
 	  it != network_modules.end();
 	  it++)
 	(*it)->detach(this, network_segments);
+
+      bgwork.stop_dedicated_workers();
 
       sampling_profiler.shutdown();
 

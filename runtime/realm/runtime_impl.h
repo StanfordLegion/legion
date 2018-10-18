@@ -43,6 +43,8 @@
 #include "realm/module.h"
 #include "realm/network.h"
 
+#include "realm/bgwork.h"
+
 namespace Realm {
 
   class ProcessorGroupImpl;
@@ -331,6 +333,7 @@ namespace Realm {
 
       CoreMap *core_map;
       CoreReservationSet *core_reservations;
+      BackgroundWorkManager bgwork;
 
       OperationTable optable;
 
