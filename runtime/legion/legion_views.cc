@@ -150,10 +150,18 @@ namespace Legion {
                                              applied_events, trace_info);
       Runtime::trigger_event(ready_event, pre);
       if (!applied_events.empty())
-        Runtime::trigger_event(applied_event, 
-            Runtime::merge_events(applied_events));
+      {
+        const RtEvent precondition = Runtime::merge_events(applied_events);
+        Runtime::trigger_event(applied_event, precondition);
+        // Send back a response to the source removing the remote valid ref
+        inst_view->send_remote_valid_decrement(source, precondition);
+      }
       else
+      {
         Runtime::trigger_event(applied_event);
+        // Send back a response to the source removing the remote valid ref
+        inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -310,10 +318,18 @@ namespace Legion {
       inst_view->add_copy_user(reading, term_event, copy_mask, copy_expr,
                                op_id, index, applied_events, trace_info);
       if (!applied_events.empty())
-        Runtime::trigger_event(applied_event, 
-            Runtime::merge_events(applied_events));
+      {
+        const RtEvent precondition = Runtime::merge_events(applied_events);
+        Runtime::trigger_event(applied_event, precondition);
+        // Send back a response to the source removing the remote valid ref
+        inst_view->send_remote_valid_decrement(source, precondition);
+      }
       else
+      {
         Runtime::trigger_event(applied_event);
+        // Send back a response to the source removing the remote valid ref
+        inst_view->send_remote_valid_decrement(source, RtEvent::NO_RT_EVENT);
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -513,6 +529,10 @@ namespace Legion {
           rez.serialize(ready_event);
           rez.serialize(applied_event);
         }
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
+        WrapperReferenceMutator mutator(applied_events);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_register_user(logical_owner, rez);
         applied_events.insert(applied_event);
         return ready_event;
@@ -639,6 +659,10 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(applied_event);
         }
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
+        WrapperReferenceMutator mutator(applied_events);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_add_copy_user(logical_owner, rez);
         applied_events.insert(applied_event);
       }
@@ -2173,6 +2197,10 @@ namespace Legion {
           rez.serialize(ready_event);
           rez.serialize(applied_event);
         }
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
+        WrapperReferenceMutator mutator(applied_events);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_register_user(logical_owner, rez);
         applied_events.insert(applied_event);
         return ready_event;
@@ -2321,6 +2349,10 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(applied_event);
         }
+        // Add a remote valid reference that will be removed by 
+        // the receiver once the changes have been applied
+        WrapperReferenceMutator mutator(applied_events);
+        add_base_valid_ref(REMOTE_DID_REF, &mutator);
         runtime->send_view_add_copy_user(logical_owner, rez);
         applied_events.insert(applied_event);
       }
