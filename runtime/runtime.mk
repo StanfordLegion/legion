@@ -22,25 +22,8 @@ else
 CC_FLAGS += -DUSE_DISK 
 endif
 
-# If using CUDA select a target GPU architecture
-#GPU_ARCH ?= fermi
-GPU_ARCH ?= kepler
-#GPU_ARCH ?= k20
-#GPU_ARCH ?= pascal
-
-# if CUDA is not set, but CUDATOOLKIT_HOME is, use that
-ifdef CUDATOOLKIT_HOME
-CUDA ?= $(CUDATOOLKIT_HOME)
-endif
-
 ifndef LG_RT_DIR
 $(error LG_RT_DIR variable is not defined, aborting build)
-endif
-
-# defaults for GASNet
-CONDUIT ?= udp
-ifdef GASNET_ROOT
-GASNET ?= $(GASNET_ROOT)
 endif
 
 # generate libraries for Legion and Realm
@@ -51,61 +34,78 @@ LEGION_LIBS     := -L. -llegion -lrealm
 # Handle some of the common machines we frequent
 
 ifeq ($(shell uname -n),sapling)
-CONDUIT=ibv
-GPU_ARCH=fermi
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(shell uname -n),n0000)
-CONDUIT=ibv
-GPU_ARCH=fermi
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(shell uname -n),n0001)
-CONDUIT=ibv
-GPU_ARCH=fermi
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(shell uname -n),n0002)
-CONDUIT=ibv
-GPU_ARCH=fermi
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(shell uname -n),n0003)
-CONDUIT=ibv
-GPU_ARCH=fermi
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(findstring xs,$(shell uname -n)), xs)
-GPU_ARCH=k80
-GASNET=/home/stanford/aaiken/users/zhihao/tools/gasnet/release/
-CONDUIT=ibv#not sure if this is true
-CUDA=${CUDA_HOME}
+GPU_ARCH ?= k80
+GASNET ?= /home/stanford/aaiken/users/zhihao/tools/gasnet/release/
+CONDUIT ?= ibv #not sure if this is true
+CUDA ?= ${CUDA_HOME}
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
-GASNET=/nics/d/home/sequoia/gasnet-1.20.2-openmpi
+GASNET ?= /nics/d/home/sequoia/gasnet-1.20.2-openmpi
 MPI=/sw/kfs/openmpi/1.6.1/centos6.2_intel2011_sp1.11.339
-CUDA=/sw/kfs/cuda/4.2/linux_binary
-CONDUIT=ibv
-GPU_ARCH=fermi
+CUDA ?= /sw/kfs/cuda/4.2/linux_binary
+CONDUIT ?= ibv
+GPU_ARCH ?= fermi
 endif
 ifeq ($(findstring titan,$(shell uname -n)),titan)
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
 MARCH ?= bdver1
-CUDA=${CUDATOOLKIT_HOME}
-CONDUIT=gemini
-GPU_ARCH=k20
+CUDA ?= ${CUDATOOLKIT_HOME}
+CONDUIT ?= gemini
+GPU_ARCH ?= k20
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-CUDA=${CUDATOOLKIT_HOME}
-CONDUIT=aries
-GPU_ARCH=pascal
+CUDA ?= ${CUDATOOLKIT_HOME}
+CONDUIT ?= aries
+GPU_ARCH ?= pascal
 endif
 ifeq ($(findstring excalibur,$(shell uname -n)),excalibur)
-CONDUIT=aries
+CONDUIT ?= aries
 endif
 ifeq ($(findstring cori,$(shell uname -n)),cori)
-CONDUIT=aries
+CONDUIT ?= aries
 endif
 ifeq ($(findstring sh,$(shell uname -n)), sh)
-GPU_ARCH=pascal
-CONDUIT=ibv#not sure if this is true
-CUDA=${CUDA_HOME}
+GPU_ARCH ?= pascal
+CONDUIT ?= ibv #not sure if this is true
+CUDA ?= ${CUDA_HOME}
+endif
+
+# defaults for GASNet
+CONDUIT ?= udp
+ifdef GASNET_ROOT
+GASNET ?= $(GASNET_ROOT)
+endif
+
+# defaults for CUDA
+#GPU_ARCH ?= fermi
+GPU_ARCH ?= kepler
+#GPU_ARCH ?= k20
+#GPU_ARCH ?= pascal
+
+# if CUDA is not set, but CUDATOOLKIT_HOME is, use that
+ifdef CUDATOOLKIT_HOME
+CUDA ?= $(CUDATOOLKIT_HOME)
 endif
 
 # Customization specific to Cray programming environment
