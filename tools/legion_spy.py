@@ -1856,9 +1856,10 @@ class Shape(object):
         return self
 
 class PointSet(object):
-    __slots__ = ['points']
+    __slots__ = ['points', 'space_string']
     def __init__(self):
         self.points = set()
+        self.space_string = None
 
     def __str__(self):
         return ' '.join(map(str, self.points))
@@ -1882,6 +1883,11 @@ class PointSet(object):
         for point in self.points:
             result.points.add(point)
         return result
+
+    def __contains__(self, point):
+        if not self.points:
+            return False
+        return point in self.points
 
     def __len__(self):
         return len(self.points)
@@ -1931,6 +1937,91 @@ class PointSet(object):
     def iterator(self):
         for p in self.points:
             yield p
+
+    def point_space_graphviz_string(self):
+        if self.space_string != None:
+            return self.space_string
+        # Easy case if this empty
+        if len(self) == 0:
+            self.space_string = 'Empty'
+            return self.space_string
+        # Check to see if there are any index spaces which
+        # appear in all the points. If so, check to see if 
+        # our set of points is equivalent to the point set
+        # for any of those index spaces
+        spaces_for_all_points = None
+        for point in self.iterator():
+            if spaces_for_all_points is None:
+                spaces_for_all_points = point.index_set
+            else:
+                # Note that this makes a new set
+                spaces_for_all_points = spaces_for_all_points & point.index_set
+            if not spaces_for_all_points:
+                break
+        if spaces_for_all_points:
+            same_spaces = None
+            for space in spaces_for_all_points:
+                # Check to see if the points are the same
+                other_points = space.get_point_set()
+                if len(self) != len(other_points):
+                    continue
+                same = True
+                for point in self.iterator():
+                    if not other_points.has_point(point):
+                        same = False
+                        break
+                if same:
+                    # It's possible for there to be multiple spaces with 
+                    # the same shape but different names
+                    if same_spaces is None:
+                        same_spaces = list()
+                    same_spaces.append(space)
+            if same_spaces:
+                for space in same_spaces:
+                    if self.space_string is None:
+                        self.space_string = str(space)
+                    else:
+                        self.space_string += ' u ' + str(space)
+        # If we didn't find an index space to represent this
+        # set of points then we express this as a union of intersections
+        if self.space_string is None:
+            for point in self.iterator():
+                point_str = None
+                # Only report the bottom-most index spaces for 
+                # this particular point
+                bottom_spaces = set()
+                parent_spaces = set()
+                for space in point.index_set:
+                    if space in parent_spaces:
+                        continue
+                    bottom_spaces.add(space)
+                    if space.parent:
+                        parent = space.parent.parent
+                        while True:
+                            if parent in parent_spaces:
+                                break
+                            parent_spaces.add(parent)
+                            if parent in bottom_spaces:
+                                bottom_spaces.remove(parent)
+                            if parent.parent:
+                                parent = parent.parent.parent
+                            else:
+                                break
+                # Should have at least one bottom space
+                assert bottom_spaces
+                for space in bottom_spaces:
+                    if point_str is None:
+                        point_str = '(' + str(space)
+                    else:
+                        point_str += ' ^ ' + str(space)
+                point_str += ')'
+                if self.space_string is None:
+                    self.space_string = point_str
+                else:
+                    # Put each point on it's own line
+                    self.space_string += ' u <br/>' + point_str
+        assert self.space_string is not None
+        return self.space_string
 
 class NodeSet(object):
     __slots__ = ['impl', 'bound', 'sparse']
@@ -2177,89 +2268,24 @@ class IndexExpr(object):
         assert self.kind is not None
         if self.kind == INDEX_SPACE_EXPR:
             self.expr_str = str(self.base)
-        else:
-            # Compute the point set
-            point_set = self.get_point_set()
-            # Easy case if this empty
-            if len(point_set) == 0:
-                self.expr_str = 'Empty'
-                return self.expr_str
-            # Check to see if there are any index spaces which
-            # appear in all the points. If so, check to see if 
-            # our set of points is equivalent to the point set
-            # for any of those index spaces
-            spaces_for_all_points = None
-            for point in point_set.iterator():
-                if spaces_for_all_points is None:
-                    spaces_for_all_points = point.index_set
+        elif self.kind == UNION_EXPR:
+            for expr in self.base:
+                if self.expr_str is None:
+                    self.expr_str = '(' + str(expr)
                 else:
-                    # Note that this makes a new set
-                    spaces_for_all_points = spaces_for_all_points & point.index_set
-                if not spaces_for_all_points:
-                    break
-            if spaces_for_all_points:
-                same_spaces = None
-                for space in spaces_for_all_points:
-                    # Check to see if the points are the same
-                    other_points = space.get_point_set()
-                    if len(point_set) != len(other_points):
-                        continue
-                    same = True
-                    for point in point_set.iterator():
-                        if not other_points.has_point(point):
-                            same = False
-                            break
-                    if same:
-                        # It's possible for there to be multiple spaces with 
-                        # the same shape but different names
-                        if same_spaces is None:
-                            same_spaces = list()
-                        same_spaces.append(space)
-                if same_spaces:
-                    for space in same_spaces:
-                        if self.expr_str is None:
-                            self.expr_str = str(space)
-                        else:
-                            self.expr_str += ' u ' + str(space)
-            # If we didn't find an index space to represent this
-            # set of points then we express this as a union of intersections
-            if self.expr_str is None:
-                for point in point_set.iterator():
-                    point_str = None
-                    # Only report the bottom-most index spaces for 
-                    # this particular point
-                    bottom_spaces = set()
-                    parent_spaces = set()
-                    for space in point.index_set:
-                        if space in parent_spaces:
-                            continue
-                        bottom_spaces.add(space)
-                        if space.parent:
-                            parent = space.parent.parent
-                            while True:
-                                if parent in parent_spaces:
-                                    break
-                                parent_spaces.add(parent)
-                                if parent in bottom_spaces:
-                                    bottom_spaces.remove(parent)
-                                if parent.parent:
-                                    parent = parent.parent.parent
-                                else:
-                                    break
-                    # Should have at least one bottom space
-                    assert bottom_spaces
-                    for space in bottom_spaces:
-                        if point_str is None:
-                            point_str = '(' + str(space)
-                        else:
-                            point_str += ' ^ ' + str(space)
-                    point_str += ')'
-                    if self.expr_str is None:
-                        self.expr_str = point_str
-                    else:
-                        # Put each point on it's own line
-                        self.expr_str += ' u <br/>' + point_str
-        assert self.expr_str is not None
+                    self.expr_str += ' u ' + str(expr)
+            self.expr_str += ')'
+        elif self.kind == INTERSECT_EXPR:
+            for expr in self.base:
+                if self.expr_str is None:
+                    self.expr_str = '(' + str(expr)
+                else:
+                    self.expr_str += ' ^ ' + str(expr)
+            self.expr_str += ')'
+        else:
+            assert self.kind == DIFFERENCE_EXPR
+            self.expr_str = '(' + str(self.base[0]) + ' - ' + str(self.base[1]) + ')'
+        assert self.expr_str
         return self.expr_str
 
     __repr__ = __str__
@@ -4593,6 +4619,8 @@ class EquivalenceSet(object):
 
     def perform_copy(self, src, dst, op, req):
         copy = op.find_or_create_copy(req, self.field, src, dst)
+        # Record this point for the copy operation so it renders properly
+        copy.record_analyzed_point(self.point)
         # Update the source instance
         src_preconditions = src.find_verification_copy_dependences(self.depth, 
               self.field, self.point, op, req.index, True, 0, self.version_number)
@@ -4628,6 +4656,8 @@ class EquivalenceSet(object):
         # If we have a fill operation, we can just do that
         elif self.pending_fill:
             fill = op.find_or_create_fill(req, self.field, inst)
+            # Record this point for the copy operation so it renders properly
+            fill.record_analyzed_point(self.point)
             preconditions = inst.find_verification_copy_dependences(self.depth, 
                 self.field, self.point, op, req.index, False, 0, self.version_number)
             for pre in preconditions:
@@ -4776,6 +4806,8 @@ class EquivalenceSet(object):
             # Should be no reductions here
             assert redop == 0
             fill = op.find_or_create_fill(dst_req, dst_field, dst_inst)
+            # Record this point for the copy operation so it renders properly
+            fill.record_analyzed_point(self.point)
             preconditions = dst_inst.find_verification_copy_dependences(
                                 dst_depth, dst_field, self.point, op, 
                                 dst_req.index, False, redop, dst_version_number)
@@ -4803,6 +4835,8 @@ class EquivalenceSet(object):
                             dst_depth, dst_field, dst_req, dst_version):
         copy = op.find_or_create_copy_across(src_inst, src_field, src_req,
                                              dst_inst, dst_field, dst_req, redop)
+        # Record this point for the copy operation so it renders properly
+        copy.record_analyzed_point(self.point)
         src_preconditions = src_inst.find_verification_copy_dependences(
                             src_depth, src_field, self.point, op, 
                             src_req.index, True, 0, self.version_number)
@@ -5497,7 +5531,7 @@ class Operation(object):
         else:
             self.realm_fills = list()
         fill = self.state.create_fill(self)
-        fill.set_tree_properties(req.index_node, req.field_space, req.tid)
+        fill.set_tree_properties(None, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
         return fill
@@ -5543,7 +5577,7 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our copy
         copy = self.state.create_copy(self)
-        copy.set_tree_properties(req.index_node, req.field_space, req.tid, req.tid)
+        copy.set_tree_properties(None, req.field_space, req.tid, req.tid)
         copy.add_field(field.fid, src, field.fid, dst, src.redop)
         self.realm_copies.append(copy)
         return copy
@@ -5568,7 +5602,7 @@ class Operation(object):
             self.realm_copies = list()
         # If we get here we have to make our own copy
         copy = self.state.create_copy(self)
-        copy.set_tree_properties(dst_req.index_node, dst_req.field_space,
+        copy.set_tree_properties(None, dst_req.field_space,
                                  src_req.tid, dst_req.tid)
         copy.add_field(src_field.fid, src_inst, dst_field.fid, dst_inst, redop)
         self.realm_copies.append(copy)
@@ -7964,9 +7998,9 @@ class RealmBase(object):
 
     def record_analyzed_point(self, point):
         if self.analyzed_points is None:
-            self.analyzed_points = set()
+            self.analyzed_points = PointSet()
         if point not in self.analyzed_points:
-            self.analyzed_points.add(point)
+            self.analyzed_points.add_point(point)
             return False
         else:
             return True
@@ -7984,7 +8018,7 @@ class RealmBase(object):
             # Check the points individually
             assert point_set_size >= len(self.analyzed_points)
             for point in point_set.iterator():
-                if point not in self.analyzed_points:
+                if point not in self.analyzed_points.iterator():
                     print('ERROR: '+str(creator)+' generated spurious '+
                             str(self)+' for point '+str(point))
                     if self.state.assert_on_error:
@@ -8117,7 +8151,17 @@ class RealmCopy(RealmBase):
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Copy ("+str(self.realm_num)+") of "+str(self.index_expr)
+            if self.index_expr:
+                # This is the case where the runtime told us what
+                # the name of the index space was for the copy
+                point_set = self.index_expr.get_point_set()
+            else:
+                # This is the case where we had to generate the 
+                # copy from our own information
+                assert self.analyzed_points
+                point_set = self.analyzed_points
+            label = "Realm Copy ("+str(self.realm_num)+") of "+\
+                        point_set.point_space_graphviz_string()
         else:
             label = "Realm Copy ("+str(self.realm_num)+")"
         if self.creator is not None:
@@ -8249,7 +8293,17 @@ class RealmFill(RealmBase):
 
     def print_event_node(self, printer):
         if self.state.detailed_graphs:
-            label = "Realm Fill ("+str(self.realm_num)+") of "+str(self.index_expr)
+            if self.index_expr:
+                # This is the case where the runtime told us what
+                # the name of the index space was for the copy
+                point_set = self.index_expr.get_point_set()
+            else:
+                # This is the case where we had to generate the 
+                # copy from our own information
+                assert self.analyzed_points
+                point_set = self.analyzed_points
+            label = "Realm Fill ("+str(self.realm_num)+") of "+\
+                        point_set.point_space_graphviz_string()
         else:
             label = "Realm Fill ("+str(self.realm_num)+")"
         if self.creator is not None:
@@ -10792,12 +10846,14 @@ class State(object):
 
     def create_copy(self, creator):
         result = RealmCopy(self, self.no_event, self.next_realm_num)
+        self.copies[self.next_realm_num] = result
         self.next_realm_num += 1
         result.set_creator(creator)
         return result
 
     def create_fill(self, creator):
         result = RealmFill(self, self.no_event, self.next_realm_num)
+        self.fills[self.next_realm_num] = result
         self.next_realm_num += 1
         result.set_creator(creator)
         return result
