@@ -57,7 +57,6 @@ ifeq ($(findstring xs,$(shell uname -n)), xs)
 GPU_ARCH ?= k80
 GASNET ?= /home/stanford/aaiken/users/zhihao/tools/gasnet/release/
 CONDUIT ?= ibv #not sure if this is true
-CUDA ?= ${CUDA_HOME}
 endif
 ifeq ($(findstring nics.utk.edu,$(shell uname -n)),nics.utk.edu)
 GASNET ?= /nics/d/home/sequoia/gasnet-1.20.2-openmpi
@@ -70,12 +69,10 @@ ifeq ($(findstring titan,$(shell uname -n)),titan)
 # without this, lapack stuff will link, but generate garbage output - thanks Cray!
 LAPACK_LIBS=-L/opt/acml/5.3.1/gfortran64_fma4/lib -Wl,-rpath=/opt/acml/5.3.1/gfortran64_fma4/lib -lacml
 MARCH ?= bdver1
-CUDA ?= ${CUDATOOLKIT_HOME}
 CONDUIT ?= gemini
 GPU_ARCH ?= k20
 endif
 ifeq ($(findstring daint,$(shell uname -n)),daint)
-CUDA ?= ${CUDATOOLKIT_HOME}
 CONDUIT ?= aries
 GPU_ARCH ?= pascal
 endif
@@ -88,7 +85,6 @@ endif
 ifeq ($(findstring sh,$(shell uname -n)), sh)
 GPU_ARCH ?= pascal
 CONDUIT ?= ibv #not sure if this is true
-CUDA ?= ${CUDA_HOME}
 endif
 
 # defaults for GASNet
@@ -103,9 +99,12 @@ GPU_ARCH ?= kepler
 #GPU_ARCH ?= k20
 #GPU_ARCH ?= pascal
 
-# if CUDA is not set, but CUDATOOLKIT_HOME is, use that
+# if CUDA is not set, but CUDATOOLKIT_HOME or CUDA_HOME is, use that
 ifdef CUDATOOLKIT_HOME
 CUDA ?= $(CUDATOOLKIT_HOME)
+endif
+ifdef CUDA_HOME
+CUDA ?= $(CUDA_HOME)
 endif
 
 # Customization specific to Cray programming environment
