@@ -3583,6 +3583,7 @@ namespace Legion {
           assert(pending_request != NULL);
 #endif
           unsigned pending_updates = 0;
+          unsigned pending_invalidates = 0;
           if (IS_REDUCE(usage))
           {
             FieldMask same_redop_mask;
@@ -3616,10 +3617,12 @@ namespace Legion {
               filter_single_copies(filter_mask, exclusive_fields, 
                                    exclusive_copies, request_space, 
                                    pending_request, pending_updates,
+                                   pending_invalidates, 
                                    true/*needs updates*/);
               filter_multi_copies(filter_mask, shared_fields, shared_copies,
                                   request_space, pending_request, 
-                                  pending_updates, true/*needs updates*/,
+                                  pending_updates, pending_invalidates,
+                                  true/*needs updates*/,
                                   false/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
@@ -3627,10 +3630,11 @@ namespace Legion {
               {
                 filter_single_copies(filter_mask, single_redop_fields, 
                     single_reduction_copies, request_space, 
-                    pending_request, pending_updates, true/*needs updates*/);
+                    pending_request, pending_updates, 
+                    pending_invalidates, true/*needs updates*/);
                 filter_multi_copies(filter_mask, multi_redop_fields,
                     multi_reduction_copies, request_space,
-                    pending_request, pending_updates, 
+                    pending_request, pending_updates, pending_invalidates,
                     true/*needs updates*/, true/*updates from all*/);
                 filter_redop_modes(redop_overlap);
               }
@@ -3656,11 +3660,12 @@ namespace Legion {
               filter_single_copies(filter_mask, single_redop_fields,
                                    single_reduction_copies, request_space,
                                    pending_request, pending_updates,
-                                   needs_updates);
+                                   pending_invalidates, needs_updates);
               filter_multi_copies(filter_mask, multi_redop_fields,
                                   multi_reduction_copies, request_space,
                                   pending_request, pending_updates,
-                                  needs_updates, true/*updates from all*/);
+                                  pending_invalidates, needs_updates, 
+                                  true/*updates from all*/);
               filter_redop_modes(redop_overlap);
               record_exclusive_copy(request_space, redop_overlap);
               request_mask -= redop_overlap;
@@ -3690,13 +3695,14 @@ namespace Legion {
                 {
                   filter_multi_copies(request_mask, shared_fields,shared_copies,
                                     request_space, pending_request, 
-                                    pending_updates, needs_updates, 
-                                    false/*updates from all*/);
+                                    pending_updates, pending_invalidates,
+                                    needs_updates, false/*updates from all*/);
                   record_exclusive_copy(request_space, shared_overlap);
                 }
                 if (!!request_mask)
                   update_exclusive_copies(request_mask, request_space,
-                      pending_request, pending_updates, needs_updates);
+                                          pending_request, pending_updates, 
+                                          pending_invalidates, needs_updates);
               }
             }
           }
@@ -3711,6 +3717,7 @@ namespace Legion {
               rez.serialize(did);
               rez.serialize(pending_request);
               rez.serialize(pending_updates);
+              rez.serialize(pending_invalidates);
               // Since we're sening this back to a remote node then
               // we need to determine the owner mask
               FieldMask owner_mask;
@@ -3733,7 +3740,8 @@ namespace Legion {
             runtime->send_equivalence_set_valid_response(request_space, rez);
           }
           else
-            record_pending_updates(pending_request, pending_updates, false);
+            record_pending_counts(pending_request, pending_updates, 
+                                  pending_invalidates, false/*need lock*/);
         }
       }
 #ifdef DEBUG_LEGION
@@ -3746,6 +3754,7 @@ namespace Legion {
                                                AddressSpaceID request_space,
                                                PendingRequest *pending_request,
                                                unsigned &pending_updates,
+                                               unsigned &pending_invalidates,
                                                const bool needs_updates)
     //--------------------------------------------------------------------------
     {
@@ -3769,7 +3778,7 @@ namespace Legion {
                          pending_request, pending_updates, true/*invalidate*/);
         else
           request_invalidate(it->first, request_space, overlap,
-                             pending_request, pending_updates, 
+                             pending_request, pending_invalidates, 
                              false/*meta only*/);
         to_add |= overlap;
         it->second -= overlap;
@@ -3942,6 +3951,7 @@ namespace Legion {
                                               AddressSpaceID request_space,
                                               PendingRequest *pending_request,
                                               unsigned &pending_updates,
+                                              unsigned &pending_invalidates,
                                               const bool needs_updates)
     //--------------------------------------------------------------------------
     {
@@ -3961,7 +3971,8 @@ namespace Legion {
           continue;
         if (it->first == request_space)
           // Just send an invalidate, when the response goes back
-          // it will restore it to being valid
+          // it will restore it to being valid, note that this
+          // gets counted as an update since it's going back to the origin
           request_invalidate(request_space, request_space, overlap, 
               pending_request, pending_updates, true/*meta only*/);
         else if (needs_updates)
@@ -3969,7 +3980,7 @@ namespace Legion {
                          pending_updates, true/*invalidate*/);
         else
           request_invalidate(it->first, request_space, overlap, pending_request,
-                             pending_updates, false/*meta only*/);
+                             pending_invalidates, false/*meta only*/);
         it->second -= overlap;
         if (!it->second)
           to_delete.push_back(it->first);
@@ -3992,6 +4003,7 @@ namespace Legion {
                                              AddressSpaceID request_space,
                                              PendingRequest *pending_request,
                                              unsigned &pending_updates,
+                                             unsigned &pending_invalidates,
                                              const bool needs_updates,
                                              const bool updates_from_all)
     //--------------------------------------------------------------------------
@@ -4011,6 +4023,8 @@ namespace Legion {
         const FieldMask overlap = update_mask & finder->second;
         if (!!overlap)
         {
+          // Note that this gets counted as a pending update since
+          // it's going back to the origin of the request
           request_invalidate(request_space, request_space, overlap,
               pending_request, pending_updates, true/*meta only*/);
           if (!updates_from_all)
@@ -4041,11 +4055,11 @@ namespace Legion {
             const FieldMask invalidate = overlap - update;
             if (!!invalidate)
               request_invalidate(it->first, request_space, invalidate,
-                  pending_request, pending_updates, false/*meta only*/);
+                  pending_request, pending_invalidates, false/*meta only*/);
           }
           else
             request_invalidate(it->first, request_space, overlap,
-                pending_request, pending_updates, false/*meta only*/);
+                pending_request, pending_invalidates, false/*meta only*/);
         }
         it->second -= overlap;
         if (!it->second) 
@@ -4618,8 +4632,9 @@ namespace Legion {
       {
         if (handled_precondition.exists())
           pending_request->applied_events.insert(handled_precondition);
-        pending_request->remaining_count -= 1;
-        if (pending_request->remaining_count == 0)
+        pending_request->remaining_updates -= 1;
+        if ((pending_request->remaining_updates == 0) &&
+            finalize_pending_update(pending_request))
           finalize_pending_request(pending_request);
       }
     }
@@ -4629,7 +4644,7 @@ namespace Legion {
                                             AddressSpaceID source,
                                             const FieldMask &invalidate_mask,
                                             PendingRequest *pending_request,
-                                            unsigned &pending_updates,
+                                            unsigned &pending_invalidates,
                                             bool meta_only, bool needs_lock)
     //--------------------------------------------------------------------------
     {
@@ -4637,11 +4652,15 @@ namespace Legion {
       {
         AutoLock eq(eq_lock);
         request_invalidate(target, source, invalidate_mask, pending_request,
-                           pending_updates, meta_only, false/*needs lock*/);
+                           pending_invalidates, meta_only, false/*needs lock*/);
         return;
       }
+#ifdef DEBUG_LEGION
+      // Should only be doing meta invaliations on the origin
+      assert(!meta_only || (target == source));
+#endif
       // Increment the number of updates that the requestor should expect
-      pending_updates++;
+      pending_invalidates++;
       if (target != local_space)
       {
         // Send the request to the target node 
@@ -4778,55 +4797,76 @@ namespace Legion {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(pending_request);
+            rez.serialize<bool>(meta_only);
           }
           runtime->send_equivalence_set_invalidate_response(source, rez);
         }
         else
-          record_invalidation(pending_request);
+          record_invalidation(pending_request, meta_only);
       }
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::record_pending_updates(PendingRequest *pending_request,
-                                                unsigned pending_updates,
-                                                bool needs_lock)
+    void EquivalenceSet::record_pending_counts(PendingRequest *pending_request,
+                                               unsigned pending_updates,
+                                               unsigned pending_invalidates,
+                                               bool needs_lock)
     //--------------------------------------------------------------------------
     {
       if (needs_lock)
       {
         AutoLock eq(eq_lock);
-        record_pending_updates(pending_request, pending_updates, false);
+        record_pending_counts(pending_request, pending_updates,
+                              pending_invalidates, false/*needs lock*/);
         return;
       }
-      pending_request->remaining_count += pending_updates;
-      if (pending_request->remaining_count == 0)
-        finalize_pending_request(pending_request);         
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_invalidation(PendingRequest *pending_request,
-                                             bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        record_invalidation(pending_request, false/*needs lock*/);
-        return;
-      }
-      pending_request->remaining_count -= 1;
-      if (pending_request->remaining_count == 0)
+      pending_request->remaining_updates += pending_updates;
+      if (pending_request->remaining_updates == 0)
+        finalize_pending_update(pending_request);
+      pending_request->remaining_invalidates += pending_invalidates;
+      // See if we need to do the deletion
+      if ((pending_request->remaining_updates == 0) && 
+          (pending_request->remaining_invalidates == 0))
         finalize_pending_request(pending_request);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::finalize_pending_request(
+    void EquivalenceSet::record_invalidation(PendingRequest *pending_request,
+                                             bool meta_only, bool needs_lock)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        record_invalidation(pending_request, meta_only, false/*needs lock*/);
+        return;
+      }
+      if (meta_only)
+      {
+        // Meta only invalidations are a kind of update since they have 
+        // to be done as part of making a local space valid
+        pending_request->remaining_updates -= 1;
+        if ((pending_request->remaining_updates == 0) && 
+            finalize_pending_update(pending_request))
+          finalize_pending_request(pending_request);
+      }
+      else
+      {
+        pending_request->remaining_invalidates -= 1;
+        if ((pending_request->remaining_invalidates == 0) &&
+            (pending_request->remaining_updates == 0))
+          finalize_pending_request(pending_request);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::finalize_pending_update(
                                                 PendingRequest *pending_request)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       sanity_check();
-      assert(pending_request->remaining_count == 0);
+      assert(pending_request->remaining_updates == 0);
 #endif
       FieldMaskSet<PendingRequest>::iterator finder = 
         outstanding_requests.find(pending_request);
@@ -4895,12 +4935,24 @@ namespace Legion {
       sanity_check();
 #endif
       outstanding_requests.erase(finder);
+      Runtime::trigger_event(pending_request->ready_event);
+      return (pending_request->remaining_invalidates == 0);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_pending_request(
+                                                PendingRequest *pending_request)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(pending_request->remaining_updates == 0);
+      assert(pending_request->remaining_invalidates == 0);
+#endif
       if (!pending_request->applied_events.empty())
         Runtime::trigger_event(pending_request->applied_event,
             Runtime::merge_events(pending_request->applied_events));
       else
         Runtime::trigger_event(pending_request->applied_event);
-      Runtime::trigger_event(pending_request->ready_event);
       delete pending_request;
     }
 
@@ -6735,13 +6787,15 @@ namespace Legion {
         runtime->find_or_request_equivalence_set(did, ready_event);
       PendingRequest *pending_request;
       derez.deserialize(pending_request);
-      unsigned pending_updates;
+      unsigned pending_updates, pending_invalidates;
       derez.deserialize(pending_updates);
+      derez.deserialize(pending_invalidates);
       derez.deserialize(pending_request->owner_mask);
 
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->record_pending_updates(pending_request, pending_updates, true);
+      set->record_pending_counts(pending_request, pending_updates, 
+                                 pending_invalidates, true/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6818,11 +6872,11 @@ namespace Legion {
 
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      unsigned dummy_updates = 0;
+      unsigned dummy_invalidates = 0;
       set->request_invalidate(runtime->address_space, source, invalidate_mask,
-                pending_request, dummy_updates, meta_only, true/*needs lock*/);
+          pending_request, dummy_invalidates , meta_only, true/*needs lock*/);
 #ifdef DEBUG_LEGION
-      assert(dummy_updates == 1);
+      assert(dummy_invalidates == 1);
 #endif
     }
 
@@ -6839,10 +6893,12 @@ namespace Legion {
         runtime->find_or_request_equivalence_set(did, ready_event);
       PendingRequest *pending_request;
       derez.deserialize(pending_request);
+      bool meta_only;
+      derez.deserialize<bool>(meta_only);
 
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->record_invalidation(pending_request, true/*needs lock*/);
+      set->record_invalidation(pending_request, meta_only, true/*needs lock*/);
     }
 
     /////////////////////////////////////////////////////////////

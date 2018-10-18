@@ -737,14 +737,15 @@ namespace Legion {
       public:
         PendingRequest(RtUserEvent ready, RtUserEvent applied, ReductionOpID r) 
           : ready_event(ready), applied_event(applied), redop(r),
-            remaining_count(0) { }
+            remaining_updates(0), remaining_invalidates(0) { }
       public:
         const RtUserEvent ready_event;
         const RtUserEvent applied_event;
         const ReductionOpID redop;
         std::set<RtEvent> applied_events;
         FieldMask owner_mask;
-        int remaining_count;
+        int remaining_updates;
+        int remaining_invalidates;
       };
       // Deferred update reqeusts
       struct DeferredRequest {
@@ -887,6 +888,7 @@ namespace Legion {
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
                                    unsigned &pending_updates,
+                                   unsigned &pending_invalidates,
                                    const bool needs_updates);
       void upgrade_single_to_multi(FieldMask &to_update,
                                    AddressSpaceID request_space,
@@ -911,6 +913,7 @@ namespace Legion {
                                 AddressSpaceID request_space,
                                 PendingRequest *pending_request,
                                 unsigned &pending_updates,
+                                unsigned &pending_invalidates,
                                 const bool needs_udpates);
       // For filtering shared and multi redop
       void filter_multi_copies(FieldMask &to_filter,
@@ -919,6 +922,7 @@ namespace Legion {
                                AddressSpaceID request_space,
                                PendingRequest *pending_request,
                                unsigned &pending_updates,
+                               unsigned &pending_invalidates,
                                const bool needs_updates,
                                const bool updates_from_all);
       void filter_redop_modes(FieldMask to_filter);
@@ -939,11 +943,13 @@ namespace Legion {
                               unsigned &pending_updates,
                               bool meta_only,
                               bool needs_lock = false);
-      void record_pending_updates(PendingRequest *pending_request,
-                                  unsigned pending_updates,
-                                  bool needs_lock);
+      void record_pending_counts(PendingRequest *pending_request,
+                                 unsigned pending_updates,
+                                 unsigned pending_invalidates,
+                                 bool needs_lock);
       void record_invalidation(PendingRequest *pending_request,
-                               bool needs_lock = false);
+                               bool meta_only, bool needs_lock = false);
+      bool finalize_pending_update(PendingRequest *pending_request);
       void finalize_pending_request(PendingRequest *pending_request);
       void perform_all_deferred_requests(void);
       void perform_ready_deferred_requests(const FieldMask &guard_mask);
