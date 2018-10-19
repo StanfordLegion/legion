@@ -249,7 +249,7 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
-        if ((*it)->acquire_mapping_guard(op, ready_mask, alt_sets))
+        if ((*it)->acquire_mapping_guard(op, alt_sets))
         {
 #ifdef DEBUG_LEGION
           assert(!alt_sets.empty());
@@ -2912,7 +2912,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_mapping_guard(Operation *op,
-                                               const FieldMask &guard_mask,
                std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -2928,17 +2927,11 @@ namespace Legion {
         // from a different operation between the two acquires.
         if (!mapping_guards.empty())
         {
-          FieldMaskSet<Operation>::iterator finder = mapping_guards.find(op);
+          std::map<Operation*,unsigned>::iterator finder = 
+            mapping_guards.find(op);
           if (finder != mapping_guards.end())
           {
-            finder.merge(guard_mask);
-            // Multiple acquires so we need to start counting
-            std::map<Operation*,unsigned>::iterator count_finder = 
-              mapping_guard_counts.find(op);
-            if (count_finder == mapping_guard_counts.end())
-              mapping_guard_counts[op] = 2;
-            else
-              count_finder->second++;
+            finder->second++;
             if (recursed)
               alt_sets.push_back(this);
             return false;
@@ -3022,7 +3015,7 @@ namespace Legion {
           // Should have been handled above
           assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
-          mapping_guards.insert(op, guard_mask);
+          mapping_guards[op] = 1;
         }
         else // Our set of subsets are now what we need
           to_recurse = subsets;
@@ -3032,7 +3025,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->acquire_mapping_guard(op,guard_mask,alt_sets,true/*recursed*/);
+          (*it)->acquire_mapping_guard(op, alt_sets, true/*recursed*/);
         // We've been refined so return true indicating that we changed
         return true;
       }
@@ -3047,8 +3040,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      std::map<Operation*,unsigned>::iterator finder = 
-        mapping_guard_counts.find(op);
+      std::map<Operation*,unsigned>::iterator finder = mapping_guards.find(op);
 #ifdef DEBUG_LEGION
       if (is_logical_owner())
         assert((eq_state == MAPPING_STATE) || 
@@ -3056,13 +3048,17 @@ namespace Legion {
       else
         assert((eq_state == VALID_STATE) ||
                 (eq_state == PENDING_INVALID_STATE));
-      assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(finder != mapping_guards.end());
+      assert(finder->second > 0);
 #endif
-      if ((finder == mapping_guard_counts.end()) || (finder->second == 1))
+      if (finder->second == 1)
       {
-        if (finder != mapping_guard_counts.end())
-          mapping_guard_counts.erase(finder);
-        mapping_guards.erase(op);
+        // Last removal so we are done
+        mapping_guards.erase(finder);
+        // We can also remove any mapping fields
+        FieldMaskSet<Operation>::iterator op_finder = mutated_fields.find(op);
+        if (op_finder != mutated_fields.end())
+          mutated_fields.erase(op_finder);
         if (mapping_guards.empty())
         {
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
@@ -3095,7 +3091,7 @@ namespace Legion {
         {
           // Tighten the mask and then use it to find any requests
           // which are now free to be performed
-          const FieldMask &guard_mask = mapping_guards.tighten_valid_mask();
+          const FieldMask &guard_mask = mutated_fields.tighten_valid_mask();
           if (guard_mask * deferred_requests.get_valid_mask())
             // We can just perform all of them
             perform_all_deferred_requests();
@@ -3103,14 +3099,10 @@ namespace Legion {
             // Only perform those that are not protected anymore
             perform_ready_deferred_requests(guard_mask);
         }
+
       }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(finder->second > 1);
-#endif
+      else // Just remove the count
         finder->second--;
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4153,8 +4145,8 @@ namespace Legion {
         // mapping here are applied. This is especially important
         // for multiple readers are mapping the same equivalence set
         // at the same time.
-        if (!mapping_guards.empty() && 
-            !(mapping_guards.get_valid_mask() * update_mask))
+        if (!mutated_fields.empty() && 
+            !(mutated_fields.get_valid_mask() * update_mask))
         {
           // Defer this request until later
           DeferredRequest *deferred = 
@@ -5305,7 +5297,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::update_set(const RegionUsage &usage, 
+    void EquivalenceSet::update_set(Operation *op, const RegionUsage &usage, 
                                 const FieldMask &user_mask,
                                 const InstanceSet &target_instances,
                                 const std::vector<InstanceView*> &target_views,
@@ -5320,6 +5312,11 @@ namespace Legion {
 #endif
       WrapperReferenceMutator mutator(applied_events);
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+      // Record that this operation is mutating
+      mutated_fields.insert(op, user_mask);
       // Check for any uninitialized data
       if (initialized != NULL)
       {
@@ -5434,7 +5431,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::acquire_restrictions(FieldMask acquire_mask,
+    void EquivalenceSet::acquire_restrictions(Operation *op,
+                                              FieldMask acquire_mask,
                                           FieldMaskSet<InstanceView> &instances,
            std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs)
     //--------------------------------------------------------------------------
@@ -5443,6 +5441,11 @@ namespace Legion {
       acquire_mask &= restricted_fields;
       if (!acquire_mask)
         return;
+#ifdef DEBUG_LEGION
+      assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+      // Record that this operation is mutating these fields
+      mutated_fields.insert(op, acquire_mask);
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
@@ -5462,7 +5465,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::release_restrictions(const FieldMask &release_mask,
+    void EquivalenceSet::release_restrictions(Operation *op,
+                                        const FieldMask &release_mask,
                                         CopyFillAggregator &release_aggregator,
                                         FieldMaskSet<InstanceView> &instances,
            std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
@@ -5470,6 +5474,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+      // Record that this operation is mutating these fields
+      mutated_fields.insert(op, release_mask);
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
@@ -5729,7 +5738,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::overwrite_set(LogicalView *view, const FieldMask &mask,
+    void EquivalenceSet::overwrite_set(Operation *op, LogicalView *view, 
+                                       const FieldMask &mask,
                                        CopyFillAggregator &output_aggregator,
                                        std::set<RtEvent> &ready_events,
                                        PredEvent pred_guard,
@@ -5737,6 +5747,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+      // Record that this operation is mutating these fields
+      mutated_fields.insert(op, mask);
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -5788,11 +5803,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::filter_set(LogicalView *view, const FieldMask &mask,
+    void EquivalenceSet::filter_set(Operation *op, LogicalView *view, 
+                                    const FieldMask &mask,
                                     bool remove_restriction/*= false*/)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+      // Record that this operation is mutating these fields
+      mutated_fields.insert(op, mask);
       FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
       if (finder != valid_instances.end())
       {

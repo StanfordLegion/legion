@@ -784,7 +784,6 @@ namespace Legion {
         { return (unrefined_remainder != NULL); }
       void refine_remainder(void);
       bool acquire_mapping_guard(Operation *op,
-                                 const FieldMask &guard_mask,
                                  std::vector<EquivalenceSet*> &alt_sets,
                                  bool recursed = false);
       void remove_mapping_guard(Operation *op);
@@ -815,17 +814,18 @@ namespace Legion {
                 ReductionOpID redop, const FieldMask &user_mask) const;
       bool filter_reduction_instances(FieldMaskSet<ReductionView> &insts,
                   ReductionOpID redop, const FieldMask &user_mask) const;
-      void update_set(const RegionUsage &usage, const FieldMask &user_mask,
+      void update_set(Operation *op, const RegionUsage &usage, 
+                      const FieldMask &user_mask,
                       const InstanceSet &target_instances,
                       const std::vector<InstanceView*> &target_views,
                       CopyFillAggregator &input_aggregator,
                       CopyFillAggregator &output_aggregator,
                       std::set<RtEvent> &applied_events,
                       FieldMask *initialized = NULL);
-      void acquire_restrictions(FieldMask acquire_mask,
+      void acquire_restrictions(Operation *op, FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs);
-      void release_restrictions(const FieldMask &release_mask,
+      void release_restrictions(Operation *op, const FieldMask &release_mask,
                                 CopyFillAggregator &release_aggregator,
                                 FieldMaskSet<InstanceView> &instances,
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
@@ -841,12 +841,12 @@ namespace Legion {
               const std::vector<unsigned> *src_indexes = NULL,
               const std::vector<unsigned> *dst_indexes = NULL,
               const std::vector<CopyAcrossHelper*> *across_helpers = NULL)const;
-      void overwrite_set(LogicalView *view, const FieldMask &mask,
+      void overwrite_set(Operation *op, LogicalView *view,const FieldMask &mask,
                          CopyFillAggregator &output_aggregator, 
                          std::set<RtEvent> &ready_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                          bool add_restriction = false);
-      void filter_set(LogicalView *view, const FieldMask &mask,
+      void filter_set(Operation *op, LogicalView *view, const FieldMask &mask,
                       bool remove_restriction = false);
     protected:
       // Help for analysis, all must be called while holding the lock
@@ -998,11 +998,13 @@ namespace Legion {
       // Track the current state of this equivalence state
       EqState eq_state;
       // Track the mapping events of the current operations that
-      // are using this equivalence class to map
-      FieldMaskSet<Operation> mapping_guards;
-      // We use this structure to track when there are multiple
-      // acquires of the equivalence class by the same operation
-      std::map<Operation*,unsigned> mapping_guard_counts;
+      // are using this equivalence class to map, the count 
+      // indicates how many times it has been acquired
+      std::map<Operation*,unsigned/*count*/> mapping_guards;
+      // We also need to track which fields are currently being
+      // mutated the operations which will block sending any updates
+      // from this equivalence set until the guards are removed
+      FieldMaskSet<Operation> mutated_fields;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready

@@ -1886,7 +1886,7 @@ namespace Legion {
         FieldMask initialized = user_mask;
         for (std::set<EquivalenceSet*>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
-          (*it)->update_set(usage, user_mask, targets, target_views, 
+          (*it)->update_set(op, usage, user_mask, targets, target_views, 
             input_aggregator, output_aggregator, local_applied, &initialized);
         if (initialized != user_mask)
         {
@@ -1898,7 +1898,7 @@ namespace Legion {
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
-          (*it)->update_set(usage, user_mask, targets, target_views, 
+          (*it)->update_set(op, usage, user_mask, targets, target_views, 
                             input_aggregator, output_aggregator, local_applied);
       }
 
@@ -1989,7 +1989,7 @@ namespace Legion {
         version_info.get_equivalence_sets();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->acquire_restrictions(user_mask, instances, inst_exprs);
+        (*it)->acquire_restrictions(op, user_mask, instances, inst_exprs);
       // Now add users for all the instances
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
@@ -2049,7 +2049,7 @@ namespace Legion {
                                             applied_events, false/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->release_restrictions(user_mask, release_aggregator, 
+        (*it)->release_restrictions(op, user_mask, release_aggregator, 
                                     instances, inst_exprs, applied_events);
       const UniqueID op_id = op->get_unique_op_id();
       // Issue any release copies/fills that need to be done
@@ -2248,7 +2248,7 @@ namespace Legion {
                                            applied_events, true/*track*/);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->overwrite_set(fill_view, fill_mask,
+        (*it)->overwrite_set(op, fill_view, fill_mask,
                              output_aggregator, applied_events);
       if (output_aggregator.has_updates())
       {
@@ -2302,9 +2302,9 @@ namespace Legion {
       const FieldMask &ext_mask = ext_instance.get_valid_fields();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->overwrite_set(external_views[0], ext_mask, output_aggregator,
-                             applied_events, PredEvent::NO_PRED_EVENT, 
-                             true/*add restriction*/);
+        (*it)->overwrite_set(attach_op, external_views[0], ext_mask, 
+                             output_aggregator, applied_events, 
+                             PredEvent::NO_PRED_EVENT, true/*add restriction*/);
       if (output_aggregator.has_updates())
       {
         output_aggregator.issue_updates(trace_info, ApEvent::NO_AP_EVENT);
@@ -2339,7 +2339,7 @@ namespace Legion {
       const FieldMask &ext_mask = ext_instance.get_valid_fields();
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->filter_set(external_views[0], ext_mask, 
+        (*it)->filter_set(detach_op, external_views[0], ext_mask, 
                           true/*remove restriction*/);
       return ApEvent::NO_AP_EVENT;
     }
