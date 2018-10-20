@@ -649,14 +649,14 @@ def get_qualname(fn):
 class Task (object):
     __slots__ = ['body', 'privileges', 'return_type', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
 
-    def __init__(self, body, privileges=None,
+    def __init__(self, body, privileges=None, return_type=None,
                  leaf=False, inner=False, idempotent=False,
                  register=True, task_id=None, top_level=False):
         self.body = body
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
-        self.return_type = None # currently all Python tasks return Pickle-encoded data
+        self.return_type = return_type
         self.leaf = bool(leaf)
         self.inner = bool(inner)
         self.idempotent = bool(idempotent)
@@ -751,15 +751,18 @@ class Task (object):
         # Execute task body.
         result = self.body(*args)
 
-        # Encode result in Pickle format.
-        if result is not None:
+        # Encode result.
+        if not self.return_type:
             result_str = pickle.dumps(result, protocol=_pickle_version)
             result_size = len(result_str)
             result_ptr = ffi.new('char[]', result_size)
             ffi.buffer(result_ptr, result_size)[:] = result_str
         else:
-            result_size = 0
-            result_ptr = ffi.NULL
+            if self.return_type.size > 0:
+                result_ptr = ffi.new(ffi.getctype(self.return_type.cffi_type, '*'), result)
+            else:
+                result_ptr = ffi.NULL
+            result_size = self.return_type.size
 
         # Execute postamble.
         c.legion_task_postamble(runtime[0], context[0], result_ptr, result_size)
@@ -1103,3 +1106,45 @@ class Tunable(object):
         c.legion_future_destroy(result)
         return future
 
+def execute_as_script():
+    args = input_args(True)
+    if len(args) < 1:
+        return False, False # no idea what's going on here, just return
+    if os.path.basename(args[0]) != 'legion_python':
+        return False, False # not in legion_python
+    if len(args) < 2 or args[1].startswith('-'):
+        return True, False # argument is a flag
+    # If it has an extension, we're going to guess that it was
+    # intended to be a script.
+    return True, len(os.path.splitext(args[1])[1]) > 1
+
+is_legion_python, is_script = execute_as_script()
+if is_script:
+    # We can't use runpy for this since runpy is aggressive about
+    # cleaning up after itself and removes the module before execution
+    # has completed.
+    def run_path(filename, run_name=None):
+        import imp
+        module = imp.new_module(run_name)
+        setattr(module, '__name__', run_name)
+        setattr(module, '__file__', filename)
+        setattr(module, '__loader__', None)
+        setattr(module, '__package__', run_name.rpartition('.')[0])
+        assert run_name not in sys.modules
+        sys.modules[run_name] = module
+
+        with open(filename) as f:
+            code = compile(f.read(), filename, 'exec')
+            exec(code, module.__dict__)
+
+    @task(top_level=True)
+    def legion_main():
+        args = input_args(True)
+        assert len(args) >= 2
+        sys.argv = list(args)
+        run_path(args[1], run_name='__legion_main__')
+elif is_legion_python:
+    print('WARNING: Executing Python modules via legion_python has been deprecated.')
+    print('It is now recommended to run the script directly by passing the path')
+    print('to legion_python.')
+    print()
