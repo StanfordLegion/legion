@@ -1430,7 +1430,7 @@ namespace Realm {
       // since we need list of local gpus to create channels
       start_dma_system(dma_worker_threads,
 		       pin_dma_threads, 100
-		       ,*core_reservations);
+		       ,*core_reservations, &bgwork);
 
       // now that we've created all the processors/etc., we can try to come up with core
       //  allocations that satisfy everybody's requirements - this will also start up any
@@ -2131,6 +2131,10 @@ namespace Realm {
       // threads that cause inter-node communication have to stop first
       PartitioningOpQueue::stop_worker_threads();
       stop_dma_worker_threads();
+      for(std::vector<Channel *>::iterator it = nodes[Network::my_node_id].dma_channels.begin();
+	  it != nodes[Network::my_node_id].dma_channels.end();
+	  ++it)
+	(*it)->shutdown();
       stop_dma_system();
 
       // detach from the network

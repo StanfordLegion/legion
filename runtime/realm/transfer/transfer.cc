@@ -1791,8 +1791,9 @@ namespace Realm {
 	for(size_t i = 0; i < spaces.size(); i++)
 	  update_bytes_write(i, output_ports[i].local_bytes_total, 0);
       }
-      update_bytes_write(spaces.size(), cp.local_bytes_total, sizeof(unsigned));
+      size_t old_lbt = cp.local_bytes_total;
       cp.local_bytes_total += sizeof(unsigned);
+      update_bytes_write(spaces.size(), old_lbt, sizeof(unsigned));
       output_space_id = -1;
       output_count = 0;
 

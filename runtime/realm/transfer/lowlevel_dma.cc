@@ -3189,11 +3189,12 @@ namespace Realm {
     }
 
     void start_dma_system(int count, bool pinned, int max_nr,
-                          CoreReservationSet& crs)
+                          CoreReservationSet& crs,
+			  BackgroundWorkManager *bgwork)
     {
       //log_dma.add_stream(&std::cerr, Logger::LEVEL_DEBUG, false, false);
       aio_context = new AsyncFileIOContext(256);
-      start_channel_manager(count, pinned, max_nr, crs);
+      start_channel_manager(count, pinned, max_nr, crs, bgwork);
       ib_req_queue = new PendingIBQueue();
     }
 

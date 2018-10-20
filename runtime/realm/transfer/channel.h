@@ -34,6 +34,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/mem_impl.h"
 #include "realm/inst_impl.h"
+#include "realm/bgwork.h"
 
 #ifdef REALM_USE_CUDA
 #include "realm/cuda/cuda_module.h"
@@ -298,6 +299,7 @@ namespace Realm {
       NodeID launch_node;
       //uint64_t /*bytes_submit, */bytes_read, bytes_write/*, bytes_total*/;
       bool iteration_completed;
+      bool transfer_completed;
       // current input and output port mask
       uint64_t current_in_port_mask, current_out_port_mask;
       uint64_t current_in_port_remain, current_out_port_remain;
@@ -335,8 +337,6 @@ namespace Realm {
       XferDesID guid;//, pre_xd_guid, next_xd_guid;
       // XferDesKind of the Xfer Descriptor
       XferDesKind kind;
-      // queue that contains all available free requests
-      std::queue<Request*> available_reqs;
       enum {
         XFERDES_NO_GUID = 0
       };
@@ -352,6 +352,17 @@ namespace Realm {
       //Layouts::GenericLayoutIterator<DIM>* li;
       // SJT:what is this for?
       //unsigned offset_idx;
+      // used to track by upstream/downstream xds so that we can safely
+      //  sleep xds that are stalled
+      atomic<unsigned> progress_counter;
+
+      // intrusive list for queued XDs in a channel
+      IntrusivePriorityListLink<XferDes> xd_link;
+      typedef IntrusivePriorityList<XferDes, int, &XferDes::xd_link, &XferDes::priority, DummyLock> XferDesList;
+    protected:
+      // this will be removed soon
+      // queue that contains all available free requests
+      std::queue<Request*> available_reqs;
     public:
       XferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 	      const std::vector<XferDesPortInfo>& inputs_info,
@@ -385,6 +396,15 @@ namespace Realm {
 
       void mark_completed();
 
+      unsigned current_progress(void);
+
+      // checks to see if progress has been made since the last read of the
+      //  progress counter - atomically marks the xd for wakeup if not
+      bool check_for_progress(unsigned last_counter);
+
+      // updates the progress counter, waking up the xd if needed
+      void update_progress(void);
+
 #if 0
       void update_pre_bytes_write(size_t new_val) {
 	update_write_lock.lock();
@@ -409,7 +429,12 @@ namespace Realm {
       }
 #endif
 
-      Request* dequeue_request() {
+      virtual bool request_available() const
+      {
+	return !available_reqs.empty();
+      }
+
+      virtual Request* dequeue_request() {
         Request* req = available_reqs.front();
 	available_reqs.pop();
 	req->is_read_done = false;
@@ -417,7 +442,7 @@ namespace Realm {
         return req;
       }
 
-      void enqueue_request(Request* req) {
+      virtual void enqueue_request(Request* req) {
         available_reqs.push(req);
       }
 
@@ -437,6 +462,8 @@ namespace Realm {
       DeferredXDEnqueue deferred_enqueue;
     };
 
+    class MemcpyChannel;
+
     class MemcpyXferDes : public XferDes {
     public:
       MemcpyXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
@@ -446,18 +473,20 @@ namespace Realm {
 		    uint64_t _max_req_size, long max_nr, int _priority,
 		    XferDesFence* _complete_fence);
 
-      ~MemcpyXferDes()
-      {
-        free(memcpy_reqs);
-      }
-
       long get_requests(Request** requests, long nr);
       void notify_request_read_done(Request* req);
       void notify_request_write_done(Request* req);
       void flush();
 
+      virtual bool request_available() const;
+      virtual Request* dequeue_request();
+      virtual void enqueue_request(Request* req);
+
+      bool progress_xd(MemcpyChannel *channel, TimeLimit work_until);
+
     private:
-      MemcpyRequest* memcpy_reqs;
+      bool memcpy_req_in_use;
+      MemcpyRequest memcpy_req;
       //const char *src_buf_base, *dst_buf_base;
     };
 
@@ -582,6 +611,10 @@ namespace Realm {
       Channel(XferDesKind _kind)
 	: node(Network::my_node_id), kind(_kind) {}
       virtual ~Channel() {};
+
+      // TODO: make pure virtual
+      virtual void shutdown() {}
+
     public:
       // which node manages this channel
       NodeID node;
@@ -645,6 +678,9 @@ namespace Realm {
 
       void print(std::ostream& os) const;
 
+      virtual void enqueue_ready_xd(XferDes *xd);
+      virtual void wakeup_xd(XferDes *xd);
+
     protected:
       void add_path(Memory src_mem, Memory dst_mem,
 		    unsigned bandwidth, unsigned latency,
@@ -682,6 +718,8 @@ namespace Realm {
     class RemoteChannel : public Channel {
     protected:
       RemoteChannel(void);
+
+      virtual void shutdown();
 
     public:
       template <typename S>
@@ -729,29 +767,51 @@ namespace Realm {
       }
     }
 
-    class MemcpyChannel;
-
-    class MemcpyThread {
+    template <typename CHANNEL, typename XD>
+    class XDQueue : public BackgroundWorkItem {
     public:
-      MemcpyThread(MemcpyChannel* _channel) : channel(_channel) {}
-      void thread_loop();
-      static void* start(void* arg);
-      void stop();
-    private:
-      MemcpyChannel* channel;
-      std::deque<MemcpyRequest*> thread_queue;
+      XDQueue(CHANNEL *_channel, const std::string& _name,
+	      bool _ordered);
+
+      void enqueue_xd(XD *xd, bool at_front = false);
+
+      virtual void do_work(TimeLimit work_until);
+
+    protected:
+      CHANNEL *channel;
+      bool ordered_mode, in_ordered_worker;
+      Mutex mutex;
+      XferDes::XferDesList ready_xds;
     };
 
-    class MemcpyChannel : public Channel {
+    template <typename CHANNEL, typename XD>
+    class SingleXDQChannel : public Channel {
     public:
-      MemcpyChannel(long max_nr);
+      SingleXDQChannel(BackgroundWorkManager *bgwork,
+		       XferDesKind _kind,
+		       const std::string& _name);
+
+      virtual void shutdown();
+
+      virtual void enqueue_ready_xd(XferDes *xd);
+      virtual void wakeup_xd(XferDes *xd);
+
+      // TODO: remove!
+      void pull() { assert(0); }
+      long available() { assert(0); return 0; }
+      virtual long progress_xd(XferDes *xd, long max_nr) { assert(0); return 0; }
+    protected:
+      XDQueue<CHANNEL, XD> xdq;
+    };
+
+    class MemcpyChannel : public SingleXDQChannel<MemcpyChannel, MemcpyXferDes> {
+    public:
+      MemcpyChannel(BackgroundWorkManager *bgwork);
+
+      // multiple concurrent memcpys ok
+      static const bool is_ordered = false;
+
       ~MemcpyChannel();
-      void stop();
-      void get_request(std::deque<MemcpyRequest*>& thread_queue);
-      void return_request(std::deque<MemcpyRequest*>& thread_queue);
-      long submit(Request** requests, long nr);
-      void pull();
-      long available();
 
       virtual bool supports_path(Memory src_mem, Memory dst_mem,
 				 CustomSerdezID src_serdez_id,
@@ -760,15 +820,9 @@ namespace Realm {
 				 unsigned *bw_ret = 0,
 				 unsigned *lat_ret = 0);
 
+      virtual long submit(Request** requests, long nr);
+
       bool is_stopped;
-    private:
-      std::deque<MemcpyRequest*> pending_queue, finished_queue;
-      Mutex pending_lock, finished_lock;
-      CondVar pending_cond;
-      atomic<long> capacity;
-      bool sleep_threads;
-      //std::vector<MemcpyRequest*> available_cb;
-      //MemcpyRequest** cbs;
     };
 
     class GASNetChannel : public Channel {
@@ -857,7 +911,7 @@ namespace Realm {
 	addr_split_channel = 0;
       }
       ~ChannelManager(void);
-      MemcpyChannel* create_memcpy_channel(long max_nr);
+      MemcpyChannel* create_memcpy_channel(BackgroundWorkManager *bgwork);
       GASNetChannel* create_gasnet_read_channel(long max_nr);
       GASNetChannel* create_gasnet_write_channel(long max_nr);
       RemoteWriteChannel* create_remote_write_channel(long max_nr);
@@ -1378,11 +1432,13 @@ namespace Realm {
         delete xd;
       }
 
-      void enqueue_xferDes_local(XferDes* xd);
+      // returns true if xd is ready, false if enqueue has been deferred
+      bool enqueue_xferDes_local(XferDes* xd, bool add_to_queue = true);
 
       bool dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty);
 
-      void start_worker(int count, int max_nr, ChannelManager* channel_manager);
+      void start_worker(int count, int max_nr, ChannelManager* channel_manager,
+			BackgroundWorkManager *bgwork);
 
       void stop_worker();
 
@@ -1396,7 +1452,7 @@ namespace Realm {
       CoreReservation* core_rsrv;
       int num_threads, num_memcpy_threads;
       DMAThread** dma_threads;
-      MemcpyThread** memcpy_threads;
+      //MemcpyThread** memcpy_threads;
       std::vector<Thread*> worker_threads;
     };
 
@@ -1405,7 +1461,9 @@ namespace Realm {
 #ifdef REALM_USE_CUDA
     void register_gpu_in_dma_systems(Cuda::GPU* gpu);
 #endif
-    void start_channel_manager(int count, bool pinned, int max_nr, CoreReservationSet& crs);
+    void start_channel_manager(int count, bool pinned, int max_nr,
+			       CoreReservationSet& crs,
+			       BackgroundWorkManager *bgwork);
     void stop_channel_manager();
 
     void destroy_xfer_des(XferDesID _guid);

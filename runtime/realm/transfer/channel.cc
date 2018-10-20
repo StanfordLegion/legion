@@ -17,6 +17,7 @@
 #include "realm/transfer/channel.h"
 #include "realm/transfer/channel_disk.h"
 #include "realm/transfer/transfer.h"
+#include "realm/utils.h"
 
 TYPE_IS_SERIALIZABLE(Realm::XferDesKind);
 
@@ -31,7 +32,7 @@ namespace Realm {
       std::vector<Cuda::GPU*> dma_all_gpus;
 #endif
       // we use a single queue for all xferDes
-      static XferDesQueue *xferDes_queue = 0;
+      XferDesQueue *xferDes_queue = 0;
 
       // we use a single manager to organize all channels
       static ChannelManager *channel_manager = 0;
@@ -217,9 +218,11 @@ namespace Realm {
 		       XferDesFence* _complete_fence)
         : dma_request(_dma_request), mark_start(_mark_start), launch_node(_launch_node),
 	  iteration_completed(false),
+	  transfer_completed(false),
           max_req_size(_max_req_size), priority(_priority),
           guid(_guid),
-          channel(NULL), complete_fence(_complete_fence)
+          channel(NULL), complete_fence(_complete_fence),
+	  progress_counter(0)
       {
 	input_ports.resize(inputs_info.size());
 	int gather_control_port = -1;
@@ -424,7 +427,7 @@ namespace Realm {
       {
         long idx = 0;
 	
-	while((idx < nr) && (available_reqs.size() > 0)) {
+	while((idx < nr) && request_available()) {
 	  // TODO: we really shouldn't even be trying if the iteration
 	  //   is already done
 	  if(iteration_completed) break;
@@ -1377,6 +1380,8 @@ namespace Realm {
 
     bool XferDes::is_completed(void)
     {
+      // check below is a bit expensive, do don't do it more than once
+      if(transfer_completed) return true;
       // to be complete, we need to have finished iterating (which may have been
       //  achieved by getting a pre_bytes_total update) and finished all of our
       //  writes
@@ -1390,6 +1395,7 @@ namespace Realm {
 	if(it->seq_local.span_exists(0, lbc_snapshot) != lbc_snapshot)
 	  return false;
       }
+      transfer_completed = true;
       return true;
     }
 
@@ -1452,6 +1458,9 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_local.add_span(offset, size);
 	log_xd.info() << "bytes_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
+	// if our oldest write was ack'd, update progress in case the xd
+	//  is just waiting for all writes to complete
+	if(inc_amt > 0) update_progress();
 	if(out_port->peer_guid != XFERDES_NO_GUID) {
 	  // we can skip an update if this was empty _and_ we're not done yet
 	  if((inc_amt > 0) || (offset == out_port->local_bytes_total)) {
@@ -1511,10 +1520,12 @@ namespace Realm {
 	XferPort *in_port = &input_ports[port_idx];
 
 	// do this before we add the span
+	bool pbt_updated = false;
 	if(pre_bytes_total != (size_t)-1) {
 	  // try to swap -1 for the given total
 	  size_t val = -1;
-	  if(!in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total)) {
+	  pbt_updated = in_port->remote_bytes_total.compare_exchange(val, pre_bytes_total);
+	  if(!pbt_updated) {
 	    // failure should only happen if we already had the same value
 	    assert(val == pre_bytes_total);
 	  }
@@ -1523,6 +1534,9 @@ namespace Realm {
 	size_t inc_amt = in_port->seq_remote.add_span(offset, size);
 	log_xd.info() << "pre_write: " << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt << " (" << pre_bytes_total << ")";
+	// if we got new data at the current pointer OR if we now know the
+	//  total incoming bytes, update progress
+	if((inc_amt > 0) || pbt_updated) update_progress();
       }
 
       void XferDes::update_next_bytes_read(int port_idx, size_t offset, size_t size)
@@ -1532,6 +1546,8 @@ namespace Realm {
 	size_t inc_amt = out_port->seq_remote.add_span(offset, size);
 	log_xd.info() << "next_read: "  << std::hex << guid << std::dec
 		      << "(" << port_idx << ") " << offset << "+" << size << " -> " << inc_amt;
+	// if we got new room at the current pointer, update progress
+	if(inc_amt > 0) update_progress();
       }
 
       void XferDes::default_notify_request_read_done(Request* req)
@@ -1572,16 +1588,14 @@ namespace Realm {
 		  _mark_start,
 		  _max_req_size, _priority,
 		  _complete_fence)
+	, memcpy_req_in_use(false)
       {
         channel = channel_manager->get_memcpy_channel();
+	kind = XFER_MEM_CPY;
 
 	// ignore requested max_nr and always use 1
 	max_nr = 1;
-        memcpy_reqs = (MemcpyRequest*) calloc(max_nr, sizeof(MemcpyRequest));
-        for (int i = 0; i < max_nr; i++) {
-          memcpy_reqs[i].xd = this;
-          enqueue_request(&memcpy_reqs[i]);
-        }
+	memcpy_req.xd = this;
       }
 
       long MemcpyXferDes::get_requests(Request** requests, long nr)
@@ -1668,6 +1682,45 @@ namespace Realm {
       void MemcpyXferDes::flush()
       {
       }
+
+      bool MemcpyXferDes::request_available() const
+      {
+	return !memcpy_req_in_use;
+      }
+
+      Request* MemcpyXferDes::dequeue_request()
+      {
+	assert(!memcpy_req_in_use);
+	memcpy_req_in_use = true;
+	memcpy_req.is_read_done = false;
+	memcpy_req.is_write_done = false;
+        return &memcpy_req;
+      }
+
+      void MemcpyXferDes::enqueue_request(Request* req)
+      {
+	assert(memcpy_req_in_use);
+	assert(req == &memcpy_req);
+	memcpy_req_in_use = false;
+      }
+
+      bool MemcpyXferDes::progress_xd(MemcpyChannel *channel,
+				      TimeLimit work_until)
+      {
+	Request *rq;
+	bool did_work = false;
+	do {
+	  long count = get_requests(&rq, 1);
+	  if(count > 0) {
+	    channel->submit(&rq, count);
+	    did_work = true;
+	  } else
+	    break;
+	} while(!work_until.is_expired());
+
+	return did_work;
+      }
+
 
       GASNetXferDes::GASNetXferDes(DmaRequest *_dma_request, NodeID _launch_node, XferDesID _guid,
 				   const std::vector<XferDesPortInfo>& inputs_info,
@@ -1764,6 +1817,7 @@ namespace Realm {
 	    ++it)
 	  assert(it->mem->kind == MemoryImpl::MKIND_RDMA);
         channel = channel_manager->get_remote_write_channel();
+	kind = XFER_REMOTE_WRITE;
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
@@ -2013,7 +2067,7 @@ namespace Realm {
       {
         long idx = 0;
 	
-	while((idx < nr) && (available_reqs.size() > 0)) {	  
+	while((idx < nr) && request_available()) {	  
 	  // TODO: use control stream to determine which input/output ports
 	  //  to use
 	  int in_port_idx = 0;
@@ -2256,6 +2310,16 @@ namespace Realm {
 	os << "] }";
       }
 
+      void Channel::enqueue_ready_xd(XferDes *xd)
+      {
+	xferDes_queue->enqueue_xferDes_local(xd);
+      }
+
+      void Channel::wakeup_xd(XferDes *xd)
+      {
+	// do nothing - most channels didn't take xd off the list
+      }
+
       const std::vector<Channel::SupportedPath>& Channel::get_paths(void) const
       {
 	return paths;
@@ -2378,6 +2442,9 @@ namespace Realm {
 	: Channel(XFER_NONE)
       {}
 
+      void RemoteChannel::shutdown()
+      {}
+
       long RemoteChannel::submit(Request** requests, long nr)
       {
 	assert(0);
@@ -2414,61 +2481,17 @@ namespace Realm {
 				      bw_ret, lat_ret);
       }
 
-      /*static*/ void* MemcpyThread::start(void* arg)
-      {
-        MemcpyThread* worker = (MemcpyThread*) arg;
-        worker->thread_loop();
-        return NULL;
-      }
-
-      void MemcpyThread::thread_loop()
-      {
-        while (!channel->is_stopped) {
-          channel->get_request(thread_queue);
-          if (channel->is_stopped)
-            break;
-          std::deque<MemcpyRequest*>::const_iterator it;
-          for (it = thread_queue.begin(); it != thread_queue.end(); it++) {
-            MemcpyRequest* req = *it;
-            //double starttime = Realm::Clock::current_time_in_microseconds();
-            if (req->dim == Request::DIM_1D) {
-              memcpy(req->dst_base, req->src_base, req->nbytes);
-            } else {
-              assert(req->dim == Request::DIM_2D);
-              const char *src = (const char *)(req->src_base);
-	      char *dst = (char *)(req->dst_base);
-              for (size_t i = 0; i < req->nlines; i++) {
-                memcpy(dst, src, req->nbytes);
-                src += req->src_str;
-                dst += req->dst_str;
-              }
-            }
-            //double stoptime = Realm::Clock::current_time_in_microseconds();
-            //fprintf(stderr, "t = %.2lfus, tp = %.2lfMB/s\n", stoptime - starttime, (req->nbytes / (stoptime - starttime)));
-          }
-          channel->return_request(thread_queue);
-          thread_queue.clear();
-        }
-      }
-
-      void MemcpyThread::stop()
-      {
-        channel->stop();
-      }
-
       static const Memory::Kind cpu_mem_kinds[] = { Memory::SYSTEM_MEM,
 						    Memory::REGDMA_MEM,
 						    Memory::Z_COPY_MEM,
                                                     Memory::SOCKET_MEM };
       static const size_t num_cpu_mem_kinds = sizeof(cpu_mem_kinds) / sizeof(cpu_mem_kinds[0]);
 
-      MemcpyChannel::MemcpyChannel(long max_nr)
-	: Channel(XFER_MEM_CPY)
-	, pending_cond(pending_lock)
-	, capacity(max_nr)
+      MemcpyChannel::MemcpyChannel(BackgroundWorkManager *bgwork)
+	: SingleXDQChannel<MemcpyChannel,MemcpyXferDes>(bgwork,
+							XFER_MEM_CPY,
+							"memcpy channel")
       {
-        is_stopped = false;
-        sleep_threads = false;
         //cbs = (MemcpyRequest**) calloc(max_nr, sizeof(MemcpyRequest*));
 	unsigned bw = 0; // TODO
 	unsigned latency = 0;
@@ -2502,40 +2525,6 @@ namespace Realm {
 				      src_serdez_id, dst_serdez_id,
 				      redop_id,
 				      bw_ret, lat_ret);
-      }
-
-      void MemcpyChannel::stop()
-      {
-	pending_lock.lock();
-        if (!is_stopped)
-	  pending_cond.broadcast();
-        is_stopped = true;
-	pending_lock.unlock();
-      }
-
-      void MemcpyChannel::get_request(std::deque<MemcpyRequest*>& thread_queue)
-      {
-        pending_lock.lock();
-        while (pending_queue.empty() && !is_stopped) {
-          sleep_threads = true;
-	  pending_cond.wait();
-        }
-        if (!is_stopped) {
-          // TODO: enable the following optimization
-          //thread_queue.insert(thread_queue.end(), pending_queue.begin(), pending_queue.end());
-          thread_queue.push_back(pending_queue.front());
-          pending_queue.pop_front();
-          //fprintf(stderr, "[%d] thread_queue.size = %lu\n", gettid(), thread_queue.size());
-          //pending_queue.clear();
-        }
-        pending_lock.unlock();
-      }
-
-      void MemcpyChannel::return_request(std::deque<MemcpyRequest*>& thread_queue)
-      {
-        finished_lock.lock();
-        finished_queue.insert(finished_queue.end(), thread_queue.begin(), thread_queue.end());
-        finished_lock.unlock();
       }
 
       long MemcpyChannel::submit(Request** requests, long nr)
@@ -2996,33 +2985,6 @@ namespace Realm {
         */
       }
 
-      void MemcpyChannel::pull()
-      {
-        finished_lock.lock();
-        while (!finished_queue.empty()) {
-          MemcpyRequest* req = finished_queue.front();
-          finished_queue.pop_front();
-          req->xd->notify_request_read_done(req);
-          req->xd->notify_request_write_done(req);
-        }
-        finished_lock.unlock();
-        /*
-        while (true) {
-          long np = worker->pull(cbs, capacity);
-          for (int i = 0; i < np; i++) {
-            cbs[i]->xd->notify_request_read_done(cbs[i]);
-            cbs[i]->xd->notify_request_write_done(cbs[i]);
-          }
-          if (np != capacity)
-            break;
-        }
-        */
-      }
-
-      long MemcpyChannel::available()
-      {
-        return capacity.load();
-      }
 
       GASNetChannel::GASNetChannel(long max_nr, XferDesKind _kind)
 	: Channel(_kind)
@@ -3449,6 +3411,11 @@ namespace Realm {
         // assert data copy is in right position
         //assert(data == args.dst_buf);
 
+	log_xd.info() << "remote write recieved: next=" << args.next_xd_guid
+		      << " start=" << args.span_start
+		      << " size=" << args.span_size
+		      << " pbt=" << args.pre_bytes_total;
+
 	// if requested, notify (probably-local) next XD
 	if(args.next_xd_guid != XferDes::XFERDES_NO_GUID)
 	  xferDes_queue->update_pre_bytes_write(args.next_xd_guid,
@@ -3581,10 +3548,10 @@ namespace Realm {
       ChannelManager::~ChannelManager(void) {
       }
 
-      MemcpyChannel* ChannelManager::create_memcpy_channel(long max_nr)
+      MemcpyChannel* ChannelManager::create_memcpy_channel(BackgroundWorkManager *bgwork)
       {
         assert(memcpy_channel == NULL);
-        memcpy_channel = new MemcpyChannel(max_nr);
+        memcpy_channel = new MemcpyChannel(bgwork);
         return memcpy_channel;
       }
       GASNetChannel* ChannelManager::create_gasnet_read_channel(long max_nr) {
@@ -3645,11 +3612,12 @@ namespace Realm {
       }
 #endif
       void start_channel_manager(int count, bool pinned, int max_nr,
-                                 Realm::CoreReservationSet& crs)
+                                 Realm::CoreReservationSet& crs,
+				 BackgroundWorkManager *bgwork)
       {
         xferDes_queue = new XferDesQueue(count, pinned, crs);
         channel_manager = new ChannelManager;
-        xferDes_queue->start_worker(count, max_nr, channel_manager);
+        xferDes_queue->start_worker(count, max_nr, channel_manager, bgwork);
       }
       FileChannel* ChannelManager::create_file_read_channel(long max_nr) {
         assert(file_read_channel == NULL);
@@ -3672,13 +3640,14 @@ namespace Realm {
         return disk_write_channel;
       }
 
-      void XferDesQueue::enqueue_xferDes_local(XferDes* xd)
+      bool XferDesQueue::enqueue_xferDes_local(XferDes* xd,
+					       bool add_to_queue /*= true*/)
       {
 	Event wait_on = xd->request_metadata();
 	if(!wait_on.has_triggered()) {
 	  log_new_dma.info() << "xd metadata wait: xd=" << xd->guid << " ready=" << wait_on;
 	  xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
-	  return;
+	  return false;
 	}
 
 	{
@@ -3703,6 +3672,8 @@ namespace Realm {
 	  }
 	}
 
+	if(!add_to_queue) return true;
+
         std::map<Channel*, DMAThread*>::iterator it;
         it = channel_to_dma_thread.find(xd->channel);
         assert(it != channel_to_dma_thread.end());
@@ -3720,6 +3691,8 @@ namespace Realm {
 	  dma_thread->enqueue_cond.broadcast();
         }
 	dma_thread->enqueue_lock.unlock();
+
+	return true;
       }
 
       bool XferDesQueue::dequeue_xferDes(DMAThread* dma_thread, bool wait_on_empty) {
@@ -3756,7 +3729,9 @@ namespace Realm {
         return true;
       }
 
-      void XferDesQueue::start_worker(int count, int max_nr, ChannelManager* channel_manager) 
+      void XferDesQueue::start_worker(int count, int max_nr,
+				      ChannelManager* channel_manager,
+				      BackgroundWorkManager *bgwork)
       {
         log_new_dma.info("XferDesQueue: start_workers");
         // num_memcpy_threads = 0;
@@ -3772,11 +3747,12 @@ namespace Realm {
         dma_threads = (DMAThread**) calloc(count, sizeof(DMAThread*));
         // dma thread #1: memcpy
         std::vector<Channel*> channels;
-        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(max_nr);
+	// TODO: numa-specific channels
+        MemcpyChannel* memcpy_channel = channel_manager->create_memcpy_channel(bgwork);
 	GASNetChannel* gasnet_read_channel = channel_manager->create_gasnet_read_channel(max_nr);
 	GASNetChannel* gasnet_write_channel = channel_manager->create_gasnet_write_channel(max_nr);
 	AddressSplitChannel *addr_split_channel = channel_manager->create_addr_split_channel();
-        channels.push_back(memcpy_channel);
+        //channels.push_back(memcpy_channel);
         channels.push_back(gasnet_read_channel);
         channels.push_back(gasnet_write_channel);
 	channels.push_back(addr_split_channel);
@@ -3856,19 +3832,6 @@ namespace Realm {
           worker_threads.push_back(t);
         }
 
-#ifdef USE_DEDICATED_MEMCPY_THREADS
-        // Next we create memcpy threads
-        memcpy_threads =(MemcpyThread**) calloc(num_memcpy_threads, sizeof(MemcpyThread*));
-        for (int i = 0; i < num_memcpy_threads; i++) {
-          memcpy_threads[i] = new MemcpyThread(memcpy_channel);
-          Realm::Thread *t = Realm::Thread::create_kernel_thread<MemcpyThread,
-                                            &MemcpyThread::thread_loop>(memcpy_threads[i],
-                                                                        tlp,
-                                                                        *core_rsrv,
-                                                                        0 /*default scheduler*/);
-          worker_threads.push_back(t);
-        }
-#endif
         assert(worker_threads.size() == (size_t)(num_threads));
       }
 
@@ -3882,8 +3845,6 @@ namespace Realm {
       void XferDesQueue::stop_worker() {
         for (int i = 0; i < num_threads; i++)
           dma_threads[i]->stop();
-        for (int i = 0; i < num_memcpy_threads; i++)
-          memcpy_threads[i]->stop();
         // reap all the threads
         for(std::vector<Realm::Thread *>::iterator it = worker_threads.begin();
             it != worker_threads.end();
@@ -3894,12 +3855,7 @@ namespace Realm {
         worker_threads.clear();
         for (int i = 0; i < num_threads; i++)
           delete dma_threads[i];
-        for (int i = 0; i < num_memcpy_threads; i++)
-          delete memcpy_threads[i];
         free(dma_threads);
-#ifdef USE_DEDICATED_MEMCPY_THREADS
-        free(memcpy_threads);
-#endif
       }
 
       void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
@@ -3915,7 +3871,8 @@ namespace Realm {
 	// TODO: handle poisoning
 	assert(!poisoned);
 	log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
-	xferDes_queue->enqueue_xferDes_local(xd);
+	xd->channel->enqueue_ready_xd(xd);
+	//xferDes_queue->enqueue_xferDes_local(xd);
       }
 
       void XferDes::DeferredXDEnqueue::print(std::ostream& os) const
