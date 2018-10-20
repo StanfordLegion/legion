@@ -113,7 +113,7 @@ def input_args(filter_runtime_options=False):
 
     args = []
     for i in range(raw_args.argc):
-        args.append(ffi.string(raw_args.argv[i]))
+        args.append(ffi.string(raw_args.argv[i]).decode('utf-8'))
 
     if filter_runtime_options:
         i = 1 # Skip program name
