@@ -647,10 +647,10 @@ def get_qualname(fn):
     return [fn.__name__]
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'return_type', 'leaf', 'inner', 'idempotent', 'calling_convention', 'task_id', 'registered']
+    __slots__ = ['body', 'privileges', 'return_type', 'leaf', 'inner', 'idempotent', 'replicable', 'calling_convention', 'task_id', 'registered']
 
     def __init__(self, body, privileges=None, return_type=None,
-                 leaf=False, inner=False, idempotent=False,
+                 leaf=False, inner=False, idempotent=False, replicable=False,
                  register=True, task_id=None, top_level=False):
         self.body = body
         if privileges is not None:
@@ -660,6 +660,7 @@ class Task (object):
         self.leaf = bool(leaf)
         self.inner = bool(inner)
         self.idempotent = bool(idempotent)
+        self.replicable = bool(replicable)
         self.calling_convention = 'python'
         self.task_id = None
         if register:
@@ -794,6 +795,7 @@ class Task (object):
         options[0].leaf = self.leaf
         options[0].inner = self.inner
         options[0].idempotent = self.idempotent
+        options[0].replicable = self.replicable
 
         qualname = get_qualname(self.body)
         task_name = ('%s.%s' % (self.body.__module__, '.'.join(qualname)))
@@ -1137,7 +1139,7 @@ if is_script:
             code = compile(f.read(), filename, 'exec')
             exec(code, module.__dict__)
 
-    @task(top_level=True)
+    @task(top_level=True, replicable=True)
     def legion_main():
         args = input_args(True)
         assert len(args) >= 2
