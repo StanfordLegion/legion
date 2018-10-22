@@ -283,7 +283,6 @@ namespace Realm {
     operator T(void) const;
     WithDefault<T,_DEFAULT>& operator=(T newval);
 
-  protected:
     T val;
   };
 
