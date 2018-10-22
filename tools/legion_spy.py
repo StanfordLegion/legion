@@ -9903,11 +9903,12 @@ class State(object):
     __slots__ = ['verbose', 'top_level_uid', 'traverser_gen', 'processors', 'memories',
                  'processor_kinds', 'memory_kinds', 'index_exprs', 'index_spaces', 
                  'index_partitions', 'field_spaces', 'regions', 'partitions', 'top_spaces',
-                 'trees', 'ops', 'tasks', 'task_names', 'variants', 'projection_functions',
-                 'has_mapping_deps', 'instances', 'events', 'copies', 'fills', 'depparts',
-                 'no_event', 'slice_index', 'slice_slice', 'point_slice', 'point_point',
-                 'futures', 'next_generation', 'next_realm_num', 'detailed_graphs', 
-                 'assert_on_error', 'assert_on_warning', 'config', 'detailed_logging']
+                 'trees', 'ops', 'unique_ops', 'tasks', 'task_names', 'variants', 
+                 'projection_functions', 'has_mapping_deps', 'instances', 'events', 
+                 'copies', 'fills', 'depparts', 'no_event', 'slice_index', 'slice_slice', 
+                 'point_slice', 'point_point', 'futures', 'next_generation', 
+                 'next_realm_num', 'detailed_graphs', 'assert_on_error', 
+                 'assert_on_warning', 'config', 'detailed_logging']
     def __init__(self, verbose, details, assert_on_error, assert_on_warning):
         self.config = False
         self.detailed_logging = True
@@ -9932,7 +9933,8 @@ class State(object):
         self.top_spaces = dict()
         self.trees = dict()
         # Logical things 
-        self.ops = dict()
+        self.ops = dict() # Operations can be duplicated from different nodes
+        self.unique_ops = None # Filled in by post_parse to deduplicate
         self.tasks = dict()
         self.task_names = dict()
         self.variants = dict()
@@ -10046,10 +10048,12 @@ class State(object):
         # Flatten summary operations in each context
         for task in self.tasks.itervalues():
             task.flatten_summary_operations()
+        # Create the unique set of operations
+        self.unique_ops = set(self.ops.itervalues())
         # Add implicit dependencies between point and index operations
         if self.detailed_logging:
             index_owners = set()
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 if op.index_owner:
                     # Skip close operations for transitive dependences
                     if op.kind == INTER_CLOSE_OP_KIND:
@@ -10067,7 +10071,7 @@ class State(object):
                 if op.finish_event.incoming_ops:
                     op.finish_event.incoming_ops.remove(op)
         # Check for any interfering index space launches
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if op.kind == INDEX_TASK_KIND and op.is_interfering_index_space_launch():
                 print("ERROR: Found interfering index space launch: %s!" % str(op))
                 if self.assert_on_error:
@@ -10082,7 +10086,7 @@ class State(object):
         op.context.depth = 0
         # Check to see if we have any unknown operations
         unknown = None
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if op.kind is NO_OP_KIND:
                 unknown = op
                 break
@@ -10094,7 +10098,7 @@ class State(object):
         for inst in self.instances.itervalues():
             inst.update_creator()
         # Update the instance users
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             op.update_instance_uses() 
         for task in self.tasks.itervalues():
             task.update_instance_uses()
@@ -10108,7 +10112,7 @@ class State(object):
         self.point_slice = None
         if self.detailed_logging:
             # Compute the physical reachable
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 op.compute_physical_reachable()
             for copy in self.copies.itervalues():
                 copy.compute_physical_reachable()
@@ -10151,7 +10155,7 @@ class State(object):
             self.get_next_traversal_generation(), None, post_traverse_node)
         topological_sorter.postorder = list()
         # Traverse all the sources 
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if not op.physical_incoming:
                 topological_sorter.visit_node(op)
         for copy in self.copies.itervalues():
@@ -10302,7 +10306,7 @@ class State(object):
                     assert len(dst.physical_incoming) == 1
                     ready_nodes.append(dst)
         # Seed the incoming sets with the roots
-        for op in self.ops.itervalues():
+        for op in self.unique_ops:
             if not op.physical_incoming:
                 process_node(op)
         for copy in self.copies.itervalues():
@@ -10319,10 +10323,6 @@ class State(object):
             node = ready_nodes.popleft()
             process_node(node)
         # The pending nodes should be empty by the time we are done with this
-        # This is actually not true because some edges are just for things like
-        # futures with no region dependences and so we might not traverse them
-        # at all, e.g. see the tests/regent/run_pass/call_task_future.rg example
-        #assert not pending_nodes
         print('Done')
         print('Simplifying equivalence event graphs...')
         # Now we need to transitively reduce each of the equivalence set graphs
@@ -10336,7 +10336,7 @@ class State(object):
                 self.get_next_traversal_generation(), None, post_traverse_node)
             topological_sorter.postorder = list()
             # Traverse all the sources 
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 if not op.physical_incoming:
                     topological_sorter.visit_node(op)
             for copy in self.copies.itervalues():
@@ -10557,7 +10557,7 @@ class State(object):
                 return False
 
         cycle_detector = CycleDetector()
-        for op in self.ops.itervalues(): 
+        for op in self.unique_ops: 
             if op.perform_cycle_check(cycle_detector):
                 return True
         for copy in self.copies.itervalues():
@@ -10669,7 +10669,7 @@ class State(object):
             copies = set()
             closes = set()
             releases = set()
-            for op in self.ops.itervalues():
+            for op in self.unique_ops:
                 if op.kind == SINGLE_TASK_KIND:
                     # If it doesn't have a task and a processor, then it's not real
                     if not op.task or op.task.processor is None:
