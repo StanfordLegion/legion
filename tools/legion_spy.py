@@ -2972,20 +2972,20 @@ class LogicalRegion(object):
                 state = self.get_verification_state(depth, field, point)
                 state.initialize_verification_state(inst)
 
-    def compute_current_version_numbers(self, depth, field, op, index, point_set = None):
+    def compute_current_version_numbers(self, depth, field, op, tree, point_set = None):
         if point_set is None:
             # First get the point set
-            self.compute_current_version_numbers(depth, field, op, index, 
+            self.compute_current_version_numbers(depth, field, op, tree, 
                                                  self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
             self.parent.parent.compute_current_version_numbers(depth, field, op,
-                                                               index, point_set)
+                                                               tree, point_set)
         else:
             # Do the actual work
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                op.record_current_version(index, field, point, state.version_number)
+                op.record_current_version(point, field, tree, state.version_number)
 
     def perform_fill_verification(self, depth, field, op, req, point_set=None):
         if point_set is None:
@@ -3273,9 +3273,9 @@ class LogicalPartition(object):
             return
         self.logical_state[field].close_logical_tree(closed_users)
 
-    def compute_current_version_numbers(self, depth, field, op, index):
+    def compute_current_version_numbers(self, depth, field, op, tree):
         self.parent.compute_current_version_numbers(depth, field, op, 
-                                                    index, self.get_point_set())
+                                                    tree, self.get_point_set())
 
     def perform_physical_verification(self, depth, field, op, req, inst, perform_checks,
                                       perform_registration):
@@ -4242,7 +4242,7 @@ class DataflowTraverser(object):
             assert node.generation < self.generation
             node.generation = self.generation
         if isinstance(node, Operation):
-            pass
+            pass 
         elif isinstance(node, RealmCopy):
             return self.visit_copy(node)
         elif isinstance(node, RealmFill):
@@ -4260,6 +4260,12 @@ class DataflowTraverser(object):
     def traverse_node(self, node, eq_key, first = True):
         if first:
             self.generation = node.state.get_next_traversal_generation()
+        elif node.version_numbers and eq_key in node.version_numbers and \
+                node.version_numbers[eq_key] != self.state.version_number:
+            # We can't traverse this node if it's from a previous version number
+            # because that is not the same value of the equivalence class
+            # Skip this check on the first node though for things like copy across
+            return False
         if not self.visit_node(node):
             return False
         eq_privileges = node.get_equivalence_privileges()
@@ -4268,12 +4274,16 @@ class DataflowTraverser(object):
         # unless this is the first operation which we're trying to
         # traverse backwards from
         if privilege == READ_ONLY or first:
+            # Check to see if the version number is the same, if this
+            # is an operation from a previous version then we can't traverse it
             if node.eq_incoming:
                 incoming = node.eq_incoming[eq_key]
                 if incoming:
                     for next_node in incoming:
                         # Short-circuit if we're done for better or worse
                         if self.traverse_node(next_node, eq_key, first=False):
+                            # Still need to do the post visit call
+                            self.post_visit_node(node)
                             return True
         self.post_visit_node(node)
         # See if we are done
@@ -4351,8 +4361,11 @@ class DataflowTraverser(object):
 
     def perform_copy_analysis(self, copy, src, dst):
         # If we've already traversed this then we can skip the verification
-        if copy.record_analyzed_point(self.point):
+        if copy.record_version_number(self.state):
             return
+        if self.across:
+            copy.record_across_version_number(self.point, self.dst_field,
+                                              self.dst_tree, self.dst_version)
         src_preconditions = src.find_verification_copy_dependences(self.src_depth,
                                         self.src_field, self.point, self.op, 
                                         self.src_req.index, True, 0, self.src_version)
@@ -4389,11 +4402,15 @@ class DataflowTraverser(object):
               fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
             # If we don't have a pending fill, then this isn't right
             if not self.state.pending_fill:
-                return
+                return True
             self.found_dataflow_path = True
             # If we've already traversed this then we can skip the verification
-            if fill.record_analyzed_point(self.point):
-                return
+            if fill.record_version_number(self.state):
+                return False
+            assert self.state.fill_op is fill.fill_op
+            if self.across:
+                fill.record_across_version_number(self.point, self.dst_field,
+                                                  self.dst_tree, self.dst_version)
             dst = fill.dsts[fill.fields.index(self.dst_field)]
             preconditions = dst.find_verification_copy_dependences(self.dst_depth,
                             self.dst_field, self.point, self.op, self.dst_req.index, 
@@ -4406,7 +4423,7 @@ class DataflowTraverser(object):
                 self.failed_analysis = True
                 if self.op.state.assert_on_error:
                     assert False
-                return
+                return False
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
         return False
@@ -4532,7 +4549,7 @@ class DataflowTraverser(object):
 class EquivalenceSet(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
                  'previous_instances', 'pending_reductions', 
-                 'pending_fill', 'version_number']
+                 'pending_fill', 'fill_op', 'version_number']
     def __init__(self, tree, depth, field, point):
         self.tree = tree
         self.depth = depth
@@ -4544,6 +4561,7 @@ class EquivalenceSet(object):
         # Reductions of different kinds must be kept in order
         self.pending_reductions = list()
         self.pending_fill = False 
+        self.fill_op = None
         self.version_number = 0
         
     def is_initialized(self):
@@ -4552,6 +4570,7 @@ class EquivalenceSet(object):
     def reset(self):
         self.version_number += 1
         self.pending_fill = False
+        self.fill_op = None
         self.previous_instances = set()
         self.valid_instances = set()
         self.pending_reductions = list()
@@ -4564,6 +4583,8 @@ class EquivalenceSet(object):
         # Fills clear everything out so we are just done
         self.reset()
         self.pending_fill = True
+        assert op.kind == FILL_OP_KIND
+        self.fill_op = op
         return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, 
@@ -4620,7 +4641,7 @@ class EquivalenceSet(object):
     def perform_copy(self, src, dst, op, req):
         copy = op.find_or_create_copy(req, self.field, src, dst)
         # Record this point for the copy operation so it renders properly
-        copy.record_analyzed_point(self.point)
+        copy.record_version_number(self)
         # Update the source instance
         src_preconditions = src.find_verification_copy_dependences(self.depth, 
               self.field, self.point, op, req.index, True, 0, self.version_number)
@@ -4655,9 +4676,9 @@ class EquivalenceSet(object):
             self.perform_copy(src, inst, op, req)
         # If we have a fill operation, we can just do that
         elif self.pending_fill:
-            fill = op.find_or_create_fill(req, self.field, inst)
+            fill = op.find_or_create_fill(req, self.field, inst, self.fill_op)
             # Record this point for the copy operation so it renders properly
-            fill.record_analyzed_point(self.point)
+            fill.record_version_number(self)
             preconditions = inst.find_verification_copy_dependences(self.depth, 
                 self.field, self.point, op, req.index, False, 0, self.version_number)
             for pre in preconditions:
@@ -4761,8 +4782,10 @@ class EquivalenceSet(object):
                         assert False
                     return False
                 # If we already preformed the verification then we can skip this
-                if copy.record_analyzed_point(self.point):
+                if copy.record_version_number(self):
                     return True
+                copy.record_across_version_number(self.point, dst_field, 
+                                                  dst_req.tid, dst_version_number)
                 src_preconditions = src_inst.find_verification_copy_dependences(
                                     src_depth, src_field, self.point, op, 
                                     src_req.index, True, 0, self.version_number)
@@ -4805,9 +4828,9 @@ class EquivalenceSet(object):
         elif self.pending_fill:
             # Should be no reductions here
             assert redop == 0
-            fill = op.find_or_create_fill(dst_req, dst_field, dst_inst)
+            fill = op.find_or_create_fill(dst_req, dst_field, dst_inst, self.fill_op)
             # Record this point for the copy operation so it renders properly
-            fill.record_analyzed_point(self.point)
+            fill.record_version_number(self)
             preconditions = dst_inst.find_verification_copy_dependences(
                                 dst_depth, dst_field, self.point, op, 
                                 dst_req.index, False, redop, dst_version_number)
@@ -4836,7 +4859,7 @@ class EquivalenceSet(object):
         copy = op.find_or_create_copy_across(src_inst, src_field, src_req,
                                              dst_inst, dst_field, dst_req, redop)
         # Record this point for the copy operation so it renders properly
-        copy.record_analyzed_point(self.point)
+        copy.record_version_number(self)
         src_preconditions = src_inst.find_verification_copy_dependences(
                             src_depth, src_field, self.point, op, 
                             src_req.index, True, 0, self.version_number)
@@ -5473,16 +5496,15 @@ class Operation(object):
         assert not other.points
         other.merged = True
 
-    def record_current_version(self, index, field, point, version_number):
-        assert index in self.reqs
+    def record_current_version(self, point, field, tree, version_number):
         if not self.version_numbers:
             self.version_numbers = dict()
-        if index not in self.version_numbers:
-            self.version_numbers[index] = dict()
-        if field not in self.version_numbers[index]:
-            self.version_numbers[index][field] = dict()
-        assert point not in self.version_numbers[index][field]
-        self.version_numbers[index][field][point] = version_number
+        eq_key = (point, field, tree)
+        assert eq_key in self.eq_privileges
+        if eq_key in self.version_numbers:
+            assert self.version_numbers[eq_key] == version_number
+        else:
+            self.version_numbers[eq_key] = version_number
 
     def compute_physical_reachable(self):
         # We can skip some of these
@@ -5516,7 +5538,7 @@ class Operation(object):
             for other in self.physical_outgoing:
                 other.physical_incoming.add(self)
 
-    def find_or_create_fill(self, req, field, dst):
+    def find_or_create_fill(self, req, field, dst, fill_op):
         # Run through our copies and see if we can find one that matches
         if self.realm_fills:
             for fill in self.realm_fills:
@@ -5534,6 +5556,7 @@ class Operation(object):
         fill.set_tree_properties(None, req.field_space, req.tid)
         fill.add_field(field.fid, dst)
         self.realm_fills.append(fill)
+        fill.set_fill_op(fill_op)
         return fill
 
     def find_verification_copy_across(self, src_field, dst_field, point,
@@ -5969,11 +5992,15 @@ class Operation(object):
             return True
         if self.realm_copies:
             for copy in self.realm_copies:
-                if not copy.check_for_spurious_points():
+                if not copy.check_for_spurious_updates(copy.dst_fields, copy.dst_tree_id,
+                        copy.across_version_numbers if copy.is_across() 
+                        else copy.version_numbers):
                     return False
         if self.realm_fills:
             for fill in self.realm_fills:
-                if not fill.check_for_spurious_points():
+                if not fill.check_for_spurious_updates(fill.fields, fill.dst_tree_id,
+                        fill.across_version_numbers if fill.is_across()
+                        else fill.version_numbers):
                     return False
         return True
 
@@ -5988,7 +6015,7 @@ class Operation(object):
                 mapping = None
             depth = self.context.find_enclosing_context_depth(req, mapping)
             for field in req.fields:
-                req.logical_node.compute_current_version_numbers(depth, field, self, index)
+                req.logical_node.compute_current_version_numbers(depth, field, self, req.tid)
 
     def verify_copy_requirements(self, src_idx, src_req, dst_idx, dst_req, perform_checks):
         # If this was predicated there might not be any mappings
@@ -7947,7 +7974,8 @@ class RealmBase(object):
     __slots__ = ['state', 'realm_num', 'creator', 'index_expr', 'field_space',
                  'start_event', 'finish_event', 'physical_incoming', 'physical_outgoing', 
                  'eq_incoming', 'eq_outgoing', 'eq_privileges', 'generation', 
-                 'event_context', 'analyzed_points', 'cluster_name']
+                 'event_context', 'version_numbers', 'across_version_numbers', 
+                 'cluster_name']
     def __init__(self, state, realm_num):
         self.state = state
         self.realm_num = realm_num
@@ -7963,7 +7991,8 @@ class RealmBase(object):
         self.finish_event = state.get_no_event()
         self.generation = 0
         self.event_context = None
-        self.analyzed_points = None
+        self.version_numbers = None
+        self.across_version_numbers = None
         self.cluster_name = None # always none
 
     def is_realm_operation(self):
@@ -7996,36 +8025,50 @@ class RealmBase(object):
         assert self.creator is not None
         return self.creator
 
-    def record_analyzed_point(self, point):
-        if self.analyzed_points is None:
-            self.analyzed_points = PointSet()
-        if point not in self.analyzed_points:
-            self.analyzed_points.add_point(point)
-            return False
-        else:
-            return True
+    def get_point_set(self):
+        result = PointSet()
+        if self.version_numbers:
+            for eq_key in self.version_numbers.iterkeys():
+                result.add_point(eq_key[0])
+        return result
 
-    def check_for_spurious_points(self):
-        point_set = self.index_expr.get_point_set()
-        point_set_size = len(point_set)
-        assert point_set_size > 0
-        if self.analyzed_points is None:
+    def record_version_number(self, eq_set):
+        if self.version_numbers is None:
+            self.version_numbers = dict()
+        eq_key = (eq_set.point, eq_set.field, eq_set.tree.tree_id)
+        if eq_key in self.version_numbers:
+            assert self.version_numbers[eq_key] == eq_set.version_number
+            return True
+        else:
+            self.version_numbers[eq_key] = eq_set.version_number
+            return False 
+
+    def record_across_version_number(self, point, field, tree, version):
+        if self.across_version_numbers is None:
+            self.across_version_numbers = dict()
+        eq_key = (point, field, tree)
+        if eq_key in self.across_version_numbers:
+            assert self.across_version_numbers[eq_key] == version
+        else:
+            self.across_version_numbers[eq_key] = version
+
+    def check_for_spurious_updates(self, fields, tree, versions):
+        if versions is None:
             print('ERROR: '+str(self.creator)+' generated spurious '+str(self)) 
             if self.state.assert_on_error:
                 assert False
             return False
-        else:
-            # Check the points individually
-            assert point_set_size >= len(self.analyzed_points)
-            for point in point_set.iterator():
-                if point not in self.analyzed_points.iterator():
-                    print('ERROR: '+str(creator)+' generated spurious '+
-                            str(self)+' for point '+str(point))
+        point_set = self.index_expr.get_point_set()
+        for point in point_set.iterator():
+            for field in fields:
+                eq_key = (point, field, tree)
+                if eq_key not in versions:
+                    print('ERROR: '+str(self.creator)+' generated spurious '+
+                            str(self)+' for point '+str(point)+' of '+str(field)+
+                            ' in tree '+str(tree))
                     if self.state.assert_on_error:
                         assert False
                     return False
-        # We can clear this now that we no longer need it
-        self.analyzed_points = None
         return True
 
     def compute_physical_reachable(self):
@@ -8158,8 +8201,8 @@ class RealmCopy(RealmBase):
             else:
                 # This is the case where we had to generate the 
                 # copy from our own information
-                assert self.analyzed_points
-                point_set = self.analyzed_points
+                point_set = self.get_point_set()
+                assert point_set
             label = "Realm Copy ("+str(self.realm_num)+") of "+\
                         point_set.point_space_graphviz_string()
         else:
@@ -8233,7 +8276,7 @@ class RealmCopy(RealmBase):
         return self.eq_privileges 
 
 class RealmFill(RealmBase):
-    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'across', 'node_name']
+    __slots__ = ['fields', 'dsts', 'dst_tree_id', 'fill_op', 'across', 'node_name']
     def __init__(self, state, finish, realm_num):
         RealmBase.__init__(self, state, realm_num)
         self.finish_event = finish
@@ -8242,6 +8285,7 @@ class RealmFill(RealmBase):
         self.fields = list()
         self.dsts = list()
         self.dst_tree_id = None
+        self.fill_op = None  
         self.across = None
         self.node_name = 'realm_fill_'+str(realm_num)
 
@@ -8260,6 +8304,13 @@ class RealmFill(RealmBase):
         self.creator = creator
         self.creator.add_realm_fill(self)
 
+    def set_fill_op(self, fill_op):
+        assert fill_op is not None
+        if self.fill_op is None:
+            self.fill_op = fill_op
+        else:
+            assert fill_op is self.fill_op
+
     def set_tree_properties(self, index_expr, field_space, dst_tid):
         self.index_expr = index_expr
         self.field_space = field_space
@@ -8268,8 +8319,8 @@ class RealmFill(RealmBase):
     def is_across(self):
         if self.across is not None:
             return self.across
-        assert self.creator is not None
-        req = self.creator.reqs[0]
+        assert self.fill_op is not None
+        req = self.fill_op.reqs[0]
         if req.tid != self.dst_tree_id:
             self.across = True
         else:
@@ -8300,8 +8351,8 @@ class RealmFill(RealmBase):
             else:
                 # This is the case where we had to generate the 
                 # copy from our own information
-                assert self.analyzed_points
-                point_set = self.analyzed_points
+                point_set = self.get_point_set()
+                assert point_set
             label = "Realm Fill ("+str(self.realm_num)+") of "+\
                         point_set.point_space_graphviz_string()
         else:
@@ -9018,7 +9069,7 @@ realm_copy_field_pat    = re.compile(
            "(?P<srcid>[0-9a-f]+) (?P<dstfid>[0-9]+) (?P<dstid>[0-9a-f]+) (?P<redop>[0-9]+)")
 realm_fill_pat          = re.compile(
     prefix+"Fill Events (?P<uid>[0-9]+) (?P<ispace>[0-9]+) (?P<fspace>[0-9]+) "+
-           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+)")
+           "(?P<tid>[0-9]+) (?P<preid>[0-9a-f]+) (?P<postid>[0-9a-f]+) (?P<fill_uid>[0-9]+)")
 realm_fill_field_pat    = re.compile(
     prefix+"Fill Field (?P<id>[0-9a-f]+) (?P<fid>[0-9]+) "+
            "(?P<dstid>[0-9a-f]+)")
@@ -9121,6 +9172,8 @@ def parse_legion_spy_line(line, state):
         field_space = state.get_field_space(int(m.group('fspace')))
         tree_id = int(m.group('tid'))
         fill.set_tree_properties(index_expr, field_space, tree_id)
+        fill_op = state.get_operation(int(m.group('fill_uid')))
+        fill.set_fill_op(fill_op)
         return True
     m = realm_fill_field_pat.match(line)
     if m is not None:
