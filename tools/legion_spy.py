@@ -10319,7 +10319,10 @@ class State(object):
             node = ready_nodes.popleft()
             process_node(node)
         # The pending nodes should be empty by the time we are done with this
-        assert not pending_nodes
+        # This is actually not true because some edges are just for things like
+        # futures with no region dependences and so we might not traverse them
+        # at all, e.g. see the tests/regent/run_pass/call_task_future.rg example
+        #assert not pending_nodes
         print('Done')
         print('Simplifying equivalence event graphs...')
         # Now we need to transitively reduce each of the equivalence set graphs
