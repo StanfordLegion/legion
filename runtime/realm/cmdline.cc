@@ -162,6 +162,18 @@ namespace Realm {
   }
 
   template <>
+  bool convert_integer_cmdline_argument<long long>(const std::string& s, long long& target)
+  {
+    errno = 0;  // no errors from before
+    char *pos;
+    target = strtoll(s.c_str(), &pos, 10);
+    if((errno == 0) && (*pos == 0)) {
+      return true;
+    } else 
+      return false;
+  }
+
+  template <>
   bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target)
   {
     errno = 0;  // no errors from before
