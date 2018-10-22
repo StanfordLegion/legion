@@ -170,6 +170,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+      assert(rhs.op == NULL);
       assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
@@ -3409,7 +3410,16 @@ namespace Legion {
         assert(mapping_guards.find(op) != mapping_guards.end());
 #endif
         MappingGuard &our_guard = mapping_guards[op];
-        if (our_guard.guard_index > 0)
+        // We use a guard index to determine which order operations arrive,
+        // 0 is used as an unset value so we don't have to record any 
+        // dependences on operations that haven't arrived yet. We then 
+        // record dependences on any operations that arrived before us. We 
+        // guarantee the same partial order on all operations across all 
+        // equivalence classes by serializing this process using the per 
+        // context "equivalence class locks" (e.g. eq_acquire_lock).
+        // We only need to do this one time since we can do it for all 
+        // our fields in our guard mask
+        if (our_guard.guard_index == 0)
         {
           for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
                 mapping_guards.begin(); it != mapping_guards.end(); it++)
@@ -3417,23 +3427,21 @@ namespace Legion {
             // Skip ourself
             if (it->first == op)
               continue;
-            // We use a guard index to determine which order operations arrive,
-            // 0 is used as an unset value so we don't have to record any 
-            // dependences on operations that haven't arrived yet. We then 
-            // record dependences on any operations that arrived before us. We 
-            // guarantee the same partial order on all operations across all 
-            // equivalence classes by serializing this process using the per 
-            // context "equivalence class locks" (e.g. eq_acquire_lock).
+            
             if (it->second.guard_index == 0)
               continue;
             // Skip any with disjoint fields
-            if (it->second.guard_mask * request_mask)
+            if (it->second.guard_mask * our_guard.guard_mask)
               continue;
             // Need to record mapping dependences on any of these ops
             ready_events.insert(it->first->get_mapped_event());
           }
           // Set our guard index
           our_guard.guard_index = next_guard_index++;
+#ifdef DEBUG_LEGION
+          // This will check for overflow too, hopefully we never exceed 2^64
+          assert(our_guard.guard_index != 0);
+#endif
         }
       }
       if (!is_logical_owner())
