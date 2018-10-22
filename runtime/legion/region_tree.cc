@@ -1406,7 +1406,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     bool defer_make_ready)
+                     bool defer_make_ready, std::set<Reservation> *eq_locks)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1424,7 +1424,31 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(),
                                                context, version_info);
-      if (!defer_make_ready)
+      // Read-only and reduction mappings to the same equivalence class can 
+      // potentially race with each other for effects on the same node. 
+      // To prevent this we grap context specific equivalence class locks
+      // before making the equivalence classes ready
+      if (IS_READ_ONLY(req) || (IS_REDUCE(req)))
+      {
+        Reservation eq_lock = context->get_equivalence_class_lock();
+        if (defer_make_ready)
+        {
+#ifdef DEBUG_LEGION
+          assert(eq_locks != NULL);
+#endif
+          eq_locks->insert(eq_lock);
+        }
+        else
+        {
+          RtEvent ready = 
+            Runtime::acquire_rt_reservation(eq_lock, true/*exclusive*/);
+          if (ready.exists() && !ready.has_triggered())
+            ready.wait();
+          version_info.make_ready(req, user_mask, ready_events);
+          eq_lock.release(); 
+        }
+      }
+      else if (!defer_make_ready)
         version_info.make_ready(req, user_mask, ready_events);
     }
 

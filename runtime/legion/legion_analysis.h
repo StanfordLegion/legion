@@ -634,6 +634,19 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = EQUIVALENCE_SET_ALLOC;
     public:
+      struct MappingGuard {
+      public:
+        MappingGuard(void)
+          : guard_index(0), count(0), mutated(false) { }
+        MappingGuard(const FieldMask &m)
+          : guard_mask(m), guard_index(0), count(1), mutated(false) { }
+      public:
+        FieldMask guard_mask;
+        unsigned long long guard_index;
+        unsigned count;
+        bool mutated;
+      };
+    public:
       struct RefinementTaskArgs : public LgTaskArgs<RefinementTaskArgs> {
       public:
         static const LgTaskID TASK_ID = LG_REFINEMENT_TASK_ID;
@@ -784,13 +797,14 @@ namespace Legion {
         { return (unrefined_remainder != NULL); }
       void refine_remainder(void);
       bool acquire_mapping_guard(Operation *op,
+                                 const FieldMask &guard_mask,
                                  std::vector<EquivalenceSet*> &alt_sets,
                                  bool recursed = false);
       void remove_mapping_guard(Operation *op);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
                                          IndexSpaceExpression *expr, 
                                          AddressSpaceID source); 
-      void request_valid_copy(FieldMask request_mask,
+      void request_valid_copy(Operation *op, FieldMask request_mask,
                               const RegionUsage usage,
                               std::set<RtEvent> &ready_events, 
                               std::set<RtEvent> &applied_events,
@@ -952,7 +966,7 @@ namespace Legion {
       bool finalize_pending_update(PendingRequest *pending_request);
       void finalize_pending_request(PendingRequest *pending_request);
       void perform_all_deferred_requests(void);
-      void perform_ready_deferred_requests(const FieldMask &guard_mask);
+      void perform_ready_deferred_requests(void);
 #ifdef DEBUG_LEGION
       void sanity_check(void) const;
 #endif
@@ -1000,15 +1014,17 @@ namespace Legion {
       // Track the mapping events of the current operations that
       // are using this equivalence class to map, the count 
       // indicates how many times it has been acquired
-      std::map<Operation*,unsigned/*count*/> mapping_guards;
-      // We also need to track which fields are currently being
-      // mutated the operations which will block sending any updates
-      // from this equivalence set until the guards are removed
-      FieldMaskSet<Operation> mutated_fields;
+      LegionMap<Operation*,MappingGuard>::aligned mapping_guards;
+      // Keep a summary mask of the fields in the mapping guards
+      FieldMask mapping_guard_summary;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready
       RtUserEvent transition_event;
+      // Keep an order on all operations that attempt to acquire
+      // this equivalence class. Hopefully 64 bits is enough that
+      // we never have to reset this
+      unsigned long long next_guard_index;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid

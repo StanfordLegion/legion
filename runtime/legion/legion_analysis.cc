@@ -249,7 +249,7 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
-        if ((*it)->acquire_mapping_guard(op, alt_sets))
+        if ((*it)->acquire_mapping_guard(op, ready_mask, alt_sets))
         {
 #ifdef DEBUG_LEGION
           assert(!alt_sets.empty());
@@ -281,7 +281,7 @@ namespace Legion {
       // writing otherwise, we know we can do things with a shared copy
       for (std::set<EquivalenceSet*>::const_iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->request_valid_copy(ready_mask, RegionUsage(req), 
+        (*it)->request_valid_copy(op, ready_mask, RegionUsage(req), 
                                   ready_events, applied_events,
                                   (*it)->local_space);
     }
@@ -2655,7 +2655,7 @@ namespace Legion {
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
             is_owner() ? VALID_STATE : INVALID_STATE),
-        unrefined_remainder(NULL)
+        next_guard_index(1), unrefined_remainder(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -2912,6 +2912,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_mapping_guard(Operation *op,
+                                               const FieldMask &guard_mask,
                std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
@@ -2927,11 +2928,15 @@ namespace Legion {
         // from a different operation between the two acquires.
         if (!mapping_guards.empty())
         {
-          std::map<Operation*,unsigned>::iterator finder = 
+          LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
             mapping_guards.find(op);
           if (finder != mapping_guards.end())
           {
-            finder->second++;
+            finder->second.count++;
+            // See if we have any new fields which we need to check for updates
+
+            finder->second.guard_mask |= guard_mask;
+            mapping_guard_summary |= guard_mask;
             if (recursed)
               alt_sets.push_back(this);
             return false;
@@ -3015,7 +3020,8 @@ namespace Legion {
           // Should have been handled above
           assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
-          mapping_guards[op] = 1;
+          mapping_guards[op] = MappingGuard(guard_mask);
+          mapping_guard_summary |= guard_mask;
         }
         else // Our set of subsets are now what we need
           to_recurse = subsets;
@@ -3025,7 +3031,7 @@ namespace Legion {
       {
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->acquire_mapping_guard(op, alt_sets, true/*recursed*/);
+          (*it)->acquire_mapping_guard(op,guard_mask,alt_sets,true/*recursed*/);
         // We've been refined so return true indicating that we changed
         return true;
       }
@@ -3040,7 +3046,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      std::map<Operation*,unsigned>::iterator finder = mapping_guards.find(op);
+      LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
+        mapping_guards.find(op);
 #ifdef DEBUG_LEGION
       if (is_logical_owner())
         assert((eq_state == MAPPING_STATE) || 
@@ -3049,18 +3056,16 @@ namespace Legion {
         assert((eq_state == VALID_STATE) ||
                 (eq_state == PENDING_INVALID_STATE));
       assert(finder != mapping_guards.end());
-      assert(finder->second > 0);
+      assert(finder->second.count > 0);
 #endif
-      if (finder->second == 1)
+      if (finder->second.count == 1)
       {
         // Last removal so we are done
         mapping_guards.erase(finder);
-        // We can also remove any mapping fields
-        FieldMaskSet<Operation>::iterator op_finder = mutated_fields.find(op);
-        if (op_finder != mutated_fields.end())
-          mutated_fields.erase(op_finder);
         if (mapping_guards.empty())
         {
+          // Clear the summary mask
+          mapping_guard_summary.clear();
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
 #ifdef DEBUG_LEGION
@@ -3091,18 +3096,20 @@ namespace Legion {
         {
           // Tighten the mask and then use it to find any requests
           // which are now free to be performed
-          const FieldMask &guard_mask = mutated_fields.tighten_valid_mask();
-          if (guard_mask * deferred_requests.get_valid_mask())
+          mapping_guard_summary.clear();
+          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
+                mapping_guards.begin(); it != mapping_guards.end(); it++)
+            mapping_guard_summary |= it->second.guard_mask;
+          if (mapping_guard_summary * deferred_requests.get_valid_mask())
             // We can just perform all of them
             perform_all_deferred_requests();
           else
             // Only perform those that are not protected anymore
-            perform_ready_deferred_requests(guard_mask);
+            perform_ready_deferred_requests();
         }
-
       }
       else // Just remove the count
-        finder->second--;
+        finder->second.count--;
     }
 
     //--------------------------------------------------------------------------
@@ -3126,8 +3133,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_ready_deferred_requests(
-                                                    const FieldMask &guard_mask)
+    void EquivalenceSet::perform_ready_deferred_requests(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3137,7 +3143,7 @@ namespace Legion {
       for (FieldMaskSet<DeferredRequest>::const_iterator it = 
             deferred_requests.begin(); it != deferred_requests.end(); it++)
       {
-        if (it->second * guard_mask)
+        if (it->second * mapping_guard_summary)
         {
           unsigned dummy_updates = 0;
           request_update(local_space, it->first->invalid_space,
@@ -3380,7 +3386,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::request_valid_copy(FieldMask request_mask,
+    void EquivalenceSet::request_valid_copy(Operation *op, 
+                                            FieldMask request_mask,
                                             const RegionUsage usage,
                                             std::set<RtEvent> &ready_events, 
                                             std::set<RtEvent> &applied_events,
@@ -3392,6 +3399,43 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
+      if ((request_space == local_space) &&
+          (IS_READ_ONLY(usage) || IS_REDUCE(usage)))
+      {
+        // In order to prevent read-only races we need to order the mapping
+        // of all simultaneous users of this equivalence class on this node, 
+        // we do it based on the mapping guard index  
+#ifdef DEBUG_LEGION
+        assert(mapping_guards.find(op) != mapping_guards.end());
+#endif
+        MappingGuard &our_guard = mapping_guards[op];
+        if (our_guard.guard_index > 0)
+        {
+          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
+                mapping_guards.begin(); it != mapping_guards.end(); it++)
+          {
+            // Skip ourself
+            if (it->first == op)
+              continue;
+            // We use a guard index to determine which order operations arrive,
+            // 0 is used as an unset value so we don't have to record any 
+            // dependences on operations that haven't arrived yet. We then 
+            // record dependences on any operations that arrived before us. We 
+            // guarantee the same partial order on all operations across all 
+            // equivalence classes by serializing this process using the per 
+            // context "equivalence class locks" (e.g. eq_acquire_lock).
+            if (it->second.guard_index == 0)
+              continue;
+            // Skip any with disjoint fields
+            if (it->second.guard_mask * request_mask)
+              continue;
+            // Need to record mapping dependences on any of these ops
+            ready_events.insert(it->first->get_mapped_event());
+          }
+          // Set our guard index
+          our_guard.guard_index = next_guard_index++;
+        }
+      }
       if (!is_logical_owner())
       {
 #ifdef DEBUG_LEGION
@@ -4145,15 +4189,25 @@ namespace Legion {
         // mapping here are applied. This is especially important
         // for multiple readers are mapping the same equivalence set
         // at the same time.
-        if (!mutated_fields.empty() && 
-            !(mutated_fields.get_valid_mask() * update_mask))
+        if (!mapping_guards.empty() && 
+            !(mapping_guard_summary * update_mask))
         {
-          // Defer this request until later
-          DeferredRequest *deferred = 
-            new DeferredRequest(invalid_space, pending_request, 
-                                invalidate, skip_redop);
-          deferred_requests.insert(deferred, update_mask);
-          return;
+          // We only need to defer this if we find a mutated set of
+          // fields that we have to defer against
+          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator 
+                it = mapping_guards.begin(); it != mapping_guards.end(); it++)
+          {
+            if (!it->second.mutated)
+              continue;
+            if (it->second.guard_mask * update_mask)
+              continue;
+            // Now we need to defer this until later
+            DeferredRequest *deferred = 
+              new DeferredRequest(invalid_space, pending_request, 
+                                  invalidate, skip_redop);
+            deferred_requests.insert(deferred, update_mask);
+            return;
+          }
         }
         // Make an event that will be triggered once the message is
         // handled on the remote node
@@ -5314,9 +5368,10 @@ namespace Legion {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(!(user_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating
-      mutated_fields.insert(op, user_mask);
+      mapping_guards[op].mutated = true;
       // Check for any uninitialized data
       if (initialized != NULL)
       {
@@ -5443,9 +5498,10 @@ namespace Legion {
         return;
 #ifdef DEBUG_LEGION
       assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(!(acquire_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mutated_fields.insert(op, acquire_mask);
+      mapping_guards[op].mutated = true;
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
@@ -5476,9 +5532,10 @@ namespace Legion {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(!(release_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mutated_fields.insert(op, release_mask);
+      mapping_guards[op].mutated = true;
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
@@ -5749,9 +5806,10 @@ namespace Legion {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mutated_fields.insert(op, mask);
+      mapping_guards[op].mutated = true;
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -5811,9 +5869,10 @@ namespace Legion {
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(mapping_guards.find(op) != mapping_guards.end());
+      assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mutated_fields.insert(op, mask);
+      mapping_guards[op].mutated = true;
       FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
       if (finder != valid_instances.end())
       {
@@ -6787,7 +6846,7 @@ namespace Legion {
       std::set<RtEvent> fake_ready, fake_applied;
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
-      set->request_valid_copy(request_mask, usage, fake_ready,
+      set->request_valid_copy(NULL/*dummy op*/, request_mask, usage, fake_ready,
                               fake_applied, source, pending_request);
 #ifdef DEBUG_LEGION
       assert(fake_ready.empty());

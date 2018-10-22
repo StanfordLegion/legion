@@ -10902,8 +10902,6 @@ namespace Legion {
       inline void clear(void);
       inline size_t size(void) const;
     public:
-      inline std::pair<T*,FieldMask>* next(T *current) const;
-    public:
       inline void swap(FieldMaskSet &other);
     public:
       inline iterator begin(void);
@@ -11203,33 +11201,6 @@ namespace Legion {
       }
       else
         return entries.multi_entries->size();
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
-    inline std::pair<T*,FieldMask>* FieldMaskSet<T>::next(T *current) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-#ifdef DEBUG_LEGION
-        assert(current == entries.single_entry);
-#endif
-        return NULL; 
-      }
-      else
-      {
-        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
-          entries.multi_entries->find(current);
-#ifdef DEBUG_LEGION
-        assert(finder != entries.multi_entries->end());
-#endif
-        finder++;
-        if (finder == entries.multi_entries->end())
-          return NULL;
-        else
-          return reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder));
-      }
     }
 
     //--------------------------------------------------------------------------

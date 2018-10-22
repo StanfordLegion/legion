@@ -2522,6 +2522,7 @@ namespace Legion {
 #endif
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
+      std::set<Reservation> context_eq_locks;
       const bool multiple_reqs = (regions.size() > 1);
       std::vector<unsigned> to_skip;
       if (is_remote())
@@ -2545,7 +2546,7 @@ namespace Legion {
             continue;
           }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                    version_info, ready_events, multiple_reqs);
+                  version_info, ready_events, multiple_reqs, &context_eq_locks);
         }
       }
       else
@@ -2566,11 +2567,24 @@ namespace Legion {
             continue;
           }
           runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                                    version_info, ready_events, multiple_reqs);
+                  version_info, ready_events, multiple_reqs, &context_eq_locks);
         }
       }
       if (multiple_reqs && (to_skip.size() < regions.size()))
       {
+        if (!context_eq_locks.empty())
+        {
+          RtEvent locks_acquired;
+          for (std::set<Reservation>::const_iterator it = 
+                context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+          {
+            RtEvent next = Runtime::acquire_rt_reservation(*it,
+                              true/*exclusive*/, locks_acquired);
+            locks_acquired = next;
+          }
+          if (locks_acquired.exists() && !locks_acquired.has_triggered())
+            locks_acquired.wait();
+        }
         if (!to_skip.empty())
         {
           unsigned skip_index = 0;
@@ -2592,6 +2606,12 @@ namespace Legion {
           for (unsigned idx = 0; idx < regions.size(); idx++)
             runtime->forest->make_versions_ready(regions[idx], 
                               version_infos[idx], ready_events);
+        }
+        if (!context_eq_locks.empty())
+        {
+          for (std::set<Reservation>::const_iterator it = 
+                context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+            it->release();
         }
       }
       if (!ready_events.empty())

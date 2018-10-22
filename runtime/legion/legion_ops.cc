@@ -3554,12 +3554,14 @@ namespace Legion {
 
       // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
+      std::set<Reservation> context_eq_locks;
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      src_requirements[idx],
                                                      src_versions[idx],
                                                      preconditions,
-                                                     true/*defer*/);
+                                                     true/*defer*/,
+                                                     &context_eq_locks);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3572,7 +3574,8 @@ namespace Legion {
                                                      dst_requirements[idx],
                                                      dst_versions[idx],
                                                      preconditions,
-                                                     true/*defer*/);
+                                                     true/*defer*/,
+                                                     &context_eq_locks);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -3585,7 +3588,8 @@ namespace Legion {
                                                  src_indirect_requirements[idx],
                                                  gather_versions[idx],
                                                  preconditions,
-                                                 true/*defer*/);
+                                                 true/*defer*/,
+                                                 &context_eq_locks);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -3595,7 +3599,23 @@ namespace Legion {
                                                  dst_indirect_requirements[idx],
                                                  scatter_versions[idx],
                                                  preconditions,
-                                                 true/*defer*/);
+                                                 true/*defer*/,
+                                                 &context_eq_locks);
+      }
+      // Acquire any locks we need to do the make ready step and 
+      // wait for them to be acquired
+      if (!context_eq_locks.empty())
+      {
+        RtEvent locks_acquired;
+        for (std::set<Reservation>::const_iterator it = 
+              context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+        {
+          RtEvent next = Runtime::acquire_rt_reservation(*it,
+                            true/*exclusive*/, locks_acquired);
+          locks_acquired = next;
+        }
+        if (locks_acquired.exists() && !locks_acquired.has_triggered())
+          locks_acquired.wait();
       }
       // Since we have multiple region requirements we know that we have
       // to defer doing these kinds of things
@@ -3630,6 +3650,13 @@ namespace Legion {
           runtime->forest->make_versions_ready(dst_indirect_requirements[idx],
                                                scatter_versions[idx],
                                                preconditions);
+      }
+      // Release any locks that we acquired
+      if (!context_eq_locks.empty())
+      {
+        for (std::set<Reservation>::const_iterator it = 
+              context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+          it->release();
       }
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));

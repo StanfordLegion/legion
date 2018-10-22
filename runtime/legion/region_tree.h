@@ -302,7 +302,8 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       bool defer_make_ready = false);
+                                       bool defer_make_ready = false,
+                                       std::set<Reservation> *eq_locks = NULL);
       void make_versions_ready(const RegionRequirement &req,
                                VersionInfo &version_info,
                                std::set<RtEvent> &ready_events);

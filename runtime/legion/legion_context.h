@@ -692,6 +692,9 @@ namespace Legion {
     public:
       InnerContext& operator=(const InnerContext &rhs);
     public:
+      inline Reservation get_equivalence_class_lock(void) const
+        { return eq_acquire_lock; }
+    public:
       void print_children(void);
       void perform_window_wait(void);
     public:
@@ -1038,6 +1041,8 @@ namespace Legion {
       const std::vector<bool>               &virtual_mapped;
     protected:
       mutable LocalLock                     child_op_lock;
+      // Reservation for serializing equivalence class acquires
+      Reservation                           eq_acquire_lock;
       // Track whether this task has finished executing
       unsigned total_children_count; // total number of sub-operations
       unsigned total_close_count; 
