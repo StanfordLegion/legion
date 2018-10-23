@@ -2262,6 +2262,14 @@ class IndexExpr(object):
                         self.point_set -= expr.get_point_set()
         return self.point_set
 
+    def point_space_graphviz_string(self):
+        if self.kind == INDEX_SPACE_EXPR:
+            return str(self)
+        else:
+            point_set = self.get_point_set()
+            assert point_set
+            return point_set.point_space_graphviz_string()
+
     def __str__(self):
         if self.expr_str is not None:
             return self.expr_str
@@ -4225,13 +4233,11 @@ class DataflowTraverser(object):
             self.found_dataflow_path = not state.is_initialized()
         if not self.found_dataflow_path:
             self.dataflow_stack = list()
-            # If there are reductions we can't add the instance to 
-            # the stack until we've gone through a reduction
-            if not state.pending_reductions or state.valid_instances:
-                self.dataflow_stack.append(dst_inst)    
+            self.dataflow_stack.append(dst_inst)    
         else:
             self.dataflow_stack = None
         self.observed_reductions = dict()
+        self.reductions_to_perform = dict()
         self.failed_analysis = False
         self.generation = None
 
@@ -4244,14 +4250,17 @@ class DataflowTraverser(object):
         if isinstance(node, Operation):
             pass 
         elif isinstance(node, RealmCopy):
-            return self.visit_copy(node)
+            self.visit_copy(node)
         elif isinstance(node, RealmFill):
-            return self.visit_fill(node)
+            self.visit_fill(node)
         elif isinstance(node, RealmDeppart):
             pass
         else:
             assert False # should never get here
-        return True
+        # Keep traversing as long as we haven't found the dataflow path or we 
+        # haven't seen all the reductions that we need to see
+        return not self.found_dataflow_path or \
+                len(self.observed_reductions) < len(self.state.pending_reductions)
 
     def post_visit_node(self, node):
         if isinstance(node, RealmCopy):
@@ -4312,7 +4321,6 @@ class DataflowTraverser(object):
                         else:
                             # Push it on the stack and continue traversal
                             self.dataflow_stack.append(src)
-                            return True
                     else:
                         if src in self.state.previous_instances:
                             self.found_dataflow_path = True             
@@ -4321,27 +4329,32 @@ class DataflowTraverser(object):
                         else:
                             # Push it on the stack and continue traversal
                             self.dataflow_stack.append(src)
-                            return True
         else:
             # Reduction copy
+            red_target = self.dataflow_stack[-1]
             if self.dst_field in copy.dst_fields and \
-                copy.dsts[copy.dst_fields.index(self.dst_field)] is self.target and \
+                    copy.dsts[copy.dst_fields.index(self.dst_field)] is red_target and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
                 src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                 if src.redop != 0:
                     if src not in self.state.pending_reductions:
                         return
-                    assert src not in self.observed_reductions
-                    self.observed_reductions[src] = copy
-                    # Wait to do the copy analysis until we've seen
-                    # all the reductions so we can replay them in order
-                    if not self.found_dataflow_path:
-                        # Otherwise we can now push the target on the stack
-                        self.dataflow_stack.append(self.target)
-                    # Always keep going backwards for reductions in case
-                    # there are multiple of them chained together
-                    return True
-        return False
+                    if src in self.observed_reductions:
+                        assert self.observed_reductions[src] is not copy
+                        print("ERROR: Duplicate application of reductions by copies "+
+                                str(copy)+" and "+str(self.observed_reductions[src])+
+                                " from reduction instance "+str(src)+ " for op "+
+                                self.error_str)
+                        if self.op.state.assert_on_error:
+                            assert False
+                        return
+                    else:
+                        self.observed_reductions[src] = copy
+                        if not red_target in self.reductions_to_perform:
+                            self.reductions_to_perform[red_target] = list()
+                        self.reductions_to_perform[red_target].append(src)
+                        # Always keep going backwards for reductions in case
+                        # there are multiple of them chained together 
 
     def post_visit_copy(self, copy):
         if self.failed_analysis:
@@ -4352,12 +4365,21 @@ class DataflowTraverser(object):
             if copy.index_expr.get_point_set().has_point(self.point) and \
                     self.found_dataflow_path: 
                 assert len(self.dataflow_stack) > 1
+                src = self.dataflow_stack[-1]
+                dst = self.dataflow_stack[-2]
+                # Check to see if we have any reductions to perform
+                if dst in self.reductions_to_perform:
+                    for src in self.reductions_to_perform[dst]:
+                        reduction = self.observed_reductions[src]
+                        self.perform_copy_analysis(reduction, src, dst)
+                        if self.failed_analysis and self.op.state.assert_on_error:
+                            assert False
+                    del self.reductions_to_perform[dst]
                 # Perform the copy analysis
-                self.perform_copy_analysis(copy, self.dataflow_stack[-1], 
-                                           self.dataflow_stack[-2])
-        # Always pop our instance off the stack
-        if self.dataflow_stack:
-            self.dataflow_stack.pop()
+                self.perform_copy_analysis(copy, src, dst)
+            # Only pop off our instance if this wasn't a reduction copy
+            if self.dataflow_stack:
+                self.dataflow_stack.pop()
 
     def perform_copy_analysis(self, copy, src, dst):
         # If we've already traversed this then we can skip the verification
@@ -4402,11 +4424,11 @@ class DataflowTraverser(object):
               fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
             # If we don't have a pending fill, then this isn't right
             if not self.state.pending_fill:
-                return True
+                return
             self.found_dataflow_path = True
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
-                return False
+                return
             assert self.state.fill_op is fill.fill_op
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
@@ -4426,7 +4448,6 @@ class DataflowTraverser(object):
                 return False
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
-        return False
 
     def verified(self, last = False):
         if self.failed_analysis:
@@ -4455,15 +4476,15 @@ class DataflowTraverser(object):
                         assert False
                 return False
             elif last:
-                # If this is the last check, replay the reductions in order
-                for src in self.state.pending_reductions:
-                    assert src in self.observed_reductions
-                    reduction = self.observed_reductions[src] 
-                    self.perform_copy_analysis(reduction, src, self.target)
-                    if self.failed_analysis:
-                        if self.op.state.assert_on_error:
-                            assert False
-                        return False
+                # If this is the last check, replay any reductions for the target
+                if self.target in self.reductions_to_perform:
+                    for src in self.reductions_to_perform[self.target]:
+                        reduction = self.observed_reductions[src]
+                        self.perform_copy_analysis(reduction, src, self.target)
+                        if self.failed_analysis:
+                            if self.op.state.assert_on_error:
+                                assert False
+                            return False
         return True
 
     def verify(self, op, restricted = False):
@@ -8197,14 +8218,15 @@ class RealmCopy(RealmBase):
             if self.index_expr:
                 # This is the case where the runtime told us what
                 # the name of the index space was for the copy
-                point_set = self.index_expr.get_point_set()
+                label = "Realm Copy ("+str(self.realm_num)+") of "+\
+                            self.index_expr.point_space_graphviz_string()
             else:
                 # This is the case where we had to generate the 
                 # copy from our own information
                 point_set = self.get_point_set()
                 assert point_set
-            label = "Realm Copy ("+str(self.realm_num)+") of "+\
-                        point_set.point_space_graphviz_string()
+                label = "Realm Copy ("+str(self.realm_num)+") of "+\
+                            point_set.point_space_graphviz_string()
         else:
             label = "Realm Copy ("+str(self.realm_num)+")"
         if self.creator is not None:
@@ -8347,14 +8369,15 @@ class RealmFill(RealmBase):
             if self.index_expr:
                 # This is the case where the runtime told us what
                 # the name of the index space was for the copy
-                point_set = self.index_expr.get_point_set()
+                label = "Realm Fill ("+str(self.realm_num)+") of "+\
+                            self.index_expr.point_space_graphviz_string()
             else:
                 # This is the case where we had to generate the 
                 # copy from our own information
                 point_set = self.get_point_set()
                 assert point_set
-            label = "Realm Fill ("+str(self.realm_num)+") of "+\
-                        point_set.point_space_graphviz_string()
+                label = "Realm Fill ("+str(self.realm_num)+") of "+\
+                            point_set.point_space_graphviz_string()
         else:
             label = "Realm Fill ("+str(self.realm_num)+")"
         if self.creator is not None:
@@ -9798,7 +9821,10 @@ def parse_legion_spy_line(line, state):
             if dim >= 3:
                 lo.vals[2] = int(m.group('lo3'))
                 hi.vals[2] = int(m.group('hi3'))
-        index_space.add_rect(Rect(lo, hi))
+        if lo == hi:
+            index_space.add_point(lo)
+        else:
+            index_space.add_rect(Rect(lo, hi))
         return True
     m = empty_index_space_pat.match(line)
     if m is not None:
