@@ -217,7 +217,7 @@ namespace Legion {
     public:
       PhysicalUser(IndexSpaceExpression *expr);
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index);
+                   UniqueID op_id, unsigned index, bool copy);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
@@ -232,6 +232,7 @@ namespace Legion {
       const size_t expr_volume;
       UniqueID op_id;
       unsigned index; // region requirement index
+      bool copy_user; // is this from a copy or an operation
     };  
 
     /**

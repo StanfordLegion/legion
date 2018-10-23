@@ -277,7 +277,7 @@ namespace Legion {
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,
                     ApEvent term_event, UniqueID op_id, unsigned index,
-                    std::set<RtEvent> &applied_events,
+                    bool copy_user, std::set<RtEvent> &applied_events,
                     const PhysicalTraceInfo &trace_info);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
@@ -341,6 +341,7 @@ namespace Legion {
                                       EventFieldExprs &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const PhysicalTraceInfo &trace_info); 
+      template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
                                       const UniqueID op_id,
@@ -483,7 +484,7 @@ namespace Legion {
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask,
                     ApEvent term_event, UniqueID op_id, unsigned index,
-                    std::set<RtEvent> &applied_events,
+                    bool copy_user, std::set<RtEvent> &applied_events,
                     const PhysicalTraceInfo &trace_info);
     public:
       virtual void copy_to(const FieldMask &copy_mask, 
@@ -891,6 +892,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<bool COPY_USER>
     inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
                                                const RegionUsage &next_user,
                                                const UniqueID op_id,
@@ -902,11 +904,10 @@ namespace Legion {
       // We order these tests in a entirely based on cost
 
       // Different region requirements of the same operation 
-      // We just need to wait on any copies generated for this region
-      // requirement, we'll implicitly wait for all other copies to 
-      // finish anyway as the region requirements that generated those
-      // copies will catch dependences
-      if ((op_id == user->op_id) && (index != user->index))
+      // Copies from different region requirements though still 
+      // need to wait on each other correctly
+      if ((op_id == user->op_id) && (index != user->index) && 
+          (!COPY_USER || !user->copy_user))
         return false;
       // Now do a dependence test for privilege non-interference
       DependenceType dt = check_dependence_type(user->usage, next_user);

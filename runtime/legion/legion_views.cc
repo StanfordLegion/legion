@@ -485,7 +485,8 @@ namespace Legion {
       assert(is_logical_owner());
 #endif
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index); 
+      PhysicalUser *user = 
+        new PhysicalUser(usage, user_expr, op_id, index, false/*copy*/); 
       user->add_reference();
       add_current_user(user, term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -548,7 +549,7 @@ namespace Legion {
                                 op_id, index, wait_on_events, trace_info);
         // Add our local user
         const bool issue_collect = add_user(usage, user_expr, user_mask,
-                    term_event, op_id, index, applied_events, trace_info);
+          term_event, op_id, index, false/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
@@ -670,7 +671,7 @@ namespace Legion {
       {
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
         const bool issue_collect = add_user(usage, copy_expr, copy_mask,
-                          term_event, op_id, index, applied_events, trace_info);
+            term_event, op_id, index, true/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
@@ -790,8 +791,8 @@ namespace Legion {
     bool MaterializedView::add_user(const RegionUsage &usage,
                                     IndexSpaceExpression *user_expr,
                                     const FieldMask &user_mask,
-                                    ApEvent term_event, 
-                                    UniqueID op_id, unsigned index,
+                                    ApEvent term_event, UniqueID op_id, 
+                                    unsigned index, bool copy_user,
                                     std::set<RtEvent> &applied_events,
                                     const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -799,7 +800,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
-      PhysicalUser *new_user = new PhysicalUser(usage, user_expr, op_id, index);
+      PhysicalUser *new_user = 
+        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user
@@ -1120,8 +1122,8 @@ namespace Legion {
             continue;
           observed |= user_overlap;
           IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition(it->first, usage, op_id, index, 
-                                     user_expr, &overlap_expr))
+          if (has_local_precondition<false>(it->first, usage, op_id, index,
+                                            user_expr, &overlap_expr))
           {
             preconditions.insert(cit->first);
             if (overlap_expr->get_volume() == it->first->expr_volume)
@@ -1190,8 +1192,8 @@ namespace Legion {
         {
           if (user_mask * it->second)
             continue;
-          if (has_local_precondition(it->first, usage,
-                                     op_id, index, user_expr))
+          if (has_local_precondition<false>(it->first, usage,
+                                            op_id, index, user_expr))
             preconditions.insert(pit->first);
         }
       }
@@ -1248,8 +1250,8 @@ namespace Legion {
             continue;
           observed |= user_overlap;
           IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition(it->first, usage, op_id, index, 
-                                     user_expr, &overlap_expr))
+          if (has_local_precondition<true>(it->first, usage, op_id, index, 
+                                           user_expr, &overlap_expr))
           {
             if (finder == preconditions.end())
             {
@@ -1324,8 +1326,8 @@ namespace Legion {
           if (!user_overlap)
             continue;
           IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition(it->first, usage, op_id, index, 
-                                     user_expr, &overlap_expr))
+          if (has_local_precondition<true>(it->first, usage, op_id, index, 
+                                           user_expr, &overlap_expr))
           {
             if (finder == preconditions.end())
             {
@@ -2147,7 +2149,8 @@ namespace Legion {
 #endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
-      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index);
+      PhysicalUser *user = 
+        new PhysicalUser(usage, user_expr, op_id, index, false/*copy*/);
       user->add_reference();
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -2223,7 +2226,7 @@ namespace Legion {
         }
         // Add our local user
         const bool issue_collect = add_user(usage, user_expr, user_mask,
-                    term_event, op_id, index, applied_events, trace_info);
+           term_event, op_id, index, false/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
@@ -2361,7 +2364,7 @@ namespace Legion {
         const RegionUsage usage(reading ? READ_ONLY : REDUCE, 
                                 EXCLUSIVE, manager->redop);
         const bool issue_collect = add_user(usage, copy_expr, copy_mask,
-                  term_event, op_id, index, applied_events, trace_info);
+            term_event, op_id, index, true/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
@@ -2534,7 +2537,7 @@ namespace Legion {
     bool ReductionView::add_user(const RegionUsage &usage,
                                  IndexSpaceExpression *user_expr,
                                  const FieldMask &user_mask, ApEvent term_event,
-                                 UniqueID op_id, unsigned index,
+                                 UniqueID op_id, unsigned index, bool copy_user,
                                  std::set<RtEvent> &applied_events,
                                  const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -2542,7 +2545,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
-      PhysicalUser *new_user = new PhysicalUser(usage, user_expr, op_id, index);
+      PhysicalUser *new_user = 
+        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user

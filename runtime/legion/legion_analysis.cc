@@ -81,8 +81,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x)
-      : usage(u), expr(e), expr_volume(expr->get_volume()), op_id(id), index(x)
+                               UniqueID id, unsigned x, bool copy)
+      : usage(u), expr(e), expr_volume(expr->get_volume()), op_id(id), 
+        index(x), copy_user(copy)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -130,6 +131,7 @@ namespace Legion {
       rez.serialize(usage.redop);
       rez.serialize(op_id);
       rez.serialize(index);
+      rez.serialize<bool>(copy_user);
     }
 
     //--------------------------------------------------------------------------
@@ -148,6 +150,7 @@ namespace Legion {
       derez.deserialize(result->usage.redop);
       derez.deserialize(result->op_id);
       derez.deserialize(result->index);
+      derez.deserialize(result->copy_user);
       if (add_reference)
         result->add_reference();
       return result;
