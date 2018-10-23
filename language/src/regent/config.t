@@ -18,7 +18,7 @@ local common_config = require("common/config")
 
 local config = {}
 
-local expect_vars = {"TERRA_PATH", "LD_LIBRARY_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_RDIR"}
+local expect_vars = {"TERRA_PATH", "LD_LIBRARY_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "CMAKE_BUILD_DIR", "USE_RDIR"}
 for _, expect_var in ipairs(expect_vars) do
   if os.getenv(expect_var) == nil then
     print("ERROR: Regent expects " .. expect_var .. " to be set, but it appears to be missing.")
