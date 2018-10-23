@@ -18,6 +18,20 @@ local common_config = require("common/config")
 
 local config = {}
 
+local expect_vars = {"TERRA_PATH", "LD_LIBRARY_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_RDIR"}
+for _, expect_var in ipairs(expect_vars) do
+  if os.getenv(expect_var) == nil then
+    print("ERROR: Regent expects " .. expect_var .. " to be set, but it appears to be missing.")
+    print("Did you configure LAUNCHER to pass through the right environment variables?")
+    print()
+    print("The following variables must be configured to pass through the LAUNCHER command.")
+    for _, v in ipairs(expect_vars) do
+      print("    " .. v)
+    end
+    os.exit(1)
+  end
+end
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
