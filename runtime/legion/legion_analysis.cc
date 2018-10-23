@@ -3663,11 +3663,13 @@ namespace Legion {
                                    pending_request, pending_updates,
                                    pending_invalidates, 
                                    true/*needs updates*/);
+              // For now we'll collapse the entire list of shared users down
+              // to one copy in order to maintain precise information
               filter_multi_copies(filter_mask, shared_fields, shared_copies,
                                   request_space, pending_request, 
                                   pending_updates, pending_invalidates,
                                   true/*needs updates*/,
-                                  false/*updates from all*/);
+                                  true/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
               if (!!redop_overlap)
