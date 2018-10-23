@@ -558,11 +558,8 @@ namespace Legion {
       bool children_complete_invoked;
       bool children_commit_invoked;
 #ifdef LEGION_SPY
-    public:
-      RtEvent update_previous_mapped_event(RtEvent next);
     protected:
       UniqueID current_fence_uid;
-      RtEvent previous_mapped_event;
 #endif
     };
 

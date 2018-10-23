@@ -1883,16 +1883,6 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent result = previous_mapped_event;
-      previous_mapped_event = next;
-      return result;
-    }
-#endif
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
