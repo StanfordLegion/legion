@@ -4225,13 +4225,22 @@ class DataflowTraverser(object):
         # to flush a bunch of reductions then copies will always come
         # from the newly created instance and not from an composite
         # instance that also buffered the reductions
-        if state.pending_reductions and not state.valid_instances:
-            assert state.is_initialized()
-            self.found_dataflow_path = dst_inst in state.previous_instances
+        if state.pending_reductions and state.is_initialized():
+            # If it's already in the set of valid instances we don't need reductions
+            if dst_inst in state.valid_instances:
+                self.found_dataflow_path = True
+                self.needs_reductions = False
+            elif dst_inst in state.previous_instances:
+                self.found_dataflow_path = True
+                self.needs_reductions = True
+            else:
+                self.found_dataflow_path = False
+                self.needs_reductions = True
         else:
             assert dst_inst not in state.valid_instances
             self.found_dataflow_path = not state.is_initialized()
-        if not self.found_dataflow_path:
+            self.needs_reductions = False
+        if not self.found_dataflow_path or self.needs_reductions:
             self.dataflow_stack = list()
             self.dataflow_stack.append(dst_inst)    
         else:
@@ -4242,25 +4251,25 @@ class DataflowTraverser(object):
         self.generation = None
 
     def visit_node(self, node):
+        if isinstance(node, Operation):
+            pass 
+        elif isinstance(node, RealmCopy):
+            if not self.visit_copy(node):
+                return False
+        elif isinstance(node, RealmFill):
+            if not self.visit_fill(node):
+                return False
+        elif isinstance(node, RealmDeppart):
+            pass
+        else:
+            assert False # should never get here
+        # Mark that we visited this node
         if node.generation == self.generation:
             return False
         else:
             assert node.generation < self.generation
             node.generation = self.generation
-        if isinstance(node, Operation):
-            pass 
-        elif isinstance(node, RealmCopy):
-            self.visit_copy(node)
-        elif isinstance(node, RealmFill):
-            self.visit_fill(node)
-        elif isinstance(node, RealmDeppart):
-            pass
-        else:
-            assert False # should never get here
-        # Keep traversing as long as we haven't found the dataflow path or we 
-        # haven't seen all the reductions that we need to see
-        return not self.found_dataflow_path or \
-                len(self.observed_reductions) < len(self.state.pending_reductions)
+        return True
 
     def post_visit_node(self, node):
         if isinstance(node, RealmCopy):
@@ -4304,32 +4313,26 @@ class DataflowTraverser(object):
             # Normal copy
             # See if we need to do the dataflow check
             # and the copy has our field
-            if not self.found_dataflow_path and self.dataflow_stack and \
-                    self.dst_field in copy.dst_fields:
-                if copy.dsts[copy.dst_fields.index(self.dst_field)] is \
-                       self.dataflow_stack[-1] and \
+            if self.dst_field in copy.dst_fields and \
+                    copy.dsts[copy.dst_fields.index(self.dst_field)] is self.dataflow_stack[-1] and \
                     self.src_field is copy.src_fields[copy.dst_fields.index(self.dst_field)]:
-                    # Traverse the dataflow path
-                    src = copy.srcs[copy.dst_fields.index(self.dst_field)]
-                    # See if the source is a valid instance or a
-                    # previous instance in the presence of pending reductions
-                    if not self.state.pending_reductions or self.state.valid_instances:
-                        if src in self.state.valid_instances:
-                            self.found_dataflow_path = True
-                            self.perform_copy_analysis(copy, src, 
-                                          self.dataflow_stack[-1])
-                        else:
-                            # Push it on the stack and continue traversal
-                            self.dataflow_stack.append(src)
-                    else:
-                        if src in self.state.previous_instances:
-                            self.found_dataflow_path = True             
-                            self.perform_copy_analysis(copy, src,
-                                          self.dataflow_stack[-1])
-                        else:
-                            # Push it on the stack and continue traversal
-                            self.dataflow_stack.append(src)
-        else:
+                # Traverse the dataflow path
+                src = copy.srcs[copy.dst_fields.index(self.dst_field)]
+                # See if the source is a valid instance or a
+                # previous instance in the presence of pending reductions
+                if src in self.state.valid_instances:
+                    self.found_dataflow_path = True
+                elif self.state.pending_reductions and src in self.state.previous_instances:
+                    self.found_dataflow_path = True
+                # Continue the traversal if we're not done
+                if not self.verified(last=False):
+                    # Push it on the stack and continue traversal
+                    self.dataflow_stack.append(src)
+                    return True
+                elif self.found_dataflow_path:
+                    # If we just finished finding it do the analysis now
+                    self.perform_copy_analysis(copy, src, self.dataflow_stack[-1])
+        elif self.needs_reductions:
             # Reduction copy
             red_target = self.dataflow_stack[-1]
             if self.dst_field in copy.dst_fields and \
@@ -4338,7 +4341,7 @@ class DataflowTraverser(object):
                 src = copy.srcs[copy.dst_fields.index(self.dst_field)]
                 if src.redop != 0:
                     if src not in self.state.pending_reductions:
-                        return
+                        return False
                     if src in self.observed_reductions:
                         assert self.observed_reductions[src] is not copy
                         print("ERROR: Duplicate application of reductions by copies "+
@@ -4347,34 +4350,36 @@ class DataflowTraverser(object):
                                 self.error_str)
                         if self.op.state.assert_on_error:
                             assert False
-                        return
+                        return False
                     else:
                         self.observed_reductions[src] = copy
                         if not red_target in self.reductions_to_perform:
                             self.reductions_to_perform[red_target] = list()
                         self.reductions_to_perform[red_target].append(src)
-                        # Always keep going backwards for reductions in case
-                        # there are multiple of them chained together 
+                        # Keep going as long as we haven't found the dataflow path
+                        # or there are more reductions to find
+                        return not self.verified(last=False)
+        return False
 
     def post_visit_copy(self, copy):
         if self.failed_analysis:
             self.dataflow_stack.pop()
             return
         if 0 in copy.redops:
-            # Normal copy, definitely do the analysis
-            if copy.index_expr.get_point_set().has_point(self.point) and \
-                    self.found_dataflow_path: 
+            # Normal copy, definitely do the analysis if we found the path
+            if self.found_dataflow_path: 
                 assert len(self.dataflow_stack) > 1
                 src = self.dataflow_stack[-1]
                 dst = self.dataflow_stack[-2]
                 # Check to see if we have any reductions to perform
-                if dst in self.reductions_to_perform:
-                    for src in self.reductions_to_perform[dst]:
-                        reduction = self.observed_reductions[src]
-                        self.perform_copy_analysis(reduction, src, dst)
+                if src in self.reductions_to_perform:
+                    # Do these in the reverse order of how they were added
+                    for red_src in reversed(self.reductions_to_perform[src]):
+                        reduction = self.observed_reductions[red_src]
+                        self.perform_copy_analysis(reduction, red_src, src)
                         if self.failed_analysis and self.op.state.assert_on_error:
                             assert False
-                    del self.reductions_to_perform[dst]
+                    del self.reductions_to_perform[src]
                 # Perform the copy analysis
                 self.perform_copy_analysis(copy, src, dst)
             # Only pop off our instance if this wasn't a reduction copy
@@ -4424,11 +4429,11 @@ class DataflowTraverser(object):
               fill.dsts[fill.fields.index(self.dst_field)] is self.dataflow_stack[-1]:
             # If we don't have a pending fill, then this isn't right
             if not self.state.pending_fill:
-                return
+                return False
             self.found_dataflow_path = True
             # If we've already traversed this then we can skip the verification
             if fill.record_version_number(self.state):
-                return
+                return False
             assert self.state.fill_op is fill.fill_op
             if self.across:
                 fill.record_across_version_number(self.point, self.dst_field,
@@ -4448,6 +4453,8 @@ class DataflowTraverser(object):
                 return False
             dst.add_verification_copy_user(self.dst_depth, self.dst_field, self.point,
                                  fill, self.dst_req.index, False, 0, self.dst_version)
+        # We should never traverse backwards through a fill
+        return False
 
     def verified(self, last = False):
         if self.failed_analysis:
@@ -4465,7 +4472,7 @@ class DataflowTraverser(object):
                     assert False
             return False
         # See if we saw all the needed reductions
-        if self.state.pending_reductions and not self.state.valid_instances:
+        if self.needs_reductions:
             if len(self.state.pending_reductions) != len(self.observed_reductions):
                 if last:
                     print("ERROR: Missing reductions to apply to field "+
@@ -4478,7 +4485,8 @@ class DataflowTraverser(object):
             elif last:
                 # If this is the last check, replay any reductions for the target
                 if self.target in self.reductions_to_perform:
-                    for src in self.reductions_to_perform[self.target]:
+                    # Do these in the reverse order of how they were added
+                    for src in reversed(self.reductions_to_perform[self.target]):
                         reduction = self.observed_reductions[src]
                         self.perform_copy_analysis(reduction, src, self.target)
                         if self.failed_analysis:
