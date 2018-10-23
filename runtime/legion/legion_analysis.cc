@@ -154,7 +154,7 @@ namespace Legion {
       if (add_reference)
         result->add_reference();
       return result;
-    } 
+    }
 
     /////////////////////////////////////////////////////////////
     // VersionInfo 
@@ -4211,8 +4211,42 @@ namespace Legion {
                 it = mapping_guards.begin(); it != mapping_guards.end(); it++)
           {
             if (!it->second.mutated)
-              continue;
-            if (it->second.guard_mask * update_mask)
+            {
+              // Be careful! There is a really nasty case here! We need to 
+              // guarantee that the first reader of reductions is done applying
+              // the reductions to a concrete instance before we can send any
+              // updates out to other nodes. If we don't guarantee that then 
+              // we risk duplicate applications of reductions! So if we have
+              // reductions and we're not in a reduction mode, we need to wait
+              // for this operation to map regardless of whether it has mutated
+              // the equivalence class or not.
+              if (!!reduction_fields)
+              {
+                FieldMask applied_redop_fields = 
+                  reduction_fields & update_mask & it->second.guard_mask;
+                // If there are no overlapping reduction fields then there
+                // is no need to serialize anything
+                if (!applied_redop_fields)
+                  continue;
+                // Remove any fields which we have in a reduction mode
+                if (!!single_redop_fields)
+                {
+                  applied_redop_fields -= single_redop_fields;
+                  if (!applied_redop_fields)
+                    continue;
+                }
+                if (!!multi_redop_fields)
+                {
+                  applied_redop_fields -= multi_redop_fields;
+                  if (!applied_redop_fields)
+                    continue;
+                }
+                // Otherwise fall through and record our dependence
+              }
+              else if (it->second.guard_mask * update_mask)
+                continue;
+            }
+            else if (it->second.guard_mask * update_mask)
               continue;
             // Now we need to defer this until later
             DeferredRequest *deferred = 
