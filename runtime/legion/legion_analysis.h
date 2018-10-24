@@ -752,10 +752,12 @@ namespace Legion {
       // Pending requests for updates
       struct PendingRequest : public LegionHeapify<PendingRequest> {
       public:
-        PendingRequest(RtUserEvent ready, RtUserEvent applied, ReductionOpID r) 
-          : ready_event(ready), applied_event(applied), redop(r),
+        PendingRequest(Operation *o, RtUserEvent ready, 
+                       RtUserEvent applied, ReductionOpID r) 
+          : op(o), ready_event(ready), applied_event(applied), redop(r),
             remaining_updates(0), remaining_invalidates(0) { }
       public:
+        Operation *const op;
         const RtUserEvent ready_event;
         const RtUserEvent applied_event;
         const ReductionOpID redop;
@@ -965,6 +967,7 @@ namespace Legion {
       void record_pending_counts(PendingRequest *pending_request,
                                  unsigned pending_updates,
                                  unsigned pending_invalidates,
+                                 bool exclusive_reduction,
                                  bool needs_lock);
       void record_invalidation(PendingRequest *pending_request,
                                bool meta_only, bool needs_lock = false);
