@@ -119,6 +119,9 @@ namespace Realm {
   bool convert_integer_cmdline_argument<unsigned long>(const std::string& s, unsigned long& target);
 
   template <>
+  bool convert_integer_cmdline_argument<long long>(const std::string& s, long long& target);
+
+  template <>
   bool convert_integer_cmdline_argument<bool>(const std::string& s, bool& target);
 
   template <typename T>

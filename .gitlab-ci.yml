@@ -312,6 +312,15 @@ gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetex, *regent, *incremental]
+# * Integration: Python + Regent
+gcc49_cxx98_debug_python2_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python2, *regent]
+gcc49_cxx98_debug_python3_regent:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *python3, *regent]
 # * Integration: LLVM + GASNet
 gcc49_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image, *tests]
@@ -422,6 +431,15 @@ clang38_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+# * Integration: Python + Regent
+clang38_cxx98_debug_python2_regent:
+  <<: [*linux, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python2, *regent]
+clang38_cxx98_debug_python3_regent:
+  <<: [*linux, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *debug, *cxx98_normal, *python3, *regent]
 # * Integration: LLVM + GASNet
 clang38_cxx98_debug_llvm_gasnet_legion:
   <<: [*linux_compute, *image_clang, *tests]
