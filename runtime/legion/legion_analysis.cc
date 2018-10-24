@@ -2963,9 +2963,7 @@ namespace Legion {
           {
             finder->second.count++;
             // See if we have any new fields which we need to check for updates
-
             finder->second.guard_mask |= guard_mask;
-            mapping_guard_summary |= guard_mask;
             if (recursed)
               alt_sets.push_back(this);
             return false;
@@ -3050,7 +3048,6 @@ namespace Legion {
           assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
           mapping_guards[op] = MappingGuard(guard_mask);
-          mapping_guard_summary |= guard_mask;
         }
         else // Our set of subsets are now what we need
           to_recurse = subsets;
@@ -3130,7 +3127,8 @@ namespace Legion {
           mapping_guard_summary.clear();
           for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
                 mapping_guards.begin(); it != mapping_guards.end(); it++)
-            mapping_guard_summary |= it->second.guard_mask;
+            if (it->second.mutated)
+              mapping_guard_summary |= it->second.guard_mask;
           if (mapping_guard_summary * deferred_requests.get_valid_mask())
             // We can just perform all of them
             perform_all_deferred_requests();
@@ -4925,17 +4923,11 @@ namespace Legion {
                 pending_invalidates, exclusive_reduction, false/*needs lock*/);
         return;
       }
+      // Mark this guard as mutated since it needs to do an exclusive
+      // reduction application before anyone else can read a copy of
+      // the meta-data again
       if (exclusive_reduction)
-      {
-        Operation *op = pending_request->op;
-#ifdef DEBUG_LEGION
-        assert(mapping_guards.find(op) != mapping_guards.end());
-#endif
-        // Mark this guard as mutated since it needs to do an exclusive
-        // reduction application before anyone else can read a copy of
-        // the meta-data again
-        mapping_guards[op].mutated = true;
-      }
+        record_mutated_guard(pending_request->op);
       pending_request->remaining_updates += pending_updates;
       if (pending_request->remaining_updates == 0)
         finalize_pending_update(pending_request);
@@ -5441,7 +5433,7 @@ namespace Legion {
       assert(!(user_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating
-      mapping_guards[op].mutated = true;
+      record_mutated_guard(op);
       // Check for any uninitialized data
       if (initialized != NULL)
       {
@@ -5571,7 +5563,7 @@ namespace Legion {
       assert(!(acquire_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mapping_guards[op].mutated = true;
+      record_mutated_guard(op);
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
@@ -5605,7 +5597,7 @@ namespace Legion {
       assert(!(release_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mapping_guards[op].mutated = true;
+      record_mutated_guard(op);
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
@@ -5879,7 +5871,7 @@ namespace Legion {
       assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mapping_guards[op].mutated = true;
+      record_mutated_guard(op);
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -5942,7 +5934,7 @@ namespace Legion {
       assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      mapping_guards[op].mutated = true;
+      record_mutated_guard(op);
       FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
       if (finder != valid_instances.end())
       {

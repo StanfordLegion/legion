@@ -793,6 +793,16 @@ namespace Legion {
     public:
       inline bool is_logical_owner(void) const 
         { return (local_space == logical_owner_space); }
+      inline void record_mutated_guard(Operation *op)
+        {
+          LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
+            mapping_guards.find(op);
+#ifdef DEBUG_LEGION
+          assert(finder != mapping_guards.end()); 
+#endif
+          finder->second.mutated = true;
+          mapping_guard_summary |= finder->second.guard_mask;
+        }
     public:
       // From distributed collectable
       virtual void notify_active(ReferenceMutator *mutator);
