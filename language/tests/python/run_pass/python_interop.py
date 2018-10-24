@@ -17,11 +17,8 @@
 
 from __future__ import print_function
 
-from legion import task
+import legion
 
-@task
-def main():
-    print("Hello, Legion!")
-
-if __name__ == '__legion_main__':
-    main()
+@legion.task(task_id=2)
+def hello():
+    print('hello from Python')

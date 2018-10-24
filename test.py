@@ -81,11 +81,12 @@ legion_openmp_cxx_tests = [
 
 legion_python_cxx_tests = [
     # Bindings
-    ['bindings/python/legion_python', ['hello', '-ll:py', '1', '-ll:cpu', '0']],
-    ['bindings/python/legion_python', ['region', '-ll:py', '1', '-ll:cpu', '0']],
-    ['bindings/python/legion_python', ['index_launch', '-ll:py', '1', '-ll:cpu', '0']],
-    ['bindings/python/legion_python', ['method', '-ll:py', '1', '-ll:cpu', '0']],
-    ['bindings/python/legion_python', ['future', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/future.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/hello.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/index_launch.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/method.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/region.py', '-ll:py', '1', '-ll:cpu', '0']],
+    ['bindings/python/legion_python', ['examples/tunable.py', '-ll:py', '1', '-ll:cpu', '0']],
 
     # Examples
     ['examples/python_interop/python_interop', ['-ll:py', '1']],
@@ -202,8 +203,7 @@ def run_test_legion_python_cxx(launcher, root_dir, tmp_dir, bin_dir, env, thread
     flags = [] # ['-logfile', 'out_%.log']
     # Hack: Fix up the environment so that Python can find all the examples.
     env = dict(list(env.items()) + [
-        ('PYTHONPATH', ':'.join([os.path.join(root_dir, 'bindings', 'python'),
-                                 os.path.join(root_dir, 'bindings', 'python', 'examples')])),
+        ('PYTHONPATH', ':'.join([os.path.join(root_dir, 'bindings', 'python')])),
     ])
     run_cxx(legion_python_cxx_tests, flags, launcher, root_dir, bin_dir, env, thread_count)
 
@@ -738,6 +738,7 @@ def run_tests(test_modules=None,
         ('USE_OPENMP', '1' if use_openmp else '0'),
         ('TEST_OPENMP', '1' if use_openmp else '0'),
         ('USE_PYTHON', '1' if use_python else '0'),
+        ('TEST_PYTHON', '1' if use_python else '0'),
         ('USE_LLVM', '1' if use_llvm else '0'),
         ('USE_HDF', '1' if use_hdf else '0'),
         ('TEST_HDF', '1' if use_hdf else '0'),

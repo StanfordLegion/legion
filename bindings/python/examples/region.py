@@ -43,7 +43,7 @@ def inc(R, step):
     return 42
 
 # Define the main task. This task is called first.
-@task(top_level=True)
+@task
 def main():
     # Create a 2D index space of size 4x4.
     I = legion.Ispace.create([4, 4])
@@ -70,3 +70,6 @@ def main():
     print("child task returned", child_result)
     print("child task future contains", child_result.get())
     print("main_task done")
+
+if __name__ == '__legion_main__':
+    main()
