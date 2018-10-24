@@ -646,6 +646,7 @@ namespace Legion {
           : guard_mask(m), guard_index(0), count(1), mutated(false) { }
       public:
         FieldMask guard_mask;
+        RtUserEvent aliased_waiters;
         unsigned long long guard_index;
         unsigned count;
         bool mutated;

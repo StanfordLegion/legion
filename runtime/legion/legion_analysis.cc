@@ -281,10 +281,10 @@ namespace Legion {
 #endif
         owner->update_equivalence_sets(equivalence_sets);
       }
-      // If this is a ready-only or a reduction privilege operation then 
+      // If this is a read-only privilege operation then 
       // we need the reservations for these equivalence sets since we 
       // could potentially race on updates between them
-      if (IS_READ_ONLY(req) || IS_REDUCE(req))
+      if (IS_READ_ONLY(req))
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               equivalence_sets.begin(); it != equivalence_sets.end(); it++)
@@ -3089,6 +3089,8 @@ namespace Legion {
 #endif
       if (finder->second.count == 1)
       {
+        if (finder->second.aliased_waiters.exists())
+          Runtime::trigger_event(finder->second.aliased_waiters);
         // Last removal so we are done
         mapping_guards.erase(finder);
         if (mapping_guards.empty())
@@ -3428,8 +3430,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sanity_check();
 #endif
-      if ((request_space == local_space) &&
-          (IS_READ_ONLY(usage) || IS_REDUCE(usage)))
+      if ((request_space == local_space) && (IS_READ_ONLY(usage)))
       {
         // In order to prevent read-only races we need to order the mapping
         // of all simultaneous users of this equivalence class on this node, 
@@ -3449,27 +3450,34 @@ namespace Legion {
         // our fields in our guard mask
         if (our_guard.guard_index == 0)
         {
-          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
-                mapping_guards.begin(); it != mapping_guards.end(); it++)
-          {
-            // Skip ourself
-            if (it->first == op)
-              continue;
-            
-            if (it->second.guard_index == 0)
-              continue;
-            // Skip any with disjoint fields
-            if (it->second.guard_mask * our_guard.guard_mask)
-              continue;
-            // Need to record mapping dependences on any of these ops
-            ready_events.insert(it->first->get_mapped_event());
-          }
-          // Set our guard index
+// Set our guard index
           our_guard.guard_index = next_guard_index++;
 #ifdef DEBUG_LEGION
           // This will check for overflow too, hopefully we never exceed 2^64
           assert(our_guard.guard_index != 0);
 #endif
+          for (LegionMap<Operation*,MappingGuard>::aligned::iterator it =
+                mapping_guards.begin(); it != mapping_guards.end(); it++)
+          {
+            // Skip ourself
+            if (it->first == op)
+              continue;
+            // Skip any that haven't done their request yet    
+            if (it->second.guard_index == 0)
+              continue;
+#ifdef DEBUG_LEGION
+            // Should never be larger than our guard index
+            assert(it->second.guard_index < our_guard.guard_index);
+#endif
+            // Skip any with disjoint fields
+            if (it->second.guard_mask * our_guard.guard_mask)
+              continue;
+            // Make an aliased waiter event to trigger once the guard is removed
+            if (!it->second.aliased_waiters.exists())
+              it->second.aliased_waiters = Runtime::create_rt_user_event();
+            // Need to record mapping dependences on any of these ops
+            ready_events.insert(it->second.aliased_waiters);
+          }
         }
       }
       if (!is_logical_owner())
