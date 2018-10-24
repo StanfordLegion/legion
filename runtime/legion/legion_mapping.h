@@ -1527,6 +1527,10 @@ namespace Legion {
       struct SelectShardingFunctorOutput {
         ShardingID                              chosen_functor;
       };
+      struct MustEpochShardingFunctorOutput :
+              public SelectShardingFunctorOutput {
+        bool                                    collective_map_must_epoch_call;
+      };
     };
 
     /**

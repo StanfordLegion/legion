@@ -66,20 +66,18 @@ int main(int argc, char **argv)
   Realm::Python::PythonModule::import_python_module(str(BINDINGS_DEFAULT_MODULE));
 #undef str
 #else
-  if (argc < 2) {
-    fprintf(stderr, "usage: %s <module_name>\n", argv[0]);
+  if (argc < 2 || argv[1][0] == '-') {
+    fprintf(stderr, "usage: %s [<module_name>|<script_path>]\n", argv[0]);
     exit(1);
   }
 #endif
 
-  if (argc >= 2) {
-    const char *module_name = argv[1];
-
-    if (argv[1][0] != '-') {
-      Realm::Python::PythonModule::import_python_module(module_name);
-    }
+  const char *module_name = argv[1];
+  if (strrchr(module_name, '.') == NULL) {
+    Realm::Python::PythonModule::import_python_module(module_name);
+  } else {
+    Realm::Python::PythonModule::import_python_module("legion");
   }
-
 
   Runtime::set_top_level_task_id(MAIN_TASK_ID);
 

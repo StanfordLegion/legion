@@ -46,7 +46,12 @@ def return_void():
     # value and pretend it does
     pass
 
-@task(top_level=True)
+# the same, but typed at the task level
+@task(return_type=legion.void)
+def return_void():
+    pass
+
+@task
 def main():
     # No explicit type specified, value is pickled
     f = Future([1, 2, 3])
@@ -67,6 +72,9 @@ def main():
     i = Future(return_void(), value_type=legion.void)
     print("value of i.get() is %s" % i.get())
 
+    j = return_void()
+    print("value of j.get() is %s" % j.get())
+
     show(f)
     show(g)
     show_buffer(h)
@@ -75,3 +83,6 @@ def main():
 
     for i in legion.IndexLaunch([3]):
         show_index(i, f)
+
+if __name__ == '__legion_main__':
+    main()

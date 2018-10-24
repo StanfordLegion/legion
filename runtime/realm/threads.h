@@ -228,24 +228,6 @@ namespace Realm {
 #endif
   };
 
-  // Finally, a Thread may operate as a co-routine, "yielding" intermediate values and 
-  //  suspending until it is "resumed" (with an optional value)
-
-  template <typename YT, typename RT = int>
-  class Coroutine : public Thread {
-  public:
-    virtual ~Coroutine(void);
-
-    YT get_yield_value(void);
-    void resume(RT value = RT());
-
-    static RT yield(YT value);
-
-  protected:
-    YT yield_value;
-    RT resume_value;
-  };
-
   class ThreadScheduler {
   public:
     virtual ~ThreadScheduler(void);
@@ -283,7 +265,6 @@ namespace Realm {
     operator T(void) const;
     WithDefault<T,_DEFAULT>& operator=(T newval);
 
-  protected:
     T val;
   };
 
@@ -448,91 +429,6 @@ namespace Realm {
     const CoreMap *cm;
     std::map<CoreReservation *, CoreReservation::Allocation *> allocations;
   };
-
-#if 0
-  class ThreadScheduler;
-
-  class KernelThread : public Thread {
-  public:
-    KernelThread(CoreReservation& _rsrv, ThreadScheduler *scheduler);
-    virtual ~KernelThread(void);
-
-    virtual State state(void) = 0;
-    virtual void await_state(State desired, bool invert = false) = 0;
-    virtual void *yield_value(void) = 0;
-    virtual void *finish_value(void) = 0;
-
-    virtual void resume(void *value = 0) = 0;
-    virtual void signal(int sig, bool asynchronous) = 0;
-    virtual void detach(void) = 0;
-  };
-
-  class Thread;
-  class ThreadLaunchParameters;
-  class ThreadReservation;
-  class ThreadReservationParameters;
-  class ThreadFactory;
-
-  // basically a struct with nice defaults
-
-  // also a struct with defaults
-  class ThreadReservationParameters {
-
-    ThreadReservationParameters(void)
-      : num_cores(1)
-      , numa_domain(NUMA_DOMAIN_DONTCARE)
-      , core_usage(CORE_USAGE_SHARED)
-      , fpu_usage(CORE_USAGE_MINIMAL)
-      , max_stack_size(STACK_SIZE_DEFAULT)
-      , max_heap_size(HEAP_SIZE_DEFAULT)
-    {}
-    virtual ~ThreadReservationParameters(void) {}
-  };
-
-  // object that describes a thread from the "outside" - operations performed
-  //  by the thread itself are static methods on this class (i.e. you don't need
-  //  to carry around your Thread * inside the thread)
-  class ThreadFactory {
-  public:
-    virtual ~ThreadFactory(void) = 0;
-
-    virtual ThreadReservation *add_reservation(const ThreadReservationParameters& params) = 0;
-    virtual bool satisfy_reservations(void) = 0;
-
-    template <typename T, void *(T::*MTHD)(void *)>
-    Thread *create_thread(T *target, void *data, 
-			  ThreadReservation *rsrv, const ThreadLaunchParameters& params);
-
-    typedef void *(* ThreadEntryUntypedFnptr)(void *, void *);
-
-  protected:
-    template <typename T, void *(T::*MTHD)(void *)>
-    static void *thread_entry_untyped(void *target, void *data) {
-      return (((T *)target)->*MTHD)(data);
-    }
-
-    virtual Thread *create_thread_untyped(ThreadEntryUntypedFnptr fnptr,
-					  void *target, void *data, 
-					  ThreadReservation *rsrv,
-					  const ThreadLaunchParameters& params) = 0;
-  };
-
-  template <typename T, void *(T::*MTHD)(void *)>
-  Thread *ThreadFactory::create_thread(T *target, void *data, 
-				       ThreadReservation *rsrv, const ThreadLaunchParameters& params)
-  {
-    return create_thread_untyped(thread_entry_untyped<T, MTHD>,
-				 target, data, rsrv, params);
-  }
-
-  // ThreadReservations cannot be created directly - they are subclassesed and created/destroyed
-  //  by actual ThreadFactory implementations
-  class ThreadReservation {
-  protected:
-    ThreadReservation(void) {}
-    ~ThreadReservation(void) {}
-  };
-#endif
 
 #ifdef REALM_USE_PAPI
   class PAPICounters {

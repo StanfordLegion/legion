@@ -1884,7 +1884,7 @@ namespace Realm {
 
       if(plist) {
 	  // if restricted node id is set or is_restricted_kind && predicates.size() == 0
-	  if ((restricted_node_id || is_restricted_kind)  && !predicates.size())
+	  if ((is_restricted_node || is_restricted_kind)  && !predicates.size())
 	  return plist->begin()->first;
 
 	std::map<Processor, MachineProcInfo *>::const_iterator it2 = plist->begin();
