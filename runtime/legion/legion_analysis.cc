@@ -5435,12 +5435,24 @@ namespace Legion {
       // Record that this operation is mutating
       record_mutated_guard(op);
       // Check for any uninitialized data
-      if (initialized != NULL)
+      // We'll dynamically allocate any memory for tracking uninitialized
+      // fields because it should be a very rare case and we don't want to pay 
+      // to initialize a field mask if we don't have to in the common case
+      FieldMask *uninitialized_fields = NULL;
+      // Don't report uninitialized warnings for empty equivalence classes
+      if ((initialized != NULL) && !set_expr->is_empty())
       {
-        FieldMask &initialized_fields = *initialized;
-        // Don't report uninitialized warnings for empty equivalence classes
-        if (!!initialized_fields && !set_expr->is_empty())
-          initialized_fields &= valid_instances.get_valid_mask(); 
+        const FieldMask uninit = user_mask - valid_instances.get_valid_mask();
+        if (!!uninit)
+        {
+          // Remove the uninitialized fields from the set
+          *initialized -= uninit;  
+          // If this is read-only or a reduction then save these fields for 
+          // later so we can filter any instances since we know that they 
+          // still will not have valid data
+          if (IS_READ_ONLY(usage) || IS_REDUCE(usage))
+            uninitialized_fields = new FieldMask(uninit);
+        }
       }
       if (IS_REDUCE(usage))
       {
@@ -5544,6 +5556,16 @@ namespace Legion {
             copy_out(restricted_mask, target_instances,
                      target_views, output_aggregator);
         }
+      }
+      // Handle any uninitialized fields now
+      if (uninitialized_fields != NULL)
+      {
+        // Remove any instances from the uninitialized set
+        if (IS_REDUCE(usage))
+          filter_reduction_instances(*uninitialized_fields);
+        else
+          filter_valid_instances(*uninitialized_fields);
+        delete uninitialized_fields;
       }
     }
 
