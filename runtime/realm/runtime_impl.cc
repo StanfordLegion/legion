@@ -63,6 +63,14 @@ static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gas
 
 #include <fstream>
 
+#define CHECK_LIBC(cmd) do { \
+  int ret = (cmd); \
+  if(ret != 0) { \
+    fprintf(stderr, "error: %s = %d (%s)\n", #cmd, ret, strerror(ret)); \
+    exit(1); \
+  } \
+} while(0)
+
 #define CHECK_PTHREAD(cmd) do { \
   int ret = (cmd); \
   if(ret != 0) { \
@@ -114,6 +122,37 @@ namespace Realm {
   // signal handlers
   //
 
+  static void register_error_signal_handler(void (*handler)(int))
+  {
+    // register our handler for the standard error signals - set SA_ONSTACK
+    //  so that any thread with an alt stack uses it
+    struct sigaction action;
+    action.sa_handler = handler;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = SA_ONSTACK;
+
+    CHECK_LIBC( sigaction(SIGINT, &action, 0) );
+    CHECK_LIBC( sigaction(SIGABRT, &action, 0) );
+    CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
+    CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
+    CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+  }
+
+  static void unregister_error_signal_handler(void)
+  {
+    // set standard error signals back to default handler
+    struct sigaction action;
+    action.sa_handler = SIG_DFL;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+
+    CHECK_LIBC( sigaction(SIGINT, &action, 0) );
+    CHECK_LIBC( sigaction(SIGABRT, &action, 0) );
+    CHECK_LIBC( sigaction(SIGSEGV, &action, 0) );
+    CHECK_LIBC( sigaction(SIGFPE, &action, 0) );
+    CHECK_LIBC( sigaction(SIGBUS, &action, 0) );
+  }
+
     static void realm_freeze(int signal)
     {
       assert((signal == SIGINT) || (signal == SIGABRT) ||
@@ -127,6 +166,15 @@ namespace Realm {
       fprintf(stderr,"Process %d on node %s is frozen!\n", 
                       process_id, hostname);
       fflush(stderr);
+
+      // now that we've stopped, don't catch any further SIGINTs
+      struct sigaction action;
+      action.sa_handler = SIG_DFL;
+      sigemptyset(&action.sa_mask);
+      action.sa_flags = 0;
+
+      CHECK_LIBC( sigaction(SIGINT, &action, 0) );
+
       while (true)
         sleep(1);
     }
@@ -1356,18 +1404,10 @@ namespace Realm {
 #endif
       if ((getenv("LEGION_FREEZE_ON_ERROR") != NULL) ||
           (getenv("REALM_FREEZE_ON_ERROR") != NULL)) {
-        signal(SIGSEGV, realm_freeze);
-        signal(SIGABRT, realm_freeze);
-        signal(SIGFPE,  realm_freeze);
-        signal(SIGILL,  realm_freeze);
-        signal(SIGBUS,  realm_freeze);
+	register_error_signal_handler(realm_freeze);
       } else if ((getenv("REALM_BACKTRACE") != NULL) ||
                  (getenv("LEGION_BACKTRACE") != NULL)) {
-        signal(SIGSEGV, realm_backtrace);
-        signal(SIGABRT, realm_backtrace);
-        signal(SIGFPE,  realm_backtrace);
-        signal(SIGILL,  realm_backtrace);
-        signal(SIGBUS,  realm_backtrace);
+	register_error_signal_handler(realm_backtrace);
       }
 
       // debugging tool to dump realm event graphs after a fixed delay
@@ -2307,6 +2347,9 @@ namespace Realm {
 #endif
 
       if(!Threading::cleanup()) exit(1);
+
+      // very last step - unregister our signal handlers
+      unregister_error_signal_handler();
 
       return shutdown_result_code;
     }

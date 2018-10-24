@@ -19,6 +19,8 @@
 
 import "regent"
 
+local parallel = rawget(_G, "pennant_parallel") ~= false
+
 -- Compile and link pennant.cc
 do
   local root_dir = arg[0]:match(".*/") or "./"
@@ -256,6 +258,8 @@ fspace point {
   has_bcy : bool,
 }
 
+if parallel then
+-- Parallel version
 fspace side(rz : region(zone),
             rpp : region(point),
             rpg : region(point),
@@ -297,6 +301,50 @@ fspace side(rz : region(zone),
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
 }
+else
+-- Sequential version
+fspace side(rz : region(zone),
+            rp : region(point),
+            rs : region(side(rz, rp, rs))) {
+  mapsz :  ptr(zone, rz),                      -- maps: side -> zone
+  mapsp1 : ptr(point, rp),                     -- maps: side -> points 1 and 2
+  mapsp2 : ptr(point, rp),
+  mapss3 : ptr(side(rz, rp, rs), rs),          -- maps: side -> previous side
+  mapss4 : ptr(side(rz, rp, rs), rs),          -- maps: side -> next side
+
+  sareap : double,       -- side area, middle of cycle
+  sarea :  double,       -- side area, end of cycle
+  svolp :  double,       -- side volume, middle of cycle -- FIXME: dead field
+  svol :   double,       -- side volume, end of cycle    -- FIXME: dead field
+  ssurfp : vec2,         -- side surface vector, middle of cycle -- FIXME: dead
+  smf :    double,       -- side mass fraction
+  sfp :    vec2,         -- side force, pgas
+  sft :    vec2,         -- side force, tts
+  sfq :    vec2,         -- side force, qcs
+
+  -- In addition to storing their own state, sides also store the
+  -- state of edges and corners. This can be done because there is a
+  -- 1-1 correspondence between sides and edges/corners. Technically,
+  -- edges can be shared between zones, but the computations on edges
+  -- are minimal, and are not actually used for sharing information,
+  -- so duplicating computations on edges is inexpensive.
+
+  -- Edge variables
+  exp :    vec2,         -- edge center coordinates, middle of cycle
+  ex :     vec2,         -- edge center coordinates, end of cycle
+  elen :   double,       -- edge length, end of cycle
+
+  -- Corner variables (temporaries for QCS)
+  carea :  double,       -- corner area
+  cevol :  double,       -- corner evol
+  cdu :    double,       -- corner delta velocity
+  cdiv :   double,       -- ??????????
+  ccos :   double,       -- corner cosine
+  cqe1 :   vec2,         -- ??????????
+  cqe2 :   vec2,         -- ??????????
+}
+end
+
 
 fspace span {
   start : int64,
@@ -649,7 +697,7 @@ terra read_config()
   do
     var zone_size = terralib.sizeof(zone)
     var point_size = terralib.sizeof(point)
-    var side_size = [ terralib.sizeof(side(wild,wild,wild,wild)) ]
+    var side_size = [ parallel and terralib.sizeof(side(wild,wild,wild,wild)) or terralib.sizeof(side(wild,wild,wild)) ]
     c.printf("Mesh memory usage:\n")
     c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
     c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
@@ -730,14 +778,15 @@ local terra compute_coloring(ncolors : int64, nitems : int64,
   end
 end
 
+local side_n_fields = parallel and 34 or 32
 terra read_input(runtime : c.legion_runtime_t,
                  ctx : c.legion_context_t,
                  rz_physical : c.legion_physical_region_t[24],
                  rz_fields : c.legion_field_id_t[24],
                  rp_physical : c.legion_physical_region_t[17],
                  rp_fields : c.legion_field_id_t[17],
-                 rs_physical : c.legion_physical_region_t[34],
-                 rs_fields : c.legion_field_id_t[34],
+                 rs_physical : c.legion_physical_region_t[side_n_fields],
+                 rs_fields : c.legion_field_id_t[side_n_fields],
                  conf : config)
 
   var color_words : c.size_t = cmath.ceil(conf.npieces/64.0)
@@ -856,16 +905,22 @@ terra read_input(runtime : c.legion_runtime_t,
       rs_physical[0], rs_fields[0])
     var rs_mapsp1_ptr = c.legion_physical_region_get_field_accessor_array_1d(
       rs_physical[1], rs_fields[1])
-    var rs_mapsp1_index = c.legion_physical_region_get_field_accessor_array_1d(
-      rs_physical[2], rs_fields[2])
+    var rs_mapsp1_index : c.legion_accessor_array_1d_t
+    if parallel then
+      rs_mapsp1_index = c.legion_physical_region_get_field_accessor_array_1d(
+        rs_physical[2], rs_fields[2])
+    end
     var rs_mapsp2_ptr = c.legion_physical_region_get_field_accessor_array_1d(
-      rs_physical[3], rs_fields[3])
-    var rs_mapsp2_index = c.legion_physical_region_get_field_accessor_array_1d(
-      rs_physical[4], rs_fields[4])
+      rs_physical[2 + ([parallel and 1 or 0])], rs_fields[2 + ([parallel and 1 or 0])])
+    var rs_mapsp2_index : c.legion_accessor_array_1d_t
+    if parallel then
+      rs_mapsp2_index = c.legion_physical_region_get_field_accessor_array_1d(
+        rs_physical[4], rs_fields[4])
+    end
     var rs_mapss3 = c.legion_physical_region_get_field_accessor_array_1d(
-      rs_physical[5], rs_fields[5])
+      rs_physical[3 + ([parallel and 2 or 0])], rs_fields[3 + ([parallel and 2 or 0])])
     var rs_mapss4 = c.legion_physical_region_get_field_accessor_array_1d(
-      rs_physical[6], rs_fields[6])
+      rs_physical[4 + ([parallel and 2 or 0])], rs_fields[4 + ([parallel and 2 or 0])])
 
     var sstart = 0
     for iz = 0, conf.nz do
@@ -878,9 +933,13 @@ terra read_input(runtime : c.legion_runtime_t,
         var p = c.legion_ptr_t { value = sstart + izs }
         @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsz, p)) = c.legion_ptr_t { value = iz }
         @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp1_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs] }
-        @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp1_index, p)) = 0
+        if parallel then
+          @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp1_index, p)) = 0
+        end
         @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapsp2_ptr, p)) = c.legion_ptr_t { value = zonepoints[zstart + izs4] }
-        @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp2_index, p)) = 0
+        if parallel then
+          @[&uint8](c.legion_accessor_array_1d_ref(rs_mapsp2_index, p)) = 0
+        end
         @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapss3, p)) = c.legion_ptr_t { value = sstart + izs3 }
         @[&c.legion_ptr_t](c.legion_accessor_array_1d_ref(rs_mapss4, p)) = c.legion_ptr_t { value = sstart + izs4 }
       end
@@ -889,9 +948,13 @@ terra read_input(runtime : c.legion_runtime_t,
 
     c.legion_accessor_array_1d_destroy(rs_mapsz)
     c.legion_accessor_array_1d_destroy(rs_mapsp1_ptr)
-    c.legion_accessor_array_1d_destroy(rs_mapsp1_index)
+    if parallel then
+      c.legion_accessor_array_1d_destroy(rs_mapsp1_index)
+    end
     c.legion_accessor_array_1d_destroy(rs_mapsp2_ptr)
-    c.legion_accessor_array_1d_destroy(rs_mapsp2_index)
+    if parallel then
+      c.legion_accessor_array_1d_destroy(rs_mapsp2_index)
+    end
     c.legion_accessor_array_1d_destroy(rs_mapss3)
     c.legion_accessor_array_1d_destroy(rs_mapss4)
   end
@@ -984,6 +1047,7 @@ read_input:compile()
 -- ## Distributed Mesh Generator
 -- #################
 
+if parallel then
 local terra ptr_t(x : int64)
   return c.legion_ptr_t { value = x }
 end
@@ -1741,6 +1805,7 @@ do
     regentlib.assert(z_ == last_z, "zone underflow")
   end
 end
+end -- if parallel
 
 --
 -- Validation
@@ -1754,8 +1819,8 @@ terra validate_output(runtime : c.legion_runtime_t,
                       rz_fields : c.legion_field_id_t[24],
                       rp_physical : c.legion_physical_region_t[17],
                       rp_fields : c.legion_field_id_t[17],
-                      rs_physical : c.legion_physical_region_t[34],
-                      rs_fields : c.legion_field_id_t[34],
+                      rs_physical : c.legion_physical_region_t[side_n_fields],
+                      rs_fields : c.legion_field_id_t[side_n_fields],
                       conf : config)
   c.printf("Running validate_output (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 

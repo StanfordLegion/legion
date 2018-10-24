@@ -2677,6 +2677,14 @@ std.sov = terralib.memoize(function(struct_type, width)
   assert(not std.is_ref(struct_type))
   assert(not std.is_rawref(struct_type))
 
+  local function make_array_of_vector_type(ty)
+    if ty:isprimitive() then
+      return vector(ty, width)
+    else
+      return make_array_of_vector_type(ty.type)[ty.N]
+    end
+  end
+
   local st = terralib.types.newstruct("sov")
   st.entries = terralib.newlist()
   for _, entry in pairs(struct_type:getentries()) do
@@ -2685,7 +2693,7 @@ std.sov = terralib.memoize(function(struct_type, width)
     if entry_type:isprimitive() then
       st.entries:insert{entry_field, vector(entry_type, width)}
     elseif entry_type:isarray() then
-      st.entries:insert{entry_field, vector(entry_type.type, width)[entry_type.N]}
+      st.entries:insert{entry_field, make_array_of_vector_type(entry_type)}
     else
       st.entries:insert{entry_field, std.sov(entry_type, width)}
     end

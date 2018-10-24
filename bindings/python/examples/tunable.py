@@ -20,7 +20,10 @@ from __future__ import print_function
 import legion
 from legion import task
 
-@task(top_level=True)
+@task
 def main():
     nprocs = legion.Tunable.select(legion.Tunable.GLOBAL_PYS).get()
     print("Number of Python processors: %s" % nprocs)
+
+if __name__ == '__legion_main__':
+    main()

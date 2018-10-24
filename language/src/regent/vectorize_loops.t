@@ -477,7 +477,7 @@ function min_simd_width.type(reg_size, ty)
   if std.is_bounded_type(ty) then
     return reg_size / sizeof(int64)
   elseif ty:isarray() then
-    return reg_size / sizeof(ty.type)
+    return min_simd_width.type(reg_size, ty.type)
   elseif ty:isstruct() then
     local simd_width = reg_size
     for _, entry in pairs(ty.entries) do
@@ -628,7 +628,7 @@ function check_vectorizability.stat(cx, node)
 
     local ty = node.type
     local type_vectorizable =
-      (ty:isarray() and ty.type:isprimitive()) or
+      ((ty:isarray() and ty.type:isprimitive()) and ty.type:isprimitive()) or
       check_vectorizability.type(ty)
     if not type_vectorizable then
       cx:report_error_when_demanded(node,

@@ -147,10 +147,11 @@ local get_ghost_rect = {
     var diff_rect : std.rect1d
     diff_rect.lo.__ptr = 0
     diff_rect.hi.__ptr = -1
-    [clear_unnecessary_polarity(root, r, polarity)]
+    var polarity_copy = polarity
+    [clear_unnecessary_polarity(root, r, polarity_copy)]
     -- If the ghost region is not necessary at all for this stencil,
     -- make a dummy region with only one element.
-    if polarity == [std.int1d:zero()] then return diff_rect end
+    if polarity_copy == [std.int1d:zero()] then return diff_rect end
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity)]
     [bounds_checks(diff_rect)]
     return diff_rect
@@ -160,11 +161,12 @@ local get_ghost_rect = {
     var diff_rect : std.rect2d
     diff_rect.lo.__ptr.x, diff_rect.lo.__ptr.y = 0, 0
     diff_rect.hi.__ptr.x, diff_rect.hi.__ptr.y = -1, -1
-    [clear_unnecessary_polarity(root, r, polarity, "x")]
-    [clear_unnecessary_polarity(root, r, polarity, "y")]
+    var polarity_copy = polarity
+    [clear_unnecessary_polarity(root, r, polarity_copy, "x")]
+    [clear_unnecessary_polarity(root, r, polarity_copy, "y")]
     -- If the ghost region is not necessary at all for this stencil,
     -- make a dummy region with only one element.
-    if polarity == [std.int2d:zero()] then return diff_rect end
+    if polarity_copy == [std.int2d:zero()] then return diff_rect end
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
     [bounds_checks(diff_rect)]
@@ -175,12 +177,13 @@ local get_ghost_rect = {
     var diff_rect : std.rect3d
     diff_rect.lo.__ptr.x, diff_rect.lo.__ptr.y, diff_rect.lo.__ptr.z = 0, 0, 0
     diff_rect.hi.__ptr.x, diff_rect.hi.__ptr.y, diff_rect.hi.__ptr.z = -1, -1, -1
-    [clear_unnecessary_polarity(root, r, polarity, "x")]
-    [clear_unnecessary_polarity(root, r, polarity, "y")]
-    [clear_unnecessary_polarity(root, r, polarity, "z")]
+    var polarity_copy = polarity
+    [clear_unnecessary_polarity(root, r, polarity_copy, "x")]
+    [clear_unnecessary_polarity(root, r, polarity_copy, "y")]
+    [clear_unnecessary_polarity(root, r, polarity_copy, "z")]
     -- If the ghost region is not necessary at all for this stencil,
     -- make a dummy region with only one element.
-    if polarity == [std.int3d:zero()] then return diff_rect end
+    if polarity_copy == [std.int3d:zero()] then return diff_rect end
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "x")]
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "y")]
     [get_ghost_rect_body(diff_rect, sz, root, r, s, polarity, "z")]

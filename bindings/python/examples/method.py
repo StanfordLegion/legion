@@ -25,9 +25,12 @@ class A:
     def static():
         print("Hello from A.static()!")
 
-@task(top_level=True)
+@task
 def main():
     A.static()
 
     a = A()
     a.static()
+
+if __name__ == '__legion_main__':
+    main()
