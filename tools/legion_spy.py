@@ -4243,6 +4243,7 @@ class DataflowTraverser(object):
         if not self.found_dataflow_path or self.needs_reductions:
             self.dataflow_stack = list()
             self.dataflow_stack.append(dst_inst)    
+            self.dataflow_copy = list()
         else:
             self.dataflow_stack = None
         self.observed_reductions = dict()
@@ -4328,10 +4329,15 @@ class DataflowTraverser(object):
                 if not self.verified(last=False):
                     # Push it on the stack and continue traversal
                     self.dataflow_stack.append(src)
+                    self.dataflow_copy.append(True)
                     return True
                 elif self.found_dataflow_path:
                     # If we just finished finding it do the analysis now
                     self.perform_copy_analysis(copy, src, self.dataflow_stack[-1])
+            else:
+                # Always traverse through non-dataflow copies
+                self.dataflow_copy.append(False)
+                return True
         elif self.needs_reductions:
             # Reduction copy
             red_target = self.dataflow_stack[-1]
@@ -4363,11 +4369,13 @@ class DataflowTraverser(object):
 
     def post_visit_copy(self, copy):
         if self.failed_analysis:
-            self.dataflow_stack.pop()
+            if self.dataflow_copy[-1]:
+                self.dataflow_stack.pop()
+            self.dataflow_copy.pop()
             return
         if 0 in copy.redops:
             # Normal copy, definitely do the analysis if we found the path
-            if self.found_dataflow_path: 
+            if self.found_dataflow_path and self.dataflow_copy[-1]: 
                 assert len(self.dataflow_stack) > 1
                 src = self.dataflow_stack[-1]
                 dst = self.dataflow_stack[-2]
@@ -4383,8 +4391,10 @@ class DataflowTraverser(object):
                 # Perform the copy analysis
                 self.perform_copy_analysis(copy, src, dst)
             # Only pop off our instance if this wasn't a reduction copy
-            if self.dataflow_stack:
-                self.dataflow_stack.pop()
+            if self.dataflow_copy:
+                if self.dataflow_copy[-1]:
+                    self.dataflow_stack.pop()
+                self.dataflow_copy.pop()
 
     def perform_copy_analysis(self, copy, src, dst):
         # If we've already traversed this then we can skip the verification
