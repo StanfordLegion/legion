@@ -2517,66 +2517,67 @@ namespace Legion {
     {
       if (is_replaying())
         return RtEvent::NO_RT_EVENT;
+      // If we're remote and origin mapped, then we are already done
+      if (is_remote() && is_origin_mapped())
+        return RtEvent::NO_RT_EVENT;
 #ifdef DEBUG_LEGION
       assert(version_infos.empty() || (version_infos.size() == regions.size()));
 #endif
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
-      std::set<Reservation> context_eq_locks;
+      LegionVector<FieldMask>::aligned version_masks(regions.size());
       const bool multiple_reqs = (regions.size() > 1);
       std::vector<unsigned> to_skip;
-      if (is_remote())
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // If we're remote and origin mapped, then we are already done
-        if (is_origin_mapped())
-          return RtEvent::NO_RT_EVENT;
-        for (unsigned idx = 0; idx < regions.size(); idx++)
+        if (no_access_regions[idx] || 
+            (early_mapped_regions.find(idx) != early_mapped_regions.end()))
         {
-          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          {
-            if (multiple_reqs)
-              to_skip.push_back(idx);
-            continue;
-          }
-          VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_version_info())
-          {
-            if (multiple_reqs)
-              to_skip.push_back(idx);
-            continue;
-          }
-          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                  version_info, ready_events, multiple_reqs, &context_eq_locks);
+          if (multiple_reqs)
+            to_skip.push_back(idx);
+          continue;
         }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
+        VersionInfo &version_info = version_infos[idx];
+        if (version_info.has_version_info())
         {
-          if (early_mapped_regions.find(idx) != early_mapped_regions.end())
-          {
-            if (multiple_reqs)
-              to_skip.push_back(idx);
-            continue;
-          }
-          VersionInfo &version_info = version_infos[idx];
-          if (version_info.has_version_info())
-          {
-            if (multiple_reqs)
-              to_skip.push_back(idx);
-            continue;
-          }
-          runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-                  version_info, ready_events, multiple_reqs, &context_eq_locks);
+          if (multiple_reqs)
+            to_skip.push_back(idx);
+          continue;
         }
+        runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
+              version_info, ready_events, multiple_reqs, &version_masks[idx]);
       }
       if (multiple_reqs && (to_skip.size() < regions.size()))
       {
-        if (!context_eq_locks.empty())
+        // Do the acquires first
+        std::set<Reservation> eq_reservations;
+        if (!to_skip.empty())
+        {
+          unsigned skip_index = 0;
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            if ((skip_index < to_skip.size()) && (idx == to_skip[skip_index]))
+              skip_index++;
+            else
+              version_infos[idx].acquire_equivalence_sets(regions[idx],
+                                  version_masks[idx], eq_reservations);
+          }
+#ifdef DEBUG_LEGION
+          assert(skip_index == to_skip.size());
+#endif
+        }
+        else
+        {
+          // Easy case with no skip indexes
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+            version_infos[idx].acquire_equivalence_sets(regions[idx],
+                                version_masks[idx], eq_reservations);
+        }
+        if (!eq_reservations.empty())
         {
           RtEvent locks_acquired;
           for (std::set<Reservation>::const_iterator it = 
-                context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+                eq_reservations.begin(); it != eq_reservations.end(); it++)
           {
             RtEvent next = Runtime::acquire_rt_reservation(*it,
                               true/*exclusive*/, locks_acquired);
@@ -2593,8 +2594,8 @@ namespace Legion {
             if ((skip_index < to_skip.size()) && (idx == to_skip[skip_index]))
               skip_index++;
             else
-              runtime->forest->make_versions_ready(regions[idx], 
-                                version_infos[idx], ready_events);
+              version_infos[idx].make_ready(regions[idx], 
+                        version_masks[idx], ready_events);
           }
 #ifdef DEBUG_LEGION
           assert(skip_index == to_skip.size());
@@ -2604,19 +2605,37 @@ namespace Legion {
         {
           // Easy case with no skip indexes
           for (unsigned idx = 0; idx < regions.size(); idx++)
-            runtime->forest->make_versions_ready(regions[idx], 
-                              version_infos[idx], ready_events);
+            version_infos[idx].make_ready(regions[idx],
+                      version_masks[idx], ready_events);
         }
-        if (!context_eq_locks.empty())
+        if (!ready_events.empty())
         {
-          for (std::set<Reservation>::const_iterator it = 
-                context_eq_locks.begin(); it != context_eq_locks.end(); it++)
-            it->release();
+          const RtEvent ready = Runtime::merge_events(ready_events);
+          if (!eq_reservations.empty())
+          {
+            for (std::set<Reservation>::const_iterator it = 
+                  eq_reservations.begin(); it != eq_reservations.end(); it++)
+              Runtime::release_reservation(*it, ready);
+          }
+          return ready;
+        }
+        else
+        {
+          if (!eq_reservations.empty())
+          {
+            for (std::set<Reservation>::const_iterator it = 
+                  eq_reservations.begin(); it != eq_reservations.end(); it++)
+              Runtime::release_reservation(*it);
+          }
+          return RtEvent::NO_RT_EVENT;
         }
       }
-      if (!ready_events.empty())
-        return Runtime::merge_events(ready_events);
-      return RtEvent::NO_RT_EVENT;
+      else
+      {
+        if (!ready_events.empty())
+          return Runtime::merge_events(ready_events);
+        return RtEvent::NO_RT_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------

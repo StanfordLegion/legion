@@ -1406,7 +1406,7 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     bool defer_make_ready, std::set<Reservation> *eq_locks)
+                     bool defer_make_ready/*=false*/, FieldMask *defer_mask)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1424,48 +1424,61 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       region_node->perform_versioning_analysis(ctx.get_id(),
                                                context, version_info);
-      // Read-only and reduction mappings to the same equivalence class can 
-      // potentially race with each other for effects on the same node. 
-      // To prevent this we grap context specific equivalence class locks
-      // before making the equivalence classes ready
-      if (IS_READ_ONLY(req) || (IS_REDUCE(req)))
+      if (!defer_make_ready)
       {
-        Reservation eq_lock = context->get_equivalence_class_lock();
-        if (defer_make_ready)
+        std::set<Reservation> needed_reservations;
+        // Acquire the equivalence sets first which will also give us
+        // any reservations that we need to acquire before requesting
+        // that we make the equivalence sets ready
+        version_info.acquire_equivalence_sets(req, user_mask, 
+                                              needed_reservations);
+        if (!needed_reservations.empty())
         {
-#ifdef DEBUG_LEGION
-          assert(eq_locks != NULL);
-#endif
-          eq_locks->insert(eq_lock);
-        }
-        else
-        {
-          RtEvent ready = 
-            Runtime::acquire_rt_reservation(eq_lock, true/*exclusive*/);
+          // Acquire the reservations
+          RtEvent ready;
+          for (std::set<Reservation>::const_iterator it = 
+                needed_reservations.begin(); it != 
+                needed_reservations.end(); it++)
+          {
+            const RtEvent next = 
+              Runtime::acquire_rt_reservation(*it, true/*exclusive*/, ready);
+            ready = next;
+          }
+          // Wait until they are ready
           if (ready.exists() && !ready.has_triggered())
             ready.wait();
-          version_info.make_ready(req, user_mask, ready_events);
-          eq_lock.release(); 
+          // Do the make ready request
+          std::set<RtEvent> local_ready_events;
+          version_info.make_ready(req, user_mask, local_ready_events);
+          // Release the reservations once the requests are ready
+          if (!local_ready_events.empty())
+          {
+            RtEvent local_ready = Runtime::merge_events(local_ready_events);
+            for (std::set<Reservation>::const_iterator it = 
+                  needed_reservations.begin(); it != 
+                  needed_reservations.end(); it++)
+              Runtime::release_reservation(*it, local_ready);
+            ready_events.insert(local_ready);
+          }
+          else
+          {
+            for (std::set<Reservation>::const_iterator it = 
+                  needed_reservations.begin(); it != 
+                  needed_reservations.end(); it++)
+              Runtime::release_reservation(*it);
+          }
         }
+        else
+          // If there are no reservations we can just do this
+          version_info.make_ready(req, user_mask, ready_events);
       }
-      else if (!defer_make_ready)
-        version_info.make_ready(req, user_mask, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeForest::make_versions_ready(const RegionRequirement &req,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      if (IS_NO_ACCESS(req))
-        return;
+      else
+      {
 #ifdef DEBUG_LEGION
-      assert(req.handle_type == SINGULAR);
+        assert(defer_mask != NULL);
 #endif
-      FieldSpaceNode *field_space_node = get_node(req.region.get_field_space());
-      FieldMask user_mask = 
-        field_space_node->get_field_mask(req.privilege_fields);
-      version_info.make_ready(req, user_mask, ready_events);
+        *defer_mask = user_mask;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1529,8 +1542,36 @@ namespace Legion {
       // Perform the version analysis and make it ready
       top_node->perform_versioning_analysis(ctx.get_id(), context,
                                             init_version_info);
-      std::set<RtEvent> eq_ready_events;
-      init_version_info.make_ready(req, user_mask, eq_ready_events); 
+      std::set<Reservation> eq_reservations;
+      init_version_info.acquire_equivalence_sets(req,user_mask,eq_reservations);
+      RtEvent eq_ready;
+      if (!eq_reservations.empty())
+      {
+        RtEvent locks_acquired;
+        for (std::set<Reservation>::const_iterator it = 
+              eq_reservations.begin(); it != eq_reservations.end(); it++)
+        {
+          RtEvent next = Runtime::acquire_rt_reservation(*it,
+                            true/*exclusive*/, locks_acquired);
+          locks_acquired = next;
+        }
+        if (locks_acquired.exists() && !locks_acquired.has_triggered())
+          locks_acquired.wait();
+        std::set<RtEvent> eq_ready_events;
+        init_version_info.make_ready(req, user_mask, eq_ready_events); 
+        if (!eq_ready_events.empty())
+          eq_ready = Runtime::merge_events(eq_ready_events);
+        for (std::set<Reservation>::const_iterator it = 
+              eq_reservations.begin(); it != eq_reservations.end(); it++)
+          Runtime::release_reservation(*it, eq_ready);
+      }
+      else
+      {
+        std::set<RtEvent> eq_ready_events;
+        init_version_info.make_ready(req, user_mask, eq_ready_events); 
+        if (!eq_ready_events.empty())
+          eq_ready = Runtime::merge_events(eq_ready_events);
+      }
       // Now get the top-views for all the physical instances
       std::vector<InstanceView*> corresponding(sources.size());
       const AddressSpaceID local_space = context->runtime->address_space;
@@ -1610,12 +1651,8 @@ namespace Legion {
         }
       }
       // Wait for the equivalence classes to be ready
-      if (!eq_ready_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(eq_ready_events);
-        if (wait_on.exists())
-          wait_on.wait();
-      }
+      if (eq_ready.exists() && !eq_ready.has_triggered())
+        eq_ready.wait();
       // Iterate over the equivalence classes and initialize them
       const std::set<EquivalenceSet*> &eq_sets = 
         init_version_info.get_equivalence_sets();

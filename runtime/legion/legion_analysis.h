@@ -106,6 +106,9 @@ namespace Legion {
       void initialize_mapping(Operation *op);
       void record_equivalence_sets(VersionManager *owner,
                                    const std::set<EquivalenceSet*> &sets);
+      void acquire_equivalence_sets(const RegionRequirement &req,
+                                    const FieldMask &acquire_mask,
+                                    std::set<Reservation> &needed_reservations);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
                       std::set<RtEvent> &ready_events);
       void finalize_mapping(std::set<RtEvent> &map_applied_events, 
@@ -778,7 +781,8 @@ namespace Legion {
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
-                     IndexSpaceExpression *expr, bool register_now);
+                     IndexSpaceExpression *expr, 
+                     Reservation version_lock, bool register_now);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
     public:
@@ -996,6 +1000,7 @@ namespace Legion {
     public:
       IndexSpaceExpression *const set_expr;
       const AddressSpaceID logical_owner_space;
+      const Reservation version_lock;
     protected:
       mutable LocalLock eq_lock;
     protected:

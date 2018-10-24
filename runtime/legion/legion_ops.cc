@@ -3539,14 +3539,16 @@ namespace Legion {
 
       // Do our versioning analysis and then add it to the ready queue
       std::set<RtEvent> preconditions;
-      std::set<Reservation> context_eq_locks;
+      LegionVector<FieldMask>::aligned version_masks(
+          src_requirements.size() + dst_requirements.size() + 
+          src_indirect_requirements.size() + dst_indirect_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      src_requirements[idx],
                                                      src_versions[idx],
                                                      preconditions,
                                                      true/*defer*/,
-                                                     &context_eq_locks);
+                                                     &version_masks[idx]);
       unsigned offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -3560,7 +3562,7 @@ namespace Legion {
                                                      dst_versions[idx],
                                                      preconditions,
                                                      true/*defer*/,
-                                                     &context_eq_locks);
+                                                   &version_masks[offset+idx]);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
@@ -3574,7 +3576,7 @@ namespace Legion {
                                                  gather_versions[idx],
                                                  preconditions,
                                                  true/*defer*/,
-                                                 &context_eq_locks);
+                                                 &version_masks[offset+idx]);
       }
       if (!dst_indirect_requirements.empty())
       {
@@ -3585,15 +3587,54 @@ namespace Legion {
                                                  scatter_versions[idx],
                                                  preconditions,
                                                  true/*defer*/,
-                                                 &context_eq_locks);
+                                                 &version_masks[offset+idx]);
+      }
+      // Do the acquires now for all the region requirements
+      std::set<Reservation> eq_reservations;
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        src_versions[idx].acquire_equivalence_sets(src_requirements[idx],
+                                                   version_masks[idx],
+                                                   eq_reservations);
+      offset = src_requirements.size();
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
+        // Perform this dependence analysis as if it was READ_WRITE
+        // so that we can get the version numbers correct
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = READ_WRITE;
+        dst_versions[idx].acquire_equivalence_sets(dst_requirements[idx],
+                                                   version_masks[offset+idx],
+                                                   eq_reservations);
+        // Switch the privileges back when we are done
+        if (is_reduce_req)
+          dst_requirements[idx].privilege = REDUCE;
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        offset += dst_requirements.size();
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          gather_versions[idx].acquire_equivalence_sets(
+                                                 src_indirect_requirements[idx],
+                                                 version_masks[offset+idx],
+                                                 eq_reservations);
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        offset += src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          scatter_versions[idx].acquire_equivalence_sets(
+                                                 dst_indirect_requirements[idx],
+                                                 version_masks[offset+idx],
+                                                 eq_reservations);
       }
       // Acquire any locks we need to do the make ready step and 
       // wait for them to be acquired
-      if (!context_eq_locks.empty())
+      if (!eq_reservations.empty())
       {
         RtEvent locks_acquired;
         for (std::set<Reservation>::const_iterator it = 
-              context_eq_locks.begin(); it != context_eq_locks.end(); it++)
+              eq_reservations.begin(); it != eq_reservations.end(); it++)
         {
           RtEvent next = Runtime::acquire_rt_reservation(*it,
                             true/*exclusive*/, locks_acquired);
@@ -3605,9 +3646,9 @@ namespace Legion {
       // Since we have multiple region requirements we know that we have
       // to defer doing these kinds of things
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        runtime->forest->make_versions_ready(src_requirements[idx],
-                                             src_versions[idx],
-                                             preconditions);
+        src_versions[idx].make_ready(src_requirements[idx],
+                                     version_masks[idx], preconditions);
+      offset = src_requirements.size();
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -3615,38 +3656,49 @@ namespace Legion {
         // so that we can get the version numbers correct
         if (is_reduce_req)
           dst_requirements[idx].privilege = READ_WRITE;
-        runtime->forest->make_versions_ready(dst_requirements[idx],
-                                             dst_versions[idx],
-                                             preconditions);
+        dst_versions[idx].make_ready(dst_requirements[idx],
+                                     version_masks[offset+idx], preconditions);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE;
       }
       if (!src_indirect_requirements.empty())
       {
+        offset += dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-          runtime->forest->make_versions_ready(src_indirect_requirements[idx],
-                                               gather_versions[idx],
-                                               preconditions);
+          gather_versions[idx].make_ready(src_indirect_requirements[idx],
+                                version_masks[offset+idx], preconditions);
       }
       if (!dst_indirect_requirements.empty())
       {
+        offset += src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-          runtime->forest->make_versions_ready(dst_indirect_requirements[idx],
-                                               scatter_versions[idx],
-                                               preconditions);
+          scatter_versions[idx].make_ready(dst_indirect_requirements[idx],
+                                 version_masks[offset+idx], preconditions);
       }
       // Release any locks that we acquired
-      if (!context_eq_locks.empty())
-      {
-        for (std::set<Reservation>::const_iterator it = 
-              context_eq_locks.begin(); it != context_eq_locks.end(); it++)
-          it->release();
-      }
+      
       if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      {
+        const RtEvent ready = Runtime::merge_events(preconditions);
+        if (!eq_reservations.empty())
+        {
+          for (std::set<Reservation>::const_iterator it = 
+                eq_reservations.begin(); it != eq_reservations.end(); it++)
+            Runtime::release_reservation(*it, ready);
+        }
+        enqueue_ready_operation(ready);
+      }
       else
+      {
+        if (!eq_reservations.empty())
+        {
+          for (std::set<Reservation>::const_iterator it = 
+                eq_reservations.begin(); it != eq_reservations.end(); it++)
+            Runtime::release_reservation(*it);
+        }
         enqueue_ready_operation();
+      }
     }
 
     //--------------------------------------------------------------------------

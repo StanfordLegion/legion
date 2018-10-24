@@ -1897,7 +1897,6 @@ namespace Legion {
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
-        eq_acquire_lock(Reservation::create_reservation()),
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
         outstanding_dependence(false), outstanding_post_task(0),
@@ -1956,8 +1955,6 @@ namespace Legion {
     InnerContext::~InnerContext(void)
     //--------------------------------------------------------------------------
     {
-      eq_acquire_lock.destroy_reservation();
-      eq_acquire_lock = Reservation::NO_RESERVATION;
       if (!remote_instances.empty())
         free_remote_contexts();
       for (std::map<TraceID,DynamicTrace*>::const_iterator it = traces.begin();
@@ -2102,7 +2099,8 @@ namespace Legion {
             const AddressSpaceID local_space = runtime->address_space;
             root = new EquivalenceSet(runtime,
               runtime->get_available_distributed_id(),
-              local_space, local_space, expr, true/*register now*/); 
+              local_space, local_space, expr, 
+              Reservation::NO_RESERVATION, true/*register now*/); 
             empty_equivalence_sets[key] = root;
             root->add_base_resource_ref(CONTEXT_REF);
           }
@@ -2153,7 +2151,8 @@ namespace Legion {
           const AddressSpaceID local_space = runtime->address_space;
           root = new EquivalenceSet(runtime, 
               runtime->get_available_distributed_id(),
-              local_space, local_space, root_expr, true/*register now*/); 
+              local_space, local_space, root_expr, 
+              Reservation::NO_RESERVATION, true/*register now*/); 
           tree_equivalence_sets[tree_id] = root;
           root->add_base_resource_ref(CONTEXT_REF);
         }

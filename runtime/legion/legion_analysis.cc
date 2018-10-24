@@ -239,9 +239,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::make_ready(const RegionRequirement &req, 
-                                 const FieldMask &ready_mask,
-                                 std::set<RtEvent> &ready_events)
+    void VersionInfo::acquire_equivalence_sets(const RegionRequirement &req, 
+                                               const FieldMask &acquire_mask,
+                                     std::set<Reservation> &needed_reservations)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -253,7 +253,7 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
-        if ((*it)->acquire_mapping_guard(op, ready_mask, alt_sets))
+        if ((*it)->acquire_mapping_guard(op, acquire_mask, alt_sets))
         {
 #ifdef DEBUG_LEGION
           assert(!alt_sets.empty());
@@ -281,6 +281,23 @@ namespace Legion {
 #endif
         owner->update_equivalence_sets(equivalence_sets);
       }
+      // If this is a ready-only or a reduction privilege operation then 
+      // we need the reservations for these equivalence sets since we 
+      // could potentially race on updates between them
+      if (IS_READ_ONLY(req) || IS_REDUCE(req))
+      {
+        for (std::set<EquivalenceSet*>::const_iterator it = 
+              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+          needed_reservations.insert((*it)->version_lock);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::make_ready(const RegionRequirement &req, 
+                                 const FieldMask &ready_mask,
+                                 std::set<RtEvent> &ready_events)
+    //--------------------------------------------------------------------------
+    {
       // We only need an exclusive mode for this operation if we're 
       // writing otherwise, we know we can do things with a shared copy
       for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -2652,9 +2669,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
                                    AddressSpaceID owner, AddressSpace logical,
-                                   IndexSpaceExpression *expr, bool reg_now)
+                                   IndexSpaceExpression *expr, 
+                                   Reservation ver_lock, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
         logical_owner_space(logical),
+        version_lock(is_owner() ? Reservation::create_reservation() : ver_lock),
         eq_state(is_logical_owner() ? MAPPING_STATE : 
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
@@ -2686,7 +2705,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
       : DistributedCollectable(rhs), set_expr(NULL), 
-        logical_owner_space(rhs.logical_owner_space)
+        logical_owner_space(rhs.logical_owner_space),
+        version_lock(rhs.version_lock)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2734,6 +2754,11 @@ namespace Legion {
           if (it->first->remove_nested_valid_ref(did))
             delete it->first;
       }
+      if (is_owner())
+      {
+        Reservation copy = version_lock;
+        copy.destroy_reservation();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2754,7 +2779,7 @@ namespace Legion {
       Runtime *runtime = owner->runtime;
       DistributedID did = runtime->get_available_distributed_id();
       refinement = new EquivalenceSet(runtime, did, runtime->address_space, 
-                                      source, expr, true/*register*/);
+              source, expr, Reservation::NO_RESERVATION, true/*register*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6456,6 +6481,7 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(logical_owner_space);
         set_expr->pack_expression(rez, target);
+        rez.serialize(version_lock);
       }
       runtime->send_equivalence_set_response(target, rez);
     }
@@ -6759,14 +6785,16 @@ namespace Legion {
       derez.deserialize(logical_owner);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      Reservation version_lock;
+      derez.deserialize(version_lock);
       void *location;
       EquivalenceSet *set = NULL;
       if (runtime->find_pending_collectable_location(did, location))
         set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
-                                           expr, false/*register now*/);
+                                     expr, version_lock, false/*register now*/);
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
-                                 expr, false/*register now*/);
+                                 expr, version_lock, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
