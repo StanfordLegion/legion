@@ -36,6 +36,7 @@ end
 
 task k() : int
   var r = region(ispace(ptr, 5), a)
+  fill(r.{b, c}, 0)
   must_epoch
     g(r)
     h(r)

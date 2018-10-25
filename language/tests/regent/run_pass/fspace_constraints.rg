@@ -27,7 +27,7 @@ where
 end
 
 task f(rtop : region(tree(rtop)), t : ptr(tree(rtop), rtop))
-where reads(rtop) do
+where reads writes(rtop) do
 end
 
 task main()
