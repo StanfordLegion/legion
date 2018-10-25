@@ -615,7 +615,7 @@ class Stage(object):
 def report_mode(debug, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest, use_gasnet,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir):
     print()
     print('#'*60)
@@ -642,6 +642,7 @@ def report_mode(debug, launcher,
     print('###   * LLVM:       %s' % use_llvm)
     print('###   * HDF5:       %s' % use_hdf)
     print('###   * Spy:        %s' % use_spy)
+    print('###   * Prof:       %s' % use_prof)
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
@@ -686,6 +687,7 @@ def run_tests(test_modules=None,
     use_llvm = feature_enabled('llvm', False)
     use_hdf = feature_enabled('hdf', False)
     use_spy = feature_enabled('spy', False)
+    use_prof = feature_enabled('prof', False)
     use_gcov = feature_enabled('gcov', False)
     use_cmake = feature_enabled('cmake', False)
     use_rdir = feature_enabled('rdir', True)
@@ -719,7 +721,7 @@ def run_tests(test_modules=None,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest,
                 use_gasnet,
-                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy,
+                use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
                 use_gcov, use_cmake, use_rdir)
 
     tmp_dir = tempfile.mkdtemp(dir=root_dir)
@@ -744,6 +746,8 @@ def run_tests(test_modules=None,
         ('TEST_HDF', '1' if use_hdf else '0'),
         ('USE_SPY', '1' if use_spy else '0'),
         ('TEST_SPY', '1' if use_spy else '0'),
+        ('USE_PROF', '1' if use_prof else '0'),
+        ('TEST_PROF', '1' if use_prof else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
@@ -875,7 +879,7 @@ def driver():
     parser.add_argument(
         '--use', dest='use_features', action=ExtendAction,
         choices=MultipleChoiceList('gasnet', 'cuda', 'openmp',
-                                   'python', 'llvm', 'hdf', 'spy',
+                                   'python', 'llvm', 'hdf', 'spy', 'prof',
                                    'gcov', 'cmake', 'rdir'),
         type=lambda s: s.split(','),
         default=None,
