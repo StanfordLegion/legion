@@ -101,6 +101,7 @@ task toplevel()
   var proc = [get_proc()]
   var procs = c.bishop_all_processors()
   var r = region(ispace(ptr, 10), fs)
+  fill(r.{x, y}, 0)
   ta(1, r)
   tb(2, r)
   tc(3, r)
