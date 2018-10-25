@@ -83,6 +83,12 @@ terra top_level_task(task : c.legion_task_t,
     c.legion_field_allocator_destroy(fsa)
   end
 
+  do
+    var init : int = 0
+    c.legion_runtime_fill_field(runtime, ctx, r, r, f1, &init, sizeof(int), c.legion_predicate_true())
+    c.legion_runtime_fill_field(runtime, ctx, r, r, f2, &init, sizeof(int), c.legion_predicate_true())
+  end
+
   var coloring = c.legion_coloring_create()
   c.legion_coloring_add_point(coloring, 1, ptr1)
   c.legion_coloring_add_point(coloring, 2, ptr1)
