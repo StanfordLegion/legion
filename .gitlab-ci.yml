@@ -83,6 +83,9 @@ variables:
 .cmake: &cmake
   USE_CMAKE: "1"
 
+.prof: &prof
+  USE_PROF: "1"
+
 .legion: &legion
   TEST_REGENT: "0"
 
@@ -257,6 +260,11 @@ gcc49_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_spy, *regent, *parallel]
+#   * Prof
+gcc49_cxx98_release_prof_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *release, *cxx98_normal, *prof, *regent, *parallel]
 #   * C++11
 gcc49_cxx11_release_legion:
   <<: [*linux, *image, *tests]
@@ -380,6 +388,11 @@ clang38_cxx98_debug_spy_regent:
   <<: [*linux_compute, *image_clang, *tests]
   variables:
     <<: [*clang38, *terra38, *debug, *cxx98_spy, *regent, *parallel]
+#   * Prof
+clang38_cxx98_release_prof_regent:
+  <<: [*linux_compute, *image_clang, *tests]
+  variables:
+    <<: [*clang38, *terra38, *release, *cxx98_normal, *prof, *regent, *parallel]
 #   * C++11
 clang38_cxx11_release_legion:
   <<: [*linux, *image_clang, *tests]

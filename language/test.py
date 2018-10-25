@@ -44,6 +44,14 @@ class TestFailure(Exception):
         self.command = command
         self.output = output
 
+def detect_python_interpreter():
+    try:
+        if subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+            return "pypy"
+    except:
+        pass
+    return sys.executable
+
 def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
@@ -78,8 +86,8 @@ def run(filename, debug, verbose, flags, env):
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
     return ' '.join(args)
 
-def run_spy(logfiles, verbose):
-    cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
+def run_spy(logfiles, verbose, py_exe_path):
+    cmd = [py_exe_path, os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
            '--logical',
            '--physical',
            '--cycle',
@@ -88,6 +96,22 @@ def run_spy(logfiles, verbose):
            # '--geometry', # FIXME: This is *very* slow.
            '--assert-error',
            '--assert-warning'] + logfiles
+    if verbose: print('Running', ' '.join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        stdout=None if verbose else subprocess.PIPE,
+        stderr=None if verbose else subprocess.STDOUT)
+    output, _ = proc.communicate()
+    retcode = proc.wait()
+    if retcode != 0:
+        raise TestFailure(' '.join(cmd), output.decode('utf-8') if output is not None else None)
+
+def run_prof(out_dir, logfiles, verbose, py_exe_path):
+    cmd = [
+        py_exe_path,
+        os.path.join(regent.root_dir(), 'tools', 'legion_prof.py'),
+        '-o', os.path.join(out_dir, 'legion_prof'),
+    ] + logfiles
     if verbose: print('Running', ' '.join(cmd))
     proc = subprocess.Popen(
         cmd,
@@ -122,7 +146,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, flags, env):
+def test_compile_fail(filename, debug, verbose, short, py_exe_path, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -142,7 +166,7 @@ def test_compile_fail(filename, debug, verbose, short, flags, env):
     else:
         raise Exception('Expected failure, but test passed')
 
-def test_run_pass(filename, debug, verbose, short, flags, env):
+def test_run_pass(filename, debug, verbose, short, py_exe_path, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
@@ -150,7 +174,7 @@ def test_run_pass(filename, debug, verbose, short, flags, env):
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
-def test_spy(filename, debug, verbose, short, flags, env):
+def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
@@ -166,11 +190,33 @@ def test_spy(filename, debug, verbose, short, flags, env):
             try:
                 spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
                 assert len(spy_logs) > 0
-                run_spy(spy_logs, verbose)
+                run_spy(spy_logs, verbose, py_exe_path)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
     finally:
         shutil.rmtree(spy_dir)
+
+def test_prof(filename, debug, verbose, short, py_exe_path, flags, env):
+    prof_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
+    prof_log = os.path.join(prof_dir, 'prof_%.gz')
+    prof_flags = ['-hl:prof', '1024', '-hl:prof_logfile', prof_log]
+
+    runs_with = find_labeled_flags(filename, 'runs-with', short)
+    try:
+        for params in runs_with:
+            try:
+                cmd = run(filename, debug, verbose, params + flags + prof_flags, env)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
+
+            try:
+                prof_logs = glob.glob(os.path.join(prof_dir, 'prof_*.gz'))
+                assert len(prof_logs) > 0
+                run_prof(prof_dir, prof_logs, verbose, py_exe_path)
+            except TestFailure as e:
+                raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
+    finally:
+        shutil.rmtree(prof_dir)
 
 red = "\033[1;31m"
 green = "\033[1;32m"
@@ -187,14 +233,14 @@ class TestTimeoutException(Exception):
 def sigalrm_handler(signum, frame):
     raise TestTimeoutException
 
-def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short):
+def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
     test_fn, test_args = test_closure
     saved_temps = []
     if timelimit:
         signal.signal(signal.SIGALRM, sigalrm_handler)
         signal.alarm(timelimit)
     try:
-        test_fn(filename, debug, verbose, short, *test_args)
+        test_fn(filename, debug, verbose, short, py_exe_path, *test_args)
         signal.alarm(0)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, None
@@ -216,7 +262,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_python, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_python, short, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -261,6 +307,17 @@ def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_pytho
           os.path.join('..', 'tutorial'),
          )),
     ]
+    prof = [
+        ('prof', (test_prof, ([] + extra_flags, {})),
+         (os.path.join('tests', 'regent', 'run_pass'),
+          os.path.join('tests', 'regent', 'perf'),
+          os.path.join('tests', 'regent', 'bugs'),
+          os.path.join('tests', 'regent', 'layout'),
+          os.path.join('tests', 'bishop', 'run_pass'),
+          os.path.join('examples'),
+          os.path.join('..', 'tutorial'),
+         )),
+    ]
     hdf5 = [
         ('run_pass', (test_run_pass, ([] + extra_flags, {})),
          (os.path.join('tests', 'hdf5', 'run_pass'),
@@ -285,7 +342,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_pytho
     ]
 
     result = []
-    if not use_run and not use_spy and not use_hdf5:
+    if not use_run and not use_spy and not use_prof and not use_hdf5:
         result.extend(base)
         if not short:
             result.extend(pretty)
@@ -294,6 +351,8 @@ def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_pytho
         result.extend(run)
     if use_spy:
         result.extend(spy)
+    if use_prof:
+        result.extend(prof)
     if use_hdf5:
         result.extend(hdf5)
     if use_openmp:
@@ -302,15 +361,17 @@ def get_test_specs(legion_dir, use_run, use_spy, use_hdf5, use_openmp, use_pytho
         result.extend(python)
     return result
 
-def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, python, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, short):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
 
     legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
+    py_exe_path = detect_python_interpreter()
+
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, hdf5, openmp, python, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, python, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -326,7 +387,7 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, python, extra_fla
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short))))
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short, py_exe_path))))
 
     thread_pool.close()
 
@@ -431,6 +492,10 @@ def test_driver(argv):
                         action='store_true',
                         help='run Legion Spy tests',
                         dest='spy')
+    parser.add_argument('--prof',
+                        action='store_true',
+                        help='run Legion Prof tests',
+                        dest='prof')
     parser.add_argument('--hdf', '--hdf5',
                         action='store_true',
                         help='run HDF5 tests',
@@ -482,6 +547,7 @@ def test_driver(argv):
         args.debug,
         args.run_pass,
         args.spy,
+        args.prof,
         args.hdf5,
         args.openmp,
         args.python,

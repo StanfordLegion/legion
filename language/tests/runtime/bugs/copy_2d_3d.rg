@@ -86,6 +86,7 @@ task dotest(size : int3d,
 	    c_lo : int3d, c_hi : int3d)
   var is = ispace(int3d, size)
   var r = region(is, fs)
+  fill(r.{x, y}, 0)
   var p_p = make_subregion(r, p_lo, p_hi)
   var p_c = make_subregion(r, c_lo, c_hi)
   var t1 = c.legion_get_current_time_in_micros()
