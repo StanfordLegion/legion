@@ -63,9 +63,6 @@
   runtime->print_once(ctx, file, message);                \
 }
 
-// A guard macro that will exist until control replication is available
-#define NO_LEGION_CONTROL_REPLICATION
-
 /**
  * \namespace Legion
  * Namespace for all Legion runtime objects
@@ -3192,8 +3189,8 @@ namespace Legion {
      */
     class ShardingFunctor {
     public:
-      ShardingFunctor(void) { }
-      virtual ~ShardingFunctor(void) { }
+      ShardingFunctor(void);
+      virtual ~ShardingFunctor(void);
     public:
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,
