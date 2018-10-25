@@ -18,7 +18,10 @@ local common_config = require("common/config")
 
 local config = {}
 
-local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "CMAKE_BUILD_DIR", "USE_RDIR"})
+local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "USE_RDIR"})
+if os.getenv("USE_CMAKE") == "1" then
+  expect_vars:insert("CMAKE_BUILD_DIR")
+end
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
   expect_vars:insert("DYLD_LIBRARY_PATH")
 else
