@@ -11978,7 +11978,6 @@ namespace Legion {
       char *field_string = column_source->to_string(uninit);
       TaskContext *context = op->get_context();
       // Read-only or reduction usage of uninitialized data is always an error
-#if 0
       if (IS_READ_ONLY(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld) in "
@@ -12002,7 +12001,6 @@ namespace Legion {
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
       else // Read-write usage is just a warning
-#endif
         REPORT_LEGION_WARNING(LEGION_WARNING_UNINITIALIZED_USE,
                       "Region requirement %d of operation %s (UID %lld) in "
                       "parent task %s (UID %lld) is using uninitialized data "
