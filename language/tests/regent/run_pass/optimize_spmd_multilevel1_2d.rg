@@ -40,6 +40,7 @@ local x1y1 = terralib.constant(`int2d { __ptr = regentlib.__int2d { 1, 1 } })
 
 task main()
   var grid = region(ispace(int2d, { 4, 4 }), int)
+  fill(grid, 0)
 
   var LR = partition(equal, grid, ispace(int2d, { 2, 1 }))
   var TB = partition(equal, grid, ispace(int2d, { 1, 2 }))
