@@ -44,6 +44,14 @@ class TestFailure(Exception):
         self.command = command
         self.output = output
 
+def detect_python_interpreter():
+    try:
+        if subprocess.call(["pypy", "-h"], stdout=subprocess.PIPE, stderr=subprocess.PIPE) == 0:
+            return "pypy"
+    except:
+        pass
+    return sys.executable
+
 def run(filename, debug, verbose, flags, env):
     args = ((['-mg'] if debug else []) +
             [os.path.basename(filename)] + flags +
@@ -78,8 +86,8 @@ def run(filename, debug, verbose, flags, env):
         raise TestFailure(' '.join(args), output.decode('utf-8') if output is not None else None)
     return ' '.join(args)
 
-def run_spy(logfiles, verbose):
-    cmd = ['pypy', os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
+def run_spy(logfiles, verbose, py_exe_path):
+    cmd = [py_exe_path, os.path.join(regent.root_dir(), 'tools', 'legion_spy.py'),
            '--logical',
            '--physical',
            '--cycle',
@@ -122,7 +130,7 @@ def find_labeled_flags(filename, prefix, short):
         return flags[:1]
     return flags
 
-def test_compile_fail(filename, debug, verbose, short, flags, env):
+def test_compile_fail(filename, debug, verbose, short, py_exe_path, flags, env):
     expected_failure = find_labeled_text(filename, 'fails-with')
     if expected_failure is None:
         raise Exception('No fails-with declaration in compile_fail test')
@@ -142,7 +150,7 @@ def test_compile_fail(filename, debug, verbose, short, flags, env):
     else:
         raise Exception('Expected failure, but test passed')
 
-def test_run_pass(filename, debug, verbose, short, flags, env):
+def test_run_pass(filename, debug, verbose, short, py_exe_path, flags, env):
     runs_with = find_labeled_flags(filename, 'runs-with', short)
     try:
         for params in runs_with:
@@ -150,7 +158,7 @@ def test_run_pass(filename, debug, verbose, short, flags, env):
     except TestFailure as e:
         raise Exception('Command failed:\n%s\n\nOutput:\n%s' % (e.command, e.output))
 
-def test_spy(filename, debug, verbose, short, flags, env):
+def test_spy(filename, debug, verbose, short, py_exe_path, flags, env):
     spy_dir = tempfile.mkdtemp(dir=os.path.dirname(os.path.abspath(filename)))
     spy_log = os.path.join(spy_dir, 'spy_%.log')
     spy_flags = ['-level', 'legion_spy=2', '-logfile', spy_log]
@@ -166,7 +174,7 @@ def test_spy(filename, debug, verbose, short, flags, env):
             try:
                 spy_logs = glob.glob(os.path.join(spy_dir, 'spy_*.log'))
                 assert len(spy_logs) > 0
-                run_spy(spy_logs, verbose)
+                run_spy(spy_logs, verbose, py_exe_path)
             except TestFailure as e:
                 raise Exception('Command failed:\n%s\n%s\n\nOutput:\n%s' % (cmd, e.command, e.output))
     finally:
@@ -187,14 +195,14 @@ class TestTimeoutException(Exception):
 def sigalrm_handler(signum, frame):
     raise TestTimeoutException
 
-def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short):
+def test_runner(test_name, test_closure, debug, verbose, filename, timelimit, short, py_exe_path):
     test_fn, test_args = test_closure
     saved_temps = []
     if timelimit:
         signal.signal(signal.SIGALRM, sigalrm_handler)
         signal.alarm(timelimit)
     try:
-        test_fn(filename, debug, verbose, short, *test_args)
+        test_fn(filename, debug, verbose, short, py_exe_path, *test_args)
         signal.alarm(0)
     except KeyboardInterrupt:
         return test_name, filename, [], INTERRUPT, None
@@ -309,6 +317,8 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, python, extra_fla
 
     legion_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 
+    py_exe_path = detect_python_interpreter()
+
     # Run tests asynchronously.
     tests = get_test_specs(legion_dir, run, spy, hdf5, openmp, python, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
@@ -326,7 +336,7 @@ def run_all_tests(thread_count, debug, run, spy, hdf5, openmp, python, extra_fla
                 continue
             if skip_patterns and any(re.search(p,test_path) for p in skip_patterns):
                 continue
-            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short))))
+            results.append((test_name, test_path, thread_pool.apply_async(test_runner, (test_name, test_fn, debug, verbose, test_path, timelimit, short, py_exe_path))))
 
     thread_pool.close()
 
