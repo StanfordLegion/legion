@@ -3652,8 +3652,25 @@ namespace Legion {
                 if (finder != exclusive_copies.end())
                   request_mask -= finder->second;
               }
+              // Check to see if we have it in single redop mode too
+              if (!(request_mask * single_redop_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = exclusive_copies.find(logical_owner_space);
+                if (finder != exclusive_copies.end())
+                {
+                  const FieldMask redop_overlap = request_mask & finder->second;
+                  if (!!redop_overlap)
+                  {
+                    request_mask -= redop_overlap;
+                    // If we overlap on single reduce record that we mutated 
+                    // this to prevent it from being invalidated underneath us
+                    record_mutated_guard(op, redop_overlap);
+                  }
+                }
+              }
               // Read-only can also be in shared mode
-              if (IS_READ_ONLY(usage) && !!request_mask)
+              if (IS_READ_ONLY(usage) && !(request_mask * shared_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
                   finder = shared_copies.find(logical_owner_space);
