@@ -3508,18 +3508,40 @@ namespace Legion {
         }
         else if (IS_READ_ONLY(usage))
         {
-          // For read-only we'll be happy with exclusive or read-only
-          const FieldMask valid_mask = 
-                        request_mask & (exclusive_fields | shared_fields);
+          // For read-only we'll be happy with 
+          // exclusive, shared, or single reduce
+          const FieldMask valid_mask = request_mask & 
+            (exclusive_fields | shared_fields | single_redop_fields);
           if (!!valid_mask)
+          {
             request_mask -= valid_mask;
+            // If we overlap on single reduce record that we mutated this
+            // already to prevent it from being invalidated underneath us
+            if (!!single_redop_fields)
+            {
+              const FieldMask redop_overlap = valid_mask & single_redop_fields;
+              if (!!redop_overlap)
+                record_mutated_guard(op, redop_overlap);
+            }
+          }
         }
         else
         {
-          // for write privileges then we need to be exclusive
-          const FieldMask valid_mask = request_mask & exclusive_fields;
+          // for write privileges then we need to be exclusive or single reduce
+          const FieldMask valid_mask = request_mask & 
+            (exclusive_fields | single_redop_fields);
           if (!!valid_mask)
+          {
             request_mask -= valid_mask;
+            // If we overlap on single reduce record that we mutated this
+            // already to prevent it from being invalidated underneath us
+            if (!!single_redop_fields)
+            {
+              const FieldMask redop_overlap = valid_mask & single_redop_fields;
+              if (!!redop_overlap)
+                record_mutated_guard(op, redop_overlap);
+            }
+          }
         }
         // If not all our fields are valid send a request to the owner
         if (!!request_mask)
@@ -5130,6 +5152,8 @@ namespace Legion {
             // know that they did because there will be no
             // reductions present for these fields
             FieldMask &single_redop_mask = pending_request->single_redop_mask;
+            // None of these fields will be shared
+            update_mask -= single_redop_mask;
             // Record that we mutated these fields to prevent
             // anyone else from invalidating them out from under us
             // Note that we do this even for fields for which 
