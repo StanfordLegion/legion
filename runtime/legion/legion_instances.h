@@ -265,8 +265,7 @@ namespace Legion {
                       LayoutDescription *desc, 
                       const PointerConstraint &constraint,
                       bool register_now, ApEvent use_event,
-                      bool external_instance,
-                      Reservation read_only_mapping_reservation); 
+                      bool external_instance);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -282,8 +281,6 @@ namespace Legion {
       virtual size_t get_instance_size(void) const;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
-      inline Reservation get_read_only_mapping_reservation(void) const
-        { return read_only_mapping_reservation; }
     public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
@@ -306,8 +303,6 @@ namespace Legion {
       // Event that needs to trigger before we can start using
       // this physical instance.
       const ApEvent use_event;
-    protected:
-      Reservation read_only_mapping_reservation;
     };
 
     /**

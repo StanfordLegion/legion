@@ -7632,18 +7632,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Reservation InstanceRef::get_read_only_reservation(void) const
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(manager != NULL);
-      assert(manager->is_instance_manager());
-#endif
-      return 
-        manager->as_instance_manager()->get_read_only_mapping_reservation();
-    }
-
-    //--------------------------------------------------------------------------
     bool InstanceRef::is_field_set(FieldID fid) const
     //--------------------------------------------------------------------------
     {
@@ -8271,23 +8259,6 @@ namespace Legion {
       }
     }
 
-    //--------------------------------------------------------------------------
-    void InstanceSet::find_read_only_reservations(
-                                             std::set<Reservation> &locks) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-        if (refs.single != NULL)
-          locks.insert(refs.single->get_read_only_reservation());
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < refs.multi->vector.size(); idx++)
-          locks.insert(refs.multi->vector[idx].get_read_only_reservation());
-      }
-    }
-    
     //--------------------------------------------------------------------------
     LegionRuntime::Accessor::RegionAccessor<
       LegionRuntime::Accessor::AccessorType::Generic> InstanceSet::

@@ -994,12 +994,11 @@ namespace Legion {
                                      LayoutDescription *desc,
                                      const PointerConstraint &constraint,
                                      bool register_now, ApEvent u_event,
-                                     bool external_instance,
-                                     Reservation read_only_reservation) 
+                                     bool external_instance)
       : PhysicalManager(ctx, mem, desc, constraint, 
                         encode_instance_did(did, external_instance),owner_space,
                         node, inst, instance_domain, tid, register_now),
-        use_event(u_event), read_only_mapping_reservation(read_only_reservation)
+        use_event(u_event)
     //--------------------------------------------------------------------------
     {
       if (!is_owner())
@@ -1038,10 +1037,6 @@ namespace Legion {
     InstanceManager::~InstanceManager(void)
     //--------------------------------------------------------------------------
     {
-      // If we are the owner, we get to destroy the read only reservation
-      if (is_owner())
-        read_only_mapping_reservation.destroy_reservation();
-      read_only_mapping_reservation = Reservation::NO_RESERVATION;
     }
 
     //--------------------------------------------------------------------------
@@ -1212,7 +1207,6 @@ namespace Legion {
         rez.serialize(use_event);
         layout->pack_layout_description(rez, target);
         pointer_constraint.serialize(rez);
-        rez.serialize(read_only_mapping_reservation);
       }
       context->runtime->send_instance_manager(target, rez);
       update_remote_instances(target);
@@ -1246,8 +1240,6 @@ namespace Legion {
                                     space_node, inst_domain->get_num_dims());
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
-      Reservation read_only_reservation;
-      derez.deserialize(read_only_reservation);
       MemoryManager *memory = runtime->find_memory_manager(mem);
       void *location;
       InstanceManager *man = NULL;
@@ -1258,15 +1250,13 @@ namespace Legion {
                                             inst_domain, space_node, tree_id, 
                                             layout, pointer_constraint,
                                             false/*reg now*/, use_event,
-                                            external_instance, 
-                                            read_only_reservation);
+                                            external_instance); 
       else
         man = new InstanceManager(runtime->forest, did, owner_space,
                                   memory, inst, inst_domain, space_node, 
                                   tree_id, layout, pointer_constraint, 
                                   false/*reg now*/, use_event,
-                                  external_instance,
-                                  read_only_reservation);
+                                  external_instance);
       // Hold-off doing the registration until construction is complete
       man->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -1915,16 +1905,13 @@ namespace Legion {
         case NORMAL_SPECIALIZE:
           {
             // Now we can make the manager
-            Reservation read_only_reservation = 
-              Reservation::create_reservation();
             result = new InstanceManager(forest, did, local_space,
                                          memory_manager,
                                          instance, instance_domain, 
                                          field_space_node, tree_id,
                                          layout, pointer_constraint, 
                                          true/*register now*/, ready,
-                                         false/*external instance*/,
-                                         read_only_reservation);
+                                         false/*external instance*/);
             break;
           }
         case REDUCTION_FOLD_SPECIALIZE:

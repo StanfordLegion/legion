@@ -1360,7 +1360,6 @@ namespace Legion {
       void remove_valid_reference(ReferenceSource source) const;
     public:
       Memory get_memory(void) const;
-      Reservation get_read_only_reservation(void) const;
     public:
       bool is_field_set(FieldID fid) const;
       LegionRuntime::Accessor::RegionAccessor<
@@ -1441,7 +1440,6 @@ namespace Legion {
       void remove_valid_references(ReferenceSource source) const;
     public:
       void update_wait_on_events(std::set<ApEvent> &wait_on_events) const;
-      void find_read_only_reservations(std::set<Reservation> &locks) const;
     public:
       LegionRuntime::Accessor::RegionAccessor<
         LegionRuntime::Accessor::AccessorType::Generic>

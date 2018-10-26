@@ -3434,41 +3434,6 @@ namespace Legion {
 #endif
       // Now do the mapping call
       invoke_mapper(must_epoch_op);
-      const bool multiple_requirements = (regions.size() > 1);
-      std::set<Reservation> read_only_reservations;
-      // This is the price of allowing read-only requirements to
-      // map in parallel: we have to get the reservations for doing
-      // read-only mappings to each physical instance prior to performing
-      // the mapping. The call to physical_register_only can do this for
-      // us if we only have one requirement, but with multiple requirements
-      // we need to deduplicate physical instances across requirements
-      // so we have to do it here in the caller's context
-      if (multiple_requirements)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          // Don't skip early mapped regions
-          if (IS_READ_ONLY(regions[idx]) && !virtual_mapped[idx])
-            physical_instances[idx].find_read_only_reservations(
-                                                  read_only_reservations);
-        }
-        if (!read_only_reservations.empty())
-        {
-          RtEvent precondition;
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_reservations.begin(); it != 
-                read_only_reservations.end(); it++)
-          {
-            RtEvent next = Runtime::acquire_rt_reservation(*it,
-                              true/*exclusive*/, precondition);
-            precondition = next;
-          }
-          // Wait until we have our read-only locks
-          if (precondition.exists())
-            precondition.wait();
-        }
-      }
-
       // After we've got our results, apply the state to the region tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -3496,12 +3461,12 @@ namespace Legion {
                                     this, idx, init_precondition,
                                     local_termination_event, 
                                     physical_instances[idx],
-                                    trace_info,
+                                    trace_info
 #ifdef DEBUG_LEGION
-                                    get_logging_name(),
-                                    unique_op_id,
+                                    , get_logging_name()
+                                    , unique_op_id
 #endif
-                                    multiple_requirements/*read only locks*/);
+                                    );
         if (effects.exists())
           effects_postconditions.insert(effects);
         // We'll finalize in post mapping if we're doing that
@@ -3513,30 +3478,6 @@ namespace Legion {
       }
       if (perform_postmap)
         perform_post_mapping(trace_info);
-      // Release any read-only reservations that we're holding
-      if (!read_only_reservations.empty())
-      {
-        if (!map_applied_conditions.empty())
-        {
-          // This is actually imprecise to do this, let's see if it
-          // comes back to haunt us at some point
-          RtEvent done_event = Runtime::merge_events(map_applied_conditions);
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_reservations.begin(); it != 
-                read_only_reservations.end(); it++)
-            it->release(done_event);
-          // Can replace the applied conditions with the summary
-          map_applied_conditions.clear();
-          map_applied_conditions.insert(done_event);
-        }
-        else
-        {
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_reservations.begin(); it != 
-                read_only_reservations.end(); it++)
-            it->release();
-        }
-      }
 
       if (is_recording())
       {

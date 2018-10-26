@@ -1869,12 +1869,12 @@ namespace Legion {
                                            ApEvent precondition, 
                                            ApEvent term_event,
                                            InstanceSet &targets,
-                                           const PhysicalTraceInfo &trace_info,
+                                           const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
-                                           const char *log_name,
-                                           UniqueID uid,
+                                           , const char *log_name
+                                           , UniqueID uid
 #endif
-                                           bool caller_holds_locks/*=false*/)
+                                           )
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
@@ -1901,35 +1901,8 @@ namespace Legion {
                      FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES), user_mask);
 #endif
       // Perform the registration
-      // See if we need to acquire locks for read-only privileges
-      std::set<Reservation> read_only_locks;
       std::vector<InstanceView*> target_views;
-      if (IS_READ_ONLY(req) && !caller_holds_locks)
-      {
-        // This is the price of allowing read-only requirements from
-        // different operations to be mapped in parallel, we have to 
-        // serialize access to the requirements mapping to the same
-        // instance to guarantee that all the effects of the copies 
-        // are applied before the next mapping operation runs
-        //
-        // Note that by using a set we deduplicate and put the
-        // locks in the order to be taken to avoid deadlocks
-        targets.find_read_only_reservations(read_only_locks);
-        RtEvent locks_acquired;
-        for (std::set<Reservation>::const_iterator it = 
-              read_only_locks.begin(); it != read_only_locks.end(); it++)
-        {
-          RtEvent next = Runtime::acquire_rt_reservation(*it,
-                            true/*exclusive*/, locks_acquired);
-          locks_acquired = next;
-        }
-        context->convert_target_views(targets, target_views);
-        // Have to wait for all the locks to be acquired
-        if (locks_acquired.exists())
-          locks_acquired.wait();
-      }
-      else
-        context->convert_target_views(targets, target_views);
+      context->convert_target_views(targets, target_views);
       // Now do the mapping with our own applied event set
       std::set<RtEvent> local_applied;
       CopyFillAggregator input_aggregator(this, op, index, 
@@ -2003,19 +1976,7 @@ namespace Legion {
       if (!local_applied.empty())
       {
         const RtEvent done_event = Runtime::merge_events(local_applied);
-        if (!read_only_locks.empty())
-        {
-          for (std::set<Reservation>::const_iterator it = 
-                read_only_locks.begin(); it != read_only_locks.end(); it++)
-            it->release(done_event);
-        }
         version_info.record_applied_event(done_event);
-      }
-      else if (!read_only_locks.empty())
-      {
-        for (std::set<Reservation>::const_iterator it = 
-              read_only_locks.begin(); it != read_only_locks.end(); it++)
-          it->release();
       }
       return result;
     }
@@ -9832,8 +9793,7 @@ namespace Legion {
                                          node->handle.get_tree_id(),
                                          layout, pointer_constraint,
                                          true/*register now*/, ready_event,
-                                         true/*external instance*/,
-                                         Reservation::create_reservation());
+                                         true/*external instance*/);
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif

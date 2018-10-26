@@ -331,12 +331,12 @@ namespace Legion {
                                      Operation *op, unsigned index,
                                      ApEvent precondition, ApEvent term_event,
                                      InstanceSet &targets,
-                                     const PhysicalTraceInfo &trace_info,
+                                     const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
-                                     const char *log_name,
-                                     UniqueID uid,
+                                     , const char *log_name
+                                     , UniqueID uid
 #endif
-                                     bool caller_holds_locks = false);
+                                     );
       void acquire_restrictions(const RegionRequirement &req,
                                 VersionInfo &version_info,
                                 Operation *op, unsigned index,
