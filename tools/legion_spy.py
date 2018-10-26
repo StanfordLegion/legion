@@ -4252,6 +4252,12 @@ class DataflowTraverser(object):
         self.generation = None
 
     def visit_node(self, node):
+        # Mark that we visited this node
+        if node.generation == self.generation:
+            return False
+        else:
+            assert node.generation < self.generation
+            node.generation = self.generation
         if isinstance(node, Operation):
             pass 
         elif isinstance(node, RealmCopy):
@@ -4264,12 +4270,6 @@ class DataflowTraverser(object):
             pass
         else:
             assert False # should never get here
-        # Mark that we visited this node
-        if node.generation == self.generation:
-            return False
-        else:
-            assert node.generation < self.generation
-            node.generation = self.generation
         return True
 
     def post_visit_node(self, node):
@@ -4536,20 +4536,21 @@ class DataflowTraverser(object):
                             self.traverse_node(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
-                        if not copy.is_across():
-                            continue
-                        eq_privileges = copy.get_equivalence_privileges()
-                        if src_key not in eq_privileges:
-                            continue
-                        # Traverse the things before the across copy
-                        if src_key in copy.eq_incoming:
-                            for node in copy.eq_incoming[src_key]:
-                                self.traverse_node(node, src_key, first=False)
-                                if self.verified(False):
-                                    break
+                        if copy.is_across():
+                            # For across, we still might need to traverse
+                            # their incoming because of how the transitive
+                            # reduction deduplicates dependences
+                            for node in copy.physical_incoming:
+                                eq_privileges = node.get_equivalence_privileges()
+                                if src_key in eq_privileges:
+                                    self.traverse_node(node, src_key)
+                        else:
+                            eq_privileges = copy.get_equivalence_privileges()
+                            if src_key in eq_privileges:
+                                self.traverse_node(copy, src_key)
             # Only need to traverse fills directly for across cases as the 
             # non-accross ones will be traverse by the normal copy traversasl
-            if op.realm_fills and self.across:
+            if op.realm_fills:
                 if self.across:
                     for fill in op.realm_fills:
                         # Skip non-across fills
