@@ -641,15 +641,15 @@ namespace Legion {
       struct MappingGuard {
       public:
         MappingGuard(void)
-          : guard_index(0), count(0), mutated(false) { }
+          : guard_index(0), count(0) { }
         MappingGuard(const FieldMask &m)
-          : guard_mask(m), guard_index(0), count(1), mutated(false) { }
+          : guard_mask(m), guard_index(0), count(1) { }
       public:
         FieldMask guard_mask;
+        FieldMask mutated_mask;
         RtUserEvent aliased_waiters;
         unsigned long long guard_index;
         unsigned count;
-        bool mutated;
       };
     public:
       struct RefinementTaskArgs : public LgTaskArgs<RefinementTaskArgs> {
@@ -754,16 +754,17 @@ namespace Legion {
       struct PendingRequest : public LegionHeapify<PendingRequest> {
       public:
         PendingRequest(Operation *o, RtUserEvent ready, 
-                       RtUserEvent applied, ReductionOpID r) 
-          : op(o), ready_event(ready), applied_event(applied), redop(r),
+                       RtUserEvent applied, const RegionUsage &u) 
+          : op(o), ready_event(ready), applied_event(applied), usage(u),
             remaining_updates(0), remaining_invalidates(0) { }
       public:
         Operation *const op;
         const RtUserEvent ready_event;
         const RtUserEvent applied_event;
-        const ReductionOpID redop;
+        const RegionUsage usage;
         std::set<RtEvent> applied_events;
-        FieldMask owner_mask;
+        FieldMask exclusive_mask;
+        FieldMask single_redop_mask;
         int remaining_updates;
         int remaining_invalidates;
       };
@@ -793,15 +794,18 @@ namespace Legion {
     public:
       inline bool is_logical_owner(void) const 
         { return (local_space == logical_owner_space); }
-      inline void record_mutated_guard(Operation *op)
+      inline void record_mutated_guard(Operation *op, const FieldMask &mask)
         {
+#ifdef DEBUG_LEGION
           LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
             mapping_guards.find(op);
-#ifdef DEBUG_LEGION
           assert(finder != mapping_guards.end()); 
+          finder->second.mutated_mask |= mask;
+#else
+          mapping_guards[op].mutated_mask |= mask;
 #endif
-          finder->second.mutated = true;
-          mapping_guard_summary |= finder->second.guard_mask;
+          // Always update the summary
+          mutated_guard_summary |= mask;
         }
     public:
       // From distributed collectable
@@ -911,17 +915,21 @@ namespace Legion {
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
       void invalidate_remote_state(RtUserEvent to_trigger);
+      RtEvent record_reduction_application(FieldMask reduced_mask,
+                                           bool needs_lock = false);
       void pack_state(Serializer &rez, RtUserEvent &handled_event,
                       PendingRequest *pending_request,
                       const FieldMask &pack_mask, 
                       ReductionOpID skip_redop, bool invalidate);
     protected:
-      void update_exclusive_copies(FieldMask &to_update,
-                                   AddressSpaceID request_space,
-                                   PendingRequest *pending_request,
-                                   unsigned &pending_updates,
-                                   unsigned &pending_invalidates,
-                                   const bool needs_updates);
+      void update_single_copies(FieldMask &to_update,
+                                AddressSpaceID request_space,
+                                PendingRequest *pending_request,
+                                unsigned &pending_updates,
+                                unsigned &pending_invalidates,
+                                const bool needs_updates,
+                                FieldMask &single_fields,
+              LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies);
       void upgrade_single_to_multi(FieldMask &to_update,
                                    AddressSpaceID request_space,
                                    PendingRequest *pending_request,
@@ -978,7 +986,6 @@ namespace Legion {
       void record_pending_counts(PendingRequest *pending_request,
                                  unsigned pending_updates,
                                  unsigned pending_invalidates,
-                                 bool exclusive_reduction,
                                  bool needs_lock);
       void record_invalidation(PendingRequest *pending_request,
                                bool meta_only, bool needs_lock = false);
@@ -1011,6 +1018,7 @@ namespace Legion {
       static void handle_update_response(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_request(Deserializer &derez, Runtime *rt);
       static void handle_invalidate_response(Deserializer &derez, Runtime *rt);
+      static void handle_reduction_application(Deserializer &derez,Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
       const AddressSpaceID logical_owner_space;
@@ -1036,7 +1044,7 @@ namespace Legion {
       // indicates how many times it has been acquired
       LegionMap<Operation*,MappingGuard>::aligned mapping_guards;
       // Keep a summary mask of the fields in the mapping guards
-      FieldMask mapping_guard_summary;
+      FieldMask mutated_guard_summary;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready

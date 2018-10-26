@@ -3093,7 +3093,7 @@ namespace Legion {
         if (mapping_guards.empty())
         {
           // Clear the summary mask
-          mapping_guard_summary.clear();
+          mutated_guard_summary.clear();
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
 #ifdef DEBUG_LEGION
@@ -3124,12 +3124,12 @@ namespace Legion {
         {
           // Tighten the mask and then use it to find any requests
           // which are now free to be performed
-          mapping_guard_summary.clear();
+          mutated_guard_summary.clear();
+          FieldMask mutated_guard_summary;
           for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
                 mapping_guards.begin(); it != mapping_guards.end(); it++)
-            if (it->second.mutated)
-              mapping_guard_summary |= it->second.guard_mask;
-          if (mapping_guard_summary * deferred_requests.get_valid_mask())
+            mutated_guard_summary |= it->second.mutated_mask;
+          if (mutated_guard_summary * deferred_requests.get_valid_mask())
             // We can just perform all of them
             perform_all_deferred_requests();
           else
@@ -3172,7 +3172,8 @@ namespace Legion {
       for (FieldMaskSet<DeferredRequest>::const_iterator it = 
             deferred_requests.begin(); it != deferred_requests.end(); it++)
       {
-        if (it->second * mapping_guard_summary)
+        // We just need to be independent of mutated guards
+        if (it->second * mutated_guard_summary)
         {
           unsigned dummy_updates = 0;
           request_update(local_space, it->first->invalid_space,
@@ -3548,7 +3549,7 @@ namespace Legion {
             RtUserEvent ready = Runtime::create_rt_user_event();
             RtUserEvent applied = Runtime::create_rt_user_event(); 
             PendingRequest *request = 
-              new PendingRequest(op, ready, applied, usage.redop);
+              new PendingRequest(op, ready, applied, usage);
             Serializer rez;
             {
               RezCheck z(rez);
@@ -3646,7 +3647,7 @@ namespace Legion {
               RtUserEvent ready = Runtime::create_rt_user_event();
               RtUserEvent applied = Runtime::create_rt_user_event(); 
               pending_request = 
-                new PendingRequest(op, ready, applied, usage.redop);
+                new PendingRequest(op, ready, applied, usage);
               outstanding_requests.insert(pending_request, request_mask); 
               ready_events.insert(ready);
               applied_events.insert(applied);
@@ -3662,7 +3663,6 @@ namespace Legion {
 #endif
           unsigned pending_updates = 0;
           unsigned pending_invalidates = 0;
-          bool exclusive_reduction = false;
           if (IS_REDUCE(usage))
           {
             FieldMask same_redop_mask;
@@ -3733,33 +3733,59 @@ namespace Legion {
             const bool needs_updates = !IS_DISCARD(usage);
             // Any reduction modes are going to exclusive regardless of
             // whether we are reading or writing 
-            const FieldMask redop_overlap = request_mask &
+            FieldMask redop_overlap = request_mask &
                               (single_redop_fields | multi_redop_fields);
             if (!!redop_overlap)
             {
-              FieldMask filter_mask = redop_overlap;
-              filter_single_copies(filter_mask, single_redop_fields,
-                                   single_reduction_copies, request_space,
-                                   pending_request, pending_updates,
-                                   pending_invalidates, needs_updates);
-              filter_multi_copies(filter_mask, multi_redop_fields,
-                                  multi_reduction_copies, request_space,
-                                  pending_request, pending_updates,
-                                  pending_invalidates, needs_updates, 
-                                  true/*updates from all*/);
-              filter_redop_modes(redop_overlap);
-              record_exclusive_copy(request_space, redop_overlap);
-              request_mask -= redop_overlap;
-              // A very tricky case here, if we're a reader from this node,
-              // then that means we're the first reader of an equivalence
-              // class with outstanding reductions, and therefore we need
-              // to make sure we apply those reductions before anyone else
-              // gets another copy of the equivalence class to avoid
-              // duplicate applications of reductions. To enforce this
-              // we'll mark that we already started mutating the guard
-              // The same thing will happen when we receive the updates
-              if (IS_READ_ONLY(usage))
-                exclusive_reduction = true;
+              if (needs_updates)
+              {
+                // If we have reductions, then we need to go to 
+                // single reduce mode until someone actually goes
+                // ahead and applies the reductions
+                FieldMask multi_overlap = request_mask & multi_redop_fields;
+                if (!!multi_overlap)
+                {
+                  record_single_reduce(request_space, multi_overlap, 
+                                       0/*redop already recorded*/); 
+                  request_mask -= multi_overlap;
+                  filter_multi_copies(multi_overlap, multi_redop_fields,
+                                      multi_reduction_copies, request_space,
+                                      pending_request, pending_updates,
+                                      pending_invalidates,true/*needs updates*/,
+                                      true/*updates from all*/);
+                }
+                FieldMask single_overlap = request_mask & single_redop_fields;
+                if (!!single_overlap)
+                {
+                  request_mask -= single_overlap;
+                  update_single_copies(single_overlap, request_space,
+                                       pending_request, pending_updates,
+                                       pending_invalidates,
+                                       true/*needs updates*/,
+                                       single_redop_fields,
+                                       single_reduction_copies);
+                }
+              }
+              else
+              {
+                // If we're discarding then we can just filter these
+                // things out and go to exclusive mode
+                filter_redop_modes(redop_overlap);
+                record_exclusive_copy(request_space, redop_overlap);
+                request_mask -= redop_overlap;
+                // These next two methods will remove fields from the 
+                // 'redop_overlap' mask so we do them last
+                filter_single_copies(redop_overlap, single_redop_fields,
+                                     single_reduction_copies, request_space,
+                                     pending_request, pending_updates,
+                                     pending_invalidates,
+                                     false/*needs updates*/);
+                filter_multi_copies(redop_overlap, multi_redop_fields,
+                                    multi_reduction_copies, request_space,
+                                    pending_request, pending_updates,
+                                    pending_invalidates, false/*needs updates*/,
+                                    false/*updates from all*/);
+              }
             }
             if (!!request_mask)
             {
@@ -3787,13 +3813,14 @@ namespace Legion {
                   filter_multi_copies(request_mask, shared_fields,shared_copies,
                                     request_space, pending_request, 
                                     pending_updates, pending_invalidates,
-                                    needs_updates, false/*updates from all*/);
+                                    needs_updates, true/*updates from all*/);
                   record_exclusive_copy(request_space, shared_overlap);
                 }
                 if (!!request_mask)
-                  update_exclusive_copies(request_mask, request_space,
-                                          pending_request, pending_updates, 
-                                          pending_invalidates, needs_updates);
+                  update_single_copies(request_mask, request_space,
+                                       pending_request, pending_updates, 
+                                       pending_invalidates, needs_updates,
+                                       exclusive_fields, exclusive_copies);
               }
             }
           }
@@ -3809,31 +3836,43 @@ namespace Legion {
               rez.serialize(pending_request);
               rez.serialize(pending_updates);
               rez.serialize(pending_invalidates);
-              rez.serialize<bool>(exclusive_reduction);
-              // Since we're sening this back to a remote node then
-              // we need to determine the owner mask
-              FieldMask owner_mask;
-              if (usage.redop > 0)
+              // Pack any exclusive fields
+              LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                finder = exclusive_copies.find(request_space);
+              if (finder != exclusive_copies.end())
               {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = single_reduction_copies.find(request_space);
-                if (finder != single_reduction_copies.end())
-                  owner_mask = finder->second & orig_mask;
+                const FieldMask excl_mask = finder->second & orig_mask;
+                if (!!excl_mask)
+                {
+                  rez.serialize<bool>(true);
+                  rez.serialize(excl_mask);
+                }
+                else
+                  rez.serialize<bool>(false);
               }
               else
+                rez.serialize<bool>(false);
+              // Pack any exclusive redop fields
+              finder = single_reduction_copies.find(request_space);
+              if (finder != single_reduction_copies.end())
               {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = exclusive_copies.find(request_space);
-                if (finder != exclusive_copies.end())
-                  owner_mask = finder->second & orig_mask;
+                const FieldMask redop_mask = finder->second & orig_mask;
+                if (!!redop_mask)
+                {
+                  rez.serialize<bool>(true);
+                  rez.serialize(redop_mask);
+                }
+                else
+                  rez.serialize<bool>(false);
               }
-              rez.serialize(owner_mask);
+              else
+                rez.serialize<bool>(false);
             }
             runtime->send_equivalence_set_valid_response(request_space, rez);
           }
           else 
             record_pending_counts(pending_request, pending_updates, 
-                pending_invalidates, exclusive_reduction, false/*need lock*/);
+                                  pending_invalidates, false/*need lock*/);
         }
       }
 #ifdef DEBUG_LEGION
@@ -3842,22 +3881,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::update_exclusive_copies(FieldMask &to_update,
-                                               AddressSpaceID request_space,
-                                               PendingRequest *pending_request,
-                                               unsigned &pending_updates,
-                                               unsigned &pending_invalidates,
-                                               const bool needs_updates)
+    void EquivalenceSet::update_single_copies(FieldMask &to_update,
+                                              AddressSpaceID request_space,
+                                              PendingRequest *pending_request,
+                                              unsigned &pending_updates,
+                                              unsigned &pending_invalidates,
+                                              const bool needs_updates,
+                                              FieldMask &single_fields,
+                    LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!(to_update - exclusive_fields)); // should all be exclusive
+      assert(!(to_update - single_fields)); // should all be exclusive
 #endif
-      // Scan through the exclusive copies, send any updates
+      // Scan through the single copies, send any updates
       FieldMask to_add;
       std::vector<AddressSpaceID> to_delete;
       for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
-            exclusive_copies.begin(); it != exclusive_copies.end(); it++)
+            single_copies.begin(); it != single_copies.end(); it++)
       {
         const FieldMask overlap = to_update & it->second;
         if (!overlap)
@@ -3884,14 +3925,14 @@ namespace Legion {
       {
         for (std::vector<AddressSpaceID>::const_iterator it = 
               to_delete.begin(); it != to_delete.end(); it++)
-          exclusive_copies.erase(*it);
+          single_copies.erase(*it);
       }
       if (!!to_add)
       {
         LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          exclusive_copies.find(request_space);
-        if (finder == exclusive_copies.end())
-          exclusive_copies[request_space] = to_add;
+          single_copies.find(request_space);
+        if (finder == single_copies.end())
+          single_copies[request_space] = to_add;
         else
           finder->second |= to_add;
       }
@@ -4033,7 +4074,8 @@ namespace Legion {
     {
       single_reduction_copies[request_space] |= request_mask;
       single_redop_fields |= request_mask;
-      redop_modes[redop] |= request_mask;
+      if (redop != 0)
+        redop_modes[redop] |= request_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -4246,16 +4288,18 @@ namespace Legion {
         // for multiple readers are mapping the same equivalence set
         // at the same time.
         if (!mapping_guards.empty() && 
-            !(mapping_guard_summary * update_mask))
+            !(mutated_guard_summary * update_mask))
         {
-          // We only need to defer this if we find a mutated set of
-          // fields that we have to defer against
+          // If this is an invalidate request then we need to wait for
+          // all the guards to have mapped before we can perform it
+          // Otherwise if it is just a read update then we just need 
+          // to wait for any mutated guards to finish
           for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator 
                 it = mapping_guards.begin(); it != mapping_guards.end(); it++)
           {
-            if (!it->second.mutated)
-              continue;
-            if (it->second.guard_mask * update_mask)
+            // If we're disjoint from all it's mutated fields then
+            // we don't need to wait for it
+            if (it->second.mutated_mask * update_mask)
               continue;
             // Now we need to defer this until later
             DeferredRequest *deferred = 
@@ -4321,6 +4365,72 @@ namespace Legion {
               LG_THROUGHPUT_WORK_PRIORITY, handled_event);
         }
         runtime->send_equivalence_set_update_response(invalid_space, rez);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent EquivalenceSet::record_reduction_application(
+                              FieldMask reduced_mask, bool needs_lock/*=false*/)
+    //--------------------------------------------------------------------------
+    {
+      if (needs_lock)
+      {
+        AutoLock eq(eq_lock);
+        return record_reduction_application(reduced_mask, false/*needs lock*/);
+      }
+#ifdef DEBUG_LEGION
+      // We should be in single redop mode for all these fields
+      // if we're applying the reduction for it
+      assert(!(reduced_mask - single_redop_fields));
+#endif
+      // All of these fields are going from single reduce mode to exclusive mode
+      single_redop_fields -= reduced_mask;
+      filter_redop_modes(reduced_mask);
+      exclusive_fields |= reduced_mask;
+      if (is_logical_owner())
+      {
+        // Move the fields to the exclusive mode and record that 
+        // whoever currently has the valid copy of the meta data
+        // now has an exclusive copy of that metadata
+        std::vector<AddressSpaceID> to_delete;
+        for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
+              single_reduction_copies.begin(); it != 
+              single_reduction_copies.end(); it++)
+        {
+          const FieldMask overlap = it->second & reduced_mask;
+          if (!overlap)
+            continue;
+          exclusive_copies[it->first] |= overlap;
+          it->second -= overlap;
+          if (!it->second)
+            to_delete.push_back(it->first);
+          reduced_mask -= overlap;
+          if (!reduced_mask)
+            break;
+        }
+        if (!to_delete.empty())
+        {
+          for (std::vector<AddressSpaceID>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            single_reduction_copies.erase(*it);
+        }
+        // Effects are applied
+        return RtEvent::NO_RT_EVENT;
+      }
+      else
+      {
+        // Send the notification to the owner
+        RtUserEvent recorded = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(reduced_mask);
+          rez.serialize(recorded);
+        }
+        runtime->send_equivalence_set_reduction_application(
+                                    logical_owner_space, rez);
+        return recorded;
       }
     }
 
@@ -4912,7 +5022,6 @@ namespace Legion {
     void EquivalenceSet::record_pending_counts(PendingRequest *pending_request,
                                                unsigned pending_updates,
                                                unsigned pending_invalidates,
-                                               bool exclusive_reduction,
                                                bool needs_lock)
     //--------------------------------------------------------------------------
     {
@@ -4920,14 +5029,9 @@ namespace Legion {
       {
         AutoLock eq(eq_lock);
         record_pending_counts(pending_request, pending_updates,
-                pending_invalidates, exclusive_reduction, false/*needs lock*/);
+                              pending_invalidates, false/*needs lock*/);
         return;
       }
-      // Mark this guard as mutated since it needs to do an exclusive
-      // reduction application before anyone else can read a copy of
-      // the meta-data again
-      if (exclusive_reduction)
-        record_mutated_guard(pending_request->op);
       pending_request->remaining_updates += pending_updates;
       if (pending_request->remaining_updates == 0)
         finalize_pending_update(pending_request);
@@ -4983,54 +5087,95 @@ namespace Legion {
 #endif
       if (!is_logical_owner())
       {
-        const FieldMask &update_mask = finder->second;
+        FieldMask update_mask = finder->second;
         // If we're not the owner then we have to update the state 
-        if (pending_request->redop > 0)
+        if (pending_request->usage.redop > 0)
         {
-          if (!!pending_request->owner_mask)
+          // Reduction case
+#ifdef DEBUG_LEGION
+          // Shouldn't have any exclusive fields
+          assert(!pending_request->exclusive_mask);
+#endif
+          redop_modes[pending_request->usage.redop] |= update_mask;
+          if (!!pending_request->single_redop_mask)
           {
 #ifdef DEBUG_LEGION
-            assert(single_redop_fields * pending_request->owner_mask);
+            assert(single_redop_fields * pending_request->single_redop_mask);
 #endif
-            single_redop_fields |= pending_request->owner_mask;
-            const FieldMask non_owner = 
-              update_mask - pending_request->owner_mask;
-            if (!!non_owner)
-            {
-#ifdef DEBUG_LEGION
-              assert(multi_redop_fields * non_owner);
-#endif
-              multi_redop_fields |= non_owner;
-            }
+            single_redop_fields |= pending_request->single_redop_mask;
+            update_mask -= pending_request->single_redop_mask;
           }
-          else
+          if (!!update_mask)
           {
 #ifdef DEBUG_LEGION
             assert(multi_redop_fields * update_mask);
 #endif
             multi_redop_fields |= update_mask;
           }
-          redop_modes[pending_request->redop] |= update_mask;
         }
         else
         {
-          if (!!pending_request->owner_mask)
+          // Read-only or read-write
+          // Handle the especially nasty case first of dealing
+          // with any reduction use cases where we need to stay
+          // in single reduce mode until someone does a reduction
+          if (!!pending_request->single_redop_mask)
           {
 #ifdef DEBUG_LEGION
-            assert(exclusive_fields * pending_request->owner_mask);
+            assert(pending_request->single_redop_mask * 
+                    pending_request->exclusive_mask);
 #endif
-            exclusive_fields |= pending_request->owner_mask;
-            const FieldMask non_owner = 
-              update_mask - pending_request->owner_mask;
-            if (!!non_owner)
+            // We think we are in single reduction mode, check to
+            // see if someone actually did the reductions. We'll
+            // know that they did because there will be no
+            // reductions present for these fields
+            FieldMask &single_redop_mask = pending_request->single_redop_mask;
+            // Record that we mutated these fields to prevent
+            // anyone else from invalidating them out from under us
+            // Note that we do this even for fields for which 
+            // reductions have already been applied to prevent us
+            // from losing information about valid instances when
+            // the later invalidation comes since this will force
+            // it to wait and then move the information about any
+            // newly made valid instances
+            record_mutated_guard(pending_request->op, single_redop_mask);
+            const FieldMask done_reductions = 
+              single_redop_mask - reduction_fields; 
+            single_redop_mask &= reduction_fields;
+            if (!!single_redop_mask)
             {
 #ifdef DEBUG_LEGION
-              assert(shared_fields * non_owner);
+              assert(single_redop_fields * single_redop_mask);
 #endif
-              shared_fields |= non_owner;
+              single_redop_fields |= single_redop_mask;
+              // Use 0 as a proxy for no actual reduction
+              redop_modes[0] |= single_redop_mask;
+            }
+            if (!!done_reductions)
+            {
+              // The owner thinks we're in single redop mode
+              // so we'll put ourselves in an equivalence exclusive mode
+              // Either we'll see a later invalidation or we'll 
+              // remain the exclusive owner, either way we'll
+              // eventually end up in the same mode that the owner
+              // thinks that we are in
+#ifdef DEBUG_LEGION
+              assert(exclusive_fields * done_reductions);
+#endif
+              exclusive_fields |= done_reductions;
             }
           }
-          else
+          // The rest of this is easy
+          // Record exclusive and shared fields as we would expect
+          if (!!pending_request->exclusive_mask)
+          {
+#ifdef DEBUG_LEGION
+            assert(exclusive_fields * pending_request->exclusive_mask);
+#endif
+            exclusive_fields |= pending_request->exclusive_mask;
+            update_mask -= pending_request->exclusive_mask;
+          }
+          if (!!update_mask)
           {
 #ifdef DEBUG_LEGION
             assert(shared_fields * update_mask);
@@ -5433,7 +5578,7 @@ namespace Legion {
       assert(!(user_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating
-      record_mutated_guard(op);
+      record_mutated_guard(op, user_mask);
       // Check for any uninitialized data
       // Don't report uninitialized warnings for empty equivalence classes
       if ((initialized != NULL) && !set_expr->is_empty())
@@ -5466,6 +5611,8 @@ namespace Legion {
           const FieldMask reduce_mask = user_mask & restricted_fields;
           if (!!reduce_mask)
             apply_reductions(reduce_mask, output_aggregator); 
+          // No need to record that we applied the reductions, we'll
+          // discover that when we collapse the single/multi-reduce state
           reduction_fields |= (user_mask - restricted_fields);
         }
         else
@@ -5531,7 +5678,12 @@ namespace Legion {
                            target_views, mutator);
         // Next check for any reductions that need to be applied
         if (!!reduce_mask)
+        {
           apply_reductions(reduce_mask, input_aggregator); 
+          const RtEvent recorded = record_reduction_application(reduce_mask);
+          if (recorded.exists() && !recorded.has_triggered())
+            applied_events.insert(recorded);
+        }
         // Issue copy-out copies for any restricted fields if we wrote stuff
         if (is_write) 
         {
@@ -5559,7 +5711,7 @@ namespace Legion {
       assert(!(acquire_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      record_mutated_guard(op);
+      record_mutated_guard(op, acquire_mask);
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
@@ -5593,7 +5745,7 @@ namespace Legion {
       assert(!(release_mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      record_mutated_guard(op);
+      record_mutated_guard(op, release_mask);
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
@@ -5624,7 +5776,12 @@ namespace Legion {
       // See if we have any reductions to apply as well
       const FieldMask reduce_mask = release_mask & reduction_fields;
       if (!!reduce_mask)
+      {
         apply_reductions(reduce_mask, release_aggregator);
+        const RtEvent recorded = record_reduction_application(reduce_mask);
+        if (recorded.exists() && !recorded.has_triggered())
+          ready_events.insert(recorded);
+      }
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
     }
@@ -5867,7 +6024,7 @@ namespace Legion {
       assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      record_mutated_guard(op);
+      record_mutated_guard(op, mask);
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -5930,7 +6087,7 @@ namespace Legion {
       assert(!(mask - mapping_guards[op].guard_mask));
 #endif
       // Record that this operation is mutating these fields
-      record_mutated_guard(op);
+      record_mutated_guard(op, mask);
       FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
       if (finder != valid_instances.end())
       {
@@ -6931,14 +7088,19 @@ namespace Legion {
       unsigned pending_updates, pending_invalidates;
       derez.deserialize(pending_updates);
       derez.deserialize(pending_invalidates);
-      bool exclusive_reduction;
-      derez.deserialize<bool>(exclusive_reduction);
-      derez.deserialize(pending_request->owner_mask);
+      bool has_exclusive_mask;
+      derez.deserialize(has_exclusive_mask);
+      if (has_exclusive_mask)
+        derez.deserialize(pending_request->exclusive_mask);
+      bool has_single_redop_mask;
+      derez.deserialize(has_single_redop_mask);
+      if (has_single_redop_mask)
+        derez.deserialize(pending_request->single_redop_mask);
 
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       set->record_pending_counts(pending_request, pending_updates, 
-                   pending_invalidates, exclusive_reduction, true/*need lock*/);
+                                 pending_invalidates, true/*need lock*/);
     }
 
     //--------------------------------------------------------------------------
@@ -7042,6 +7204,29 @@ namespace Legion {
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       set->record_invalidation(pending_request, meta_only, true/*needs lock*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_reduction_application(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready_event;
+      EquivalenceSet *set = 
+        runtime->find_or_request_equivalence_set(did, ready_event);
+      FieldMask reduced_mask;
+      derez.deserialize(reduced_mask);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      if (ready_event.exists() && !ready_event.has_triggered())
+        ready_event.wait();
+      const RtEvent recorded = 
+        set->record_reduction_application(reduced_mask, true/*needs lock*/);
+      Runtime::trigger_event(done_event, recorded);
     }
 
     /////////////////////////////////////////////////////////////

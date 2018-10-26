@@ -2285,6 +2285,8 @@ namespace Legion {
                                                    Serializer &rez);
       void send_equivalence_set_invalidate_response(AddressSpaceID target,
                                                     Serializer &rez);
+      void send_equivalence_set_reduction_application(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_update_request(AddressSpaceID target, 
                                              Serializer &rez);
@@ -2474,6 +2476,7 @@ namespace Legion {
       void handle_equivalence_set_update_response(Deserializer &derez);
       void handle_equivalence_set_invalidate_request(Deserializer &derez);
       void handle_equivalence_set_invalidate_response(Deserializer &derez);
+      void handle_equivalence_set_reduction_application(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,

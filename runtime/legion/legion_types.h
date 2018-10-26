@@ -666,6 +666,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
       SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
       SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
+      SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -801,6 +802,7 @@ namespace Legion {
         "Send Equivalence Set Update Response",                       \
         "Send Equivalence Set Invalidate Request",                    \
         "Send Equivalence Set Invalidate Response",                   \
+        "Send Equivalence Set Reduction Application",                 \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \

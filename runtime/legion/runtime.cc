@@ -6264,6 +6264,11 @@ namespace Legion {
               runtime->handle_equivalence_set_invalidate_response(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION:
+            {
+              runtime->handle_equivalence_set_reduction_application(derez);
+              break;
+            }
           case SEND_INSTANCE_REQUEST:
             {
               runtime->handle_instance_request(derez, remote_address_space);
@@ -14231,6 +14236,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_reduction_application(
+                                         AddressSpaceID target, Serializer &rez) 
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15311,6 +15326,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       EquivalenceSet::handle_invalidate_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_reduction_application(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_reduction_application(derez, this);
     }
 
     //--------------------------------------------------------------------------
