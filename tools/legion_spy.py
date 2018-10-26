@@ -4277,7 +4277,7 @@ class DataflowTraverser(object):
             self.post_visit_copy(node)
 
     def traverse_node(self, node, eq_key, first = True):
-        if first:
+        if self.generation is None:
             self.generation = node.state.get_next_traversal_generation()
         elif node.version_numbers and eq_key in node.version_numbers and \
                 node.version_numbers[eq_key] != self.state.version_number:
@@ -4538,17 +4538,20 @@ class DataflowTraverser(object):
                             self.traverse_node(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
+                        if not copy.is_across():
+                            continue
                         eq_privileges = copy.get_equivalence_privileges()
                         if src_key not in eq_privileges:
                             continue
-                        # Skip across copies
-                        if copy.is_across():
-                            # Traverse the things before the across copy
+                        # Traverse the things before the across copy
+                        if src_key in copy.eq_incoming:
                             for node in copy.eq_incoming[src_key]:
-                                self.traverse_node(node, src_key)
-                        else:
-                            self.traverse_node(copy, src_key)
-            if op.realm_fills:
+                                self.traverse_node(node, src_key, first=False)
+                                if self.verified(False):
+                                    break
+            # Only need to traverse fills directly for across cases as the 
+            # non-accross ones will be traverse by the normal copy traversasl
+            if op.realm_fills and self.across:
                 if self.across:
                     for fill in op.realm_fills:
                         # Skip non-across fills
