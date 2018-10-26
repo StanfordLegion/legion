@@ -4325,15 +4325,13 @@ class DataflowTraverser(object):
                     # We have pending reductions, see if we went through any to find this
                     # valid instance. If we did then check in previous instances otherwise
                     # we can look directly in the valid instances
-                    if self.reductions_to_perform:
-                        if src in self.state.previous_instances:
-                            self.found_dataflow_path = True
-                    else:
-                        if src in self.state.valid_instances:
-                            self.found_dataflow_path = True
-                            # No longer need reductions since we found a direct 
-                            # path to a valid instance
-                            self.needs_reductions = False
+                    if src in self.state.valid_instances:
+                        self.found_dataflow_path = True
+                        # No longer need reductions since we found a direct 
+                        # path to a valid instance
+                        self.needs_reductions = False
+                    elif src in self.state.previous_instances:
+                        self.found_dataflow_path = True
                 elif src in self.state.valid_instances:
                     self.found_dataflow_path = True
                 # Continue the traversal if we're not done
