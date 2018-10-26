@@ -4251,13 +4251,7 @@ class DataflowTraverser(object):
         self.failed_analysis = False
         self.generation = None
 
-    def visit_node(self, node):
-        # Mark that we visited this node
-        if node.generation == self.generation:
-            return False
-        else:
-            assert node.generation < self.generation
-            node.generation = self.generation
+    def visit_node(self, node): 
         if isinstance(node, Operation):
             pass 
         elif isinstance(node, RealmCopy):
@@ -4270,6 +4264,12 @@ class DataflowTraverser(object):
             pass
         else:
             assert False # should never get here
+        # Mark that we visited this node
+        if node.generation == self.generation:
+            return False
+        else:
+            assert node.generation < self.generation
+            node.generation = self.generation
         return True
 
     def post_visit_node(self, node):
@@ -4541,6 +4541,10 @@ class DataflowTraverser(object):
                             # their incoming because of how the transitive
                             # reduction deduplicates dependences
                             for node in copy.physical_incoming:
+                                # Skip anything we're going to traverse anyway
+                                if node in op.realm_copies or \
+                                        (op.realm_fills and node in op.realm_fills):
+                                    continue
                                 eq_privileges = node.get_equivalence_privileges()
                                 if src_key in eq_privileges:
                                     self.traverse_node(node, src_key)
