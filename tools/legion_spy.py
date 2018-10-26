@@ -4538,11 +4538,15 @@ class DataflowTraverser(object):
                             self.traverse_node(copy, dst_key)
                 else:
                     for copy in op.realm_copies:
+                        eq_privileges = copy.get_equivalence_privileges()
+                        if src_key not in eq_privileges:
+                            continue
                         # Skip across copies
                         if copy.is_across():
-                            continue
-                        eq_privileges = copy.get_equivalence_privileges()
-                        if src_key in eq_privileges:
+                            # Traverse the things before the across copy
+                            for node in copy.eq_incoming[src_key]:
+                                self.traverse_node(node, src_key)
+                        else:
                             self.traverse_node(copy, src_key)
             if op.realm_fills:
                 if self.across:
