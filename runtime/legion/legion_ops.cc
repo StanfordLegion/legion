@@ -69,11 +69,9 @@ namespace Legion {
       context_index = 0;
       outstanding_mapping_references = 0;
       prepipelined = false;
-#ifdef DEBUG_LEGION
       mapped = false;
       executed = false;
       resolved = false;
-#endif
       completed = false;
       committed = false;
       hardened = false;
@@ -123,9 +121,9 @@ namespace Legion {
         delete commit_tracker;
         commit_tracker = NULL;
       }
-      if (!mapped_event.has_triggered())
+      if (!mapped)
         Runtime::trigger_event(mapped_event);
-      if (!resolved_event.has_triggered())
+      if (!resolved)
         Runtime::trigger_event(resolved_event);
       if (need_completion_trigger && !completion_event.has_triggered())
         Runtime::trigger_event(completion_event);
@@ -600,12 +598,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      {
-        AutoLock o_lock(op_lock);
-        assert(!mapped);
-        mapped = true;
-      }
+      assert(!mapped);
 #endif
+      mapped = true;
       Runtime::trigger_event(mapped_event, wait_on);
     }
 
@@ -627,12 +622,9 @@ namespace Legion {
       if (track_parent)
         parent_ctx->register_child_executed(this);
 #ifdef DEBUG_LEGION
-      {
-        AutoLock o_lock(op_lock);
-        assert(!executed);
-        executed = true;
-      }
+      assert(!executed);
 #endif
+      executed = true;
       // Now see if we are ready to complete this operation
       if (!mapped_event.has_triggered() || !resolved_event.has_triggered())
       {
@@ -651,12 +643,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      {
-        AutoLock o_lock(op_lock);
-        assert(!resolved);
-        resolved = true;
-      }
+      assert(!resolved);
 #endif
+      resolved = true;
       Runtime::trigger_event(resolved_event, wait_on);
     }
 

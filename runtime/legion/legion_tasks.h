@@ -398,17 +398,6 @@ namespace Legion {
      */
     class SingleTask : public TaskOp {
     public:
-      struct DeferredPostMappedArgs : 
-        public LgTaskArgs<DeferredPostMappedArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_POST_MAPPED_ID;
-      public:
-        DeferredPostMappedArgs(SingleTask *t)
-          : LgTaskArgs<DeferredPostMappedArgs>(t->get_unique_op_id()),
-            task(t) { }
-      public:
-        SingleTask *const task;
-      };
       struct MisspeculationTaskArgs :
         public LgTaskArgs<MisspeculationTaskArgs> {
       public:
@@ -538,6 +527,7 @@ namespace Legion {
     protected:
       // Events that must be triggered before we are done mapping
       std::set<RtEvent>                     map_applied_conditions; 
+      RtUserEvent                           deferred_complete_mapping;
     protected:
       TaskContext*                          execution_context;
     protected:
@@ -712,14 +702,12 @@ namespace Legion {
     protected:
       void pack_remote_complete(Serializer &rez);
       void pack_remote_commit(Serializer &rez);
-      void unpack_remote_mapped(Deserializer &derez);
       void unpack_remote_complete(Deserializer &derez);
       void unpack_remote_commit(Deserializer &derez);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
     public:
-      static void process_unpack_remote_mapped(Deserializer &derez);
       static void process_unpack_remote_complete(Deserializer &derez);
       static void process_unpack_remote_commit(Deserializer &derez);
     protected: 
@@ -827,6 +815,7 @@ namespace Legion {
       friend class SliceTask;
       SliceTask                   *slice_owner;
       ApUserEvent                 point_termination;
+      ApUserEvent                 deferred_effects;
     protected:
       std::map<AddressSpaceID,RemoteTask*> remote_instances;
     };

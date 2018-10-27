@@ -266,7 +266,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTION_TRIGGER_ID,
       LG_DEFERRED_RESOLUTION_TRIGGER_ID,
       LG_DEFERRED_COMMIT_TRIGGER_ID,
-      LG_DEFERRED_POST_MAPPED_ID,
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
@@ -342,7 +341,6 @@ namespace Legion {
         "Deferred Execution Trigger",                             \
         "Deferred Resolution Trigger",                            \
         "Deferred Commit Trigger",                                \
-        "Deferred Post Mapped",                                   \
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
@@ -597,7 +595,6 @@ namespace Legion {
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-      INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -733,7 +730,6 @@ namespace Legion {
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Logical Partition Destruction",                              \
-        "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \

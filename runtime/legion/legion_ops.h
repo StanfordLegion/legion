@@ -548,7 +548,6 @@ namespace Legion {
       std::map<Operation*,std::set<unsigned> > verify_regions;
       // Whether this operation has executed its prepipeline stage yet
       bool prepipelined;
-#ifdef DEBUG_LEGION
       // Whether this operation has mapped, once it has mapped then
       // the set of incoming dependences is fixed
       bool mapped;
@@ -556,7 +555,6 @@ namespace Legion {
       bool executed;
       // Whether speculation for this operation has been resolved
       bool resolved;
-#endif
       // Whether this operation has completed, cannot commit until
       // both completed is set, and outstanding mapping references
       // has been gone to zero.

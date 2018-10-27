@@ -5889,11 +5889,6 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case INDIVIDUAL_REMOTE_MAPPED:
-            {
-              runtime->handle_individual_remote_mapped(derez); 
-              break;
-            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -13624,17 +13619,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_mapped(Processor target,
-                                        Serializer &rez, bool flush /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
-      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
-                       DEFAULT_VIRTUAL_CHANNEL, flush, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_individual_remote_complete(Processor target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14749,13 +14733,6 @@ namespace Legion {
       LogicalPartition handle;
       derez.deserialize(handle);
       forest->destroy_logical_partition(handle, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndividualTask::process_unpack_remote_mapped(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -19582,13 +19559,6 @@ namespace Legion {
               (const Operation::DeferredCommitTriggerArgs*)args;
             deferred_commit_args->proxy_this->deferred_commit_trigger(
                 deferred_commit_args->gen);
-            break;
-          }
-        case LG_DEFERRED_POST_MAPPED_ID:
-          {
-            const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
-              (const SingleTask::DeferredPostMappedArgs*)args;
-            post_mapped_args->task->handle_post_mapped();
             break;
           }
         case LG_DEFERRED_EXECUTE_ID:

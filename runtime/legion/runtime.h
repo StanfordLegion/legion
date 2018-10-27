@@ -2183,8 +2183,6 @@ namespace Legion {
                                            AddressSpaceID target);
       void send_logical_partition_destruction(LogicalPartition handle,
                                               AddressSpaceID target);
-      void send_individual_remote_mapped(Processor target, 
-                                         Serializer &rez, bool flush = true);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -2373,7 +2371,6 @@ namespace Legion {
                                              AddressSpaceID source);
       void handle_logical_partition_destruction(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
