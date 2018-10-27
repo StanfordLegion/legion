@@ -318,6 +318,17 @@ namespace Legion {
        *     from being stolen as it will have already been mapped
        *     once it enters the ready queue.
        *
+       * valid_instance default:true
+       *     When calls to map_task are performed, it's often the 
+       *     case that the mapper will want to know the currently valid
+       *     instances are for that region. There is some overhead to
+       *     doing this and the mapper may want to avoid this overhead
+       *     in cases where it knows it won't need the information such
+       *     as when it is going to virtually map all the regions for 
+       *     an inner task. By setting this flag to false the mapper
+       *     can opt-out of receiving the valid instance information
+       *     for a task.
+       *
        * parent_priority default:current
        *     If the mapper for the parent task permits child
        *     operations to mutate the priority of the parent task
@@ -329,6 +340,7 @@ namespace Legion {
         bool                                   inline_task;  // = false
         bool                                   stealable;   // = false
         bool                                   map_locally;  // = false
+        bool                                   valid_instances; // = true
         bool                                   memoize;  // = false
         bool                                   replicate; // = false
         TaskPriority                           parent_priority; // = current
