@@ -19917,7 +19917,7 @@ namespace Legion {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
             RtEvent wait_on = margs->proxy_this->perform_mapping(
-                                                    margs->must_op);
+                        margs->must_op, false/*first invocation*/);
             if (wait_on.exists())
               wait_on.wait();
             break;

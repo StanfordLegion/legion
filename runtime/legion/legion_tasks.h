@@ -287,7 +287,8 @@ namespace Legion {
     public:
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
     public:
@@ -361,6 +362,7 @@ namespace Legion {
       bool options_selected;
       bool memoize_selected;
       bool map_origin;
+      bool valid_instances;
     protected:
       // For managing predication
       PredEvent true_guard;
@@ -437,7 +439,7 @@ namespace Legion {
       inline VariantID get_selected_variant(void) const 
         { return selected_variant; }
     public:
-      RtEvent perform_versioning_analysis(void);
+      RtEvent perform_versioning_analysis(const bool post_mapper);
       void initialize_map_task_input(Mapper::MapTaskInput &input,
                                      Mapper::MapTaskOutput &output,
                                      MustEpochOp *must_epoch_owner,
@@ -453,8 +455,8 @@ namespace Legion {
                     VariantImpl *impl, const char *call_name) const;
     protected:
       void invoke_mapper(MustEpochOp *must_epoch_owner);
-      void map_all_regions(ApEvent user_event,
-                           MustEpochOp *must_epoch_owner = NULL); 
+      RtEvent map_all_regions(ApEvent user_event, const bool first_invocation,
+                              MustEpochOp *must_epoch_owner);
       void perform_post_mapping(const PhysicalTraceInfo &trace_info);
     protected:
       void pack_single_task(Serializer &rez, AddressSpaceID target);
@@ -474,7 +476,8 @@ namespace Legion {
       virtual void launch_task(void);
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0; 
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
     public:
@@ -576,7 +579,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched) = 0;
       virtual void early_map_task(void) = 0;
       virtual bool distribute_task(void) = 0;
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL) = 0;
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true) = 0;
       virtual void launch_task(void) = 0;
       virtual bool is_stealable(void) const = 0;
       virtual void map_and_launch(void) = 0;
@@ -667,7 +671,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -767,7 +772,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -867,7 +873,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);
@@ -976,7 +983,8 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
       virtual void early_map_task(void);
       virtual bool distribute_task(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true);
       virtual void launch_task(void);
       virtual bool is_stealable(void) const;
       virtual void map_and_launch(void);

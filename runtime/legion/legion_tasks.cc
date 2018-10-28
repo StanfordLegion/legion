@@ -777,6 +777,7 @@ namespace Legion {
       stealable = false;
       options_selected = false;
       map_origin = false;
+      valid_instances = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
@@ -866,6 +867,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
+      rez.serialize(valid_instances);
       rez.serialize(execution_fence_event);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
@@ -904,6 +906,7 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
+      derez.deserialize(valid_instances);
       derez.deserialize(execution_fence_event);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -1072,6 +1075,7 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_origin = options.map_locally;
+      valid_instances = options.valid_instances;
       if (parent_priority != options.parent_priority)
       {
         // Request for priority change see if it is legal or not
@@ -1736,6 +1740,7 @@ namespace Legion {
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
+      this->valid_instances = rhs->valid_instances;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -2543,7 +2548,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    RtEvent SingleTask::perform_versioning_analysis(void)
+    RtEvent SingleTask::perform_versioning_analysis(const bool post_mapper)
     //--------------------------------------------------------------------------
     {
       if (is_replaying())
@@ -2562,6 +2567,7 @@ namespace Legion {
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (no_access_regions[idx] || 
+            (post_mapper && virtual_mapped[idx]) ||
             (early_mapped_regions.find(idx) != early_mapped_regions.end()))
         {
           if (multiple_reqs)
@@ -3446,11 +3452,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SingleTask::map_all_regions(ApEvent local_termination_event,
-                                     MustEpochOp *must_epoch_op /*=NULL*/)
+    RtEvent SingleTask::map_all_regions(ApEvent local_termination_event,
+                                        const bool first_invocation, 
+                                        MustEpochOp *must_epoch_op)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
+      if (valid_instances)
+      {
+        // If the mapper wants valid instances we first need to do our
+        // versioning analysis and then call the mapper
+        if (first_invocation)
+        {
+          const RtEvent version_ready_event = 
+            perform_versioning_analysis(false/*post mapper*/);
+          if (version_ready_event.exists() && 
+              !version_ready_event.has_triggered())
+          return defer_perform_mapping(version_ready_event, must_epoch_op);
+        }
+        // Now do the mapping call
+        invoke_mapper(must_epoch_op);
+      }
+      else
+      {
+        // If the mapper doesn't need valid instances, we do the mapper
+        // call first and then see if we need to do any versioning analysis
+        if (first_invocation)
+        {
+          invoke_mapper(must_epoch_op);
+          const RtEvent version_ready_event = 
+            perform_versioning_analysis(true/*post mapper*/);
+          if (version_ready_event.exists() && 
+              !version_ready_event.has_triggered())
+          return defer_perform_mapping(version_ready_event, must_epoch_op);
+        }
+      }
       const PhysicalTraceInfo trace_info(this);
       ApEvent init_precondition = compute_init_precondition(trace_info);
 #ifdef LEGION_SPY
@@ -3463,8 +3499,6 @@ namespace Legion {
                                           local_termination_event);
       }
 #endif
-      // Now do the mapping call
-      invoke_mapper(must_epoch_op);
       // After we've got our results, apply the state to the region tree
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
@@ -3524,6 +3558,7 @@ namespace Legion {
         ApEvent ready_event = Runtime::merge_events(&trace_info, ready_events);
         tpl->record_complete_replay(this, ready_event);
       } 
+      return RtEvent::NO_RT_EVENT;
     }  
 
     //--------------------------------------------------------------------------
@@ -4942,18 +4977,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent IndividualTask::perform_mapping(
-                                         MustEpochOp *must_epoch_owner/*=NULL*/)
+         MustEpochOp *must_epoch_owner/*=NULL*/, bool first_invocation/*=true*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_PERFORM_MAPPING_CALL);
-      // See if we need to do any versioning computations first
-      RtEvent version_ready_event = perform_versioning_analysis();
-      if (version_ready_event.exists() && !version_ready_event.has_triggered())
-        return defer_perform_mapping(version_ready_event, must_epoch_owner);
       // Now try to do the mapping, we can just use our completion
       // event since we know this task will object will be active
       // throughout the duration of the computation
-      map_all_regions(get_task_completion(), must_epoch_owner);
+      const RtEvent deferred = map_all_regions(get_task_completion(), 
+                                  first_invocation, must_epoch_owner);
+      if (deferred.exists() && !deferred.has_triggered())
+        return deferred;
       // Release any acquired instances that we have
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
@@ -5689,18 +5723,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/)
+    RtEvent PointTask::perform_mapping(MustEpochOp *must_epoch_owner/*=NULL*/,
+                                       bool first_invocation/*=true*/)
     //--------------------------------------------------------------------------
     {
-      // Our versioning analysis was done with our slice
-      
       // For point tasks we use the point termination event which as the
       // end event for this task since point tasks can be moved and
       // the completion event is therefore not guaranteed to survive
       // the length of the task's execution
+      const RtEvent deferred = 
+        map_all_regions(point_termination, first_invocation, must_epoch_owner);
+      if (deferred.exists() && !deferred.has_triggered())
+        return deferred;
       RtEvent applied_condition;
       ApEvent effects_condition;
-      map_all_regions(point_termination, must_epoch_owner);
       // If we succeeded in mapping and had no virtual mappings
       // then we are done mapping
       if (is_leaf() && !has_virtual_instances()) 
@@ -6697,13 +6733,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent IndexTask::perform_mapping(MustEpochOp *owner/*=NULL*/)
+    RtEvent IndexTask::perform_mapping(MustEpochOp *owner/*=NULL*/,
+                                       bool first_invocation/*=true*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_PERFORM_MAPPING_CALL);
       // This will only get called if we had slices that failed to origin map 
 #ifdef DEBUG_LEGION
       assert(!slices.empty());
+      // Should never get duplicate invocations here
+      assert(first_invocation);
 #endif
       for (std::list<SliceTask*>::iterator it = slices.begin();
             it != slices.end(); /*nothing*/)
@@ -7536,10 +7575,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/)
+    RtEvent SliceTask::perform_mapping(MustEpochOp *epoch_owner/*=NULL*/,
+                                       bool first_invocation/*=true*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, SLICE_PERFORM_MAPPING_CALL);
+#ifdef DEBUG_LEGION
+      // Should never get duplicate invocations here
+      assert(first_invocation);
+#endif
       // Check to see if we already enumerated all the points, if
       // not then do so now
       if (points.empty())
@@ -7550,20 +7594,9 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
-        RtEvent versions_ready = (*it)->perform_versioning_analysis();
-        if (!versions_ready.exists() || versions_ready.has_triggered())
-        {
-          const RtEvent map_event = (*it)->perform_mapping(epoch_owner);
-          if (map_event.exists())
-            mapped_events.insert(map_event);
-        }
-        else
-        {
-          const RtEvent map_event = 
-            (*it)->defer_perform_mapping(versions_ready, epoch_owner);
-          if (map_event.exists())
-            mapped_events.insert(map_event);
-        }
+        const RtEvent map_event = (*it)->perform_mapping(epoch_owner);
+        if (map_event.exists())
+          mapped_events.insert(map_event);
       }
       if (!mapped_events.empty())
         return Runtime::merge_events(mapped_events);
@@ -7607,23 +7640,11 @@ namespace Legion {
       for (std::vector<PointTask*>::const_iterator it = 
             points.begin(); it != points.end(); it++)
       {
-        RtEvent versions_ready = (*it)->perform_versioning_analysis();
-        if (versions_ready.exists())
-        {
-          // Defer everything
-          RtEvent map_event = 
-            (*it)->defer_perform_mapping(versions_ready, NULL/*epoch owner*/);
+        RtEvent map_event = (*it)->perform_mapping();
+        if (map_event.exists() && !map_event.has_triggered())
           (*it)->defer_launch_task(map_event);
-        }
         else
-        {
-          // We can do the mapping now
-          RtEvent map_event = (*it)->perform_mapping();
-          if (map_event.exists() && !map_event.has_triggered())
-            (*it)->defer_launch_task(map_event);
-          else
-            (*it)->launch_task();
-        }
+          (*it)->launch_task();
       }
     }
 

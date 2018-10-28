@@ -10134,10 +10134,6 @@ namespace Legion {
     void MustEpochMapper::map_task(SingleTask *task)
     //--------------------------------------------------------------------------
     {
-      // Before we can actually map, we have to perform our versioning analysis
-      RtEvent versions_ready = task->perform_versioning_analysis();
-      if (versions_ready.exists())
-        versions_ready.wait();
       // Note we don't need to hold a lock here because this is
       // a monotonic change.  Once it fails for anyone then it
       // fails for everyone.
