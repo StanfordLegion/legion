@@ -25,10 +25,13 @@ def hi(i):
     print("hello %s" % i)
     return i
 
-@task(top_level=True)
+@task
 def main():
     futures = []
     for i in legion.IndexLaunch([10]):
         futures.append(hi(i))
     for future in futures:
         print("got %s" % future.get())
+
+if __name__ == '__legion_main__':
+    main()

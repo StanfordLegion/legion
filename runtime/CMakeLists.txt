@@ -43,6 +43,7 @@ list(APPEND REALM_SRC
   realm/deppart/setops.h                   realm/deppart/setops.cc
   realm/deppart/sparsity_impl.h            realm/deppart/sparsity_impl.cc
   realm/deppart/sparsity_impl.inl
+  realm/atomics.h           realm/atomics.inl
   realm/event_impl.h        realm/event_impl.cc
   realm/event_impl.inl
   realm/faults.h            realm/faults.cc

@@ -19,6 +19,9 @@ from __future__ import print_function
 
 from legion import task
 
-@task(top_level=True)
+@task
 def main():
     print("Hello, Legion!")
+
+if __name__ == '__legion_main__':
+    main()

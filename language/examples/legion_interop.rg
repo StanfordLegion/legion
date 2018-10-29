@@ -70,7 +70,7 @@ f:set_calling_convention(regentlib.convention.manual())
 
 task main()
   var r = region(ispace(ptr, 5), s)
-  fill(r.{a, b}, 1.0)
+  fill(r.{a, b, c, d}, 1.0)
 
   f(r, 2.0)
 end

@@ -18,6 +18,28 @@ local common_config = require("common/config")
 
 local config = {}
 
+local expect_vars = terralib.newlist({"TERRA_PATH", "INCLUDE_PATH", "LG_RT_DIR", "USE_CMAKE", "USE_RDIR"})
+if os.getenv("USE_CMAKE") == "1" then
+  expect_vars:insert("CMAKE_BUILD_DIR")
+end
+if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
+  expect_vars:insert("DYLD_LIBRARY_PATH")
+else
+  expect_vars:insert("LD_LIBRARY_PATH")
+end
+for _, expect_var in ipairs(expect_vars) do
+  if os.getenv(expect_var) == nil then
+    print("ERROR: Regent expects " .. expect_var .. " to be set, but it appears to be missing.")
+    print("Did you configure LAUNCHER to pass through the right environment variables?")
+    print()
+    print("The following variables must be configured to pass through the LAUNCHER command.")
+    for _, v in ipairs(expect_vars) do
+      print("    " .. v)
+    end
+    os.exit(1)
+  end
+end
+
 local default_options = {
   -- Main user-facing correctness flags:
   ["bounds-checks"] = false,
