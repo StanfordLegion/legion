@@ -719,6 +719,7 @@ namespace Legion {
       runtime->find_valid_variants(ctx, task.task_id, variants);
       if (!variants.empty())
       {
+        std::string kindString;
         variants.clear();
         Processor::Kind best_kind = Processor::NO_KIND;
         if (finder == preferred_variants.end() || 
@@ -740,36 +741,42 @@ namespace Legion {
             {
               case Processor::TOC_PROC:
                 {
+                  kindString += "TOC_PROC ";
                   if (local_gpus.empty())
                     continue;
                   break;
                 }
               case Processor::LOC_PROC:
                 {
+                  kindString += "LOC_PROC ";
                   if (local_cpus.empty())
                     continue;
                   break;
                 }
               case Processor::IO_PROC:
                 {
+                  kindString += "IO_PROC ";
                   if (local_ios.empty())
                     continue;
                   break;
                 }
               case Processor::PY_PROC:
                 {
+                  kindString += "PY_PROC ";
                   if (local_pys.empty())
                     continue;
                   break;
                 }
               case Processor::PROC_SET:
                 {
+                  kindString += "PROC_SET ";
                   if (local_procsets.empty())
                     continue;
                   break;
                 }
               case Processor::OMP_PROC:
                 {
+                  kindString += "OMP_PROC ";
                   if (local_omps.empty())
                     continue;
                   break;
@@ -793,9 +800,9 @@ namespace Legion {
           if (best_kind == Processor::NO_KIND)
           {
             log_mapper.error("Failed to find any valid variants for task %s "
-                             "on the current machine. All variants for this "
+                             "on the current machine. All variants (%s) for this "
                              "task are for processor kinds which are not "
-                             "present on this machine.", task.get_task_name());
+                             "present on this machine.", task.get_task_name(), kindString.c_str());
             assert(false);
           }
         }
