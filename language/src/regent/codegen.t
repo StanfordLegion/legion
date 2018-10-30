@@ -2697,7 +2697,7 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
     return subregion
   end
 
-  return std.register_projection_functor(0, nil, partition_functor)
+  return std.register_projection_functor(false, true, 0, nil, nil, nil, partition_functor)
 end
 
 local function expr_call_setup_region_arg(
