@@ -339,6 +339,7 @@ extern "C" {
     bool inline_task;
     bool stealable;
     bool map_locally;
+    bool valid_instances;
     bool memoize;
     bool replicate;
     legion_task_priority_t parent_priority;
