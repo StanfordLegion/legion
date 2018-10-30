@@ -367,7 +367,29 @@ extern "C" {
 
   /**
    * Interface for a Legion C projection functor (Logical Region
-   * upper bound). DO NOT USE IF PROJECTION FUNCTOR has is_functional set.
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_region_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_region_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Partition
+   * upper bound).
+   */
+  typedef
+    legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
+      legion_runtime_t /* runtime */,
+      legion_logical_partition_t /* upper_bound */,
+      legion_domain_point_t /* point */,
+      legion_domain_t /* launch domain */);
+
+  /**
+   * Interface for a Legion C projection functor (Logical Region
+   * upper bound).
    */
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_region_mappable_t)(
@@ -379,7 +401,7 @@ extern "C" {
 
   /**
    * Interface for a Legion C projection functor (Logical Partition
-   * upper bound). DO NOT USE IF PROJECTION FUNCTOR has is_functional set.
+   * upper bound).
    */
   typedef
     legion_logical_region_t (*legion_projection_functor_logical_partition_mappable_t)(
@@ -388,28 +410,6 @@ extern "C" {
       unsigned /* index */,
       legion_logical_partition_t /* upper_bound */,
       legion_domain_point_t /* point */);
-
-  /**
-   * Interface for a Legion C projection functor (Logical Region
-   * upper bound). USE ONLY IF PROJECTION FUNCTOR has is_functional set.
-   */
-  typedef
-    legion_logical_region_t (*legion_projection_functor_logical_region_t)(
-      legion_runtime_t /* runtime */,
-      legion_logical_region_t /* upper_bound */,
-      legion_domain_point_t /* point */,
-      legion_domain_t /* launch domain */);
-
-  /**
-   * Interface for a Legion C projection functor (Logical Partition
-   * upper bound). USE ONLY IF PROJECTION FUNCTOR has is_functional set.
-   */
-  typedef
-    legion_logical_region_t (*legion_projection_functor_logical_partition_t)(
-      legion_runtime_t /* runtime */,
-      legion_logical_partition_t /* upper_bound */,
-      legion_domain_point_t /* point */,
-      legion_domain_t /* launch domain */);
 
   // -----------------------------------------------------------------------
   // Pointer Operations
@@ -3967,13 +3967,21 @@ extern "C" {
   void
   legion_runtime_preregister_projection_functor(
     legion_projection_id_t id,
-    bool is_exclusive,
-    bool is_functional,
+    bool exclusive,
     unsigned depth,
-    legion_projection_functor_logical_region_mappable_t region_functor_mappable,
-    legion_projection_functor_logical_partition_mappable_t partition_functor_mappable,
     legion_projection_functor_logical_region_t region_functor,
     legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::preregister_projection_functor()
+   */
+  void
+  legion_runtime_preregister_projection_functor_mappable(
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_mappable_t region_functor,
+    legion_projection_functor_logical_partition_mappable_t partition_functor);
 
   /**
    * @see Legion::Runtime::register_projection_functor()
@@ -3982,13 +3990,22 @@ extern "C" {
   legion_runtime_register_projection_functor(
     legion_runtime_t runtime,
     legion_projection_id_t id,
-    bool is_exclusive,
-    bool is_functional,
+    bool exclusive,
     unsigned depth,
-    legion_projection_functor_logical_region_mappable_t region_functor_mappable,
-    legion_projection_functor_logical_partition_mappable_t partition_functor_mappable,
     legion_projection_functor_logical_region_t region_functor,
     legion_projection_functor_logical_partition_t partition_functor);
+
+  /**
+   * @see Legion::Runtime::register_projection_functor()
+   */
+  void
+  legion_runtime_register_projection_functor_mappable(
+    legion_runtime_t runtime,
+    legion_projection_id_t id,
+    bool exclusive,
+    unsigned depth,
+    legion_projection_functor_logical_region_mappable_t region_functor,
+    legion_projection_functor_logical_partition_mappable_t partition_functor);
 
   /**
    * @see Legion::Runtime::generate_library_task_ids()
