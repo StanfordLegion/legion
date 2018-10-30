@@ -63,6 +63,9 @@
   runtime->print_once(ctx, file, message);                \
 }
 
+// A guard macro that will exist until control replication is available
+#define NO_LEGION_CONTROL_REPLICATION
+
 /**
  * \namespace Legion
  * Namespace for all Legion runtime objects
@@ -3071,7 +3074,7 @@ namespace Legion {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
 
-      /*
+      /**
        * This method corresponds to the one above for projecting from
        * a logical region but is only invoked if the 'is_functional' 
        * method for this projection functor returns true. It must always 
@@ -3186,8 +3189,8 @@ namespace Legion {
      */
     class ShardingFunctor {
     public:
-      ShardingFunctor(void);
-      virtual ~ShardingFunctor(void);
+      ShardingFunctor(void) { }
+      virtual ~ShardingFunctor(void) { }
     public:
       virtual ShardID shard(const DomainPoint &point,
                             const Domain &full_space,

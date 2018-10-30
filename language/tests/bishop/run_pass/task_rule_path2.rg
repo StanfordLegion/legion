@@ -61,6 +61,7 @@ end
 
 task toplevel()
   var r = region(ispace(ptr, 10), fs)
+  fill(r.{x, y}, 0)
   ta(1, r)
 end
 

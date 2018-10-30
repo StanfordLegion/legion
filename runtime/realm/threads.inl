@@ -325,25 +325,6 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class Coroutine<YT, RT>
-#if DO_I_REALLY_WANT_COROUTINES
-  template <typename YT, typename RT>
-  inline Coroutine<YT, RT>::~Coroutine(void)
-  {
-  }
-
-  template <typename YT, typename RT>
-  inline YT Coroutine<YT, RT>::get_yield_value(void)
-  {
-    // illegal unless we're actually yielded...
-    assert(state == STATE_YIELDED);
-    return yield_value;
-  }
-#endif
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class ThreadScheduler
 
   inline ThreadScheduler::~ThreadScheduler(void)

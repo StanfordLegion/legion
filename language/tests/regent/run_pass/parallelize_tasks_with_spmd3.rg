@@ -60,6 +60,10 @@ task test(size : int)
   var is = ispace(int3d, {size, size, size})
   var primary_region = region(is, fs)
 
+  fill(primary_region.f, 1)
+  fill(primary_region.g, 2)
+  fill(primary_region.h, 3)
+
   var steps = 1
   __demand(__spmd)
   for i = 0, steps do

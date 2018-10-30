@@ -1043,7 +1043,7 @@ namespace Legion {
     public:
       void add_collection(LogicalView *view, ApEvent term_event,
                           ReferenceMutator *mutator);
-      RtEvent launch(void);
+      bool launch(RtEvent *done = NULL);
       bool handle_collection(const GarbageCollectionArgs *args);
     private:
       Runtime *const runtime;

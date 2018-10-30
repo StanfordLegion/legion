@@ -6852,29 +6852,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent GarbageCollectionEpoch::launch(void)
+    bool GarbageCollectionEpoch::launch(RtEvent *done/*=NULL*/)
     //--------------------------------------------------------------------------
     {
-      // Set remaining to the total number of collections
-      remaining = collections.size();
+      if (collections.empty())
+        return true;
+      // Set remaining to the total number of collections + 1 for a guard
+      remaining = collections.size() + 1;
       GarbageCollectionArgs args(this);
       std::set<RtEvent> events;
       for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
-            collections.begin(); it != collections.end(); /*nothing*/)
+            collections.begin(); it != collections.end(); it++)
       {
         args.view = it->first;
         RtEvent precondition = Runtime::protect_merge_events(it->second);
-        // Avoid the deletion race by testing the condition 
-        // before launching the task
-        it++;
-        bool done = (it == collections.end());
         RtEvent e = runtime->issue_runtime_meta_task(args,
                 LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        events.insert(e);
-        if (done)
-          break;
+        if (done != NULL)
+          events.insert(e);
       }
-      return Runtime::merge_events(events);
+      if (done != NULL)
+        *done = Runtime::merge_events(events);
+      // Remove our guard and return if we should delete this or not
+      return (__sync_add_and_fetch(&remaining, -1) == 0);
     }
 
     //--------------------------------------------------------------------------
@@ -16530,8 +16530,8 @@ namespace Legion {
           gc_epoch_counter = 0;
         }
       }
-      if (to_trigger != NULL)
-        to_trigger->launch();
+      if ((to_trigger != NULL) && to_trigger->launch())
+        delete to_trigger;
     }
 
     //--------------------------------------------------------------------------
@@ -16623,14 +16623,18 @@ namespace Legion {
         // Launch our last garbage collection epoch and wait for it to
         // finish so we can try to have no outstanding tasks
         RtEvent gc_done;
+        GarbageCollectionEpoch *to_delete = NULL;
         {
           AutoLock gc(gc_epoch_lock);
           if (current_gc_epoch != NULL)
           {
-            gc_done = current_gc_epoch->launch();
+            if (current_gc_epoch->launch(&gc_done))
+              to_delete = current_gc_epoch;
             current_gc_epoch = NULL;
           }
         }
+        if (to_delete != NULL)
+          delete to_delete;
         gc_done.wait();
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 

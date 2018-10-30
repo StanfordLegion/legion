@@ -1060,6 +1060,9 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
+      options.valid_instances = true;
+      options.memoize = false;
+      options.replicate = false;
       const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
         parent_ctx->get_current_priority() : 0;
       options.parent_priority = parent_priority;

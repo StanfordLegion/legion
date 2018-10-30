@@ -78,6 +78,8 @@ task main()
 
   var bounds = r.bounds
 
+  fill(r.{a, b}, 0)
+
   __demand(__spmd)
   do
     for i in colors do
