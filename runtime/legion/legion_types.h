@@ -1179,7 +1179,6 @@ namespace Legion {
     class VirtualChannel;
     class MessageManager;
     class ShutdownManager;
-    class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;

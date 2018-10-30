@@ -66,31 +66,36 @@ namespace Legion {
       LogicalView *view = static_cast<LogicalView*>(dc);
 #endif
       view->send_view(source);
-    }
-
-    //--------------------------------------------------------------------------
-    void LogicalView::defer_collect_user(ApEvent term_event,
-                                         ReferenceMutator *mutator) 
-    //--------------------------------------------------------------------------
-    {
-      // The runtime will add the gc reference to this view when necessary
-      runtime->defer_collect_user(this, term_event, mutator);
-    }
- 
-    //--------------------------------------------------------------------------
-    /*static*/ void LogicalView::handle_deferred_collect(LogicalView *view,
-                                           const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      view->collect_users(term_events);
-      // Then remove the gc reference on the object
-      if (view->remove_base_gc_ref(PENDING_GC_REF))
-        delete view;
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // InstanceView 
     /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void InstanceView::defer_collect_user(ApEvent term_event,
+                                          ReferenceMutator *mutator) 
+    //--------------------------------------------------------------------------
+    {
+      // The runtime will add the gc reference to this view when necessary
+      PhysicalManager *manager = get_manager(); 
+      std::set<ApEvent> to_collect;
+      if (manager->defer_collect_user(this, term_event, to_collect))
+        add_base_gc_ref(PENDING_GC_REF, mutator);
+      if (!to_collect.empty())
+        collect_users(to_collect); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_deferred_collect(InstanceView *view,
+                                            const std::set<ApEvent> &to_collect)
+    //--------------------------------------------------------------------------
+    {
+      view->collect_users(to_collect);
+      // Then remove the gc reference on the object
+      if (view->remove_base_gc_ref(PENDING_GC_REF))
+        delete view;
+    }
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,

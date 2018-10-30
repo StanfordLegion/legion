@@ -66,11 +66,7 @@ namespace Legion {
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      void defer_collect_user(ApEvent term_event, ReferenceMutator *mutator);
-      virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
-      virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0;
-      static void handle_deferred_collect(LogicalView *view,
-                                          const std::set<ApEvent> &term_events);
+      virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0; 
     public:
       static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
@@ -167,6 +163,10 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields) = 0;
+    public:
+      void defer_collect_user(ApEvent term_event, ReferenceMutator *mutator);
+      static void handle_deferred_collect(InstanceView *view,
+                                          const std::set<ApEvent> &term_events);
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);

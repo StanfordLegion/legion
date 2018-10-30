@@ -740,6 +740,7 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
+      void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
       void finalize(void);
     public:
@@ -1019,39 +1020,6 @@ namespace Legion {
       unsigned needed_responses;
       std::set<RtEvent> wait_for;
       bool result;
-    };
-
-    /**
-     * \class GarbageCollectionEpoch
-     * A class for managing the a set of garbage collections
-     */
-    class GarbageCollectionEpoch {
-    public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(GarbageCollectionEpoch *e)
-          : LgTaskArgs<GarbageCollectionArgs>(0), epoch(e) { }
-      public:
-        GarbageCollectionEpoch *const epoch;
-        LogicalView *view;
-      };
-    public:
-      GarbageCollectionEpoch(Runtime *runtime);
-      GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
-      ~GarbageCollectionEpoch(void);
-    public:
-      GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
-    public:
-      void add_collection(LogicalView *view, ApEvent term_event,
-                          ReferenceMutator *mutator);
-      bool launch(RtEvent *done = NULL);
-      bool handle_collection(const GarbageCollectionArgs *args);
-    private:
-      Runtime *const runtime;
-      int remaining;
-      std::map<LogicalView*,std::set<ApEvent> > collections;
     };
 
     /**
@@ -2609,10 +2577,6 @@ namespace Legion {
                                                    const void *realm_is,
                                                    TypeTag type_tag);
     public:
-      void defer_collect_user(LogicalView *view, ApEvent term_event, 
-                              ReferenceMutator *mutator);
-      void complete_gc_epoch(GarbageCollectionEpoch *epoch);
-    public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
     public:
@@ -2921,12 +2885,6 @@ namespace Legion {
     protected:
       mutable LocalLock is_launch_lock;
       std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
-    protected:
-      mutable LocalLock gc_epoch_lock;
-      GarbageCollectionEpoch *current_gc_epoch;
-      LegionSet<GarbageCollectionEpoch*,
-                RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
-      unsigned gc_epoch_counter;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely

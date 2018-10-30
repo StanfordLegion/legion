@@ -3245,6 +3245,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::find_shutdown_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PhysicalManager*> to_check;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
+        {
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          to_check.push_back(it->first);
+        }
+      }
+      for (std::vector<PhysicalManager*>::const_iterator it = 
+            to_check.begin(); it != to_check.end(); it++)
+      {
+        (*it)->find_shutdown_preconditions(preconditions);
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
@@ -6792,103 +6816,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Garbage Collection Epoch 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(Runtime *rt)
-      : runtime(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(
-                                              const GarbageCollectionEpoch &rhs)
-      : runtime(rhs.runtime)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::~GarbageCollectionEpoch(void)
-    //--------------------------------------------------------------------------
-    {
-      runtime->complete_gc_epoch(this);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch& GarbageCollectionEpoch::operator=(
-                                              const GarbageCollectionEpoch &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term,
-                                                ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(view);
-      if (finder == collections.end())
-      {
-        // Add a garbage collection reference to the view, it will
-        // be removed in LogicalView::handle_deferred_collect
-        view->add_base_gc_ref(PENDING_GC_REF, mutator);
-        collections[view].insert(term);
-      }
-      else
-        finder->second.insert(term);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::launch(RtEvent *done/*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      if (collections.empty())
-        return true;
-      // Set remaining to the total number of collections + 1 for a guard
-      remaining = collections.size() + 1;
-      GarbageCollectionArgs args(this);
-      std::set<RtEvent> events;
-      for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
-            collections.begin(); it != collections.end(); it++)
-      {
-        args.view = it->first;
-        RtEvent precondition = Runtime::protect_merge_events(it->second);
-        RtEvent e = runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        if (done != NULL)
-          events.insert(e);
-      }
-      if (done != NULL)
-        *done = Runtime::merge_events(events);
-      // Remove our guard and return if we should delete this or not
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::handle_collection(
-                                              const GarbageCollectionArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(args->view);
-#ifdef DEBUG_LEGION
-      assert(finder != collections.end());
-#endif
-      LogicalView::handle_deferred_collect(args->view, finder->second);
-      // See if we are done
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
-    }
-
-    /////////////////////////////////////////////////////////////
     // Pending Registrations 
     /////////////////////////////////////////////////////////////
 
@@ -8878,8 +8805,7 @@ namespace Legion {
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
-        unique_distributed_id((unique == 0) ? runtime_stride : unique),
-        gc_epoch_counter(0)
+        unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -8936,9 +8862,6 @@ namespace Legion {
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
       }
-      // Create our first GC epoch
-      current_gc_epoch = new GarbageCollectionEpoch(this);
-      pending_gc_epochs.insert(current_gc_epoch);
       // Initialize our random number generator state
       random_state[0] = address_space & 0xFFFF; // low-order bits of node ID 
       random_state[1] = (address_space >> 16) & 0xFFFF; // high-order bits
@@ -16421,43 +16344,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,
-                                     ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      GarbageCollectionEpoch *to_trigger = NULL;
-      {
-        AutoLock gc(gc_epoch_lock);
-        current_gc_epoch->add_collection(view, term_event, mutator);
-        gc_epoch_counter++;
-        if (gc_epoch_counter == Runtime::gc_epoch_size)
-        {
-          to_trigger = current_gc_epoch;
-          current_gc_epoch = new GarbageCollectionEpoch(this);
-          pending_gc_epochs.insert(current_gc_epoch);
-          gc_epoch_counter = 0;
-        }
-      }
-      if ((to_trigger != NULL) && to_trigger->launch())
-        delete to_trigger;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::complete_gc_epoch(GarbageCollectionEpoch *epoch)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_epoch_lock);
-#ifdef DEBUG_LEGION
-      std::set<GarbageCollectionEpoch*>::iterator finder = 
-        pending_gc_epochs.find(epoch);
-      assert(finder != pending_gc_epochs.end());
-      pending_gc_epochs.erase(finder);
-#else
-      pending_gc_epochs.erase(epoch);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
@@ -16528,22 +16414,23 @@ namespace Legion {
       // If this is the first phase, do all our normal stuff
       if (phase == ShutdownManager::CHECK_TERMINATION)
       {
-        // Launch our last garbage collection epoch and wait for it to
-        // finish so we can try to have no outstanding tasks
-        RtEvent gc_done;
-        GarbageCollectionEpoch *to_delete = NULL;
+        // Get the preconditions for any outstanding operations still
+        // available for garabage collection and wait on them to 
+        // try and get close to when there are no more outstanding tasks
+        std::map<Memory,MemoryManager*> copy_managers;
         {
-          AutoLock gc(gc_epoch_lock);
-          if (current_gc_epoch != NULL)
-          {
-            if (current_gc_epoch->launch(&gc_done))
-              to_delete = current_gc_epoch;
-            current_gc_epoch = NULL;
-          }
+          AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+          copy_managers = memory_managers;
         }
-        if (to_delete != NULL)
-          delete to_delete;
-        gc_done.wait();
+        std::set<ApEvent> wait_events;
+        for (std::map<Memory,MemoryManager*>::const_iterator it = 
+              copy_managers.begin(); it != copy_managers.end(); it++)
+          it->second->find_shutdown_preconditions(wait_events);
+        if (!wait_events.empty())
+        {
+          RtEvent wait_on = Runtime::protect_merge_events(wait_events);
+          wait_on.wait();
+        }
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
                 !prepared_for_shutdown)
@@ -19596,11 +19483,11 @@ namespace Legion {
           }
         case LG_DEFERRED_COLLECT_ID:
           {
-            const GarbageCollectionEpoch::GarbageCollectionArgs *collect_args =
-              (const GarbageCollectionEpoch::GarbageCollectionArgs*)args;
-            bool done = collect_args->epoch->handle_collection(collect_args);
-            if (done)
-              delete collect_args->epoch;
+            const PhysicalManager::GarbageCollectionArgs *collect_args =
+              (const PhysicalManager::GarbageCollectionArgs*)args;
+            InstanceView::handle_deferred_collect(collect_args->view,
+                                            *collect_args->to_collect);
+            delete collect_args->to_collect;
             break;
           }
         case LG_PRE_PIPELINE_ID:

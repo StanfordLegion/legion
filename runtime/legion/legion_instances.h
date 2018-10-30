@@ -108,6 +108,18 @@ namespace Legion {
      */
     class PhysicalManager : public DistributedCollectable {
     public:
+      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
+      public:
+        GarbageCollectionArgs(InstanceView *v, std::set<ApEvent> *collect)
+          : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
+            view(v), to_collect(collect) { }
+      public:
+        InstanceView *const view;
+        std::set<ApEvent> *const to_collect;
+      };
+    public:
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
                       LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
@@ -199,6 +211,10 @@ namespace Legion {
                                            GCPriority priority); 
       RtEvent detach_external_instance(void);
     public:
+      bool defer_collect_user(InstanceView *view, ApEvent term_event,
+                              std::set<ApEvent> &to_collect);
+      void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
+    public:
       static inline DistributedID encode_instance_did(DistributedID did,
                                                       bool external);
       static inline DistributedID encode_reduction_fold_did(DistributedID did);
@@ -219,6 +235,9 @@ namespace Legion {
     protected:
       mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
+    private:
+      // Events that have to trigger before we can remove our GC reference
+      std::map<InstanceView*,std::set<ApEvent> > gc_events;
     };
 
     /**
@@ -298,11 +317,11 @@ namespace Legion {
       virtual void send_manager(AddressSpaceID target);
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
-                                      Deserializer &derez);
+                                      Deserializer &derez); 
     public:
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const ApEvent use_event;
+      const ApEvent use_event; 
     };
 
     /**

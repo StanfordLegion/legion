@@ -656,6 +656,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
+      assert(gc_events.empty());
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
@@ -672,6 +673,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
+      assert(gc_events.empty());
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
@@ -688,6 +690,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
+      // Should not have any gc events
+      assert(gc_events.empty());
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
@@ -705,6 +709,22 @@ namespace Legion {
       if (is_owner())
         assert(instance.exists());
 #endif
+      // If we have any gc events then launch tasks to actually prune
+      // off their references when they are done since we are now eligible
+      // for collection by the garbage collector
+      if (!gc_events.empty())
+      {
+        for (std::map<InstanceView*,std::set<ApEvent> >::iterator it =
+              gc_events.begin(); it != gc_events.end(); it++)
+        {
+          GarbageCollectionArgs args(it->first, new std::set<ApEvent>());
+          RtEvent precondition = Runtime::protect_merge_events(it->second);
+          args.to_collect->swap(it->second);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_WORK_PRIORITY, precondition);
+        }
+        gc_events.clear();
+      }
       // Will be null for virtual managers
       if (memory_manager != NULL)
         memory_manager->invalidate_instance(this);
@@ -979,6 +999,53 @@ namespace Legion {
       assert(is_external_instance());
 #endif
       return memory_manager->detach_external_instance(this);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::defer_collect_user(InstanceView *view,
+                              ApEvent term_event, std::set<ApEvent> &to_collect)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock inst(inst_lock);
+      std::set<ApEvent> &view_events = gc_events[view]; 
+      const bool add_reference = view_events.empty();
+      view_events.insert(term_event);
+      // If the number of events is too big then prune them out
+      if (view_events.size() >= runtime->gc_epoch_size)
+      {
+        for (std::set<ApEvent>::iterator it = view_events.begin();
+              it != view_events.end(); /*nothing*/)
+        {
+          if (it->has_triggered())
+          {
+            to_collect.insert(*it);
+            std::set<ApEvent>::iterator to_delete = it++;
+            view_events.erase(to_delete);
+          }
+          else
+            it++;
+        }
+        if (view_events.empty())
+        {
+          gc_events.erase(view);
+          return false;
+        }
+        else
+          return add_reference;
+      }
+      else
+        return add_reference;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalManager::find_shutdown_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock inst(inst_lock,1,false/*exclusive*/);
+      for (std::map<InstanceView*,std::set<ApEvent> >::const_iterator it =
+            gc_events.begin(); it != gc_events.end(); it++)
+        preconditions.insert(it->second.begin(), it->second.end());
     }
 
     /////////////////////////////////////////////////////////////
