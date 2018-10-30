@@ -3308,13 +3308,11 @@ local projection_functors = terralib.newlist()
 do
   local next_id = 1
   function std.register_projection_functor(exclusive, functional, depth,
-                                           region_functor_mappable, partition_functor_mappable,
                                            region_functor, partition_functor)
     local id = next_id
     next_id = next_id + 1
 
     projection_functors:insert(terralib.newlist({id, exclusive, functional, depth,
-                                                 region_functor_mappable, partition_functor_mappable,
                                                  region_functor, partition_functor}))
 
     return id
@@ -3586,20 +3584,25 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local projection_functor_registrations = projection_functors:map(
     function(args)
-      local id, exclusive, functional, depth, region_functor_mappable, partition_functor_mappable, region_functor, partition_functor = unpack(args)
-      print(id, exclusive, functional, depth, region_functor_mappable, partition_functor_mappable, region_functor, partition_functor)
+      local id, exclusive, functional, depth, region_functor, partition_functor = unpack(args)
+      print(id, exclusive, functional, depth, region_functor, partition_functor)
 
       -- Hack: Work around Terra not wanting to escape nil.
-      region_functor_mappable = region_functor_mappable or `nil
-      partition_functor_mappable = partition_functor_mappable or `nil
       region_functor = region_functor or `nil
       partition_functor = partition_functor or `nil
 
-      return quote
-        c.legion_runtime_preregister_projection_functor(
-          id, exclusive, functional, depth,
-          region_functor_mappable, partition_functor_mappable,
-          region_functor, partition_functor)
+      if functional then
+        return quote
+          c.legion_runtime_preregister_projection_functor(
+            id, exclusive, depth,
+            region_functor, partition_functor)
+        end
+      else
+        return quote
+          c.legion_runtime_preregister_projection_functor_mappable(
+            id, exclusive, depth,
+            region_functor, partition_functor)
+        end
       end
     end)
 
