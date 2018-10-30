@@ -16531,15 +16531,18 @@ namespace Legion {
         // Launch our last garbage collection epoch and wait for it to
         // finish so we can try to have no outstanding tasks
         RtEvent gc_done;
+        GarbageCollectionEpoch *to_delete = NULL;
         {
           AutoLock gc(gc_epoch_lock);
           if (current_gc_epoch != NULL)
           {
             if (current_gc_epoch->launch(&gc_done))
-              delete current_gc_epoch;
+              to_delete = current_gc_epoch;
             current_gc_epoch = NULL;
           }
         }
+        if (to_delete != NULL)
+          delete to_delete;
         gc_done.wait();
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
