@@ -3585,7 +3585,6 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   local projection_functor_registrations = projection_functors:map(
     function(args)
       local id, exclusive, functional, depth, region_functor, partition_functor = unpack(args)
-      print(id, exclusive, functional, depth, region_functor, partition_functor)
 
       -- Hack: Work around Terra not wanting to escape nil.
       region_functor = region_functor or `nil
