@@ -2078,9 +2078,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
+                              RegionTreeID tree_id, IndexSpace handle,
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(handle.exists());
+#endif
       EquivalenceSet *root = NULL;
       if (expr->is_empty())
       {
@@ -2097,9 +2101,10 @@ namespace Legion {
           if (finder == empty_equivalence_sets.end())
           {
             const AddressSpaceID local_space = runtime->address_space;
+            IndexSpaceNode *node = runtime->forest->get_node(handle);
             root = new EquivalenceSet(runtime,
               runtime->get_available_distributed_id(),
-              local_space, local_space, expr, 
+              local_space, local_space, expr, node,
               Reservation::NO_RESERVATION, true/*register now*/); 
             empty_equivalence_sets[key] = root;
             root->add_base_resource_ref(CONTEXT_REF);
@@ -2151,7 +2156,7 @@ namespace Legion {
           const AddressSpaceID local_space = runtime->address_space;
           root = new EquivalenceSet(runtime, 
               runtime->get_available_distributed_id(),
-              local_space, local_space, root_expr, 
+              local_space, local_space, root_expr, root_node->row_source,
               Reservation::NO_RESERVATION, true/*register now*/); 
           tree_equivalence_sets[tree_id] = root;
           root->add_base_resource_ref(CONTEXT_REF);
@@ -2162,7 +2167,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(root != NULL);
 #endif
-      return root->ray_trace_equivalence_sets(manager, expr, source);
+      return root->ray_trace_equivalence_sets(manager, expr, handle, source);
     } 
 
     //--------------------------------------------------------------------------
@@ -6570,13 +6575,15 @@ namespace Legion {
       derez.deserialize(tree_id);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpace handle;
+      derez.deserialize(handle);
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent ready_event;
       derez.deserialize(ready_event);
 
       const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
-                                                         tree_id, expr, origin);
+                                               tree_id, handle, expr, origin);
       Runtime::trigger_event(ready_event, done);
     }
 
@@ -6893,7 +6900,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
+                              RegionTreeID tree_id, IndexSpace handle, 
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We're the top-level task, so we handle the request on the node
@@ -6902,7 +6910,7 @@ namespace Legion {
         RegionTreeNode::get_owner_space(tree_id, runtime);
       if (owner_space == runtime->address_space)
         return InnerContext::compute_equivalence_sets(manager, tree_id, 
-                                                      expr, source);
+                                                      handle, expr, source);
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
@@ -6915,6 +6923,7 @@ namespace Legion {
         rez.serialize(manager);
         rez.serialize(tree_id);
         expr->pack_expression(rez, owner_space);
+        rez.serialize(handle);
         rez.serialize(source);
         rez.serialize(ready_event);
       }
@@ -7138,7 +7147,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id, IndexSpaceExpression *expr, AddressSpaceID source)
+                              RegionTreeID tree_id, IndexSpace handle,
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       const AddressSpaceID owner_space = 
@@ -7147,7 +7157,7 @@ namespace Legion {
       // on the node that made the region
       if (top_level_context && (owner_space == runtime->address_space))
         return InnerContext::compute_equivalence_sets(manager, tree_id, 
-                                                      expr, source);
+                                                      handle, expr, source);
       // Otherwise we fall through and issue the request to the 
       // the node that actually made the region
 #ifdef DEBUG_LEGION
@@ -7166,6 +7176,7 @@ namespace Legion {
         rez.serialize(manager);
         rez.serialize(tree_id);
         expr->pack_expression(rez, target);
+        rez.serialize(handle);
         rez.serialize(source);
         rez.serialize(ready_event);
       }

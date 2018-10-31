@@ -677,14 +677,15 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_RAY_TRACE_TASK_ID;
       public:
         DeferRayTraceArgs(EquivalenceSet *s, VersionManager *t,
-                          IndexSpaceExpression *e, AddressSpaceID o,
-                          RtUserEvent d)
+                          IndexSpaceExpression *e, IndexSpace h,
+                          AddressSpaceID o, RtUserEvent d)
           : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
-            set(s), target(t), expr(e), origin(o), done(d) { }
+            set(s), target(t), expr(e), handle(h), origin(o), done(d) { }
       public:
         EquivalenceSet *const set;
         VersionManager *const target;
         IndexSpaceExpression *const expr;
+        const IndexSpace handle;
         const AddressSpaceID origin;
         const RtUserEvent done;
       };
@@ -710,7 +711,7 @@ namespace Legion {
     protected:
       class RefinementThunk : public Collectable {
       public:
-        RefinementThunk(IndexSpaceExpression *expr, 
+        RefinementThunk(IndexSpaceExpression *expr, IndexSpaceNode *node,
             EquivalenceSet *owner, AddressSpaceID source);
         RefinementThunk(const RefinementThunk &rhs) 
           : owner(NULL), expr(NULL) { assert(false); }
@@ -728,7 +729,7 @@ namespace Legion {
       };
       class LocalRefinement : public RefinementThunk {
       public:
-        LocalRefinement(IndexSpaceExpression *expr, 
+        LocalRefinement(IndexSpaceExpression *expr, IndexSpaceNode *node,
             EquivalenceSet *owner, AddressSpaceID source);
       LocalRefinement(const LocalRefinement &rhs) 
           : RefinementThunk(rhs) { assert(false); }
@@ -781,11 +782,20 @@ namespace Legion {
         const ReductionOpID skip_redop;
         const bool invalidate;
       };
+      struct DisjointPartitionRefinement {
+      public:
+        DisjointPartitionRefinement(IndexPartNode *p)
+          : partition(p) { }
+      public:
+        IndexPartNode *const partition;
+        std::map<IndexSpaceNode*,EquivalenceSet*> children;
+      };
     public:
       EquivalenceSet(Runtime *rt, DistributedID did,
                      AddressSpaceID owner_space,
                      AddressSpaceID logical_owner,
                      IndexSpaceExpression *expr, 
+                     IndexSpaceNode *index_space_node,
                      Reservation version_lock, bool register_now);
       EquivalenceSet(const EquivalenceSet &rhs);
       virtual ~EquivalenceSet(void);
@@ -825,6 +835,7 @@ namespace Legion {
       void remove_mapping_guard(Operation *op);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
                                          IndexSpaceExpression *expr, 
+                                         IndexSpace handle,
                                          AddressSpaceID source); 
       void request_valid_copy(Operation *op, FieldMask request_mask,
                               const RegionUsage usage,
@@ -907,6 +918,7 @@ namespace Legion {
       void advance_version_numbers(FieldMask advance_mask);
     protected:
       void perform_refinements(void);
+      void finalize_disjoint_refinement(void);
       void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
@@ -1021,6 +1033,7 @@ namespace Legion {
       static void handle_reduction_application(Deserializer &derez,Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
+      IndexSpaceNode *const index_space_node; // can be NULL
       const AddressSpaceID logical_owner_space;
       const Reservation version_lock;
     protected:
@@ -1064,6 +1077,8 @@ namespace Legion {
       // Index space expression for unrefined remainder of our set_expr
       // This is only valid on the owner node
       IndexSpaceExpression *unrefined_remainder;
+      // For detecting when we are slicing a disjoint partition
+      DisjointPartitionRefinement *disjoint_partition_refinement;
     protected:
       // Track which fields we hold in exclusive mode
       FieldMask exclusive_fields;
@@ -1113,7 +1128,8 @@ namespace Legion {
       void reset(void);
     public:
       void perform_versioning_analysis(InnerContext *parent_ctx,
-                                       VersionInfo &version_info);
+                                       VersionInfo &version_info,
+                                       RegionNode *region_node);
       void record_equivalence_set(EquivalenceSet *set);
       void update_equivalence_sets(const std::set<EquivalenceSet*> &alt_sets);
     public:

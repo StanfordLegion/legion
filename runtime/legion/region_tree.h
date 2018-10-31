@@ -2566,11 +2566,7 @@ namespace Legion {
       void process_logical_state_return(ContextID ctx, Deserializer &derez,
                                         AddressSpaceID source);
       static void handle_logical_state_return(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
-    public:
-      void perform_versioning_analysis(ContextID ctx,
-                                       InnerContext *parent_ctx,
-                                       VersionInfo &version_info);
+                              Deserializer &derez, AddressSpaceID source); 
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -2778,6 +2774,10 @@ namespace Legion {
                                          TreeStateLogger *logger,
                                          const FieldMask &mask);
 #endif
+    public:
+      void perform_versioning_analysis(ContextID ctx,
+                                       InnerContext *parent_ctx,
+                                       VersionInfo &version_info);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,

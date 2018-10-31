@@ -702,7 +702,8 @@ namespace Legion {
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1159,7 +1160,8 @@ namespace Legion {
                      const void *result, size_t size, PhysicalInstance inst);
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
+                        RegionTreeID tree_id, IndexSpace handle, 
+                        IndexSpaceExpression *expr, AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1250,7 +1252,8 @@ namespace Legion {
       virtual InnerContext* find_top_context(void);
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
-        RegionTreeID tree_id,IndexSpaceExpression *expr,AddressSpaceID source);
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);

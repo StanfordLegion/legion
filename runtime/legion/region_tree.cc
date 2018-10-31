@@ -12591,17 +12591,7 @@ namespace Legion {
       }
       node->process_logical_state_return(outermost->get_context().get_id(),
                                          derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void RegionTreeNode::perform_versioning_analysis(ContextID ctx,
-                                                     InnerContext *parent_ctx,
-                                                     VersionInfo &version_info)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager &manager = get_current_version_manager(ctx);
-      manager.perform_versioning_analysis(parent_ctx, version_info);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::initialize_current_state(ContextID ctx)
@@ -13491,6 +13481,16 @@ namespace Legion {
         }
       }
     } 
+
+    //--------------------------------------------------------------------------
+    void RegionNode::perform_versioning_analysis(ContextID ctx,
+                                                 InnerContext *parent_ctx,
+                                                 VersionInfo &version_info)
+    //--------------------------------------------------------------------------
+    {
+      VersionManager &manager = get_current_version_manager(ctx);
+      manager.perform_versioning_analysis(parent_ctx, version_info, this);
+    }
 
     //--------------------------------------------------------------------------
     void RegionNode::find_open_complete_partitions(ContextID ctx,

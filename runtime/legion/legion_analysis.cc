@@ -2669,19 +2669,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(Runtime *rt, DistributedID did,
                                    AddressSpaceID owner, AddressSpace logical,
-                                   IndexSpaceExpression *expr, 
+                                   IndexSpaceExpression *expr,
+                                   IndexSpaceNode *node,
                                    Reservation ver_lock, bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
-        logical_owner_space(logical),
+        index_space_node(node), logical_owner_space(logical),
         version_lock(is_owner() ? Reservation::create_reservation() : ver_lock),
         eq_state(is_logical_owner() ? MAPPING_STATE : 
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
             is_owner() ? VALID_STATE : INVALID_STATE),
-        next_guard_index(1), unrefined_remainder(NULL)
+        next_guard_index(1), unrefined_remainder(NULL),
+        disjoint_partition_refinement(NULL)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
+      if (index_space_node != NULL)
+      {
+#ifdef DEBUG_LEGION
+        // These two index space expressions should be equivalent
+        // Although they don't have to be the same
+        // These assertions are pretty expensive so we'll comment them
+        // out for now, but put them back in if you think this invariant
+        // is being invalidated
+        //assert(runtime->forest->subtract_index_spaces(index_space_node,
+        //                                              set_expr)->is_empty());
+        //assert(runtime->forest->subtract_index_spaces(set_expr,
+        //                                      index_space_node)->is_empty());
+#endif
+        index_space_node->add_nested_resource_ref(did);
+      }
       if (is_logical_owner())
       {
         // If we're the logical owner then whoever is the actual owner
@@ -2704,7 +2721,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
-      : DistributedCollectable(rhs), set_expr(NULL), 
+      : DistributedCollectable(rhs), set_expr(NULL), index_space_node(NULL), 
         logical_owner_space(rhs.logical_owner_space),
         version_lock(rhs.version_lock)
     //--------------------------------------------------------------------------
@@ -2719,6 +2736,9 @@ namespace Legion {
     {
       if (set_expr->remove_expression_reference())
         delete set_expr;
+      if ((index_space_node != NULL) && 
+          index_space_node->remove_nested_resource_ref(did))
+        delete index_space_node;
       if (!subsets.empty())
       {
         for (std::vector<EquivalenceSet*>::const_iterator it = 
@@ -2759,6 +2779,8 @@ namespace Legion {
         Reservation copy = version_lock;
         copy.destroy_reservation();
       }
+      if (disjoint_partition_refinement != NULL)
+        delete disjoint_partition_refinement;
     }
 
     //--------------------------------------------------------------------------
@@ -2772,14 +2794,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::RefinementThunk::RefinementThunk(IndexSpaceExpression *exp,
-                                     EquivalenceSet *own, AddressSpaceID source)
+              IndexSpaceNode *node, EquivalenceSet *own, AddressSpaceID source)
       : owner(own), expr(exp), refinement(NULL)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = owner->runtime;
       DistributedID did = runtime->get_available_distributed_id();
       refinement = new EquivalenceSet(runtime, did, runtime->address_space, 
-              source, expr, Reservation::NO_RESERVATION, true/*register*/);
+            source, expr, node, Reservation::NO_RESERVATION, true/*register*/);
     }
 
     //--------------------------------------------------------------------------
@@ -2823,9 +2845,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::LocalRefinement::LocalRefinement(IndexSpaceExpression *expr, 
+                                                     IndexSpaceNode *node,
                                                      EquivalenceSet *owner,
                                                      AddressSpaceID source) 
-      : RefinementThunk(expr, owner, source)
+      : RefinementThunk(expr, node, owner, source)
     //--------------------------------------------------------------------------
     {
     }
@@ -2833,7 +2856,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::RemoteComplete::RemoteComplete(IndexSpaceExpression *expr, 
                                    EquivalenceSet *owner, AddressSpaceID source)
-      : RefinementThunk(expr, owner, source), target(source)
+      : RefinementThunk(expr, NULL/*node*/, owner, source), target(source)
     //--------------------------------------------------------------------------
     {
     }
@@ -2928,11 +2951,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      if (disjoint_partition_refinement != NULL)
+        finalize_disjoint_refinement();
       // Could have lost the race so check again
       if (unrefined_remainder != NULL)
       {
         LocalRefinement *refinement = 
-          new LocalRefinement(unrefined_remainder, this,runtime->address_space);
+          new LocalRefinement(unrefined_remainder, NULL/*node*/,
+                              this, runtime->address_space);
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
@@ -2972,12 +2998,14 @@ namespace Legion {
         // We need to iterate until we get a valid lease while holding the lock
         if (is_logical_owner())
         {
+          if (disjoint_partition_refinement != NULL)
+            finalize_disjoint_refinement();
           // If we have an unrefined remainder then we need to do that now
           if (unrefined_remainder != NULL)
           {
             LocalRefinement *refinement = 
-              new LocalRefinement(unrefined_remainder, this, 
-                                  runtime->address_space);
+              new LocalRefinement(unrefined_remainder, NULL/*node*/,
+                                  this, runtime->address_space);
             // We can clear the unrefined remainder now
             unrefined_remainder = NULL;
             add_pending_refinement(refinement);
@@ -3208,6 +3236,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RtEvent EquivalenceSet::ray_trace_equivalence_sets(VersionManager *target,
                                                      IndexSpaceExpression *expr,
+                                                     IndexSpace handle,
                                                      AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
@@ -3221,6 +3250,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(target);
           expr->pack_expression(rez, logical_owner_space);
+          rez.serialize(handle);
           rez.serialize(source);
           rez.serialize(done_event);
         }
@@ -3236,6 +3266,8 @@ namespace Legion {
       std::map<RefinementThunk*,IndexSpaceExpression*> refinements_to_traverse;
       RtEvent refinement_done;
       bool record_self = false;
+      // Check to see if we precisely intersect with the sub-equivalence set
+      bool precise_intersection = handle.exists();
       {
         RegionTreeForest *forest = runtime->forest;
         AutoLock eq(eq_lock);
@@ -3254,62 +3286,227 @@ namespace Legion {
         // one where it is just starting
         if (!subsets.empty() || !pending_refinements.empty())
         {
-          // Iterate through all the subsets and find any overlapping ones
-          // that we need to traverse in order to do our subsets
-          bool is_empty = false;
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                subsets.begin(); it != subsets.end(); it++)
-          {
-            IndexSpaceExpression *overlap = 
-              forest->intersect_index_spaces((*it)->set_expr, expr);
-            if (overlap->is_empty())
-              continue;
-            to_traverse[*it] = overlap;
-            expr = forest->subtract_index_spaces(expr, overlap);
-            if ((expr == NULL) || expr->is_empty())
-            {
-              is_empty = true;
-              break;
-            }
-          }
-          for (std::vector<RefinementThunk*>::const_iterator it = 
-                pending_refinements.begin(); !is_empty && (it != 
-                pending_refinements.end()); it++)
-          {
-            IndexSpaceExpression *overlap = 
-              forest->intersect_index_spaces((*it)->expr, expr);
-            if (overlap->is_empty())
-              continue;
-            (*it)->add_reference();
-            refinements_to_traverse[*it] = overlap;
-            // If this is a pending refinement then we'll need to
-            // wait for it before traversing farther
-            if (!refinement_done.exists())
-            {
-#ifdef DEBUG_LEGION
-              assert(eq_state == PENDING_REFINED_STATE);
-#endif
-              if (!transition_event.exists())
-                transition_event = Runtime::create_rt_user_event();
-              refinement_done = transition_event;
-            }
-            expr = forest->subtract_index_spaces(expr, overlap);
-            if ((expr == NULL) || expr->is_empty())
-              is_empty = true;
-          }
-          if (!is_empty)
+          bool disjoint_refinement = false;
+          if (disjoint_partition_refinement != NULL)
           {
 #ifdef DEBUG_LEGION
-            assert(unrefined_remainder != NULL);
+            assert(index_space_node != NULL);
 #endif
-            LocalRefinement *refinement = new LocalRefinement(expr,this,source);
-            refinement->add_reference();
-            refinements_to_traverse[refinement] = expr;
-            add_pending_refinement(refinement);
-            // If this is a pending refinement then we'll need to
-            // wait for it before traversing farther
-            if (!refinement_done.exists())
+            // This is the special case where we are refining 
+            // a disjoint partition and all the refinements so far
+            // have been specific instances of a subregion of the
+            // disjoint partition, check to see if that is still true
+            if (handle.exists())
             {
+              IndexSpaceNode *node = runtime->forest->get_node(handle);
+              if (node->parent == disjoint_partition_refinement->partition)
+              {
+                // Another sub-region of the disjoint partition
+                // See if we already made the refinement or not
+                std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator
+                  finder = disjoint_partition_refinement->children.find(node);
+                if (finder == disjoint_partition_refinement->children.end())
+                {
+                  LocalRefinement *refinement = 
+                    new LocalRefinement(expr, node, this, source);
+                  refinement->add_reference();
+                  refinements_to_traverse[refinement] = expr;
+                  add_pending_refinement(refinement);
+                  // If this is a pending refinement then we'll need to
+                  // wait for it before traversing farther
+                  if (!refinement_done.exists())
+                  {
+#ifdef DEBUG_LEGION
+                    assert((eq_state == PENDING_REFINED_STATE) ||
+                           (eq_state == REFINING_STATE));
+#endif
+                    if (!transition_event.exists())
+                      transition_event = Runtime::create_rt_user_event();
+                    refinement_done = transition_event;
+                  }
+                  // Record this child for the future
+                  disjoint_partition_refinement->children[node] = 
+                    refinement->owner;
+                }
+                else
+                {
+                  bool is_pending = false;
+                  // See if our set is in the pending refinements in 
+                  // which case we'll need to wait for it
+                  if (!pending_refinements.empty())
+                  {
+                    for (std::vector<RefinementThunk*>::const_iterator it = 
+                          pending_refinements.begin(); it != 
+                          pending_refinements.end(); it++)
+                    {
+                      if ((*it)->owner != finder->second)
+                        continue;
+                      (*it)->add_reference();
+                      refinements_to_traverse[*it] = finder->first;
+                      // If this is a pending refinement then we'll need to
+                      // wait for it before traversing farther
+                      if (!refinement_done.exists())
+                      {
+#ifdef DEBUG_LEGION
+                        assert(eq_state == PENDING_REFINED_STATE);
+#endif
+                        if (!transition_event.exists())
+                          transition_event = Runtime::create_rt_user_event();
+                        refinement_done = transition_event;
+                      }
+                      is_pending = true;
+                      break;
+                    }
+                  }
+                  if (!is_pending)
+                    to_traverse[finder->second] = finder->first;
+                }
+                // We did a disjoint refinement
+                disjoint_refinement = true;
+              }
+            }
+            // If we get here and we still haven't done a disjoint
+            // refinement then we can no longer allow it to continue
+            if (!disjoint_refinement)
+              finalize_disjoint_refinement(); 
+          }
+          if (!disjoint_refinement)
+          {
+            // This is the normal case
+            // If we were doing a special disjoint partition refinement
+            // we now need to stop that
+            // Iterate through all the subsets and find any overlapping ones
+            // that we need to traverse in order to do our subsets
+            bool is_empty = false;
+            for (std::vector<EquivalenceSet*>::const_iterator it = 
+                  subsets.begin(); it != subsets.end(); it++)
+            {
+              IndexSpaceExpression *overlap = 
+                forest->intersect_index_spaces((*it)->set_expr, expr);
+              if (overlap->is_empty())
+                continue;
+              to_traverse[*it] = overlap;
+              expr = forest->subtract_index_spaces(expr, overlap);
+              if ((expr == NULL) || expr->is_empty())
+              {
+                is_empty = true;
+                break;
+              }
+              else if (precise_intersection)
+                precise_intersection = false;
+            }
+            for (std::vector<RefinementThunk*>::const_iterator it = 
+                  pending_refinements.begin(); !is_empty && (it != 
+                  pending_refinements.end()); it++)
+            {
+              IndexSpaceExpression *overlap = 
+                forest->intersect_index_spaces((*it)->expr, expr);
+              if (overlap->is_empty())
+                continue;
+              (*it)->add_reference();
+              refinements_to_traverse[*it] = overlap;
+              // If this is a pending refinement then we'll need to
+              // wait for it before traversing farther
+              if (!refinement_done.exists())
+              {
+#ifdef DEBUG_LEGION
+                assert(eq_state == PENDING_REFINED_STATE);
+#endif
+                if (!transition_event.exists())
+                  transition_event = Runtime::create_rt_user_event();
+                refinement_done = transition_event;
+              }
+              expr = forest->subtract_index_spaces(expr, overlap);
+              if ((expr == NULL) || expr->is_empty())
+                is_empty = true;
+              else if (precise_intersection)
+                precise_intersection = false;
+            }
+            if (!is_empty)
+            {
+#ifdef DEBUG_LEGION
+              assert(unrefined_remainder != NULL);
+#endif
+              LocalRefinement *refinement = 
+                new LocalRefinement(expr, NULL, this, source);
+              refinement->add_reference();
+              refinements_to_traverse[refinement] = expr;
+              add_pending_refinement(refinement);
+              // If this is a pending refinement then we'll need to
+              // wait for it before traversing farther
+              if (!refinement_done.exists())
+              {
+#ifdef DEBUG_LEGION
+                assert((eq_state == PENDING_REFINED_STATE) ||
+                       (eq_state == REFINING_STATE));
+#endif
+                if (!transition_event.exists())
+                  transition_event = Runtime::create_rt_user_event();
+                refinement_done = transition_event;
+              }
+              unrefined_remainder = 
+                forest->subtract_index_spaces(unrefined_remainder, expr);
+              if ((unrefined_remainder != NULL) && 
+                    unrefined_remainder->is_empty())
+                unrefined_remainder = NULL;
+            }
+          }
+        }
+        else
+        {
+          // We haven't done any refinements yet, so this is the first one
+#ifdef DEBUG_LEGION
+          assert(unrefined_remainder == NULL);
+          assert(disjoint_partition_refinement == NULL);
+#endif
+          // See if the set expressions are the same or whether we 
+          // need to make a refinement
+          IndexSpaceExpression *diff = (set_expr == expr) ? NULL :
+            forest->subtract_index_spaces(set_expr, expr);
+          if ((diff != NULL) && !diff->is_empty())
+          {
+            // We're doing a refinement for the first time, see if 
+            // we can make this a disjoint partition refeinement
+            if ((index_space_node != NULL) && handle.exists())
+            {
+              IndexSpaceNode *node = runtime->forest->get_node(handle);
+              // We can start a disjoint complete partition if there
+              // is exactly one partition between the parent index
+              // space for the equivalence class and the child index
+              // space for the subset and the partition is disjoint
+              if ((node->parent != NULL) && 
+                  (node->parent->parent == index_space_node) &&
+                  node->parent->is_disjoint())
+              {
+                disjoint_partition_refinement = 
+                  new DisjointPartitionRefinement(node->parent);
+                LocalRefinement *refinement = 
+                  new LocalRefinement(expr, node, this, source);
+                refinement->add_reference();
+                refinements_to_traverse[refinement] = expr;
+                add_pending_refinement(refinement);
+#ifdef DEBUG_LEGION
+                assert((eq_state == PENDING_REFINED_STATE) ||
+                       (eq_state == REFINING_STATE));
+#endif
+                if (!transition_event.exists())
+                  transition_event = Runtime::create_rt_user_event();
+                refinement_done = transition_event;
+                // Save this for the future
+                disjoint_partition_refinement->children[node] = 
+                  refinement->owner;
+              }
+            }
+            // If we didn't make a disjoint partition refeinement
+            // then we need to do the normal kind of refinement
+            if (disjoint_partition_refinement == NULL)
+            {
+              // Time to refine this since we only need a subset of it
+              LocalRefinement *refinement = 
+                new LocalRefinement(expr, NULL, this, source);
+              refinement->add_reference();
+              refinements_to_traverse[refinement] = expr;
+              add_pending_refinement(refinement);
 #ifdef DEBUG_LEGION
               assert((eq_state == PENDING_REFINED_STATE) ||
                      (eq_state == REFINING_STATE));
@@ -3317,39 +3514,9 @@ namespace Legion {
               if (!transition_event.exists())
                 transition_event = Runtime::create_rt_user_event();
               refinement_done = transition_event;
+              // Update the unrefined remainder
+              unrefined_remainder = diff;
             }
-            unrefined_remainder = 
-              forest->subtract_index_spaces(unrefined_remainder, expr);
-            if ((unrefined_remainder != NULL) && 
-                  unrefined_remainder->is_empty())
-              unrefined_remainder = NULL;
-          }
-        }
-        else
-        {
-#ifdef DEBUG_LEGION
-          assert(unrefined_remainder == NULL);
-#endif
-          // See if the set expressions are the same or whether we 
-          // need to make a refinement
-          IndexSpaceExpression *diff = 
-            forest->subtract_index_spaces(set_expr, expr);
-          if ((diff != NULL) && !diff->is_empty())
-          {
-            // Time to refine this since we only need a subset of it
-            LocalRefinement *refinement = new LocalRefinement(expr,this,source);
-            refinement->add_reference();
-            refinements_to_traverse[refinement] = expr;
-            add_pending_refinement(refinement);
-#ifdef DEBUG_LEGION
-            assert((eq_state == PENDING_REFINED_STATE) ||
-                   (eq_state == REFINING_STATE));
-#endif
-            if (!transition_event.exists())
-              transition_event = Runtime::create_rt_user_event();
-            refinement_done = transition_event;
-            // Update the unrefined remainder
-            unrefined_remainder = diff;
           }
           else
           {
@@ -3375,6 +3542,23 @@ namespace Legion {
       }
       if (record_self)
         target->record_equivalence_set(this);
+      // Traverse anything we can now before we have to wait
+      std::set<RtEvent> done_events;
+      const IndexSpace subset_handle = 
+        precise_intersection ? handle : IndexSpace::NO_SPACE;
+      if (!to_traverse.empty())
+      {
+        for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator 
+              it = to_traverse.begin(); it != to_traverse.end(); it++)
+        {
+          RtEvent done = it->first->ray_trace_equivalence_sets(target, 
+                                    it->second, subset_handle, source);
+          if (done.exists())
+            done_events.insert(done);
+        }
+        // Clear these since we are done doing them
+        to_traverse.clear();
+      }
       // If we have a refinement to do then we need to wait for that
       // to be done before we continue our traversal
       if (refinement_done.exists() && !refinement_done.has_triggered())
@@ -3388,31 +3572,18 @@ namespace Legion {
               it != refinements_to_traverse.end(); it++)
         {
           EquivalenceSet *result = it->first->get_refinement();
-#ifdef DEBUG_LEGION
-          assert(to_traverse.find(result) == to_traverse.end());
-#endif
-          to_traverse[result] = it->second;
+          RtEvent done = result->ray_trace_equivalence_sets(target, it->second,
+                                                        subset_handle, source);
+          if (done.exists())
+            done_events.insert(done);
           if (it->first->remove_reference())
             delete it->first;
         }
       }
-      // Finally traverse any subsets that we have to do
-      if (!to_traverse.empty())
-      {
-        std::set<RtEvent> done_events;
-        for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator 
-              it = to_traverse.begin(); it != to_traverse.end(); it++)
-        {
-          RtEvent done = it->first->ray_trace_equivalence_sets(target, 
-                                                  it->second, source);
-          if (done.exists())
-            done_events.insert(done);
-        }
-        if (!done_events.empty())
-          return Runtime::merge_events(done_events);
-        // Otherwise fall through and return a no-event
-      }
-      return RtEvent::NO_RT_EVENT;
+      if (!done_events.empty())
+        return Runtime::merge_events(done_events);
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -6575,7 +6746,8 @@ namespace Legion {
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
           // and remove any valid references that we might be holding
-          if (unrefined_remainder == NULL)
+          if ((unrefined_remainder == NULL) &&
+              (disjoint_partition_refinement == NULL))
           {
             if (!valid_instances.empty())
             {
@@ -6627,6 +6799,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void EquivalenceSet::finalize_disjoint_refinement(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(unrefined_remainder == NULL);
+      assert(disjoint_partition_refinement != NULL);
+#endif
+      // We're not going to be able to finish up this disjoint
+      // partition refinement so restore this to the state
+      // for normal traversal
+      // Figure out if we finished refining or whether there
+      // is still an unrefined remainder
+      IndexPartNode *partition = 
+        disjoint_partition_refinement->partition;
+      const size_t total_children = partition->color_space->get_volume();
+      if (disjoint_partition_refinement->children.size() < total_children)
+      {
+        // Summarize all the children with a union and then subtract
+        std::set<IndexSpaceExpression*> all_children;
+        for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator
+              it = disjoint_partition_refinement->children.begin(); 
+              it != disjoint_partition_refinement->children.end(); it++)
+          all_children.insert(it->first);
+        IndexSpaceExpression *union_expr = 
+          runtime->forest->union_index_spaces(all_children);
+        IndexSpaceExpression *diff_expr = 
+          runtime->forest->subtract_index_spaces(set_expr, union_expr);
+        if ((diff_expr != NULL) && !diff_expr->is_empty())
+          unrefined_remainder = diff_expr;
+      }
+      else if (!partition->is_complete())
+      {
+        // We had all the children, but the partition is not 
+        // complete so we actually need to do the subtraction
+        IndexSpaceExpression *diff_expr = 
+          runtime->forest->subtract_index_spaces(set_expr, 
+              partition->get_union_expression());
+        if ((diff_expr != NULL) && !diff_expr->is_empty())
+          unrefined_remainder = diff_expr;
+      }
+      delete disjoint_partition_refinement;
+      disjoint_partition_refinement = NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::remove_remote_references(RtEvent done)
     //--------------------------------------------------------------------------
     {
@@ -6665,6 +6882,10 @@ namespace Legion {
         rez.serialize(did);
         rez.serialize(logical_owner_space);
         set_expr->pack_expression(rez, target);
+        if (index_space_node != NULL)
+          rez.serialize(index_space_node->handle);
+        else
+          rez.serialize(IndexSpace::NO_SPACE);
         rez.serialize(version_lock);
       }
       runtime->send_equivalence_set_response(target, rez);
@@ -6753,6 +6974,8 @@ namespace Legion {
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
+      if (disjoint_partition_refinement != NULL)
+        finalize_disjoint_refinement();
       // First check to see if we need to complete this refinement
       if (unrefined_remainder != NULL)
       {
@@ -6935,7 +7158,7 @@ namespace Legion {
     {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
       const RtEvent traced = dargs->set->ray_trace_equivalence_sets(
-                              dargs->target, dargs->expr, dargs->origin);
+                      dargs->target, dargs->expr, dargs->handle, dargs->origin);
       Runtime::trigger_event(dargs->done, traced);
     }
 
@@ -6969,16 +7192,23 @@ namespace Legion {
       derez.deserialize(logical_owner);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpace handle;
+      derez.deserialize(handle);
       Reservation version_lock;
       derez.deserialize(version_lock);
       void *location;
       EquivalenceSet *set = NULL;
+      // We only actually need the index space node on the owner and the
+      // logical owner otherwise we can skip it
+      IndexSpaceNode *node = NULL;
+      if (handle.exists() && (logical_owner == runtime->address_space))
+        node = runtime->forest->get_node(handle);
       if (runtime->find_pending_collectable_location(did, location))
         set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
-                                     expr, version_lock, false/*register now*/);
+                               expr, node, version_lock, false/*register now*/);
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
-                                 expr, version_lock, false/*register now*/);
+                               expr, node, version_lock, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -7051,6 +7281,8 @@ namespace Legion {
       derez.deserialize(target);
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpace handle;
+      derez.deserialize(handle);
       AddressSpaceID origin;
       derez.deserialize(origin);
       RtUserEvent done_event;
@@ -7059,7 +7291,7 @@ namespace Legion {
       // This operation could always block so in order to avoid head of 
       // line blocking on the virtual channel we always defer it into a 
       // meta-task on the local processor
-      DeferRayTraceArgs args(set, target, expr, origin, done_event);
+      DeferRayTraceArgs args(set, target, expr, handle, origin, done_event);
       runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,ready);
     }
 
@@ -7331,9 +7563,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                                                     VersionInfo &version_info)
+                             VersionInfo &version_info, RegionNode *region_node)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(node == region_node);
+#endif
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
       RtEvent wait_on;
@@ -7354,9 +7589,10 @@ namespace Legion {
       }
       if (compute_sets)
       {
-        IndexSpaceExpression *expr = node->get_index_space_expression();
+        IndexSpaceExpression *expr = region_node->row_source; 
+        IndexSpace handle = region_node->row_source->handle;
         RtEvent ready = context->compute_equivalence_sets(this, 
-            node->get_tree_id(), expr, runtime->address_space);
+            region_node->get_tree_id(), handle, expr, runtime->address_space);
         Runtime::trigger_event(equivalence_sets_ready, ready);
       }
       // Wait if necessary for the results
@@ -8318,10 +8554,7 @@ namespace Legion {
     bool VersioningInvalidator::visit_partition(PartitionNode *node)
     //--------------------------------------------------------------------------
     {
-      if (invalidate_all)
-        node->invalidate_version_managers();
-      else
-        node->invalidate_version_state(ctx);
+      // There is no version information on partitions
       return true;
     }
 
