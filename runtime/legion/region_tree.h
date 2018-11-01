@@ -2777,7 +2777,8 @@ namespace Legion {
     public:
       void perform_versioning_analysis(ContextID ctx,
                                        InnerContext *parent_ctx,
-                                       VersionInfo &version_info);
+                                       VersionInfo *version_info,
+                                       LogicalRegion upper_bound);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,

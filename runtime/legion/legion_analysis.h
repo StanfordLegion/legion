@@ -1125,10 +1125,12 @@ namespace Legion {
     public:
       VersionManager& operator=(const VersionManager &rhs);
     public:
+      inline bool has_versions(void) const { return has_equivalence_sets; }
+    public:
       void reset(void);
     public:
       void perform_versioning_analysis(InnerContext *parent_ctx,
-                                       VersionInfo &version_info,
+                                       VersionInfo *version_info,
                                        RegionNode *region_node);
       void record_equivalence_set(EquivalenceSet *set);
       void update_equivalence_sets(const std::set<EquivalenceSet*> &alt_sets);

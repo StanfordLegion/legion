@@ -7563,7 +7563,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void VersionManager::perform_versioning_analysis(InnerContext *context,
-                             VersionInfo &version_info, RegionNode *region_node)
+                             VersionInfo *version_info, RegionNode *region_node)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7601,9 +7601,12 @@ namespace Legion {
       // Possibly duplicate writes, but that is alright
       if (!has_equivalence_sets)
         has_equivalence_sets = true;
-      // Grab the lock in read-only mode in case any updates come in here later
-      AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-      version_info.record_equivalence_sets(this, equivalence_sets);
+      if (version_info != NULL)
+      {
+        // Grab the lock in read-only mode in case any updates come later
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        version_info->record_equivalence_sets(this, equivalence_sets);
+      }
     }
 
     //--------------------------------------------------------------------------

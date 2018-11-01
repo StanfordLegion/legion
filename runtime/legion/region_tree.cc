@@ -1422,8 +1422,8 @@ namespace Legion {
       RegionNode *region_node = get_node(req.region);
       FieldMask user_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
-      region_node->perform_versioning_analysis(ctx.get_id(),
-                                               context, version_info);
+      region_node->perform_versioning_analysis(ctx.get_id(), context, 
+                                               &version_info, req.parent);
       if (!defer_make_ready)
       {
         std::set<Reservation> needed_reservations;
@@ -1541,7 +1541,7 @@ namespace Legion {
       init_version_info.initialize_mapping(context->owner_task);
       // Perform the version analysis and make it ready
       top_node->perform_versioning_analysis(ctx.get_id(), context,
-                                            init_version_info);
+                                            &init_version_info, req.region);
       std::set<Reservation> eq_reservations;
       init_version_info.acquire_equivalence_sets(req,user_mask,eq_reservations);
       RtEvent eq_ready;
@@ -13485,10 +13485,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RegionNode::perform_versioning_analysis(ContextID ctx,
                                                  InnerContext *parent_ctx,
-                                                 VersionInfo &version_info)
+                                                 VersionInfo *version_info,
+                                                 LogicalRegion upper_bound)
     //--------------------------------------------------------------------------
     {
       VersionManager &manager = get_current_version_manager(ctx);
+      // Make sure we traverse up the tree if necessary
+      // This not strictly necessary for correctness, but is done
+      // for performance in order to try to help out the analysis 
+      // in the shattering code for equivalence sets that tries to
+      // recognize disjoint partitions. If we ever switch to using
+      // explicit shattering operations then we can remove this code
+      if (!manager.has_versions() && (handle != upper_bound))
+      {
+#ifdef DEBUG_LEGION
+        assert(parent != NULL);
+#endif
+        parent->parent->perform_versioning_analysis(ctx, parent_ctx,
+                              NULL/*no version info*/, upper_bound);
+      }
       manager.perform_versioning_analysis(parent_ctx, version_info, this);
     }
 
