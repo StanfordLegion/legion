@@ -68,6 +68,7 @@ end
 
 task main()
   var grid = region(ispace(int1d, NX + 2 * HALO_WIDTH), GridData)
+  fill(grid, 1)
 
   var coloring = c.legion_domain_point_coloring_create()
   c.legion_domain_point_coloring_color_domain(coloring, [int1d](LEFT_HALO), rect1d { 0, HALO_WIDTH - 1 })
