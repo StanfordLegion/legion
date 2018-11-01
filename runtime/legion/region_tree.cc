@@ -2325,7 +2325,8 @@ namespace Legion {
       std::set<RtEvent> &applied_events = version_info.get_applied_events();
       CopyFillAggregator output_aggregator(this, attach_op, index,
                                            applied_events, true/*track*/);
-      const FieldMask &ext_mask = ext_instance.get_valid_fields();
+      FieldSpaceNode *node = get_node(req.region.get_field_space());
+      const FieldMask ext_mask = node->get_field_mask(req.privilege_fields);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->overwrite_set(attach_op, external_views[0], ext_mask, 
@@ -2362,7 +2363,8 @@ namespace Legion {
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
-      const FieldMask &ext_mask = ext_instance.get_valid_fields();
+      FieldSpaceNode *node = get_node(req.region.get_field_space());
+      const FieldMask ext_mask = node->get_field_mask(req.privilege_fields);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->filter_set(detach_op, external_views[0], ext_mask, 

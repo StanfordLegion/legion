@@ -13483,6 +13483,22 @@ namespace Legion {
       if (!region.is_valid())
         region.wait_until_valid();
       this->region = region; 
+      // Make sure that we have privileges on all the fields for the 
+      // physical region regardless of whether they where valid or 
+      // not when we attached since we need to filter them all
+      // Now we can get the reference we need for the detach operation
+      InstanceSet references;
+      this->region.impl->get_references(references);
+      FieldMask all_allocated_fields;
+      for (unsigned idx = 0; idx < references.size(); idx++)
+      {
+        PhysicalManager *manager = references[idx].get_manager();
+        all_allocated_fields |= manager->layout->allocated_fields;
+      }
+      FieldSpaceNode *field_space = 
+        runtime->forest->get_node(requirement.region.get_field_space());
+      field_space->get_field_set(all_allocated_fields, 
+                                 requirement.privilege_fields);
       // Check to see if this is a valid detach operation
       if (!region.impl->is_external_region())
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_OPERATION,
