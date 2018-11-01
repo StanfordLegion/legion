@@ -1915,7 +1915,10 @@ namespace Legion {
       const UniqueID op_id = op->get_unique_op_id();
       // Iterate over all the equivalence classes and perform the analysis
       // Only need to check for uninitialized data for things not discarding
-      if (!IS_DISCARD(usage))
+      // and things that are not simultaneous (simultaneous can appear 
+      // uninitialized since it might be reading, but then use internal
+      // synchronization to wait for something running concurrently to write)
+      if (!IS_DISCARD(usage) && !IS_SIMULT(req))
       {
         FieldMask initialized = user_mask;
         for (std::set<EquivalenceSet*>::const_iterator it = 
