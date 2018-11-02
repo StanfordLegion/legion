@@ -450,6 +450,7 @@ namespace Legion {
       rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
       rez.serialize(index_point);
+      rez.serialize(sharding_space);
       rez.serialize(local_arglen);
       rez.serialize(local_args,local_arglen);
       rez.serialize(orig_proc);
@@ -543,6 +544,7 @@ namespace Legion {
       derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
       derez.deserialize(index_point);
+      derez.deserialize(sharding_space);
       derez.deserialize(local_arglen);
       if (local_arglen > 0)
       {
@@ -1913,6 +1915,7 @@ namespace Legion {
       this->speculated = rhs->speculated;
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
+      this->sharding_space = rhs->sharding_space;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -4828,6 +4831,8 @@ namespace Legion {
       map_id = launcher.map_id;
       tag = launcher.tag;
       index_point = launcher.point;
+      index_domain = Domain(index_point, index_point);
+      sharding_space = launcher.sharding_space;
       is_index_space = false;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -6760,6 +6765,7 @@ namespace Legion {
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space;
+      sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
                            launcher.predicate, task_id);
@@ -6834,6 +6840,7 @@ namespace Legion {
       else
         index_domain = launcher.launch_domain;
       internal_space = launch_space;
+      sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
