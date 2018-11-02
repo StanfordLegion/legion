@@ -1908,6 +1908,7 @@ namespace Legion {
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
       this->replicate = rhs->replicate;
+      this->sharding_space = rhs->sharding_space;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -4721,7 +4722,6 @@ namespace Legion {
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
-      this->sharding_space = rhs->sharding_space;
       this->internal_space = is;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
@@ -9510,7 +9510,6 @@ namespace Legion {
       result->is_index_space = true;
       result->must_epoch_task = this->must_epoch_task;
       result->index_domain = this->index_domain;
-      result->sharding_space = this->sharding_space;
       result->trace_local_id = trace_local_id;
       result->tpl = tpl;
       result->memo_state = memo_state;
