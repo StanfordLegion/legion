@@ -14667,11 +14667,13 @@ namespace Legion {
       // this instance can be safely acquired for use
       MemoryManager *memory_manager = external_instance->memory_manager;
       memory_manager->attach_external_instance(external_instance);
+      const PhysicalTraceInfo trace_info(this);
       InstanceRef result = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_instance,
                                                         version_info,
-                                                        map_applied_conditions);
+                                                        map_applied_conditions,
+                                                        trace_info);
 #ifdef DEBUG_LEGION
       assert(result.has_ref());
 #endif
@@ -15014,9 +15016,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      // No need to check privileges because we never would have been
-      // able to attach in the first place anyway.
       requirement = region.impl->get_requirement();
+      // Make sure that the privileges are read-write so that we wait for
+      // all prior users of this particular region
+      requirement.privilege = READ_WRITE;
+      requirement.prop = EXCLUSIVE;
       // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
       if (!region.is_valid())
@@ -15157,9 +15161,10 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
 #endif
       std::set<RtEvent> applied_conditions;
+      const PhysicalTraceInfo trace_info(this);
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                                     version_info,reference,applied_conditions);
+            version_info, reference, applied_conditions, trace_info);
       version_info.apply_mapping(applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped

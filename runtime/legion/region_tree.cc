@@ -3135,7 +3135,8 @@ namespace Legion {
                                                  const RegionRequirement &req,
                                                  InstanceManager *ext_instance,
                                                  VersionInfo &version_info,
-                                                 std::set<RtEvent> &map_applied)
+                                                 std::set<RtEvent> &map_applied,
+                                            const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -3147,10 +3148,11 @@ namespace Legion {
       RegionNode *attach_node = get_node(req.region);
       UniqueID logical_ctx_uid = attach_op->get_context()->get_context_uid();
       // Perform the attachment
-      return attach_node->attach_external(ctx.get_id(), context,logical_ctx_uid,
+      return attach_node->attach_external(ctx.get_id(), attach_op, index,
+                                        context,logical_ctx_uid,
                                         ext_instance->layout->allocated_fields, 
-                                        req, ext_instance, 
-                                        version_info, map_applied);
+                                        req, ext_instance, version_info, 
+                                        map_applied, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -3159,7 +3161,8 @@ namespace Legion {
                                           unsigned index,
                                           VersionInfo &version_info,
                                           const InstanceRef &ref,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -3171,8 +3174,10 @@ namespace Legion {
       RegionNode *detach_node = get_node(req.region);
       UniqueID logical_ctx_uid = detach_op->get_context()->get_context_uid();
       // Perform the detachment
-      return detach_node->detach_external(ctx.get_id(), context,logical_ctx_uid,
-                                          version_info, ref,map_applied_events);
+      return detach_node->detach_external(ctx.get_id(), detach_op, index,
+                                          context, logical_ctx_uid, req,
+                                          version_info, ref, map_applied_events,
+                                          trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -16671,13 +16676,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InstanceRef RegionNode::attach_external(ContextID ctx, 
+                                          AttachOp *attach_op, unsigned index, 
                                           InnerContext *parent_ctx, 
                                           const UniqueID logical_ctx_uid,
                                           const FieldMask &attach_mask,
                                           const RegionRequirement &req,
                                           InstanceManager *instance_manager,
                                           VersionInfo &version_info,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       // We're effectively writing to this region by doing the attach
@@ -16698,16 +16705,25 @@ namespace Legion {
       // We need to invalidate all other instances for these fields since
       // we are now making this the only valid copy of the data
       update_valid_views(state, attach_mask, true/*dirty*/, view);
+      const RegionUsage usage(req);
+      const ApEvent term_event = attach_op->get_completion_event();
+      ApEvent ready = view->add_user_fused(usage, term_event, attach_mask,
+                                           attach_op, index, &version_info,
+                                           context->runtime->address_space,
+                                           map_applied_events, trace_info);
       // Return the resulting instance
-      return InstanceRef(instance_manager,attach_mask,ApUserEvent::NO_AP_EVENT);
+      return InstanceRef(instance_manager, attach_mask, ready);
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionNode::detach_external(ContextID ctx, InnerContext *context, 
+    ApEvent RegionNode::detach_external(ContextID ctx, DetachOp *detach_op,
+                                        unsigned index, InnerContext *context, 
                                         const UniqueID logical_ctx_uid,  
+                                        const RegionRequirement &req,
                                         VersionInfo &version_info, 
                                         const InstanceRef &ref,
-                                        std::set<RtEvent> &map_applied_events)
+                                        std::set<RtEvent> &map_applied_events,
+                                        const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       InstanceView *view = convert_reference(ref, context);
@@ -16723,10 +16739,17 @@ namespace Legion {
       const bool update_parent_state = !version_info.is_upper_bound_node(this);
       manager.advance_versions(detach_mask, logical_ctx_uid, context,
                                update_parent_state, map_applied_events);
-      // First remove this view from the set of valid views
+      // Get the event for when the view is done being used
+      const RegionUsage usage(req);
+      const ApEvent term_event = detach_op->get_completion_event();
+      ApEvent done = detach_view->add_user_fused(usage, term_event, detach_mask,
+                                                detach_op, index, &version_info,
+                                                context->runtime->address_space,
+                                                map_applied_events, trace_info);
+      // Next remove this view from the set of valid views
       PhysicalState *state = get_physical_state(version_info);
       filter_valid_views(state, detach_view);
-      return ApEvent::NO_AP_EVENT;
+      return done;
     }
 
     //--------------------------------------------------------------------------

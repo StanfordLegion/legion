@@ -12,7 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-local std_base = require("regent/std_base")
+local base = require("regent/std_base")
 local config = require("regent/config").args()
 local report = require("common/report")
 
@@ -47,11 +47,7 @@ local externcall_builtin = terralib.externfunction
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
 local HijackAPI = terralib.includec("legion_terra_cudart_hijack.h")
 
-local C = terralib.includecstring [[
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-]]
+local C = base.c
 
 local struct CUctx_st
 local struct CUmod_st
@@ -155,11 +151,15 @@ struct fat_bin_t {
 
 local terra register_ptx(ptxc : rawstring, ptxSize : uint32, version : uint64) : &&opaque
   var fat_bin : &fat_bin_t
+  var fat_size = sizeof(fat_bin_t)
   -- TODO: this line is leaking memory
-  fat_bin = [&fat_bin_t](C.malloc(sizeof(fat_bin_t)))
+  fat_bin = [&fat_bin_t](C.malloc(fat_size))
+  base.assert(fat_size == 0 or fat_bin ~= nil, "malloc failed in register_ptx")
   fat_bin.magic = 1234
   fat_bin.versions = 5678
-  fat_bin.data = C.malloc(ptxSize + 1)
+  var fat_data_size = ptxSize + 1
+  fat_bin.data = C.malloc(fat_data_size)
+  base.assert(fat_data_size == 0 or fat_bin.data ~= nil, "malloc failed in register_ptx")
   fat_bin.data = ptxc
   var handle = HijackAPI.hijackCudaRegisterFatBinary(fat_bin)
   return handle
@@ -326,7 +326,7 @@ local function generate_atomic(op, typ)
     repeat
       if not mask then
         assumed = old
-        new     = [std_base.quote_binary_op(op, assumed, operand)]
+        new     = [base.quote_binary_op(op, assumed, operand)]
         res     = cas_func([&cas_type](address), @assumed_b, @new_b)
         old     = @[&typ](&res)
         mask    = @assumed_b == @[&cas_type](&old)
@@ -392,7 +392,7 @@ function cudahelper.generate_reduction_preamble(reductions)
 
   for red_var, red_op in pairs(reductions) do
     local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
-    local init = std_base.reduction_op_init[red_op][red_var.type]
+    local init = base.reduction_op_init[red_op][red_var.type]
     preamble = quote
       [preamble];
       var [device_ptr] = [&red_var.type](nil)
@@ -421,7 +421,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
     local red_op = reductions[red_var]
     local shared_mem_ptr =
       cudalib.sharedmemory(red_var.type, THREAD_BLOCK_SIZE)
-    local init = std_base.reduction_op_init[red_op][red_var.type]
+    local init = base.reduction_op_init[red_op][red_var.type]
     preamble = quote
       [preamble]
       var [red_var] = [init]
@@ -436,7 +436,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
       reduction_tree = quote
         [reduction_tree]
         if [tid] < step then
-          var v = [std_base.quote_binary_op(red_op,
+          var v = [base.quote_binary_op(red_op,
                                             `([shared_mem_ptr][ [tid] ]),
                                             `([shared_mem_ptr][ [tid] + [step] ]))]
 
@@ -450,7 +450,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
       step = step / 2
       unrolled_reductions:insert(quote
         do
-          var v = [std_base.quote_binary_op(red_op,
+          var v = [base.quote_binary_op(red_op,
                                             `([shared_mem_ptr][ [tid] ]),
                                             `([shared_mem_ptr][ [tid] + [step] ]))]
           terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
@@ -485,7 +485,7 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
   local postamble = nil
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
-    local init = std_base.reduction_op_init[red_op][red_var.type]
+    local init = base.reduction_op_init[red_op][red_var.type]
     if postamble == nil then
       postamble = quote RuntimeAPI.cudaDeviceSynchronize() end
     end
@@ -498,9 +498,9 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
                               RuntimeAPI.cudaMemcpyDeviceToHost)
         var tmp : red_var.type = [init]
         for i = 0, GLOBAL_RED_BUFFER do
-          tmp = [std_base.quote_binary_op(red_op, tmp, `(v[i]))]
+          tmp = [base.quote_binary_op(red_op, tmp, `(v[i]))]
         end
-        [red_var] = [std_base.quote_binary_op(red_op, red_var, tmp)]
+        [red_var] = [base.quote_binary_op(red_op, red_var, tmp)]
         RuntimeAPI.cudaFree([device_ptr])
       end
     end
@@ -532,7 +532,7 @@ local function generate_prefix_op_kernel(shmem, tid, num_leaves, op, init, left_
           var bi : int = offset * ob - [left_to_right]
           ai = ai + bank_offset(ai)
           bi = bi + bank_offset(bi)
-          [shmem][bi] = [std_base.quote_binary_op(op, `([shmem][ai]), `([shmem][bi]))]
+          [shmem][bi] = [base.quote_binary_op(op, `([shmem][ai]), `([shmem][bi]))]
         end
         offset = offset << 1
         d = d >> 1
@@ -552,7 +552,7 @@ local function generate_prefix_op_kernel(shmem, tid, num_leaves, op, init, left_
           bi = bi + bank_offset(bi)
           var x = [shmem][ai]
           [shmem][ai] = [shmem][bi]
-          [shmem][bi] = [std_base.quote_binary_op(op, x, `([shmem][bi]))]
+          [shmem][bi] = [base.quote_binary_op(op, x, `([shmem][bi]))]
         end
         d = d << 1
       end
@@ -599,11 +599,11 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
     var [res]
     [idx].__ptr = t
     [rhs.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
+    [res] = [base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
     [lhs.actions]
     [idx].__ptr = [idx].__ptr + [THREAD_BLOCK_SIZE]
     [rhs.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
+    [res] = [base.quote_binary_op(op, `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
     [lhs.actions]
   end
 
@@ -632,13 +632,13 @@ local function generate_prefix_op_prescan(shmem, lhs, rhs, lhs_ptr, rhs_ptr, res
     var [res]
     [idx].__ptr = t
     [rhs.actions]
-    [res] = [std_base.quote_binary_op(op,
+    [res] = [base.quote_binary_op(op,
         `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
     [lhs.actions]
     [idx].__ptr = [idx].__ptr + (num_leaves / 2)
     if [idx].__ptr < num_elmts then
       [rhs.actions]
-      [res] = [std_base.quote_binary_op(op,
+      [res] = [base.quote_binary_op(op,
           `([shmem][ [idx].__ptr + bank_offset([idx].__ptr) ]), rhs.value)]
       [lhs.actions]
     end
@@ -675,12 +675,12 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
     tidx = t
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+    [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
     [lhs_wr.actions]
     tidx = tidx + [THREAD_BLOCK_SIZE]
     [idx].__ptr = (tidx + lr) * [offset] - lr
     [lhs_rd.actions]
-    [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+    [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
     [lhs_wr.actions]
   end
 
@@ -729,26 +729,26 @@ local function generate_prefix_op_scan(shmem, lhs_wr, lhs_rd, lhs_ptr, res, idx,
       var tidx = t
       [idx].__ptr = (tidx + 1) * [offset] - 1
       [lhs_rd.actions]
-      [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+      [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
       [lhs_wr.actions]
       tidx = tidx + num_leaves / 2
       if [tidx] < [num_elmts] then
         [idx].__ptr = (tidx + 1) * [offset] - 1
         [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+        [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
         [lhs_wr.actions]
       end
     else
       var tidx = t
       [idx].__ptr = tidx * [offset]
       [lhs_rd.actions]
-      [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+      [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
       [lhs_wr.actions]
       tidx = tidx + num_leaves / 2
       if [tidx] < [num_elmts] then
         [idx].__ptr = tidx * [offset]
         [lhs_rd.actions]
-        [res] = [std_base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
+        [res] = [base.quote_binary_op(op, `([shmem][tidx + bank_offset(tidx)]), lhs_rd.value)]
         [lhs_wr.actions]
       end
     end
@@ -767,7 +767,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
                                                res, idx, dir, op, elem_type)
   local BLOCK_SIZE = THREAD_BLOCK_SIZE * 2
   local shmem = cudalib.sharedmemory(elem_type, BLOCK_SIZE)
-  local init = std_base.reduction_op_init[op][elem_type]
+  local init = base.reduction_op_init[op][elem_type]
 
   local prescan_full, prescan_arbitrary =
     generate_prefix_op_prescan(shmem, lhs_wr, rhs, lhs_ptr, rhs_ptr, res, idx, dir, op, init)
@@ -794,7 +794,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
       [lhs_rd.actions]
       var v2 = [lhs_rd.value]
 
-      [res] = [std_base.quote_binary_op(op, v1, v2)]
+      [res] = [base.quote_binary_op(op, v1, v2)]
       [lhs_wr.actions]
     else
       var t = [cudahelper.global_thread_id()]
@@ -808,7 +808,7 @@ function cudahelper.generate_prefix_op_kernels(lhs_wr, lhs_rd, rhs, lhs_ptr, rhs
       [lhs_rd.actions]
       var v2 = [lhs_rd.value]
 
-      [res] = [std_base.quote_binary_op(op, v1, v2)]
+      [res] = [base.quote_binary_op(op, v1, v2)]
       [lhs_wr.actions]
     end
   end
