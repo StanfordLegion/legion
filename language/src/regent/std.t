@@ -3307,11 +3307,13 @@ local projection_functors = terralib.newlist()
 
 do
   local next_id = 1
-  function std.register_projection_functor(depth, region_functor, partition_functor)
+  function std.register_projection_functor(exclusive, functional, depth,
+                                           region_functor, partition_functor)
     local id = next_id
     next_id = next_id + 1
 
-    projection_functors:insert(terralib.newlist({id, depth, region_functor, partition_functor}))
+    projection_functors:insert(terralib.newlist({id, exclusive, functional, depth,
+                                                 region_functor, partition_functor}))
 
     return id
   end
@@ -3582,25 +3584,24 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local projection_functor_registrations = projection_functors:map(
     function(args)
-      local id, depth, region_functor, partition_functor = unpack(args)
+      local id, exclusive, functional, depth, region_functor, partition_functor = unpack(args)
+
       -- Hack: Work around Terra not wanting to escape nil.
-      if region_functor and partition_functor then
+      region_functor = region_functor or `nil
+      partition_functor = partition_functor or `nil
+
+      if functional then
         return quote
           c.legion_runtime_preregister_projection_functor(
-            id, depth, region_functor, partition_functor)
-        end
-      elseif region_functor then
-        return quote
-          c.legion_runtime_preregister_projection_functor(
-            id, depth, region_functor, nil)
-        end
-      elseif partition_functor then
-        return quote
-          c.legion_runtime_preregister_projection_functor(
-            id, depth, nil, partition_functor)
+            id, exclusive, depth,
+            region_functor, partition_functor)
         end
       else
-        assert(false)
+        return quote
+          c.legion_runtime_preregister_projection_functor_mappable(
+            id, exclusive, depth,
+            region_functor, partition_functor)
+        end
       end
     end)
 
