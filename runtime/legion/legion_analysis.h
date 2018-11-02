@@ -900,7 +900,7 @@ namespace Legion {
               const std::vector<unsigned> *dst_indexes = NULL,
               const std::vector<CopyAcrossHelper*> *across_helpers = NULL)const;
       void overwrite_set(Operation *op, LogicalView *view,const FieldMask &mask,
-                         CopyFillAggregator &output_aggregator, 
+                         CopyFillAggregator &output_aggregator,
                          std::set<RtEvent> &ready_events,
                          PredEvent pred_guard = PredEvent::NO_PRED_EVENT,
                          bool add_restriction = false);

@@ -386,7 +386,8 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
-                              const InstanceRef &ref); 
+                              const InstanceRef &ref,
+                              const PhysicalTraceInfo &trace_info); 
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,

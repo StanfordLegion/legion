@@ -2355,22 +2355,35 @@ namespace Legion {
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
       std::set<RtEvent> &applied_events = version_info.get_applied_events();
+      RegionNode *region_node = get_node(req.region);
+      FieldSpaceNode *fs_node = region_node->column_source;
+      const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
+#ifdef DEBUG_LEGION
       CopyFillAggregator output_aggregator(this, attach_op, index,
                                            applied_events, true/*track*/);
-      FieldSpaceNode *node = get_node(req.region.get_field_space());
-      const FieldMask ext_mask = node->get_field_mask(req.privilege_fields);
+#else
+      // No need to track the events in release mode since there shouldn't
+      // be any, we track in debug mode though to confirm this
+      CopyFillAggregator output_aggregator(this, attach_op, index,
+                                           applied_events, false/*track*/);
+#endif
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->overwrite_set(attach_op, external_views[0], ext_mask, 
                              output_aggregator, applied_events, 
                              PredEvent::NO_PRED_EVENT, true/*add restriction*/);
-      if (output_aggregator.has_updates())
-      {
-        output_aggregator.issue_updates(trace_info, ApEvent::NO_AP_EVENT);
-        return output_aggregator.summarize(trace_info);
-      }
-      else
-        return ApEvent::NO_AP_EVENT;
+#ifdef DEBUG_LEGION
+      assert(!output_aggregator.has_updates());
+#endif
+      IndexSpaceExpression *expr = region_node->get_index_space_expression();
+      const UniqueID op_id = attach_op->get_unique_op_id();
+      const ApEvent term_event = attach_op->get_completion_event();
+      const RegionUsage usage(req);
+      ApEvent ready = external_views[0]->register_user(usage, ext_mask, expr,
+                                                       op_id, index, term_event,
+                                                       applied_events, 
+                                                       trace_info);
+      return ready;
     }
 
     //--------------------------------------------------------------------------
@@ -2378,7 +2391,8 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          const InstanceRef &ext_instance)
+                                          const InstanceRef &ext_instance,
+                                          const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -2395,13 +2409,23 @@ namespace Legion {
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
-      FieldSpaceNode *node = get_node(req.region.get_field_space());
-      const FieldMask ext_mask = node->get_field_mask(req.privilege_fields);
+      RegionNode *region_node = get_node(req.region);
+      FieldSpaceNode *fs_node = region_node->column_source;
+      const FieldMask ext_mask = fs_node->get_field_mask(req.privilege_fields);
+      IndexSpaceExpression *expr = region_node->get_index_space_expression();
+      const UniqueID op_id = detach_op->get_unique_op_id();
+      const ApEvent term_event = detach_op->get_completion_event();
+      std::set<RtEvent> &applied_events = version_info.get_applied_events();
+      const RegionUsage usage(req);
+      ApEvent done = external_views[0]->register_user(usage, ext_mask, expr,
+                                                      op_id, index, term_event,
+                                                      applied_events, 
+                                                      trace_info);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->filter_set(detach_op, external_views[0], ext_mask, 
                           true/*remove restriction*/);
-      return ApEvent::NO_AP_EVENT;
+      return done;
     }
 
     //--------------------------------------------------------------------------

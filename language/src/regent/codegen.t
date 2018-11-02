@@ -453,7 +453,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
 
   local dim = data.max(index_type.dim, 1)
   local elem_type
-  if regentlib.is_regent_array(field_type) then
+  if std.is_regent_array(field_type) then
     elem_type = field_type.elem_type
   else
     elem_type = field_type
@@ -480,7 +480,7 @@ local function physical_region_get_base_pointer_setup(index_type, field_type, fa
   local p_base_pointer
   local num_fields
   local actions
-  if regentlib.is_regent_array(field_type) then
+  if std.is_regent_array(field_type) then
     base_pointer = terralib.newsymbol((&elem_type)[field_type.N], "base_pointer")
     p_base_pointer = terralib.newsymbol(&&elem_type, "p_base_pointer")
     num_fields = field_type.N
@@ -582,7 +582,7 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
                                                 field_path, physical_region, field_id)
   local fastest_index = 1
   local expected_stride
-  if regentlib.is_regent_array(field_type) then
+  if std.is_regent_array(field_type) then
     expected_stride = terralib.sizeof(field_type.elem_type)
   else
     expected_stride = terralib.sizeof(field_type)
@@ -602,7 +602,7 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
       index_type, field_type, fastest_index, expected_stride))
 
     local base_pointer
-    if regentlib.is_regent_array(field_type) then
+    if std.is_regent_array(field_type) then
       base_pointer = terralib.newsymbol((&field_type.elem_type)[field_type.N], "base_pointer")
     else
       base_pointer = terralib.newsymbol(&field_type, "base_pointer")
@@ -2076,7 +2076,7 @@ function codegen.expr_field_access(cx, node)
       [emit_debuginfo(node)]
 
       -- Currently doesn't support index spaces with multiple domains.
-      regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [value.value].impl),
+      std.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [value.value].impl),
         "\"volume\" field isn't supported on index spaces with multiple domains")
       var [volume] = c.legion_domain_get_volume(
         c.legion_index_space_get_domain([cx.runtime], [value.value].impl))
@@ -2330,9 +2330,9 @@ function codegen.expr_index_access(cx, node)
         [index.actions]
         [emit_debuginfo(node)]
 
-        var data = c.malloc(
-          terralib.sizeof([list_type.element_type]) * [index.value].__size)
-        regentlib.assert(data ~= nil, "malloc failed in index_access")
+        var size = terralib.sizeof([list_type.element_type]) * [index.value].__size
+        var data = c.malloc(size)
+        std.assert(size == 0 or data ~= nil, "malloc failed in index_access")
         var [list] = [list_type] {
           __size = [index.value].__size,
           __data = data
@@ -2426,7 +2426,7 @@ local function expr_call_setup_task_args(
 
   task_args_setup:insert(quote
     var [buffer] = c.malloc([size])
-    std.assert([buffer] ~= nil, "malloc failed in setup task args")
+    std.assert([size] == 0 or [buffer] ~= nil, "malloc failed in setup task args")
     [task_args].args = [buffer]
     [task_args].arglen = [size]
   end)
@@ -3015,7 +3015,7 @@ local function expr_call_setup_partition_arg(
            function(field)
              local field_path, field_type = unpack(field)
              local field_id = cx:region(arg_type):field_id(field_path)
-             if regentlib.is_regent_array(field_type) then
+             if std.is_regent_array(field_type) then
                return quote
                  for idx = 0, [field_type.N] do
                    c.legion_index_launcher_add_field(
@@ -3963,7 +3963,7 @@ function codegen.expr_region(cx, node)
          function(field)
            local field_path, field_type, field_id = unpack(field)
            local field_name = field_path:mkstring("", ".", "")
-           if regentlib.is_regent_array(field_type) then
+           if std.is_regent_array(field_type) then
              local attach_names = terralib.newlist()
              for idx = 0, field_type.N - 1 do
                local elem_name = field_name .. "[" .. tostring(idx) .. "]"
@@ -3991,7 +3991,7 @@ function codegen.expr_region(cx, node)
     [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
-         if regentlib.is_regent_array(field_type) then
+         if std.is_regent_array(field_type) then
            local allocate_fields = terralib.newlist()
            return quote
              for idx = 0, [field_type.N] do
@@ -4021,7 +4021,7 @@ function codegen.expr_region(cx, node)
       [data.zip(field_ids, field_types):map(
          function(field)
            local field_id, field_type = unpack(field)
-           if regentlib.is_regent_array(field_type) then
+           if std.is_regent_array(field_type) then
              return quote
                for idx = 0, [field_type.N] do
                  c.legion_inline_launcher_add_field(il, [field_id] + idx, true)
@@ -4459,10 +4459,10 @@ function codegen.expr_cross_product_array(cx, node)
         [cx.runtime], [lhs.value].impl.index_partition)
     var color_domain = 
       c.legion_index_space_get_domain([cx.runtime], color_space)
-    regentlib.assert(color_domain.dim == 1, "color domain should be 1D")
+    std.assert(color_domain.dim == 1, "color domain should be 1D")
     var start_color = color_domain.rect_data[0]
     var end_color = color_domain.rect_data[1]
-    regentlib.assert(start_color >= 0 and end_color >= 0,
+    std.assert(start_color >= 0 and end_color >= 0,
       "colors should be non-negative")
     var [lp] = [lhs.value].impl
     var lhs_ip = [lp].index_partition
@@ -4543,9 +4543,9 @@ function codegen.expr_list_slice_partition(cx, node)
 
   actions = quote
     [actions]
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_slice_partition")
+    var size = terralib.sizeof([expr_type.element_type]) * [indices.value].__size
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_slice_partition")
     var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
@@ -4592,9 +4592,9 @@ function codegen.expr_list_duplicate_partition(cx, node)
 
   actions = quote
     [actions]
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_duplicate_partition")
+    var size = terralib.sizeof([expr_type.element_type]) * [indices.value].__size
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_duplicate_partition")
     var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
@@ -4623,7 +4623,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
       -- Attach semantic info.
       var name : &int8
       c.legion_logical_region_retrieve_name([cx.runtime], root, &name)
-      regentlib.assert(name ~= nil, "invalid name")
+      std.assert(name ~= nil, "invalid name")
       c.legion_logical_region_attach_name([cx.runtime], new_root, name, false)
 
       [expr_type:data(result)][i] = [expr_type.element_type] { impl = r }
@@ -4652,9 +4652,9 @@ function codegen.expr_list_slice_cross_product(cx, node)
 
   actions = quote
     [actions]
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [indices.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_slice_cross_product")
+    var size = terralib.sizeof([expr_type.element_type]) * [indices.value].__size
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_slice_cross_product")
     var [result] = expr_type {
       __size = [indices.value].__size,
       __data = data,
@@ -4716,17 +4716,17 @@ function codegen.expr_list_cross_product(cx, node)
     var rhs_ : &c.legion_terra_logical_region_list_t =
       [&c.legion_terra_logical_region_list_t]([&opaque](&[rhs.value]))
 
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_cross_product")
+    var size = terralib.sizeof([expr_type.element_type]) * [lhs.value].__size
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_cross_product")
     var [result] = expr_type {
       __size = [lhs.value].__size,
       __data = data,
     }
     for i = 0, [lhs.value].__size do
-      var subdata = c.malloc(
-        terralib.sizeof([expr_type.element_type.element_type]) * [rhs.value].__size)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_cross_product")
+      var subsize = terralib.sizeof([expr_type.element_type.element_type]) * [rhs.value].__size
+      var subdata = c.malloc(subsize)
+      std.assert(subsize == 0 or subdata ~= nil, "malloc failed in list_cross_product")
       [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = 0, -- will be set to a meaningful value inside the C library
         __data = subdata,
@@ -4774,33 +4774,32 @@ function codegen.expr_list_cross_product_complete(cx, node)
   actions = quote
     [actions]
 
-    regentlib.assert([product.value].__size == [lhs.value].__size,
+    std.assert([product.value].__size == [lhs.value].__size,
                      "size mismatch in list_cross_product 1")
 
     var lhs_list : c.legion_terra_index_space_list_t
     lhs_list.space.tid = 0
     lhs_list.space.id = 0
     lhs_list.count = [lhs.value].__size
-    lhs_list.subspaces = [&c.legion_index_space_t](
-      c.malloc(
-        terralib.sizeof([c.legion_index_space_t]) * [lhs.value].__size))
-    regentlib.assert(lhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
+    var lhs_size = terralib.sizeof([c.legion_index_space_t]) * [lhs.value].__size
+    lhs_list.subspaces = [&c.legion_index_space_t](c.malloc(lhs_size))
+    std.assert(lhs_size == 0 or lhs_list.subspaces ~= nil, "malloc failed in list_cross_product")
     for i = 0, [lhs.value].__size do
       lhs_list.subspaces[i] = [lhs_type:data(lhs.value)][i].impl.index_space
     end
 
     var shallow_product : c.legion_terra_index_space_list_list_t
     shallow_product.count = [lhs.value].__size
-    shallow_product.sublists = [&c.legion_terra_index_space_list_t](
-      c.malloc(
-        terralib.sizeof([c.legion_terra_index_space_list_t]) * [lhs.value].__size))
-    regentlib.assert(shallow_product.sublists ~= nil, "malloc failed in list_cross_product")
+    var shallow_size = terralib.sizeof([c.legion_terra_index_space_list_t]) * [lhs.value].__size
+    shallow_product.sublists = [&c.legion_terra_index_space_list_t](c.malloc(shallow_size))
+    std.assert(shallow_size == 0 or shallow_product.sublists ~= nil, "malloc failed in list_cross_product")
     for i = 0, [lhs.value].__size do
       var subsize = [product_type:data(product.value)][i].__size
       shallow_product.sublists[i].space = [lhs_type:data(lhs.value)][i].impl.index_space
       shallow_product.sublists[i].count = subsize
-      shallow_product.sublists[i].subspaces = [&c.legion_index_space_t](
-        c.malloc(terralib.sizeof([c.legion_index_space_t]) * subsize))
+      var shallow_subsize = terralib.sizeof([c.legion_index_space_t]) * subsize
+      shallow_product.sublists[i].subspaces = [&c.legion_index_space_t](c.malloc(shallow_subsize))
+      std.assert(shallow_subsize == 0 or shallow_product.sublists[i].subspaces ~= nil, "malloc failed in list_cross_product")
       for j = 0, subsize do
         shallow_product.sublists[i].subspaces[j] =
           [product_type.element_type:data(
@@ -4810,12 +4809,12 @@ function codegen.expr_list_cross_product_complete(cx, node)
 
     var complete_product = c.legion_terra_index_cross_product_create_list_complete(
       [cx.runtime], [cx.context], [lhs_list], [shallow_product], false)
-    regentlib.assert(complete_product.count == [lhs.value].__size,
+    std.assert(complete_product.count == [lhs.value].__size,
                      "size mismatch in list_cross_product 2")
 
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) * [lhs.value].__size)
-    regentlib.assert(data ~= nil, "malloc failed in list_cross_product")
+    var data_size = terralib.sizeof([expr_type.element_type]) * [lhs.value].__size
+    var data = c.malloc(data_size)
+    std.assert(data_size == 0 or data ~= nil, "malloc failed in list_cross_product")
     var [result] = expr_type {
       __size = [lhs.value].__size,
       __data = data,
@@ -4823,14 +4822,14 @@ function codegen.expr_list_cross_product_complete(cx, node)
 
     for i = 0, [lhs.value].__size do
       var subsize = [product_type:data(product.value)][i].__size
-      regentlib.assert(
+      std.assert(
         subsize == complete_product.sublists[i].count,
         "size mismatch in list_cross_product 3")
 
       -- Allocate sublist.
-      var subdata = c.malloc(
-        terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-      regentlib.assert(subdata ~= nil, "malloc failed in list_cross_product")
+      var subdata_size = terralib.sizeof([expr_type.element_type.element_type]) * subsize
+      var subdata = c.malloc(subdata_size)
+      std.assert(subdata_size == 0 or subdata ~= nil, "malloc failed in list_cross_product")
       [expr_type:data(result)][i] = [expr_type.element_type] {
         __size = subsize,
         __data = subdata,
@@ -4869,9 +4868,9 @@ local gen_expr_list_phase_barriers = terralib.memoize(
     local runtime = terralib.newsymbol(c.legion_runtime_t, "runtime")
     local context = terralib.newsymbol(c.legion_context_t, "context")
     local terra list_phase_barriers([runtime], [context], [product])
-      var data = c.malloc(
-        terralib.sizeof([expr_type.element_type]) * [product].__size)
-      regentlib.assert(data ~= nil, "malloc failed in list_phase_barriers")
+      var size = terralib.sizeof([expr_type.element_type]) * [product].__size
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in list_phase_barriers")
       var [result] = expr_type {
         __size = [product].__size,
         __data = data,
@@ -4880,9 +4879,9 @@ local gen_expr_list_phase_barriers = terralib.memoize(
         var subsize = [product_type:data(product)][i].__size
 
         -- Allocate sublist.
-        var subdata = c.malloc(
-          terralib.sizeof([expr_type.element_type.element_type]) * subsize)
-        regentlib.assert(subdata ~= nil, "malloc failed in list_phase_barriers")
+        var subdata_size = terralib.sizeof([expr_type.element_type.element_type]) * subsize
+        var subdata = c.malloc(subdata_size)
+        std.assert(subdata_size == 0 or subdata ~= nil, "malloc failed in list_phase_barriers")
         [expr_type:data(result)][i] = [expr_type.element_type] {
           __size = subsize,
           __data = subdata,
@@ -4971,9 +4970,9 @@ local gen_expr_list_invert = terralib.memoize(
       -- 3. Allocate sublists.
       -- 3. Fill sublists.
 
-      var data = c.malloc(
-        terralib.sizeof([expr_type.element_type]) * [rhs].__size)
-      regentlib.assert(data ~= nil, "malloc failed in list_invert")
+      var size = terralib.sizeof([expr_type.element_type]) * [rhs].__size
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in list_invert")
       var [result] = expr_type {
         __size = [rhs].__size,
         __data = data,
@@ -4999,12 +4998,12 @@ local gen_expr_list_invert = terralib.memoize(
         var colors_rect = [std.rect_type(color_type)] { lo = min_color, hi = max_color }
         var colors_size = colors_rect:size()
         var num_colors = colors_rect:volume()
-        regentlib.assert(num_colors >= 0, "invalid color range in list_invert")
+        std.assert(num_colors >= 0, "invalid color range in list_invert")
 
         -- Build the index.
-        var color_to_index = [&int64](c.malloc(
-          terralib.sizeof(int64) * num_colors))
-        regentlib.assert(color_to_index ~= nil, "malloc failed in list_invert")
+        var color_to_index_size = terralib.sizeof(int64) * num_colors
+        var color_to_index = [&int64](c.malloc(color_to_index_size))
+        std.assert(color_to_index_size == 0 or color_to_index ~= nil, "malloc failed in list_invert")
 
         for i = 0, num_colors do
           color_to_index[i] = -1
@@ -5016,10 +5015,10 @@ local gen_expr_list_invert = terralib.memoize(
 
           var delta = rhs_color - min_color
           var color_index = [get_offset_in_rect(delta, colors_size)]
-          regentlib.assert(
+          std.assert(
             (0 <= color_index) and (color_index < num_colors),
             "color index out of bounds in list_invert")
-          regentlib.assert(
+          std.assert(
             color_to_index[color_index] == -1,
             "duplicate colors in list_invert")
           color_to_index[color_index] = i
@@ -5037,7 +5036,7 @@ local gen_expr_list_invert = terralib.memoize(
             var inner = leaf
 
             if not [product_type.shallow] then
-              regentlib.assert(
+              std.assert(
                 c.legion_logical_region_has_parent_logical_partition(
                   [runtime], leaf),
                 "missing color in list_invert")
@@ -5059,17 +5058,18 @@ local gen_expr_list_invert = terralib.memoize(
         -- 3. Allocate sublists.
         for i = 0, [rhs].__size do
           var subsize = [expr_type:data(result)][i].__size
-          var subdata = [&expr_type.element_type.element_type](c.malloc(
-            terralib.sizeof([expr_type.element_type.element_type]) * subsize))
-          regentlib.assert(subdata ~= nil, "malloc failed in list_invert")
+          var subdata_size = terralib.sizeof([expr_type.element_type.element_type]) * subsize
+          var subdata = [&expr_type.element_type.element_type](c.malloc(subdata_size))
+          std.assert(subdata_size == 0 or subdata ~= nil, "malloc failed in list_invert")
           [expr_type:data(result)][i].__data = subdata
         end
 
         -- 4. Fill sublists.
 
         -- Create a list to hold the next index.
-        var subslots = [&int64](c.malloc(
-          terralib.sizeof([int64]) * [rhs].__size))
+        var subslots_size = terralib.sizeof([int64]) * [rhs].__size
+        var subslots = [&int64](c.malloc(subslots_size))
+        std.assert(subslots_size == 0 or subslots ~= nil, "malloc failed in list_invert")
         for i = 0, [rhs].__size do
           subslots[i] = 0
         end
@@ -5081,7 +5081,7 @@ local gen_expr_list_invert = terralib.memoize(
             var inner = leaf
 
             if not [product_type.shallow] then
-              regentlib.assert(
+              std.assert(
                 c.legion_logical_region_has_parent_logical_partition(
                   [runtime], leaf),
                 "missing parent in list_invert")
@@ -5095,7 +5095,7 @@ local gen_expr_list_invert = terralib.memoize(
             var inner_color = [get_logical_region_color(runtime, inner, color_type)]
             var delta = inner_color - min_color
             var i = color_to_index[ [get_offset_in_rect(delta, colors_size)] ]
-            regentlib.assert(subslots[i] < [expr_type:data(result)][i].__size,
+            std.assert(subslots[i] < [expr_type:data(result)][i].__size,
                              "overflowed sublist in list_invert")
             [expr_type.element_type:data(`([expr_type:data(result)][i]))][subslots[i]] =
                 [barriers_type.element_type:data(
@@ -5105,7 +5105,7 @@ local gen_expr_list_invert = terralib.memoize(
         end
 
         for i = 0, [rhs].__size do
-          regentlib.assert(subslots[i] == [expr_type:data(result)][i].__size, "underflowed sublist in list_invert")
+          std.assert(subslots[i] == [expr_type:data(result)][i].__size, "underflowed sublist in list_invert")
         end
 
         c.free(subslots)
@@ -5163,11 +5163,10 @@ function codegen.expr_list_range(cx, node)
     [stop.actions]
     [emit_debuginfo(node)]
 
-    regentlib.assert([stop.value] >= [start.value], "negative size range in list_range")
-    var data = c.malloc(
-      terralib.sizeof([expr_type.element_type]) *
-        ([stop.value] - [start.value]))
-    regentlib.assert(data ~= nil, "malloc failed in list_range")
+    std.assert([stop.value] >= [start.value], "negative size range in list_range")
+    var size = terralib.sizeof([expr_type.element_type]) * ([stop.value] - [start.value])
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_range")
     var [result] = expr_type {
       __size = [stop.value] - [start.value],
       __data = data
@@ -5208,7 +5207,7 @@ function codegen.expr_list_ispace(cx, node)
 
   local loop_body = ast.typed.stat.Internal {
     actions = quote
-      regentlib.assert((i >= 0) and (i < [result_len]), "list index out of bounds in list_ispace")
+      std.assert((i >= 0) and (i < [result_len]), "list index out of bounds in list_ispace")
       [expr_type:data(result)][ [i] ] = [p_symbol:getsymbol()];
       [i] = [i] + 1
     end,
@@ -5232,14 +5231,15 @@ function codegen.expr_list_ispace(cx, node)
 
     -- Compute size of resulting list.
     -- Currently doesn't support index spaces with multiple domains.
-    regentlib.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [ispace.value].impl),
+    std.assert(not c.legion_index_space_has_multiple_domains([cx.runtime], [ispace.value].impl),
       "list_ispace doesn't support index spaces with multiple domains")
     var ispace_domain = c.legion_index_space_get_domain([cx.runtime], [ispace.value].impl)
     var [result_len] = c.legion_domain_get_volume(ispace_domain)
 
     -- Allocate list.
-    var data = c.malloc(terralib.sizeof([expr_type.element_type]) * [result_len])
-    regentlib.assert(data ~= nil, "malloc failed in list_ispace")
+    var size = terralib.sizeof([expr_type.element_type]) * [result_len]
+    var data = c.malloc(size)
+    std.assert(size == 0 or data ~= nil, "malloc failed in list_ispace")
     var [result] = expr_type {
       __size = [result_len],
       __data = data
@@ -5260,7 +5260,9 @@ local function gen_expr_list_from_element(expr_type, result, list, value)
   if not std.is_list(expr_type.element_type) then
     return quote
       var len = [list].__size
-      var data = c.malloc(terralib.sizeof([expr_type.element_type]) * len)
+      var size = terralib.sizeof([expr_type.element_type]) * len
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in gen_expr_list_from_element")
       [result] = expr_type {
         __size = len,
         __data = data,
@@ -5272,7 +5274,9 @@ local function gen_expr_list_from_element(expr_type, result, list, value)
   else
     return quote
       var len = [list].__size
-      var data = c.malloc(terralib.sizeof([expr_type.element_type]) * len)
+      var size = terralib.sizeof([expr_type.element_type]) * len
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in gen_expr_list_from_element")
       [result] = expr_type {
         __size = len,
         __data = data,
@@ -5434,9 +5438,9 @@ local function expr_advance_list_body(runtime, context, value, value_type)
     local inner_actions, inner_value = expr_advance_list_body(
       runtime, context, element, value_type.element_type)
     local actions = quote
-      var data = c.malloc(
-        terralib.sizeof([value_type.element_type]) * [value].__size)
-      regentlib.assert(data ~= nil, "malloc failed in index_access")
+      var size = terralib.sizeof([value_type.element_type]) * [value].__size
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in index_access")
       var [result] = [value_type] {
         __size = [value].__size,
         __data = data
@@ -5531,9 +5535,9 @@ local function expr_adjust_list(cx, barrier, barrier_type, value, value_type)
     local inner_actions, inner_result = expr_adjust_list(
       cx, element, barrier_type.element_type, value, value_type)
     local actions = quote
-      var data = c.malloc(
-        terralib.sizeof([barrier_type.element_type]) * [barrier].__size)
-      regentlib.assert(data ~= nil, "malloc failed in adjust")
+      var size = terralib.sizeof([barrier_type.element_type]) * [barrier].__size
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in adjust")
       var [result] = barrier_type {
         __size = [barrier].__size,
         __data = data,
@@ -5719,9 +5723,9 @@ local function map_phase_barriers(value, value_type, fn)
       element, element_type, fn)
 
     local actions = quote
-      var data = c.malloc(
-        terralib.sizeof([value_type.element_type]) * [value].__size)
-      regentlib.assert(data ~= nil, "malloc failed in copy")
+      var size = terralib.sizeof([value_type.element_type]) * [value].__size
+      var data = c.malloc(size)
+      std.assert(size == 0 or data ~= nil, "malloc failed in copy")
       var [result] = value_type {
         __size = [value].__size,
         __data = data,
@@ -6588,7 +6592,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
   elseif std.is_list_of_regions(region_type) then
     field_space = terralib.newsymbol(c.legion_field_space_t, "field_space")
     actions = quote
-      regentlib.assert([region.value].__size > 0, "attempting to allocate scratch fields for empty list")
+      std.assert([region.value].__size > 0, "attempting to allocate scratch fields for empty list")
       var r = [region_type:data(region.value)][0]
       var [field_space] = r.impl.field_space
     end
@@ -7038,7 +7042,7 @@ function codegen.expr_future(cx, node)
       [size_actions]
       var buffer_size = terralib.sizeof(content_type) + [size_value]
       var [buffer] = c.malloc(buffer_size)
-      std.assert([buffer] ~= nil, "malloc failed in future")
+      std.assert(buffer_size == 0 or [buffer] ~= nil, "malloc failed in future")
       var [data_ptr] = [&uint8]([buffer]) + terralib.sizeof(content_type)
       [ser_actions]
       std.assert(
@@ -8738,7 +8742,7 @@ function codegen.stat_return(cx, node)
       [actions]
       var buffer_size = terralib.sizeof([result_type])
       var buffer = c.malloc(buffer_size)
-      std.assert(buffer ~= nil, "malloc failed in return")
+      std.assert(buffer_size == 0 or buffer ~= nil, "malloc failed in return")
       terralib.attrstore(
         [&result_type](buffer), result,
         { align = [result_type_alignment] })

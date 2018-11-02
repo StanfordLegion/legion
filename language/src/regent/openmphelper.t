@@ -110,8 +110,10 @@ function omp.generate_argument_init(arg, arg_type, mapping, reductions)
       assert(field_type:ispointer())
       return quote
         -- We don't like false sharing
-        [arg].[field_name] =
-          [field_type](std.c.malloc([omp.get_max_threads]()  * omp.CACHE_LINE_SIZE))
+        var size = [omp.get_max_threads]()  * omp.CACHE_LINE_SIZE
+        var data = std.c.malloc(size)
+        std.assert(size == 0 or data ~= nil, "malloc failed in generate_argument_init")
+        [arg].[field_name] = [field_type](data)
       end
     else
       return quote [arg].[field_name] = [symbol] end

@@ -13129,7 +13129,7 @@ namespace Legion {
         external_instance.get_manager()->as_instance_manager();
       MemoryManager *memory_manager = external_manager->memory_manager;
       memory_manager->attach_external_instance(external_manager);
-      PhysicalTraceInfo trace_info(this);
+      const PhysicalTraceInfo trace_info(this);
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
                                                         external_instance,
@@ -13475,9 +13475,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
-      // No need to check privileges because we never would have been
-      // able to attach in the first place anyway.
       requirement = region.impl->get_requirement();
+      // Make sure that the privileges are read-write so that we wait for
+      // all prior users of this particular region
+      requirement.privilege = READ_WRITE;
+      requirement.prop = EXCLUSIVE;
       // Delay getting a reference until trigger_mapping().  This means we
       //  have to keep region
       if (!region.is_valid())
@@ -13627,9 +13629,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!manager->is_reduction_manager()); 
 #endif
+      const PhysicalTraceInfo trace_info(this);
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                                         version_info, reference);
+                                         version_info, reference, trace_info);
       version_info.finalize_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
