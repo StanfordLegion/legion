@@ -562,26 +562,37 @@ namespace Legion {
       // Record preconditions coming back from analysis on views
       void record_preconditions(InstanceView *view, bool reading,
                                 EventFieldExprs &preconditions);
+      void record_precondition(InstanceView *view, bool reading,
+                               ApEvent event, const FieldMask &mask,
+                               IndexSpaceExpression *expr);
       inline bool has_updates(void) const
         { return !sources.empty() || !reductions.empty(); }
       void issue_updates(const PhysicalTraceInfo &trace_info, 
-                         ApEvent precondition);
+                         ApEvent precondition,
+                         // Next two flags are used for across-copies
+                         // to indicate when we already know preconditions
+                         const bool has_src_preconditions = false,
+                         const bool has_dst_preconditions = false);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
     protected:
       void record_view(LogicalView *new_view);
       void perform_updates(const LegionMap<InstanceView*,
                             FieldMaskSet<Update> >::aligned &updates,
                            const PhysicalTraceInfo &trace_info,
-                           ApEvent precondition);
+                           ApEvent precondition,
+                           const bool has_src_preconditions,
+                           const bool has_dst_preconditions);
       void issue_fills(InstanceView *target,
                        const std::vector<FillUpdate*> &fills,
                        ApEvent precondition, const FieldMask &fill_mask,
-                       const PhysicalTraceInfo &trace_info);
+                       const PhysicalTraceInfo &trace_info,
+                       const bool has_dst_preconditions);
       void issue_copies(InstanceView *target, 
                         const std::map<InstanceView*,
                                        std::vector<CopyUpdate*> > &copies,
                         ApEvent precondition, const FieldMask &copy_mask,
-                        const PhysicalTraceInfo &trace_info);
+                        const PhysicalTraceInfo &trace_info,
+                        const bool has_dst_preconditions);
     public:
       RegionTreeForest *const forest;
       Operation *const op;

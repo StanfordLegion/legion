@@ -2124,20 +2124,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_precondition(InstanceView *view,
+                                                 bool reading, ApEvent event,
+                                                 const FieldMask &mask,
+                                                 IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock p_lock(pre_lock);
+      FieldMaskSet<IndexSpaceExpression> &event_pre = 
+        reading ? src_pre[view][event] : dst_pre[view][event];
+      FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+        event_pre.find(expr);
+      if (finder == event_pre.end())
+        event_pre.insert(expr, mask);
+      else
+        finder.merge(mask);
+    }
+
+    //--------------------------------------------------------------------------
     void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
-                                           ApEvent precondition)
+                                           ApEvent precondition,
+                                           const bool has_src_preconditions,
+                                           const bool has_dst_preconditions)
     //--------------------------------------------------------------------------
     {
       // Perform updates from any sources first
       if (!sources.empty())
-        perform_updates(sources, trace_info, precondition);
+        perform_updates(sources, trace_info, precondition,
+                        has_src_preconditions, has_dst_preconditions);
       // Then apply any reductions that we might have
       if (!reductions.empty())
       {
         for (std::vector<LegionMap<InstanceView*,
                    FieldMaskSet<Update> >::aligned>::const_iterator it =
               reductions.begin(); it != reductions.end(); it++)
-          perform_updates(*it, trace_info, precondition);
+          perform_updates(*it, trace_info, precondition,
+                          has_src_preconditions, has_dst_preconditions);
       }
     }
 
@@ -2167,108 +2189,126 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyFillAggregator::perform_updates(
          const LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned &updates,
-         const PhysicalTraceInfo &trace_info, ApEvent precondition)
+         const PhysicalTraceInfo &trace_info, ApEvent precondition,
+         const bool has_src_preconditions, const bool has_dst_preconditions)
     //--------------------------------------------------------------------------
     {
-      // First compute the access expressions for all the copies
-      InstanceFieldExprs dst_exprs, src_exprs;
-      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-            const_iterator uit = updates.begin(); uit != updates.end(); uit++)
+      if (!has_src_preconditions || !has_dst_preconditions)
       {
-        FieldMaskSet<IndexSpaceExpression> &dst_expr = dst_exprs[uit->first];
-        for (FieldMaskSet<Update>::const_iterator it = 
-              uit->second.begin(); it != uit->second.end(); it++)
+        // First compute the access expressions for all the copies
+        InstanceFieldExprs dst_exprs, src_exprs;
+        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+              const_iterator uit = updates.begin(); uit != updates.end(); uit++)
         {
-          // Update the destinations first
-          FieldMaskSet<IndexSpaceExpression>::iterator finder = 
-            dst_expr.find(it->first->expr);
-          if (finder == dst_expr.end())
-            dst_expr.insert(it->first->expr, it->second);
-          else
-            finder.merge(it->second);
-          // Now record the source expressions
-          it->first->record_source_expressions(src_exprs);
-        }
-      }
-      // Next compute the event preconditions for these accesses
-      std::set<RtEvent> preconditions_ready; 
-      const UniqueID op_id = op->get_unique_op_id();
-      for (InstanceFieldExprs::const_iterator dit = 
-            dst_exprs.begin(); dit != dst_exprs.end(); dit++)
-      {
-        if (dit->second.size() == 1)
-        {
-          // No need to do any kind of sorts here
-          IndexSpaceExpression *copy_expr = dit->second.begin()->first;
-          const FieldMask &copy_mask = dit->second.get_valid_mask();
-          RtEvent pre_ready = dit->first->find_copy_preconditions(
-                                false/*reading*/, copy_mask, copy_expr,
-                                op_id, dst_index, *this, trace_info);
-          if (pre_ready.exists())
-            preconditions_ready.insert(pre_ready);
-        }
-        else
-        {
-          // Sort into field sets and merge expressions
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned sorted_exprs;
-          dit->second.compute_field_sets(FieldMask(), sorted_exprs);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = sorted_exprs.begin(); 
-                it != sorted_exprs.end(); it++)
+          FieldMaskSet<IndexSpaceExpression> &dst_expr = dst_exprs[uit->first];
+          for (FieldMaskSet<Update>::const_iterator it = 
+                uit->second.begin(); it != uit->second.end(); it++)
           {
-            const FieldMask &copy_mask = it->set_mask; 
-            IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
-              *(it->elements.begin()) : 
-              forest->union_index_spaces(it->elements);
-            RtEvent pre_ready = dit->first->find_copy_preconditions(
-                                  false/*reading*/, copy_mask, copy_expr,
-                                  op_id, dst_index, *this, trace_info);
-            if (pre_ready.exists())
-              preconditions_ready.insert(pre_ready);
+            // Update the destinations first
+            if (!has_dst_preconditions)
+            {
+              FieldMaskSet<IndexSpaceExpression>::iterator finder = 
+                dst_expr.find(it->first->expr);
+              if (finder == dst_expr.end())
+                dst_expr.insert(it->first->expr, it->second);
+              else
+                finder.merge(it->second);
+            }
+            // Now record the source expressions
+            if (!has_src_preconditions)
+              it->first->record_source_expressions(src_exprs);
           }
         }
-      }
-      for (InstanceFieldExprs::const_iterator sit = 
-            src_exprs.begin(); sit != src_exprs.end(); sit++)
-      {
-        if (sit->second.size() == 1)
+        // Next compute the event preconditions for these accesses
+        std::set<RtEvent> preconditions_ready; 
+        const UniqueID op_id = op->get_unique_op_id();
+        if (!has_dst_preconditions)
         {
-          // No need to do any kind of sorts here
-          IndexSpaceExpression *copy_expr = sit->second.begin()->first;
-          const FieldMask &copy_mask = sit->second.get_valid_mask();
-          RtEvent pre_ready = sit->first->find_copy_preconditions(
-                                true/*reading*/, copy_mask, copy_expr,
-                                op_id, src_index, *this, trace_info);
-          if (pre_ready.exists())
-            preconditions_ready.insert(pre_ready);
-        }
-        else
-        {
-          // Sort into field sets and merge expressions
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned sorted_exprs;
-          sit->second.compute_field_sets(FieldMask(), sorted_exprs);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = sorted_exprs.begin(); 
-                it != sorted_exprs.end(); it++)
+          dst_pre.clear();
+          for (InstanceFieldExprs::const_iterator dit = 
+                dst_exprs.begin(); dit != dst_exprs.end(); dit++)
           {
-            const FieldMask &copy_mask = it->set_mask; 
-            IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
-              *(it->elements.begin()) : 
-              forest->union_index_spaces(it->elements);
-            RtEvent pre_ready = sit->first->find_copy_preconditions(
-                                  true/*reading*/, copy_mask, copy_expr,
-                                  op_id, src_index, *this, trace_info);
-            if (pre_ready.exists())
-              preconditions_ready.insert(pre_ready);
+            if (dit->second.size() == 1)
+            {
+              // No need to do any kind of sorts here
+              IndexSpaceExpression *copy_expr = dit->second.begin()->first;
+              const FieldMask &copy_mask = dit->second.get_valid_mask();
+              RtEvent pre_ready = dit->first->find_copy_preconditions(
+                                    false/*reading*/, copy_mask, copy_expr,
+                                    op_id, dst_index, *this, trace_info);
+              if (pre_ready.exists())
+                preconditions_ready.insert(pre_ready);
+            }
+            else
+            {
+              // Sort into field sets and merge expressions
+              LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
+                sorted_exprs;
+              dit->second.compute_field_sets(FieldMask(), sorted_exprs);
+              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                    const_iterator it = sorted_exprs.begin(); 
+                    it != sorted_exprs.end(); it++)
+              {
+                const FieldMask &copy_mask = it->set_mask; 
+                IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
+                  *(it->elements.begin()) : 
+                  forest->union_index_spaces(it->elements);
+                RtEvent pre_ready = dit->first->find_copy_preconditions(
+                                      false/*reading*/, copy_mask, copy_expr,
+                                      op_id, dst_index, *this, trace_info);
+                if (pre_ready.exists())
+                  preconditions_ready.insert(pre_ready);
+              }
+            }
           }
         }
-      }
-      // If necessary wait until all we have all the preconditions
-      if (!preconditions_ready.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(preconditions_ready);
-        if (wait_on.exists())
-          wait_on.wait();
+        if (!has_src_preconditions)
+        {
+          src_pre.clear();
+          for (InstanceFieldExprs::const_iterator sit = 
+                src_exprs.begin(); sit != src_exprs.end(); sit++)
+          {
+            if (sit->second.size() == 1)
+            {
+              // No need to do any kind of sorts here
+              IndexSpaceExpression *copy_expr = sit->second.begin()->first;
+              const FieldMask &copy_mask = sit->second.get_valid_mask();
+              RtEvent pre_ready = sit->first->find_copy_preconditions(
+                                    true/*reading*/, copy_mask, copy_expr,
+                                    op_id, src_index, *this, trace_info);
+              if (pre_ready.exists())
+                preconditions_ready.insert(pre_ready);
+            }
+            else
+            {
+              // Sort into field sets and merge expressions
+              LegionList<FieldSet<IndexSpaceExpression*> >::aligned 
+                sorted_exprs;
+              sit->second.compute_field_sets(FieldMask(), sorted_exprs);
+              for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+                    const_iterator it = sorted_exprs.begin(); 
+                    it != sorted_exprs.end(); it++)
+              {
+                const FieldMask &copy_mask = it->set_mask; 
+                IndexSpaceExpression *copy_expr = (it->elements.size() == 1) ?
+                  *(it->elements.begin()) : 
+                  forest->union_index_spaces(it->elements);
+                RtEvent pre_ready = sit->first->find_copy_preconditions(
+                                      true/*reading*/, copy_mask, copy_expr,
+                                      op_id, src_index, *this, trace_info);
+                if (pre_ready.exists())
+                  preconditions_ready.insert(pre_ready);
+              }
+            }
+          }
+        }
+        // If necessary wait until all we have all the preconditions
+        if (!preconditions_ready.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(preconditions_ready);
+          if (wait_on.exists())
+            wait_on.wait();
+        }
       }
       // Iterate over the destinations and compute updates that have the
       // same preconditions on different fields
@@ -2403,10 +2443,10 @@ namespace Legion {
             const FieldMask &update_mask = group.get_valid_mask();
             if (!fills.empty())
               issue_fills(uit->first, fills, group_precondition, 
-                          update_mask, trace_info);
+                          update_mask, trace_info, has_dst_preconditions);
             if (!copies.empty())
               issue_copies(uit->first, copies, group_precondition, 
-                           update_mask, trace_info);
+                           update_mask, trace_info, has_dst_preconditions);
           }
           else
           {
@@ -2424,10 +2464,10 @@ namespace Legion {
                 (*it)->sort_updates(copies, fills);
               if (!fills.empty())
                 issue_fills(uit->first, fills, group_precondition,
-                            fit->set_mask, trace_info);
+                            fit->set_mask, trace_info, has_dst_preconditions);
               if (!copies.empty())
                 issue_copies(uit->first, copies, group_precondition, 
-                             fit->set_mask, trace_info);
+                             fit->set_mask, trace_info, has_dst_preconditions);
             }
           }
         }
@@ -2439,7 +2479,8 @@ namespace Legion {
                                          const std::vector<FillUpdate*> &fills,
                                          ApEvent precondition, 
                                          const FieldMask &fill_mask,
-                                         const PhysicalTraceInfo &trace_info)
+                                         const PhysicalTraceInfo &trace_info,
+                                         const bool has_dst_preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2481,11 +2522,21 @@ namespace Legion {
             target->add_copy_user(false/*reading*/,
                                   result, dst_mask, fill_expr,
                                   op_id, dst_index, effects, trace_info);
+            // Record this for the next iteration if necessary
+            if (has_dst_preconditions)
+              record_precondition(target, false/*reading*/, result, 
+                                  dst_mask, fill_expr);
           }
           else
+          {
             target->add_copy_user(false/*reading*/,
                                   result, fill_mask, fill_expr,
-                                  op_id, dst_index, effects, trace_info); 
+                                  op_id, dst_index, effects, trace_info);
+            // Record this for the next iteration if necessary
+            if (has_dst_preconditions)
+              record_precondition(target, false/*reading*/, result,
+                                  fill_mask, fill_expr);
+          }
           if (track_events)
             events.insert(result);
         }
@@ -2535,6 +2586,10 @@ namespace Legion {
                                   op_id, dst_index, effects, trace_info);
             if (track_events)
               events.insert(result);
+            // Record this for the next iteration if necessary
+            if (has_dst_preconditions)
+              record_precondition(target, false/*reading*/, result,
+                                  dst_mask, fill_expr);
           }
         }
       }
@@ -2545,7 +2600,8 @@ namespace Legion {
                               const std::map<InstanceView*,
                                              std::vector<CopyUpdate*> > &copies,
                               ApEvent precondition, const FieldMask &copy_mask,
-                              const PhysicalTraceInfo &trace_info)
+                              const PhysicalTraceInfo &trace_info,
+                              const bool has_dst_preconditions)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -2596,11 +2652,21 @@ namespace Legion {
               target->add_copy_user(false/*reading*/,
                                     result, dst_mask, copy_expr,
                                     op_id, dst_index, effects, trace_info);
+              // Record this for the next iteration if necessary
+              if (has_dst_preconditions)
+                record_precondition(target, false/*reading*/, result,
+                                    dst_mask, copy_expr);
             }
             else
+            {
               target->add_copy_user(false/*reading*/,
                                     result, copy_mask, copy_expr,
                                     op_id, dst_index, effects, trace_info);
+              // Record this for the next iteration if necessary
+              if (has_dst_preconditions)
+                record_precondition(target, false/*reading*/, result,
+                                    copy_mask, copy_expr);
+            }
             if (track_events)
               events.insert(result);
           }
@@ -2653,6 +2719,10 @@ namespace Legion {
                                     op_id, dst_index, effects, trace_info);
               if (track_events)
                 events.insert(result);
+              // Record this for the next iteration if necessary
+              if (has_dst_preconditions)
+                record_precondition(target, false/*reading*/, result,
+                                    dst_mask, copy_expr);
             }
           }
         }

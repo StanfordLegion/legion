@@ -3814,7 +3814,7 @@ namespace Legion {
                                                   src_versions[idx],
                                                   this, idx, 
                                                   local_init_precondition,
-                                                  ApEvent::NO_AP_EVENT,
+                                                  local_completion,
                                                   src_targets,
                                                   trace_info
 #ifdef DEBUG_LEGION
@@ -3840,7 +3840,7 @@ namespace Legion {
                                                 dst_versions[idx], this, 
                                                 idx + src_requirements.size(),
                                                 local_init_precondition,
-                                                ApEvent::NO_AP_EVENT,
+                                                local_completion,
                                                 dst_targets,
                                                 trace_info
 #ifdef DEBUG_LEGION

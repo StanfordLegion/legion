@@ -2216,7 +2216,39 @@ namespace Legion {
       ApEvent result;
       if (across_aggregator.has_updates())
       {
-        across_aggregator.issue_updates(trace_info, precondition);
+        // Record the event field preconditions for each view
+        // Use the destination expr since we know we we're only actually
+        // issuing copies for that particular expression
+        IndexSpaceExpression *const dst_expr = 
+          get_node(dst_req.region.get_index_space());
+        const bool has_src_preconditions = !src_targets.empty();
+        if (has_src_preconditions)
+        {
+          for (unsigned idx = 0; idx < src_targets.size(); idx++)
+          {
+            const InstanceRef &ref = src_targets[idx];
+            const ApEvent event = ref.get_ready_event();
+            if (!event.exists())
+              continue;
+            const FieldMask &mask = ref.get_valid_fields();
+            InstanceView *view = source_views[idx];
+            across_aggregator.record_precondition(view, true/*reading*/,
+                                                  event, mask, dst_expr);
+          }
+        } 
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const InstanceRef &ref = dst_targets[idx];
+          const ApEvent event = ref.get_ready_event();
+          if (!event.exists())
+            continue;
+          const FieldMask &mask = ref.get_valid_fields();
+          InstanceView *view = target_views[idx];
+          across_aggregator.record_precondition(view, false/*reading*/,
+                                                event, mask, dst_expr);
+        }
+        across_aggregator.issue_updates(trace_info, precondition,
+            has_src_preconditions, true/*has dst preconditions*/);
         result = across_aggregator.summarize(trace_info);
       }
       if (!across_helpers.empty())
