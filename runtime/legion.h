@@ -2647,6 +2647,7 @@ namespace Legion {
       bool                                must_epoch_task; 
       Domain                              index_domain;
       DomainPoint                         index_point;
+      IndexSpace                          sharding_space;
       void*                               local_args;
       size_t                              local_arglen;
     public:
