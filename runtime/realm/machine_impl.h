@@ -363,7 +363,7 @@ namespace Realm {
 
     extern MachineImpl *machine_singleton;
     inline MachineImpl *get_machine(void) { return machine_singleton; }
-
+    extern void cleanup_query_caches();
   // active messages
 
   enum NodeAnnounceTag {

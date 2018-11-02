@@ -2305,7 +2305,7 @@ namespace Realm {
         show_event_waiters(/*log_file*/);
       }
 #endif
-
+      cleanup_query_caches();
       // delete processors, memories, nodes, etc.
       {
 	for(NodeID i = 0; i <= max_node_id; i++) {
