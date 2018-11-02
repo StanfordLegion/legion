@@ -613,16 +613,16 @@ local function desugar_image_by_task(cx, node)
   local stats = terralib.newlist()
 
   local coloring_symbol =
-    regentlib.newsymbol(capi.legion_domain_point_coloring_t)
+    std.newsymbol(capi.legion_domain_point_coloring_t)
   local coloring_expr = ast_util.mk_expr_id(coloring_symbol)
   stats:insert(
     ast_util.mk_stat_var(
       coloring_symbol, nil,
       ast_util.mk_expr_call(capi.legion_domain_point_coloring_create)))
 
-  local colors_symbol = regentlib.newsymbol(partition_type:colors())
+  local colors_symbol = std.newsymbol(partition_type:colors())
   local color_symbol =
-    regentlib.newsymbol(partition_type:colors().index_type(colors_symbol))
+    std.newsymbol(partition_type:colors().index_type(colors_symbol))
   local colors_expr = ast_util.mk_expr_colors_access(partition)
   local subregion_type = partition_type:subregion_dynamic()
   std.add_constraint(cx, subregion_type, partition_type, std.subregion, false)

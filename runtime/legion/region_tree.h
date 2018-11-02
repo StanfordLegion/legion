@@ -521,11 +521,13 @@ namespace Legion {
                                   const RegionRequirement &req,
                                   InstanceManager *ext_instance,
                                   VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events);
+                                  std::set<RtEvent> &map_applied_events,
+                                  const PhysicalTraceInfo &trace_info);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               const InstanceRef &ref, 
-                              std::set<RtEvent> &map_applied_events);
+                              std::set<RtEvent> &map_applied_events,
+                              const PhysicalTraceInfo &trace_info);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -3218,18 +3220,23 @@ namespace Legion {
                               ApEvent precondition, PredEvent true_guard,
                               std::set<RtEvent> &map_applied_events,
                               const PhysicalTraceInfo &trace_info);
-      InstanceRef attach_external(ContextID ctx, InnerContext *parent_ctx,
+      InstanceRef attach_external(ContextID ctx, AttachOp *attach_op,
+                                  unsigned index, InnerContext *parent_ctx,
                                   const UniqueID logical_ctx_uid,
                                   const FieldMask &attach_mask,
                                   const RegionRequirement &req, 
                                   InstanceManager *manager, 
                                   VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events);
-      ApEvent detach_external(ContextID ctx, InnerContext *context, 
+                                  std::set<RtEvent> &map_applied_events,
+                                  const PhysicalTraceInfo &trace_info);
+      ApEvent detach_external(ContextID ctx, DetachOp *detach_op,
+                              unsigned index, InnerContext *context, 
                               const UniqueID logical_ctx_uid,
+                              const RegionRequirement &req,
                               VersionInfo &version_info, 
                               const InstanceRef &ref,
-                              std::set<RtEvent> &map_applied_events);
+                              std::set<RtEvent> &map_applied_events,
+                              const PhysicalTraceInfo &trace_info);
     public:
       virtual InstanceView* find_context_view(PhysicalManager *manager,
                                               InnerContext *context);

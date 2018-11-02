@@ -328,9 +328,9 @@ local function make_create_launcher(task, launcher_name,
     var launcher = c.legion_task_launcher_create(
       [task:get_task_id()], task_args, pred, id, tag)
 
-    var launcher_state = [&state_type](
-      c.malloc([terralib.sizeof(state_type)]))
-    base.assert(launcher_state ~= nil, ["malloc failed in " .. helper_name])
+    var launcher_size = [terralib.sizeof(state_type)]
+    var launcher_state = [&state_type](c.malloc(launcher_size))
+    base.assert(launcher_size == 0 or launcher_state ~= nil, ["malloc failed in " .. helper_name])
 
     -- Important: use calloc to ensure provided map is zeroed.
     var args_provided = [&int8](c.calloc([#params], 1))

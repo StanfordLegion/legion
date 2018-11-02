@@ -1269,7 +1269,9 @@ end
 
 local terra factorize(dop : int, factors : &&int, num_factors : &int)
   @num_factors = 0
-  @factors = [&int](std.c.malloc([sizeof(int)] * dop))
+  var size = [sizeof(int)] * dop
+  @factors = [&int](std.c.malloc(size))
+  std.assert(size == 0 or @factors ~= nil, "malloc failed in factorize")
   while dop > 1 do
     var factor = 1
     while factor <= dop do
