@@ -3074,7 +3074,7 @@ namespace Legion {
                                     LogicalPartition upper_bound,
                                     const DomainPoint &point);
 
-      /*
+      /**
        * This method corresponds to the one above for projecting from
        * a logical region but is only invoked if the 'is_functional' 
        * method for this projection functor returns true. It must always 

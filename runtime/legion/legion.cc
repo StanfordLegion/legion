@@ -2795,12 +2795,6 @@ namespace Legion {
             unsigned index, LogicalRegion upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
-                            "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                            "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
-                            "METHODS FOR NOW!");
-#endif
       if (is_functional())
       {
         switch (mappable->get_mappable_type())
@@ -2849,6 +2843,12 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
+                              "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                              "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                              "METHODS FOR NOW!");
+#endif
         switch (mappable->get_mappable_type())
         {
           case Mappable::TASK_MAPPABLE:
@@ -2876,12 +2876,6 @@ namespace Legion {
          unsigned index, LogicalPartition upper_bound, const DomainPoint &point)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
-                            "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
-                            "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
-                            "METHODS FOR NOW!");
-#endif
       if (is_functional())
       {
         switch (mappable->get_mappable_type())
@@ -2930,6 +2924,12 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        REPORT_LEGION_WARNING(LEGION_WARNING_NEW_PROJECTION_FUNCTORS, 
+                              "THERE ARE NEW METHODS FOR PROJECTION FUNCTORS "
+                              "THAT MUST BE OVERRIDEN! CALLING DEPRECATED "
+                              "METHODS FOR NOW!");
+#endif
         switch (mappable->get_mappable_type())
         {
           case Mappable::TASK_MAPPABLE:

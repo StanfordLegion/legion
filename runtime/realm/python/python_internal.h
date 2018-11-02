@@ -22,6 +22,8 @@
 
 namespace Realm {
 
+#define USE_PYGILSTATE_CALLS
+
   // these are all defined in Python.h, which we currently do not include
   struct PyObject;
   struct PyInterpreterState;
@@ -34,6 +36,9 @@ namespace Realm {
     // lots more stuff here
   };
   typedef ssize_t Py_ssize_t;
+#ifdef USE_PYGILSTATE_CALLS
+  enum PyGILState_STATE {PyGILState_LOCKED, PyGILState_UNLOCKED};
+#endif
 
   // This class contains interpreter-specific instances of Python API calls.
   class PythonAPI {
@@ -56,6 +61,11 @@ namespace Realm {
     PyObject *(*PyByteArray_FromStringAndSize)(const char *, Py_ssize_t);
 
     void (*PyEval_InitThreads)(void);
+
+#ifdef USE_PYGILSTATE_CALLS
+    PyGILState_STATE (*PyGILState_Ensure)(void);
+    void (*PyGILState_Release)(PyGILState_STATE);
+#else
     void (*PyEval_RestoreThread)(PyThreadState *);
     PyThreadState *(*PyEval_SaveThread)(void);
 
@@ -63,6 +73,7 @@ namespace Realm {
     void (*PyThreadState_Clear)(PyThreadState *);
     void (*PyThreadState_Delete)(PyThreadState *);
     PyThreadState *(*PyThreadState_Get)(void);
+#endif
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);
