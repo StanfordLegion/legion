@@ -17140,7 +17140,6 @@ namespace Legion {
       const ApEvent term_event = attach_op->get_completion_event();
       ApEvent ready = view->add_user_fused(usage, term_event, attach_mask,
                                            attach_op, index, &version_info,
-                                           context->runtime->address_space,
                                            map_applied_events, trace_info);
       // Return the resulting instance
       return InstanceRef(instance_manager, attach_mask, ready);
@@ -17175,7 +17174,6 @@ namespace Legion {
       const ApEvent term_event = detach_op->get_completion_event();
       ApEvent done = detach_view->add_user_fused(usage, term_event, detach_mask,
                                                 detach_op, index, &version_info,
-                                                context->runtime->address_space,
                                                 map_applied_events, trace_info);
       // Next remove this view from the set of valid views
       PhysicalState *state = get_physical_state(version_info);
