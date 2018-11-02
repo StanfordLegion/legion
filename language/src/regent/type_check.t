@@ -739,7 +739,7 @@ function type_check.expr_index_access(cx, node)
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
     local test
-    if regentlib.is_regent_array(value_type) then
+    if std.is_regent_array(value_type) then
       test = function()
         local terra query(a : value_type, i : index_type)
           return a.impl[i]
