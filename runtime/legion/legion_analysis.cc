@@ -6319,21 +6319,47 @@ namespace Legion {
       }
       else
       {
-        // Easy case, just filter everything and add the new view
-        const FieldMask reduce_filter = mask & reduction_fields;
-        if (!!reduce_filter)
-          filter_reduction_instances(reduce_filter);
-        filter_valid_instances(mask);
-        FieldMaskSet<LogicalView>::iterator finder = 
-          valid_instances.find(view);
-        if (finder == valid_instances.end())
+        if (add_restriction || !restricted_fields || (restricted_fields * mask))
         {
-          WrapperReferenceMutator mutator(ready_events);
-          view->add_nested_valid_ref(did, &mutator);
-          valid_instances.insert(view, mask);
+          // Easy case, just filter everything and add the new view
+          const FieldMask reduce_filter = mask & reduction_fields;
+          if (!!reduce_filter)
+            filter_reduction_instances(reduce_filter);
+          filter_valid_instances(mask);
+          FieldMaskSet<LogicalView>::iterator finder = 
+            valid_instances.find(view);
+          if (finder == valid_instances.end())
+          {
+            WrapperReferenceMutator mutator(ready_events);
+            view->add_nested_valid_ref(did, &mutator);
+            valid_instances.insert(view, mask);
+          }
+          else
+            finder.merge(mask);
         }
         else
-          finder.merge(mask);
+        {
+          // We overlap with some restricted fields so we can't filter
+          // or update any restricted fields
+          const FieldMask update_mask = mask - restricted_fields;
+          if (!!update_mask)
+          {
+            const FieldMask reduce_filter = update_mask & reduction_fields;
+            if (!!reduce_filter)
+              filter_reduction_instances(reduce_filter);
+            filter_valid_instances(update_mask);
+            FieldMaskSet<LogicalView>::iterator finder = 
+              valid_instances.find(view);
+            if (finder == valid_instances.end())
+            {
+              WrapperReferenceMutator mutator(ready_events);
+              view->add_nested_valid_ref(did, &mutator);
+              valid_instances.insert(view, update_mask);
+            }
+            else
+              finder.merge(update_mask);
+          }
+        }
         // Advance the version numbers
         advance_version_numbers(mask);
         if (add_restriction)
@@ -6353,6 +6379,13 @@ namespace Legion {
           else
             restricted_finder.merge(mask);
           restricted_fields |= mask; 
+        }
+        else if (!!restricted_fields)
+        {
+          // Check to see if we have any restricted outputs to write
+          const FieldMask restricted_overlap = mask & restricted_fields;
+          if (!!restricted_overlap)
+            copy_out(restricted_overlap, view, output_aggregator);  
         }
       }
     }
@@ -6685,6 +6718,26 @@ namespace Legion {
           if (!srcs.empty())
             aggregator.record_updates(dst_view, srcs, dst_overlap, set_expr);
         }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::copy_out(const FieldMask &restricted_mask, 
+                    LogicalView *src_view, CopyFillAggregator &aggregator) const
+    //--------------------------------------------------------------------------
+    {
+      FieldMaskSet<LogicalView> srcs;
+      srcs.insert(src_view, restricted_mask);
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            valid_instances.begin(); it != valid_instances.end(); it++)
+      {
+        if (it->first == src_view)
+          continue;
+        const FieldMask overlap = it->second & restricted_mask;
+        if (!overlap)
+          continue;
+        InstanceView *dst_view = it->first->as_instance_view();
+        aggregator.record_updates(dst_view, srcs, overlap, set_expr);
       }
     }
 

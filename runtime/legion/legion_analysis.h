@@ -926,6 +926,9 @@ namespace Legion {
                     const InstanceSet &src_instances,
                     const std::vector<InstanceView*> &src_views,
                           CopyFillAggregator &aggregator) const;
+      // For the case with a single instance and a logical view
+      void copy_out(const FieldMask &restricted_mask, LogicalView *src_view,
+                          CopyFillAggregator &aggregator) const;
       void advance_version_numbers(FieldMask advance_mask);
     protected:
       void perform_refinements(void);
