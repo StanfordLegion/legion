@@ -230,7 +230,7 @@ do
     var rp_span = rp_spans_p[span]
     for p in rp_span do
       if vel == 0.0 then
-        p.pu = {x = 0.0, y = 0.0}
+        p.pu = vec2 {x = 0.0, y = 0.0}
       else
         var pmag = length(p.px)
         p.pu = (vel / pmag)*p.px
@@ -266,15 +266,12 @@ do
 
     -- Save off point variable values from previous cycle.
     -- Initialize fields used in reductions.
-    __demand(__vectorize)
     for p in rp_span do
       p.pmaswt = 0.0
     end
-    __demand(__vectorize)
     for p in rp_span do
       p.pf.x = 0.0
     end
-    __demand(__vectorize)
     for p in rp_span do
       p.pf.y = 0.0
     end
@@ -284,7 +281,6 @@ do
     --
 
     -- Copy state variables from previous time step and update position.
-    __demand(__vectorize)
     for p in rp_span do
       var px0_x = p.px.x
       var pu0_x = p.pu.x
@@ -292,7 +288,6 @@ do
       p.pu0.x = pu0_x
       p.pxp.x = px0_x + dth*pu0_x
     end
-    __demand(__vectorize)
     for p in rp_span do
       var px0_y = p.px.y
       var pu0_y = p.pu.y
@@ -367,7 +362,6 @@ do
 
     -- Save off zone variable value from previous cycle.
     -- Copy state variables from previous time step.
-    __demand(__vectorize)
     for z in rz_span do
       z.zvol0 = z.zvol
     end
@@ -468,7 +462,6 @@ do
     --
 
     -- Compute zone densities.
-    __demand(__vectorize)
     for z in rz_span do
       z.zrp = z.zm / z.zvolp
     end
@@ -759,8 +752,8 @@ do
     --
 
     do
-      var vfixx = {x = 1.0, y = 0.0}
-      var vfixy = {x = 0.0, y = 1.0}
+      var vfixx = vec2 {x = 1.0, y = 0.0}
+      var vfixy = vec2 {x = 0.0, y = 1.0}
       for p in rp_span do
         if p.has_bcx then
           p.pu0 = project(p.pu0, vfixx)
@@ -781,7 +774,6 @@ do
     do
       var fuzz = 1e-99
       var dth = 0.5 * dt
-      __demand(__vectorize)
       for p in rp_span do
         var fac = 1.0 / max(p.pmaswt, fuzz)
         var pap_x = fac*p.pf.x
@@ -922,7 +914,6 @@ do
 
     do
       var dtiny = 1.0 / dt
-      __demand(__vectorize)
       for z in rz_span do
         var dvol = z.zvol - z.zvol0
         z.zwrate = (z.zw + z.zp * dvol) * dtiny
@@ -935,13 +926,11 @@ do
 
     do
       var fuzz = 1e-99
-      __demand(__vectorize)
       for z in rz_span do
         z.ze = z.zetot / (z.zm + fuzz)
       end
     end
 
-    __demand(__vectorize)
     for z in rz_span do
       z.zr = z.zm / z.zvol
     end
@@ -1170,7 +1159,7 @@ task toplevel()
   var ssmin = conf.ssmin
   var tstop = conf.tstop
   var uinitradial = conf.uinitradial
-  var vfix = {x = 0.0, y = 0.0}
+  var vfix = vec2 {x = 0.0, y = 0.0}
 
   var enable = conf.enable and not conf.warmup
   var warmup = conf.warmup and conf.enable
@@ -1380,7 +1369,7 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local link_flags = {"-L" .. root_dir, "-lpennant"}
-  local exe = os.getenv('OBJNAME') or "pennant"
+  local exe = os.getenv('OBJNAME') or "pennant_stripmine"
   regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
 else
   regentlib.start(toplevel, cpennant.register_mappers)
