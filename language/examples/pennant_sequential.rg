@@ -36,7 +36,7 @@ local c = regentlib.c
 -- ## Initialization
 -- #################
 
-__demand(__parallel)
+__demand(__parallel, __cuda)
 task init_mesh_zones(rz : region(zone))
 where
   writes(rz.{zx, zarea, zvol})
@@ -51,7 +51,7 @@ end
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
 
-__demand(__parallel)
+__demand(__parallel, __cuda)
 task init_side_fracs(rz : region(zone), rp : region(point),
                      rs : region(side(rz, rp, rs)))
 where
@@ -65,7 +65,7 @@ do
   end
 end
 
-__demand(__parallel)
+__demand(__parallel, __cuda)
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
                 subregion_x0 : double, subregion_x1 : double,
@@ -98,7 +98,7 @@ do
   end
 end
 
-__demand(__parallel)
+__demand(__parallel, __cuda)
 task init_radial_velocity(rp : region(point), vel : double)
 where
   reads(rp.px),
@@ -106,7 +106,7 @@ where
 do
   for p in rp do
     if vel == 0.0 then
-      p.pu = {x = 0.0, y = 0.0}
+      p.pu = vec2 {x = 0.0, y = 0.0}
     else
       var pmag = length(p.px)
       p.pu = (vel / pmag)*p.px
@@ -119,7 +119,7 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
-__demand(__parallel)
+__demand(__parallel, __cuda)
 task init_step_points(rp : region(point),
                       enable : bool)
 where
@@ -128,16 +128,9 @@ do
   if not enable then return end
 
   -- Initialize fields used in reductions.
-  __demand(__vectorize)
   for p in rp do
     p.pmaswt = 0.0
-  end
-  __demand(__vectorize)
-  for p in rp do
     p.pf.x = 0.0
-  end
-  __demand(__vectorize)
-  for p in rp do
     p.pf.y = 0.0
   end
 end
@@ -145,6 +138,7 @@ end
 --
 -- 1. Advance mesh to center of time step.
 --
+__demand(__cuda)
 task adv_pos_half(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -156,7 +150,6 @@ do
   var dth = 0.5 * dt
 
   -- Copy state variables from previous time step and update position.
-  __demand(__vectorize)
   for p in rp do
     var px0_x = p.px.x
     var pu0_x = p.pu.x
@@ -164,7 +157,6 @@ do
     p.pu0.x = pu0_x
     p.pxp.x = px0_x + dth*pu0_x
   end
-  __demand(__vectorize)
   for p in rp do
     var px0_y = p.px.y
     var pu0_y = p.pu.y
@@ -175,6 +167,7 @@ do
 end
 
 -- Save off zone variable value from previous cycle.
+__demand(__cuda)
 task init_step_zones(rz : region(zone), enable : bool)
 where
   reads(rz.zvol),
@@ -183,7 +176,6 @@ do
   if not enable then return end
 
   -- Copy state variables from previous time step.
-  __demand(__vectorize)
   for z in rz do
     z.zvol0 = z.zvol
   end
@@ -194,17 +186,21 @@ end
 --
 
 -- Compute centers of zones and edges.
+__demand(__cuda)
 task calc_centers(rz : region(zone), rp : region(point),
                   rs : region(side(rz, rp, rs)),
                   enable : bool)
 where
   reads(rz.znump, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.zxp, rs.exp)
+  writes(rs.exp),
+  reads writes(rz.zxp)
 do
   if not enable then return end
 
-  var zxp = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
+  for z in rz do
+    z.zxp = vec2 {x = 0.0, y = 0.0}
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -214,19 +210,13 @@ do
     var p1_pxp = p1.pxp
     e.exp = 0.5*(p1_pxp + p2.pxp)
 
-    zxp += p1_pxp
-
-    if nside == z.znump then
-      z.zxp = (1/double(z.znump)) * zxp
-      zxp = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    z.zxp += (1/double(z.znump)) * p1_pxp
   end
 end
 
 -- Compute volumes of zones and sides.
 -- Compute edge lengths.
+__demand(__cuda)
 task calc_volumes(rz : region(zone), rp : region(point),
                   rs : region(side(rz, rp, rs)),
                   enable : bool)
@@ -242,6 +232,7 @@ do
     z.zvolp = 0.0
   end
 
+  var num_negative_sv = 0
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -258,22 +249,28 @@ do
     z.zareap += sa
     z.zvolp += (1.0 / 3.0) * sv
 
-    regentlib.assert(sv > 0.0, "sv negative")
+    if sv <= 0.0 then
+      num_negative_sv += 1
+    end
   end
+  regentlib.assert(num_negative_sv == 0, "sv negative")
 end
 
 -- Compute zone characteristic lengths.
+__demand(__cuda)
 task calc_char_len(rz : region(zone), rp : region(point),
                    rs : region(side(rz, rp, rs)),
                    enable : bool)
 where
   reads(rz.znump, rs.{mapsz, sareap, elen}),
-  writes(rz.zdl)
+  reads writes(rz.zdl)
 do
   if not enable then return end
 
-  var zdl = 1e99
-  var nside = 1
+  for z in rz do
+    z.zdl = 1e99
+  end
+
   for s in rs do
     var z = s.mapsz
     var e = s
@@ -287,14 +284,8 @@ do
       fac = 4.0
     end
     var sdl = fac * area / base
-    zdl = min(zdl, sdl)
 
-    if nside == z.znump then
-      z.zdl = zdl
-      zdl = 1e99
-      nside = 0
-    end
-    nside += 1
+    z.zdl min= sdl
   end
 end
 
@@ -303,6 +294,7 @@ end
 --
 
 -- Compute zone densities.
+__demand(__cuda)
 task calc_rho_half(rz : region(zone), enable : bool)
 where
   reads(rz.{zvolp, zm}),
@@ -310,13 +302,13 @@ where
 do
   if not enable then return end
 
-  __demand(__vectorize)
   for z in rz do
     z.zrp = z.zm / z.zvolp
   end
 end
 
 -- Reduce masses into points.
+__demand(__cuda)
 task sum_point_mass(rz : region(zone), rp : region(point),
                     rs : region(side(rz, rp, rs)),
                     enable : bool)
@@ -340,6 +332,7 @@ end
 -- 3. Compute material state (half-advanced).
 --
 
+__demand(__cuda)
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
                         enable : bool)
@@ -378,6 +371,7 @@ end
 --
 
 -- Compute PolyGas and TTS forces.
+__demand(__cuda)
 task calc_force_pgas_tts(rz : region(zone), rp : region(point),
                          rs : region(side(rz, rp, rs)),
                          alfa : double, ssmin : double,
@@ -409,6 +403,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_zone_center_velocity(rz : region(zone), rp : region(point),
                               rs : region(side(rz, rp, rs)),
                               enable : bool)
@@ -430,6 +425,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_corner_divergence(rz : region(zone), rp : region(point),
                            rs : region(side(rz, rp, rs)),
                            enable : bool)
@@ -523,6 +519,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_qcn_force(rz : region(zone), rp : region(point),
                    rs : region(side(rz, rp, rs)),
                    gamma : double, q1 : double, q2 : double,
@@ -560,6 +557,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_force(rz : region(zone), rp : region(point),
                rs : region(side(rz, rp, rs)),
                enable : bool)
@@ -596,6 +594,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_vel_diff(rz : region(zone), rp : region(point),
                   rs : region(side(rz, rp, rs)),
                   q1 : double, q2 : double,
@@ -626,7 +625,7 @@ do
     else
       dux = 0.0
     end
-    z.z0tmp = max(z.z0tmp, dux)
+    z.z0tmp max= dux
   end
 
   for z in rz do
@@ -635,6 +634,7 @@ do
 end
 
 -- Reduce forces into points.
+__demand(__cuda)
 task sum_point_force(rz : region(zone), rp : region(point),
                      rs : region(side(rz, rp, rs)),
                      enable : bool)
@@ -658,6 +658,7 @@ end
 -- 4a. Apply boundary conditions.
 --
 
+__demand(__cuda)
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
@@ -666,8 +667,8 @@ where
 do
   if not enable then return end
 
-  var vfixx = {x = 1.0, y = 0.0}
-  var vfixy = {x = 0.0, y = 1.0}
+  var vfixx = vec2 {x = 1.0, y = 0.0}
+  var vfixy = vec2 {x = 0.0, y = 1.0}
   for p in rp do
     if p.has_bcx then
       p.pu0 = project(p.pu0, vfixx)
@@ -690,6 +691,7 @@ end
 -- 6. Advance mesh to end of time step.
 --
 
+__demand(__cuda)
 task adv_pos_full(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -700,7 +702,6 @@ do
 
   var fuzz = 1e-99
   var dth = 0.5 * dt
-  __demand(__vectorize)
   for p in rp do
     var fac = 1.0 / max(p.pmaswt, fuzz)
     var pap_x = fac*p.pf.x
@@ -723,17 +724,21 @@ end
 -- FIXME: This is a duplicate of calc_centers but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_centers_full(rz : region(zone), rp : region(point),
                        rs : region(side(rz, rp, rs)),
                        enable : bool)
 where
   reads(rz.znump, rp.px, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.zx, rs.ex)
+  writes(rs.ex),
+  reads writes(rz.zx)
 do
   if not enable then return end
 
-  var zx = vec2 { x = 0.0, y = 0.0 }
-  var nside = 1
+  for z in rz do
+    z.zx = vec2 {x = 0.0, y = 0.0}
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -743,32 +748,30 @@ do
     var p1_px = p1.px
     e.ex = 0.5*(p1_px + p2.px)
 
-    zx += p1_px
-
-    if nside == z.znump then
-      z.zx = (1/double(z.znump)) * zx
-      zx = vec2 { x = 0.0, y = 0.0 }
-      nside = 0
-    end
-    nside += 1
+    z.zx += (1/double(z.znump)) * p1_px
   end
 end
 
 -- FIXME: This is a duplicate of calc_volumes but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_volumes_full(rz : region(zone), rp : region(point),
                        rs : region(side(rz, rp, rs)),
                        enable : bool)
 where
   reads(rz.{zx, znump}, rp.px, rs.{mapsz, mapsp1, mapsp2}),
-  writes(rz.{zarea, zvol}, rs.{sarea})
+  writes(rs.{sarea}),
+  reads writes(rz.{zarea, zvol})
 do
   if not enable then return end
 
-  var zarea = 0.0
-  var zvol = 0.0
-  var nside = 1
+  for z in rz do
+    z.zarea = 0.0
+    z.zvol = 0.0
+  end
+
+  var num_negative_sv = 0
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -781,39 +784,36 @@ do
     s.sarea = sa
     -- s.svol = sv
 
-    zarea += sa
-    zvol += sv
+    z.zarea += sa
+    z.zvol += (1.0 / 3.0) * sv
 
-    if nside == z.znump then
-      z.zarea = zarea
-      z.zvol = (1.0 / 3.0) * zvol
-      zarea = 0.0
-      zvol = 0.0
-      nside = 0
+    if sv <= 0.0 then
+      num_negative_sv += 1
     end
-    nside += 1
-
-    regentlib.assert(sv > 0.0, "sv negative")
   end
+  regentlib.assert(num_negative_sv == 0, "sv negative")
 end
 
 --
 -- 7. Compute work
 --
 
+__demand(__cuda)
 task calc_work(rz : region(zone), rp : region(point),
                rs : region(side(rz, rp, rs)),
                dt : double,
                enable : bool)
 where
-  reads(rz.{zetot, znump}, rp.{pxp, pu0, pu},
+  reads(rz.znump, rp.{pxp, pu0, pu},
         rs.{mapsz, mapsp1, mapsp2, sfp, sfq}),
-  writes(rz.{zw, zetot})
+  reads writes(rz.{zw, zetot})
 do
   if not enable then return end
 
-  var zdwork = 0.0
-  var nside = 1
+  for z in rz do
+    z.zw = 0.0
+  end
+
   for s in rs do
     var z = s.mapsz
     var p1 = s.mapsp1
@@ -824,15 +824,8 @@ do
     var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
     var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
 
-    zdwork += dwork
-
-    if nside == z.znump then
-      z.zetot += zdwork
-      z.zw = zdwork
-      zdwork = 0.0
-      nside = 0
-    end
-    nside += 1
+    z.zetot += dwork
+    z.zw += dwork
   end
 end
 
@@ -841,6 +834,7 @@ end
 -- 8. Update state variables.
 --
 
+__demand(__cuda)
 task calc_work_rate_energy_rho_full(rz : region(zone), dt : double,
                                     enable : bool)
 where
@@ -852,7 +846,6 @@ do
   var dtiny = 1.0 / dt
   var fuzz = 1e-99
 
-  __demand(__vectorize)
   for z in rz do
     var dvol = z.zvol - z.zvol0
     z.zwrate = (z.zw + z.zp * dvol) * dtiny
@@ -897,6 +890,7 @@ do
 end
 ]]
 
+__demand(__cuda)
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
                    cfl : double, cflv : double, enable : bool) : double
 where
@@ -936,6 +930,7 @@ do
   return dthydro
 end
 
+__demand(__inline)
 task calc_global_dt(dt : double, dtfac : double, dtinit : double,
                     dtmax : double, dthydro : double,
                     time : double, tstop : double, cycle : int64) : double
@@ -956,6 +951,7 @@ task calc_global_dt(dt : double, dtfac : double, dtinit : double,
   return dt
 end
 
+-- XXX: this triggers different behavior: __demand(__inline)
 task continue_simulation(cycle : int64, cstop : int64,
                          time : double, tstop : double)
   return (cycle < cstop and time < tstop)
@@ -983,7 +979,7 @@ do
   var ssmin = conf.ssmin
   var tstop = conf.tstop
   var uinitradial = conf.uinitradial
-  var vfix = {x = 0.0, y = 0.0}
+  var vfix = vec2 {x = 0.0, y = 0.0}
 
   var enable = conf.enable
 
@@ -1219,7 +1215,7 @@ task toplevel()
     var ssmin = conf.ssmin
     var tstop = conf.tstop
     var uinitradial = conf.uinitradial
-    var vfix = {x = 0.0, y = 0.0}
+    var vfix = vec2 {x = 0.0, y = 0.0}
 
     var enable = conf.enable
 
@@ -1305,4 +1301,12 @@ task toplevel()
 
   -- write_output(conf, rz, rp, rs)
 end
-regentlib.start(toplevel, cpennant.register_mappers)
+
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  local exe = os.getenv('OBJNAME') or "pennant_sequential"
+  regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
+else
+  regentlib.start(toplevel, cpennant.register_mappers)
+end
