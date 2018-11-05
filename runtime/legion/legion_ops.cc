@@ -5512,9 +5512,11 @@ namespace Legion {
     {
       // Perform the version analysis
       std::set<RtEvent> preconditions;
+      src_versions.resize(src_requirements.size());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         runtime->forest->perform_versioning_analysis(this, idx,
             src_requirements[idx], src_versions[idx], preconditions);
+      dst_versions.resize(dst_requirements.size());
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
@@ -5531,6 +5533,7 @@ namespace Legion {
       }
       if (!src_indirect_requirements.empty())
       {
+        gather_versions.resize(src_indirect_requirements.size());
         const size_t offset = src_requirements.size() + dst_requirements.size();
         for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
@@ -5538,6 +5541,7 @@ namespace Legion {
       }
       if (!dst_indirect_requirements.empty())
       {
+        scatter_versions.resize(dst_indirect_requirements.size());
         const size_t offset = src_requirements.size() + 
           dst_requirements.size() + src_indirect_requirements.size();
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
