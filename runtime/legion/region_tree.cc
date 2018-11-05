@@ -1830,6 +1830,7 @@ namespace Legion {
         // Try ot match it first
         if ((*it)->matches(op, node, released_fields))
         {
+          delete (*it);
           it = restrictions.erase(it);
           if (!released_fields)
             return true;
