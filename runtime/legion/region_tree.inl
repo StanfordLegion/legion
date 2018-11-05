@@ -542,7 +542,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_union_operation(this, sub_expressions);
+      if (forest != NULL)
+        forest->remove_union_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -637,7 +638,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_intersection_operation(this, sub_expressions);
+      if (forest != NULL)
+        forest->remove_intersection_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -737,7 +739,8 @@ namespace Legion {
       if (lhs != rhs)
         rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_subtraction_operation(this, lhs, rhs);
+      if (forest != NULL)
+        forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();

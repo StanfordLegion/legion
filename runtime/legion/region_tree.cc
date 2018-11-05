@@ -4966,7 +4966,9 @@ namespace Legion {
       // If we still have a result then it's because it wasn't consumed need 
       // we need to remove it's reference that was added by the 
       // IndexSpaceOperation constructor 
-      if ((result != NULL) && result->remove_expression_reference())
+      // We know the operation was never added to the region tree so we
+      // can pass in a NULL pointer to the region tree forest
+      if ((result != NULL) && result->remove_operation(NULL/*forest*/))
         delete result;
     }
 
