@@ -13477,8 +13477,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                      REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13491,8 +13494,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_SPACE_VIRTUAL_CHANNEL,
+        INDEX_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                              true/*flush*/);
     }
 
@@ -13506,8 +13512,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          FIELD_SPACE_DESTRUCTION_MESSAGE, FIELD_SPACE_VIRTUAL_CHANNEL,
+          FIELD_SPACE_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
@@ -13521,8 +13530,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_REGION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_REGION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
@@ -13536,8 +13548,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
     }
 
