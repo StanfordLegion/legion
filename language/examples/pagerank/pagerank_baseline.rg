@@ -62,19 +62,19 @@ local E_ID = int64
 struct Config {
   num_nodes : V_ID,
   num_edges : E_ID,
-  num_iterations : int32,
-  num_workers : int32
-  graph : int8[128]
+  num_iterations : int64,
+  num_workers : int64,
+  graph : int8[256],
 }
 
 fspace NodeStruct {
   index : E_ID,
-  degree : V_ID
+  degree : V_ID,
 }
 
 fspace EdgeStruct {
   src : V_ID,
-  dst : int1d
+  dst : int1d,
 }
 
 terra parse_input_args(conf : Config)
@@ -83,10 +83,10 @@ terra parse_input_args(conf : Config)
   for i = 0, args.argc do
     if cstring.strcmp(args.argv[i], "-ni") == 0 then
       i = i + 1
-      conf.num_iterations = std.atoi(args.argv[i])
+      conf.num_iterations = std.atoll(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-nw") == 0 then
       i = i + 1
-      conf.num_workers = std.atoi(args.argv[i])
+      conf.num_workers = std.atoll(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-graph") == 0 then
       i = i + 1
       input_file = rawstring(args.argv[i])
@@ -97,7 +97,7 @@ terra parse_input_args(conf : Config)
   regentlib.assert(file ~= nil, "failed to open input file")
   c.fscanf(file, "%i", &conf.num_nodes)
   c.fscanf(file, "%i", &conf.num_edges)
-  c.fscanf(file, "%s", conf.graph)
+  c.fscanf(file, "%255s", conf.graph)
   c.fclose(file)
   return conf
 end
@@ -106,14 +106,14 @@ task init_graph(nodes : region(ispace(int1d), NodeStruct),
                 edges : region(ispace(int1d), EdgeStruct),
                 num_nodes : V_ID,
                 num_edges : E_ID,
-                graph : int8[128])
+                graph : regentlib.string)
 where
   reads(nodes, edges), writes(nodes, edges)
 do
   var indices : &E_ID = [&E_ID](c.malloc(num_nodes * 8))
   var degrees : &V_ID = [&V_ID](c.malloc(num_nodes * 4))
   var srcs : &V_ID = [&V_ID](c.malloc(num_edges * 4))
-  var file = c.fopen(graph, "rb")
+  var file = c.fopen([rawstring](graph), "rb")
   regentlib.assert(not isnull(file), "failed to open graph file")
   c.printf("graph = %s\n", graph)
   c.fread(indices, 8, num_nodes, file)
@@ -236,13 +236,13 @@ task main()
   var pr_score1 = region(is_nodes, float)
 
   c.printf("Load input graph...\n")
-  init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, conf.graph)
+  init_graph(all_nodes, all_edges, conf.num_nodes, conf.num_edges, [rawstring](conf.graph))
   init_pr_score(pr_score0, conf.num_nodes)
 
-  var num_pieces = ispace(int1d, conf.num_workers)
+  var pieces = ispace(int1d, conf.num_workers)
   -- compute node and edge partition
-  var edge_range = region(num_pieces, regentlib.rect1d)   
-  var edge_range_part = partition(equal, edge_range, num_pieces)
+  var edge_range = region(pieces, regentlib.rect1d)
+  var edge_range_part = partition(equal, edge_range, pieces)
   var total_num_edges = init_partition(edge_range, all_edges,
                                        conf.num_edges/ conf.num_workers+1,
                                        conf.num_workers) 
@@ -269,13 +269,13 @@ task main()
     end
     if iter % 2 == 0 then
       __demand(__parallel)
-      for p in num_pieces do
+      for p in pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score0, part_score1[p], 0.9f, conf.num_nodes)
       end
     else
       __demand(__parallel)
-      for p in num_pieces do
+      for p in pieces do
         pagerank(part_nodes[p], part_edges[p],
                  pr_score1, part_score0[p], 0.9f, conf.num_nodes)
       end
