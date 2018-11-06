@@ -187,7 +187,7 @@ function context:ispace(ispace_type)
 end
 
 function context:add_ispace_root(ispace_type, index_space, index_iterator,
-                                 bounds)
+                                 domain, bounds)
   if not self.ispaces then
     error("not in task context", 2)
   end
@@ -204,12 +204,13 @@ function context:add_ispace_root(ispace_type, index_space, index_iterator,
         index_partition = nil,
         index_iterator = index_iterator,
         root_ispace_type = ispace_type,
+        domain = domain,
         bounds = bounds,
       }, ispace))
 end
 
 function context:add_ispace_subispace(ispace_type, index_space, index_iterator,
-                                      parent_ispace_type, bounds)
+                                      parent_ispace_type, domain, bounds)
   if not self.ispaces then
     error("not in task context", 2)
   end
@@ -228,6 +229,7 @@ function context:add_ispace_subispace(ispace_type, index_space, index_iterator,
         index_space = index_space,
         index_iterator = index_iterator,
         root_ispace_type = self:ispace(parent_ispace_type).root_ispace_type,
+        domain = domain,
         bounds = bounds,
       }, ispace))
 end
@@ -637,36 +639,41 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
 end
 
 local function index_space_bounds(cx, is, index_type)
-  local bounds = terralib.newsymbol(std.rect_type(index_type), "bounds")
-  local actions
-  if index_type.dim == 1 then
-    actions = quote
-      var domain = c.legion_index_space_get_domain([cx.runtime], [is])
-      [bounds].lo = domain.rect_data[0]
-      [bounds].hi = domain.rect_data[1]
-    end
-  else
-    local domain = terralib.newsymbol(c.legion_domain_t)
-    actions = quote
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
-    end
-    local idx = 0
-    local fields = terralib.newlist { "lo", "hi" }
-    fields:map(function(field)
-      index_type.impl_type:getentries():map(function(entry)
-        actions = quote
-          [actions]
-          [bounds].[field].__ptr.[entry.field] = [domain].rect_data[ [idx] ]
-        end
-        idx = idx + 1
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local bounds = false
+  local actions = quote
+    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+  end
+  if not index_type:is_opaque() then
+    bounds = terralib.newsymbol(std.rect_type(index_type), "bounds")
+    local bounds_actions = nil
+    if index_type.dim == 1 then
+      bounds_actions = quote
+        [bounds].lo = [domain].rect_data[0]
+        [bounds].hi = [domain].rect_data[1]
+      end
+    else
+      bounds_actions = quote
+      end
+      local idx = 0
+      local fields = terralib.newlist { "lo", "hi" }
+      fields:map(function(field)
+        index_type.impl_type:getentries():map(function(entry)
+          bounds_actions = quote
+            [bounds_actions]
+            [bounds].[field].__ptr.[entry.field] = [domain].rect_data[ [idx] ]
+          end
+          idx = idx + 1
+        end)
       end)
-    end)
+    end
+    actions = quote
+      [actions]
+      var [bounds]
+      do [bounds_actions] end
+    end
   end
-  actions = quote
-    var [bounds]
-    do [actions] end
-  end
-  return actions, bounds
+  return actions, domain, bounds
 end
 
 local function make_copy(cx, value, value_type)
@@ -779,15 +786,12 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
     error("failed to find appropriate for region " .. tostring(region_type) .. " in unpack", 2)
   end
 
-  local bounds
-  if not region_type:is_opaque() then
-    local bounds_actions
-    bounds_actions, bounds = index_space_bounds(cx, is, region_type:ispace().index_type)
-    actions = quote [actions]; [bounds_actions] end
-  end
+  local bounds_actions, domain, bounds =
+    index_space_bounds(cx, is, region_type:ispace().index_type)
+  actions = quote [actions]; [bounds_actions] end
 
   cx:add_ispace_subispace(region_type:ispace(), is, it,
-                          parent_region_type:ispace(), bounds)
+                          parent_region_type:ispace(), domain, bounds)
   cx:add_region_subregion(region_type, r, parent_region_type)
 
   return expr.just(actions, r)
@@ -2161,15 +2165,12 @@ function codegen.expr_index_access(cx, node)
       end
     end
 
-    local bounds
-    if not expr_type:is_opaque() then
-      local bounds_actions
-      bounds_actions, bounds = index_space_bounds(cx, is, expr_type:ispace().index_type)
-      actions = quote [actions]; [bounds_actions] end
-    end
+    local bounds_actions, domain, bounds =
+      index_space_bounds(cx, is, expr_type:ispace().index_type)
+    actions = quote [actions]; [bounds_actions] end
 
     cx:add_ispace_subispace(expr_type:ispace(), is, it,
-                            parent_region_type:ispace(), bounds)
+                            parent_region_type:ispace(), domain, bounds)
     cx:add_region_subregion(expr_type, r, parent_region_type)
 
     return values.value(node, expr.just(actions, r), expr_type)
@@ -2215,15 +2216,12 @@ function codegen.expr_index_access(cx, node)
         end
       end
 
-      local bounds
-      if not region_type:is_opaque() then
-        local bounds_actions
-        bounds_actions, bounds = index_space_bounds(cx, is, region_type:ispace().index_type)
-        actions = quote [actions]; [bounds_actions] end
-      end
+      local bounds_actions, domain, bounds =
+        index_space_bounds(cx, is, region_type:ispace().index_type)
+      actions = quote [actions]; [bounds_actions] end
 
       cx:add_ispace_subispace(region_type:ispace(), is, it,
-                              parent_region_type:ispace(), bounds)
+                              parent_region_type:ispace(), domain, bounds)
       cx:add_region_subregion(region_type, r, parent_region_type)
     else
       lr = `([cx:region(region_type).logical_region]).impl
@@ -2281,18 +2279,15 @@ function codegen.expr_index_access(cx, node)
           -- FIXME: For the moment, iterators, allocators, and physical
           -- regions are inaccessible since we assume lists are always
           -- unmapped.
-          local bounds
-          if not region_type:is_opaque() then
-            local bounds_actions
-            bounds_actions, bounds =
-              index_space_bounds(cx, `([region.value].impl.index_space),
-                                 region_type:ispace().index_type)
-            region.actions = quote [region.actions]; [bounds_actions] end
-          end
+          local bounds_actions, domain, bounds =
+            index_space_bounds(cx, `([region.value].impl.index_space),
+                               region_type:ispace().index_type)
+          region.actions = quote [region.actions]; [bounds_actions] end
           cx:add_ispace_root(
             region_type:ispace(),
             `([region.value].impl.index_space),
             false,
+            domain,
             bounds)
           cx:add_region_root(
             region_type, region.value,
@@ -3852,11 +3847,8 @@ function codegen.expr_ispace(cx, node)
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
   end
 
-  local bounds, bounds_actions = terralib.newlist()
-  if not ispace_type:is_opaque() then
-    bounds_actions, bounds = index_space_bounds(cx, is, ispace_type.index_type)
-  end
-  cx:add_ispace_root(ispace_type, is, it, bounds)
+  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type.index_type)
+  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
 
   if ispace_type.dim == 0 then
     if start then
@@ -9780,14 +9772,10 @@ function codegen.top_task(cx, node)
           [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
-        local bounds
-        if not param_type:is_opaque() then
-          local bounds_actions
-          bounds_actions, bounds =
-            index_space_bounds(cx, `([param_symbol].impl), param_type.index_type)
-          actions = quote [actions]; [bounds_actions] end
-        end
-        cx:add_ispace_root(param_type, `([param_symbol].impl), false, bounds)
+        local bounds_actions, domain, bounds =
+          index_space_bounds(cx, `([param_symbol].impl), param_type.index_type)
+        actions = quote [actions]; [bounds_actions] end
+        cx:add_ispace_root(param_type, `([param_symbol].impl), false, domain, bounds)
       end
       task_setup:insert(actions)
     end
@@ -9928,14 +9916,10 @@ function codegen.top_task(cx, node)
     end
 
     if not cx:has_ispace(region_type:ispace()) then
-      local bounds
-      if not region_type:is_opaque() then
-        local bounds_actions
-        bounds_actions, bounds =
-          index_space_bounds(cx, `([r].impl.index_space), region_type:ispace().index_type)
-        task_setup:insert(bounds_actions)
-      end
-      cx:add_ispace_root(region_type:ispace(), is, it, bounds)
+      local bounds_actions, domain, bounds =
+        index_space_bounds(cx, `([r].impl.index_space), region_type:ispace().index_type)
+      task_setup:insert(bounds_actions)
+      cx:add_ispace_root(region_type:ispace(), is, it, domain, bounds)
     end
 
     -- If the region does *NOT* have privileges, look for parents that
