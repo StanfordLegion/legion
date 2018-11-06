@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- []
+-- [["-graph", "sample.gr", "-nw", "4", "-ll:cpu", "4"]]
 
 import "regent"
 import "bishop"
