@@ -53,7 +53,7 @@ end
 
 __demand(__parallel, __cuda)
 task init_side_fracs(rz : region(zone), rp : region(point),
-                     rs : region(side(rz, rp, rs)))
+                     rs : region(side))
 where
   reads(rz.zarea, rs.{mapsz, sarea}),
   writes(rs.smf)
@@ -61,7 +61,7 @@ do
   for s in rs do
     var z = s.mapsz
 
-    s.smf = s.sarea / z.zarea
+    rs[s].smf = rs[s].sarea / rz[z].zarea
   end
 end
 
@@ -138,7 +138,7 @@ end
 --
 -- 1. Advance mesh to center of time step.
 --
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task adv_pos_half(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -186,9 +186,9 @@ end
 --
 
 -- Compute centers of zones and edges.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_centers(rz : region(zone), rp : region(point),
-                  rs : region(side(rz, rp, rs)),
+                  rs : region(side),
                   enable : bool)
 where
   reads(rz.znump, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
@@ -205,20 +205,19 @@ do
     var z = s.mapsz
     var p1 = s.mapsp1
     var p2 = s.mapsp2
-    var e = s
 
-    var p1_pxp = p1.pxp
-    e.exp = 0.5*(p1_pxp + p2.pxp)
+    var p1_pxp = rp[p1].pxp
+    s.exp = 0.5*(p1_pxp + rp[p2].pxp)
 
-    z.zxp += (1/double(z.znump)) * p1_pxp
+    rz[z].zxp += (1/double(rz[z].znump)) * p1_pxp
   end
 end
 
 -- Compute volumes of zones and sides.
 -- Compute edge lengths.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_volumes(rz : region(zone), rp : region(point),
-                  rs : region(side(rz, rp, rs)),
+                  rs : region(side),
                   enable : bool)
 where
   reads(rz.{zxp, znump}, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
@@ -238,16 +237,16 @@ do
     var p1 = s.mapsp1
     var p2 = s.mapsp2
 
-    var p1_pxp = p1.pxp
-    var p2_pxp = p2.pxp
-    var sa = 0.5 * cross(p2_pxp - p1_pxp, z.zxp - p1_pxp)
-    var sv = sa * (p1_pxp.x + p2_pxp.x + z.zxp.x)
+    var p1_pxp = rp[p1].pxp
+    var p2_pxp = rp[p2].pxp
+    var sa = 0.5 * cross(p2_pxp - p1_pxp, rz[z].zxp - p1_pxp)
+    var sv = sa * (p1_pxp.x + p2_pxp.x + rz[z].zxp.x)
     s.sareap = sa
     -- s.svolp = sv
     s.elen = length(p2_pxp - p1_pxp)
 
-    z.zareap += sa
-    z.zvolp += (1.0 / 3.0) * sv
+    rz[z].zareap += sa
+    rz[z].zvolp += (1.0 / 3.0) * sv
 
     if sv <= 0.0 then
       num_negative_sv += 1
@@ -257,9 +256,9 @@ do
 end
 
 -- Compute zone characteristic lengths.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_char_len(rz : region(zone), rp : region(point),
-                   rs : region(side(rz, rp, rs)),
+                   rs : region(side),
                    enable : bool)
 where
   reads(rz.znump, rs.{mapsz, sareap, elen}),
@@ -273,19 +272,18 @@ do
 
   for s in rs do
     var z = s.mapsz
-    var e = s
 
     var area = s.sareap
-    var base = e.elen
+    var base = s.elen
     var fac = 0.0
-    if z.znump == 3 then
+    if rz[z].znump == 3 then
       fac = 3.0
     else
       fac = 4.0
     end
     var sdl = fac * area / base
 
-    z.zdl min= sdl
+    rz[z].zdl min= sdl
   end
 end
 
@@ -294,7 +292,7 @@ end
 --
 
 -- Compute zone densities.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_rho_half(rz : region(zone), enable : bool)
 where
   reads(rz.{zvolp, zm}),
@@ -308,9 +306,9 @@ do
 end
 
 -- Reduce masses into points.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task sum_point_mass(rz : region(zone), rp : region(point),
-                    rs : region(side(rz, rp, rs)),
+                    rs : region(side),
                     enable : bool)
 where
   reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
@@ -323,8 +321,8 @@ do
     var p1 = s.mapsp1
     var s3 = s.mapss3
 
-    var m = z.zrp * z.zareap * 0.5 * (s.smf + s3.smf)
-    p1.pmaswt += m
+    var m = rz[z].zrp * rz[z].zareap * 0.5 * (s.smf + rs[s3].smf)
+    rp[p1].pmaswt += m
   end
 end
 
@@ -373,7 +371,7 @@ end
 -- Compute PolyGas and TTS forces.
 __demand(__cuda)
 task calc_force_pgas_tts(rz : region(zone), rp : region(point),
-                         rs : region(side(rz, rp, rs)),
+                         rs : region(side),
                          alfa : double, ssmin : double,
                          enable : bool)
 where
@@ -386,18 +384,18 @@ do
     var z = s.mapsz
 
     -- Compute surface vectors of sides.
-    var ssurfp = rotateCCW(s.exp - z.zxp)
+    var ssurfp = rotateCCW(s.exp - rz[z].zxp)
 
     -- Compute PolyGas forces.
-    var sfx = (-z.zp)*ssurfp
+    var sfx = (-rz[z].zp)*ssurfp
     s.sfp = sfx
 
     -- Compute TTS forces.
-    var svfacinv = z.zareap / s.sareap
-    var srho = z.zrp * s.smf * svfacinv
-    var sstmp = max(z.zss, ssmin)
+    var svfacinv = rz[z].zareap / s.sareap
+    var srho = rz[z].zrp * s.smf * svfacinv
+    var sstmp = max(rz[z].zss, ssmin)
     sstmp = alfa * sstmp * sstmp
-    var sdp = sstmp * (srho - z.zrp)
+    var sdp = sstmp * (srho - rz[z].zrp)
     var sqq = (-sdp)*ssurfp
     s.sft = sfx + sqq
   end
@@ -405,7 +403,7 @@ end
 
 __demand(__cuda)
 task qcs_zone_center_velocity(rz : region(zone), rp : region(point),
-                              rs : region(side(rz, rp, rs)),
+                              rs : region(side),
                               enable : bool)
 where
   reads(rz.znump, rp.pu, rs.{mapsz, mapsp1}),
@@ -421,13 +419,13 @@ do
     var z = s.mapsz
     var p1 = s.mapsp1
 
-    z.zuc += (1.0 / double(z.znump))*p1.pu
+    rz[z].zuc += (1.0 / double(rz[z].znump))*rp[p1].pu
   end
 end
 
 __demand(__cuda)
 task qcs_corner_divergence(rz : region(zone), rp : region(point),
-                           rs : region(side(rz, rp, rs)),
+                           rs : region(side),
                            enable : bool)
 where
   reads(rz.{zxp, zuc}, rp.{pxp, pu},
@@ -439,26 +437,26 @@ do
   for s2 in rs do
     var c = s2
     var s = s2.mapss3
-    var z = s.mapsz
-    var p = s.mapsp2
-    var p1 = s.mapsp1
+    var z = rs[s].mapsz
+    var p = rs[s].mapsp2
+    var p1 = rs[s].mapsp1
     var p2 = s2.mapsp2
     var e1 = s
     var e2 = s2
 
     -- velocities and positions
     -- point p
-    var up0 = p.pu
-    var xp0 = p.pxp
+    var up0 = rp[p].pu
+    var xp0 = rp[p].pxp
     -- edge e2
-    var up1 = 0.5*(p.pu + p2.pu)
-    var xp1 = e2.exp
+    var up1 = 0.5*(rp[p].pu + rp[p2].pu)
+    var xp1 = rs[e2].exp
     -- zone center z
-    var up2 = z.zuc
-    var xp2 = z.zxp
+    var up2 = rz[z].zuc
+    var xp2 = rz[z].zxp
     -- edge e1
-    var up3 = 0.5*(p1.pu + p.pu)
-    var xp3 = e1.exp
+    var up3 = 0.5*(rp[p1].pu + rp[p].pu)
+    var xp3 = rs[e1].exp
 
     -- compute 2d cartesian volume of corner
     var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
@@ -467,13 +465,13 @@ do
     -- compute cosine angle
     var v1 = xp3 - xp0
     var v2 = xp1 - xp0
-    var de1 = e1.elen
-    var de2 = e2.elen
+    var de1 = rs[e1].elen
+    var de2 = rs[e2].elen
     var minelen = min(de1, de2)
     if minelen < 1e-12 then
-      c.ccos = 0.0
+      rs[c].ccos = 0.0
     else
-      c.ccos = 4.0 * dot(v1, v2) / (de1 * de2)
+      rs[c].ccos = 4.0 * dot(v1, v2) / (de1 * de2)
     end
 
     -- compute divergence of corner
@@ -510,18 +508,18 @@ do
     var du = max(dv1, dv2)
 
     if cdiv < 0.0 then
-      c.cevol = evol
-      c.cdu = du
+      rs[c].cevol = evol
+      rs[c].cdu = du
     else
-      c.cevol = 0.0
-      c.cdu = 0.0
+      rs[c].cevol = 0.0
+      rs[c].cdu = 0.0
     end
   end
 end
 
 __demand(__cuda)
 task qcs_qcn_force(rz : region(zone), rp : region(point),
-                   rs : region(side(rz, rp, rs)),
+                   rs : region(side),
                    gamma : double, q1 : double, q2 : double,
                    enable : bool)
 where
@@ -537,29 +535,29 @@ do
     var c = s4
     var z = c.mapsz
 
-    var ztmp2 = q2 * 0.25 * gammap1 * c.cdu
-    var ztmp1 = q1 * z.zss
+    var ztmp2 = q2 * 0.25 * gammap1 * rs[c].cdu
+    var ztmp1 = q1 * rz[z].zss
     var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
-    var rmu = zkur * z.zrp * c.cevol
+    var rmu = zkur * rz[z].zrp * rs[c].cevol
     if c.cdiv > 0.0 then
       rmu = 0.0
     end
 
-    var s = c.mapss3
-    var p = s.mapsp2
-    var p1 = s.mapsp1
+    var s = rs[c].mapss3
+    var p = rs[s].mapsp2
+    var p1 = rs[s].mapsp1
     var e1 = s
-    var p2 = s4.mapsp2
+    var p2 = rs[s4].mapsp2
     var e2 = s4
 
-    c.cqe1 = rmu / e1.elen*(p.pu - p1.pu)
-    c.cqe2 = rmu / e2.elen*(p2.pu - p.pu)
+    rs[c].cqe1 = rmu / rs[e1].elen*(rp[p].pu - rp[p1].pu)
+    rs[c].cqe2 = rmu / rs[e2].elen*(rp[p2].pu - rp[p].pu)
   end
 end
 
 __demand(__cuda)
 task qcs_force(rz : region(zone), rp : region(point),
-               rs : region(side(rz, rp, rs)),
+               rs : region(side),
                enable : bool)
 where
   reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2}),
@@ -573,30 +571,30 @@ do
     var e = s
     var el = e.elen
 
-    var c1sin2 = 1.0 - c1.ccos * c1.ccos
+    var c1sin2 = 1.0 - rs[c1].ccos * rs[c1].ccos
     var c1w = 0.0
     var c1cos = 0.0
     if c1sin2 >= 1e-4 then
-      c1w = c1.carea / c1sin2
-      c1cos = c1.ccos
+      c1w = rs[c1].carea / c1sin2
+      c1cos = rs[c1].ccos
     end
 
-    var c2sin2 = 1.0 - c2.ccos * c2.ccos
+    var c2sin2 = 1.0 - rs[c2].ccos * rs[c2].ccos
     var c2w = 0.0
     var c2cos = 0.0
     if c2sin2 >= 1e-4 then
-      c2w = c2.carea / c2sin2
-      c2cos = c2.ccos
+      c2w = rs[c2].carea / c2sin2
+      c2cos = rs[c2].ccos
     end
 
-    s.sfq = (1.0 / el)*(c1w*(c1.cqe2 + c1cos*c1.cqe1) +
-                          c2w*(c2.cqe1 + c2cos*c2.cqe2))
+    s.sfq = (1.0 / el)*(c1w*(rs[c1].cqe2 + c1cos*rs[c1].cqe1) +
+                          c2w*(rs[c2].cqe1 + c2cos*rs[c2].cqe2))
   end
 end
 
 __demand(__cuda)
 task qcs_vel_diff(rz : region(zone), rp : region(point),
-                  rs : region(side(rz, rp, rs)),
+                  rs : region(side),
                   q1 : double, q2 : double,
                   enable : bool)
 where
@@ -616,16 +614,16 @@ do
     var z = s.mapsz
     var e = s
 
-    var dx = p2.pxp - p1.pxp
-    var du = p2.pu - p1.pu
-    var lenx = e.elen
+    var dx = rp[p2].pxp - rp[p1].pxp
+    var du = rp[p2].pu - rp[p1].pu
+    var lenx = rs[e].elen
     var dux = dot(du, dx)
     if lenx > 0.0 then
       dux = abs(dux) / lenx
     else
       dux = 0.0
     end
-    z.z0tmp max= dux
+    rz[z].z0tmp max= dux
   end
 
   for z in rz do
@@ -636,7 +634,7 @@ end
 -- Reduce forces into points.
 __demand(__cuda)
 task sum_point_force(rz : region(zone), rp : region(point),
-                     rs : region(side(rz, rp, rs)),
+                     rs : region(side),
                      enable : bool)
 where
   reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
@@ -648,9 +646,9 @@ do
     var p1 = s.mapsp1
     var s3 = s.mapss3
 
-    var f = (s.sfq + s.sft) - (s3.sfq + s3.sft)
-    p1.pf.x += f.x
-    p1.pf.y += f.y
+    var f = (rs[s].sfq + rs[s].sft) - (rs[s3].sfq + rs[s3].sft)
+    rp[p1].pf.x += f.x
+    rp[p1].pf.y += f.y
   end
 end
 
@@ -724,9 +722,9 @@ end
 -- FIXME: This is a duplicate of calc_centers but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_centers_full(rz : region(zone), rp : region(point),
-                       rs : region(side(rz, rp, rs)),
+                       rs : region(side),
                        enable : bool)
 where
   reads(rz.znump, rp.px, rs.{mapsz, mapsp1, mapsp2}),
@@ -745,19 +743,19 @@ do
     var p2 = s.mapsp2
     var e = s
 
-    var p1_px = p1.px
-    e.ex = 0.5*(p1_px + p2.px)
+    var p1_px = rp[p1].px
+    rs[e].ex = 0.5*(p1_px + rp[p2].px)
 
-    z.zx += (1/double(z.znump)) * p1_px
+    rz[z].zx += (1/double(rz[z].znump)) * p1_px
   end
 end
 
 -- FIXME: This is a duplicate of calc_volumes but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_volumes_full(rz : region(zone), rp : region(point),
-                       rs : region(side(rz, rp, rs)),
+                       rs : region(side),
                        enable : bool)
 where
   reads(rz.{zx, znump}, rp.px, rs.{mapsz, mapsp1, mapsp2}),
@@ -777,15 +775,15 @@ do
     var p1 = s.mapsp1
     var p2 = s.mapsp2
 
-    var p1_px = p1.px
-    var p2_px = p2.px
-    var sa = 0.5 * cross(p2_px - p1_px, z.zx - p1_px)
-    var sv = sa * (p1_px.x + p2_px.x + z.zx.x)
-    s.sarea = sa
+    var p1_px = rp[p1].px
+    var p2_px = rp[p2].px
+    var sa = 0.5 * cross(p2_px - p1_px, rz[z].zx - p1_px)
+    var sv = sa * (p1_px.x + p2_px.x + rz[z].zx.x)
+    rs[s].sarea = sa
     -- s.svol = sv
 
-    z.zarea += sa
-    z.zvol += (1.0 / 3.0) * sv
+    rz[z].zarea += sa
+    rz[z].zvol += (1.0 / 3.0) * sv
 
     if sv <= 0.0 then
       num_negative_sv += 1
@@ -800,7 +798,7 @@ end
 
 __demand(__cuda)
 task calc_work(rz : region(zone), rp : region(point),
-               rs : region(side(rz, rp, rs)),
+               rs : region(side),
                dt : double,
                enable : bool)
 where
@@ -820,12 +818,12 @@ do
     var p2 = s.mapsp2
 
     var sftot = s.sfp + s.sfq
-    var sd1 = dot(sftot, p1.pu0 + p1.pu)
-    var sd2 = dot(-1.0*sftot, p2.pu0 + p2.pu)
-    var dwork = -0.5 * dt * (sd1 * p1.pxp.x + sd2 * p2.pxp.x)
+    var sd1 = dot(sftot, rp[p1].pu0 + rp[p1].pu)
+    var sd2 = dot(-1.0*sftot, rp[p2].pu0 + rp[p2].pu)
+    var dwork = -0.5 * dt * (sd1 * rp[p1].pxp.x + sd2 * rp[p2].pxp.x)
 
-    z.zetot += dwork
-    z.zw += dwork
+    rz[z].zetot += dwork
+    rz[z].zw += dwork
   end
 end
 
@@ -960,7 +958,7 @@ end
 --[[
 task simulate(rz : region(zone),
               rp : region(point),
-              rs : region(side(rz, rp, rs)),
+              rs : region(side),
               conf : config)
 where
   reads writes(rz, rp, rs)
@@ -1058,7 +1056,7 @@ end
 __demand(__inline)
 task initialize(rz : region(zone),
                 rp : region(point),
-                rs : region(side(rz, rp, rs)),
+                rs : region(side),
                 conf : config)
 where
   reads writes(rz, rp, rs)
@@ -1099,7 +1097,7 @@ end
 
 task read_input_sequential(rz : region(zone),
                            rp : region(point),
-                           rs : region(side(rz, rp, rs)),
+                           rs : region(side),
                            conf : config)
 where reads writes(rz, rp, rs) do
   return read_input(
@@ -1112,7 +1110,7 @@ end
 
 task validate_output_sequential(rz : region(zone),
                                 rp : region(point),
-                                rs : region(side(rz, rp, rs)),
+                                rs : region(side),
                                 conf : config)
 where reads(rz, rp, rs) do
   validate_output(
@@ -1141,7 +1139,7 @@ task toplevel()
 
   var rz = region(ispace(ptr, conf.nz), zone)
   var rp = region(ispace(ptr, conf.np), point)
-  var rs = region(ispace(ptr, conf.ns), side(rz, rp, rs))
+  var rs = region(ispace(ptr, conf.ns), side)
 
   var colorings : mesh_colorings
 
@@ -1163,9 +1161,15 @@ task toplevel()
 
   var rz_p = partition(disjoint, rz, colorings.rz_all_c)
   var rz_c = rz_p.colors
+  var rs_p = preimage(rs, rz_p, rs.mapsz)
+  var rp_p = partition(equal, rp, rz_c)
+
+  var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  __parallelize_with rz_p, rz_c
+  __parallelize_with rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
+                     image(rp, rs_p, rs.mapsp1) <= rp_p_img,
+                     image(rp, rs_p, rs.mapsp2) <= rp_p_img
   do
     -- Hack: Manually inline this call to make parallelizer happy
     -- initialize(rz, rp, rs, conf)
@@ -1197,7 +1201,9 @@ task toplevel()
 
   c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  __parallelize_with rz_p, rz_c
+  __parallelize_with rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
+                     image(rp, rs_p, rs.mapsp1) <= rp_p_img,
+                     image(rp, rs_p, rs.mapsp2) <= rp_p_img
   do
     -- Hack: Manually inline this call to make parallelizer happy
     -- simulate(rz, rp, rs, conf)
