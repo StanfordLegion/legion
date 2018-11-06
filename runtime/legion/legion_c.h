@@ -500,6 +500,12 @@ extern "C" {
   legion_domain_get_bounds_3d(legion_domain_t d);
 
   /**
+   * @see Legion::Domain::contains()
+   */
+  bool
+  legion_domain_contains(legion_domain_t d, legion_domain_point_t p);
+
+  /**
    * @see Legion::Domain::get_volume()
    */
   size_t
