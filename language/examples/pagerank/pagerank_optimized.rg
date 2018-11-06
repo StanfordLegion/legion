@@ -127,7 +127,7 @@ end
 
 terra parse_input_args(conf : Config)
   var args = c.legion_runtime_get_input_args()
-  var input_file : rawstring
+  var input_file : rawstring = nil
   for i = 0, args.argc do
     if cstring.strcmp(args.argv[i], "-ni") == 0 then
       i = i + 1
@@ -140,7 +140,9 @@ terra parse_input_args(conf : Config)
       input_file = rawstring(args.argv[i])
     end
   end
+  regentlib.assert_error(input_file ~= nil, "error: the flag '-graph' is required but was not provided\n")
   var file = c.fopen(input_file, "r")
+  regentlib.assert(file ~= nil, "failed to open input file")
   c.fscanf(file, "%i", &conf.num_nodes)
   c.fscanf(file, "%i", &conf.num_edges)
   c.fscanf(file, "%s", conf.graph)
@@ -160,6 +162,7 @@ do
   var degrees : &V_ID = [&V_ID](c.malloc(num_nodes * 4))
   var srcs : &V_ID = [&V_ID](c.malloc(num_edges * 4))
   var file = c.fopen(graph, "rb")
+  regentlib.assert(not isnull(file), "failed to open graph file")
   c.printf("graph = %s\n", graph)
   c.fread(indices, 8, num_nodes, file)
   for n = 0, num_nodes do
