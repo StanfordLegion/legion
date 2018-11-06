@@ -1498,6 +1498,14 @@ function type_check.expr_partition(cx, node)
     end
   end
 
+  if coloring_type == std.c.legion_coloring_t then
+    report.warn(node, "WARNING: using old style partition API with legion_coloring_t, please consider upgrading to legion_point_coloring_t")
+  end
+
+  if coloring_type == std.c.legion_domain_coloring_t then
+    report.warn(node, "WARNING: using old style partition API with legion_domain_coloring_t, please consider upgrading to legion_domain_point_coloring_t")
+  end
+
   local region_symbol
   if region:is(ast.typed.expr.ID) then
     region_symbol = region.value
