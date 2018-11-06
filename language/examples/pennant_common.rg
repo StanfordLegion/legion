@@ -303,14 +303,12 @@ fspace side(rz : region(zone),
 }
 else
 -- Sequential version
-fspace side(rz : region(zone),
-            rp : region(point),
-            rs : region(side(rz, rp, rs))) {
-  mapsz :  ptr(zone, rz),                      -- maps: side -> zone
-  mapsp1 : ptr(point, rp),                     -- maps: side -> points 1 and 2
-  mapsp2 : ptr(point, rp),
-  mapss3 : ptr(side(rz, rp, rs), rs),          -- maps: side -> previous side
-  mapss4 : ptr(side(rz, rp, rs), rs),          -- maps: side -> next side
+fspace side {
+  mapsz :  ptr,          -- maps: side -> zone
+  mapsp1 : ptr,          -- maps: side -> points 1 and 2
+  mapsp2 : ptr,
+  mapss3 : ptr,          -- maps: side -> previous side
+  mapss4 : ptr,          -- maps: side -> next side
 
   sareap : double,       -- side area, middle of cycle
   sarea :  double,       -- side area, end of cycle
@@ -697,7 +695,7 @@ terra read_config()
   do
     var zone_size = terralib.sizeof(zone)
     var point_size = terralib.sizeof(point)
-    var side_size = [ parallel and terralib.sizeof(side(wild,wild,wild,wild)) or terralib.sizeof(side(wild,wild,wild)) ]
+    var side_size = [ parallel and terralib.sizeof(side(wild,wild,wild,wild)) or terralib.sizeof(side) ]
     c.printf("Mesh memory usage:\n")
     c.printf("  Zones  : %9lld * %4d bytes = %11lld bytes\n", conf.nz, zone_size, conf.nz * zone_size)
     c.printf("  Points : %9lld * %4d bytes = %11lld bytes\n", conf.np, point_size, conf.np * point_size)
