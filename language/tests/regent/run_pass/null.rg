@@ -14,6 +14,11 @@
 
 import "regent"
 
+terra get_raw_null()
+  var x : &int = nil
+  return x
+end
+
 task main()
   var r = region(ispace(ptr, 5), int)
   var x = null(ptr(int, r))
@@ -22,5 +27,8 @@ task main()
   var is = ispace(ptr, 5)
   var y = null(ptr(is))
   regentlib.assert(isnull(y), "test failed")
+
+  var z = get_raw_null()
+  regentlib.assert(isnull(z), "test failed")
 end
 regentlib.start(main)

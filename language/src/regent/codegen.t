@@ -3504,29 +3504,42 @@ end
 
 function codegen.expr_isnull(cx, node)
   local pointer = codegen.expr(cx, node.pointer):read(cx)
-  local index_type = std.as_read(node.pointer.expr_type).index_type
+  local pointer_type = std.as_read(node.pointer.expr_type)
   local expr_type = std.as_read(node.expr_type)
   local actions = quote
     [pointer.actions];
     [emit_debuginfo(node)]
   end
 
-  if index_type:is_opaque() then
+  if std.is_bounded_type(pointer_type) then
+    local index_type = pointer_type.index_type
+    if index_type:is_opaque() then
+      return values.value(
+        node,
+        expr.once_only(
+          actions,
+          `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr.__ptr))),
+          expr_type),
+        expr_type)
+    else
+      return values.value(
+        node,
+        expr.once_only(
+          actions,
+          `([expr_type]([index_type]([pointer.value]) == [index_type:nil_index()])),
+          expr_type),
+        expr_type)
+    end
+  elseif pointer_type:ispointer() then
     return values.value(
       node,
       expr.once_only(
         actions,
-        `([expr_type](c.legion_ptr_is_null([pointer.value].__ptr.__ptr))),
+        `([expr_type]([pointer.value] == nil)),
         expr_type),
       expr_type)
   else
-    return values.value(
-      node,
-      expr.once_only(
-        actions,
-        `([expr_type]([index_type]([pointer.value]) == [index_type:nil_index()])),
-        expr_type),
-      expr_type)
+    assert(false, "unreachable")
   end
 end
 
