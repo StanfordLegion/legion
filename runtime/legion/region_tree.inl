@@ -230,6 +230,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    Domain IndexSpaceOperationT<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> result;
+      ready = get_realm_index_space(result, tight);
+      return DomainT<DIM,T>(result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     ApEvent IndexSpaceOperationT<DIM,T>::get_realm_index_space(
                         Realm::IndexSpace<DIM,T> &space, bool need_tight_result)
     //--------------------------------------------------------------------------
@@ -807,6 +817,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    Domain RemoteExpression<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    //--------------------------------------------------------------------------
+    {
+      ready = realm_index_space_ready;
+      return DomainT<DIM,T>(realm_index_space);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void RemoteExpression<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
@@ -1150,6 +1169,16 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> *space = 
         reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
       return get_realm_index_space(*space, need_tight_result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Domain IndexSpaceNodeT<DIM,T>::get_domain(ApEvent &ready, bool need_tight)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> result;
+      ready = get_realm_index_space(result, need_tight);
+      return DomainT<DIM,T>(result);
     }
 
     //--------------------------------------------------------------------------

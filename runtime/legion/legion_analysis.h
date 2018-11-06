@@ -434,6 +434,42 @@ namespace Legion {
       GenerationID merge_close_gen;
     }; 
 
+    class KDTree {
+    public:
+      virtual ~KDTree(void) { }
+      virtual bool refine(std::vector<EquivalenceSet*> &subsets) = 0;
+    };
+
+    /**
+     * \class KDNode
+     * A KDNode is used for constructing a KD tree in order to divide up the 
+     * sub equivalence sets when there are too many to fan out from just 
+     * one parent equivalence set.
+     */
+    template<int DIM>
+    class KDNode : public KDTree {
+    public:
+      KDNode(IndexSpaceExpression *expr, Runtime *runtime, 
+             int refinement_dim, int last_changed_dim = -1); 
+      KDNode(const Rect<DIM> &rect, Runtime *runtime,
+             int refinement_dim, int last_changed_dim = -1);
+      KDNode(const KDNode<DIM> &rhs);
+      virtual ~KDNode(void);
+    public:
+      KDNode<DIM>& operator=(const KDNode<DIM> &rhs);
+    public:
+      virtual bool refine(std::vector<EquivalenceSet*> &subsets);
+    public:
+      static Rect<DIM> get_bounds(IndexSpaceExpression *expr);
+    public:
+      Runtime *const runtime;
+      const Rect<DIM> bounds;
+      const int refinement_dim;
+      // For detecting non convext cases where we kind find a 
+      // splitting plane in any dimension
+      const int last_changed_dim;
+    };
+
     /**
      * \class CopyFillAggregator
      * The copy aggregator class is one that records the copies
@@ -841,7 +877,7 @@ namespace Legion {
       void refine_remainder(void);
       bool acquire_mapping_guard(Operation *op,
                                  const FieldMask &guard_mask,
-                                 std::vector<EquivalenceSet*> &alt_sets,
+                                 std::set<EquivalenceSet*> &alt_sets,
                                  bool recursed = false);
       void remove_mapping_guard(Operation *op);
       RtEvent ray_trace_equivalence_sets(VersionManager *target,
@@ -854,6 +890,7 @@ namespace Legion {
                               std::set<RtEvent> &applied_events,
                               AddressSpaceID request_space,
                               PendingRequest *pending_request = NULL);
+      void record_subset(EquivalenceSet *set);
     public:
       // Analysis methods
       inline bool has_restrictions(const FieldMask &mask) const
@@ -1164,7 +1201,7 @@ namespace Legion {
       volatile bool has_equivalence_sets;
     };
 
-    typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator;
+    typedef DynamicTableAllocator<VersionManager,10,8> VersionManagerAllocator; 
 
     /**
      * \class RegionTreePath

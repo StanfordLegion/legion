@@ -5052,6 +5052,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Domain PendingIndexSpaceExpression::get_domain(ApEvent &ready, bool tight)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->get_domain(ready, tight);
+    }
+
+    //--------------------------------------------------------------------------
     void PendingIndexSpaceExpression::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {

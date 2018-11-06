@@ -187,9 +187,9 @@
 #define LEGION_SHUTDOWN_RADIX             8
 #endif
 
-// Maximum depth of composite instances before warnings
-#ifndef LEGION_PRUNE_DEPTH_WARNING
-#define LEGION_PRUNE_DEPTH_WARNING        8
+// Maximum number of equivalence subsets in the bounding volume hierarchy
+#ifndef LEGION_MAX_BVH_FANOUT
+#define LEGION_MAX_BVH_FANOUT             32
 #endif
 
 // Maximum number of non-replayable templates before warnings

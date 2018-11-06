@@ -249,7 +249,7 @@ namespace Legion {
 #endif
       // First we need to go through and lock in the equivalence sets to
       // confirm that they won't be refined while we're doing the mapping
-      std::vector<EquivalenceSet*> alt_sets;
+      std::set<EquivalenceSet*> alt_sets;
       for (std::set<EquivalenceSet*>::iterator it = 
             equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
       {
@@ -267,7 +267,7 @@ namespace Legion {
       if (!alt_sets.empty())
       {
         // Add references to the sets and put them in our equivalence sets
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
+        for (std::set<EquivalenceSet*>::const_iterator it = 
               alt_sets.begin(); it != alt_sets.end(); it++)
         {
 #ifdef DEBUG_LEGION
@@ -1655,6 +1655,244 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // KDNode
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    KDNode<DIM>::KDNode(IndexSpaceExpression *expr, Runtime *rt,
+                        int ref_dim, int last)
+      : runtime(rt), bounds(get_bounds(expr)), refinement_dim(ref_dim),
+        last_changed_dim(last)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ref_dim < DIM);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    KDNode<DIM>::KDNode(const Rect<DIM> &rect, Runtime *rt, 
+                        int ref_dim, int last_dim)
+      : runtime(rt), bounds(rect), refinement_dim(ref_dim), 
+        last_changed_dim(last_dim)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ref_dim < DIM);
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    KDNode<DIM>::KDNode(const KDNode<DIM> &rhs)
+      : runtime(rhs.runtime), bounds(rhs.bounds), 
+        refinement_dim(rhs.refinement_dim), 
+        last_changed_dim(rhs.last_changed_dim)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    KDNode<DIM>::~KDNode(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    KDNode<DIM>& KDNode<DIM>::operator=(const KDNode<DIM> &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    /*static*/ Rect<DIM> KDNode<DIM>::get_bounds(IndexSpaceExpression *expr)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent wait_on;
+      const Domain d = expr->get_domain(wait_on, true/*tight*/);
+      if (wait_on.exists())
+        wait_on.wait();
+      return d.bounds<DIM,coord_t>();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM>
+    bool KDNode<DIM>::refine(std::vector<EquivalenceSet*> &subsets)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(subsets.size() > LEGION_MAX_BVH_FANOUT);
+#endif
+      std::vector<Rect<DIM> > subset_bounds(subsets.size());
+      for (unsigned idx = 0; idx < subsets.size(); idx++)
+        subset_bounds[idx] = get_bounds(subsets[idx]->set_expr);
+      // Compute a splitting plane 
+      coord_t split = 0;
+      {
+        // Sort the start and end of each equivalence set bounding rectangle
+        // along the splitting dimension
+        std::map<std::pair<coord_t,unsigned/*index*/>,bool/*start*/> lines;
+        for (unsigned idx = 0; idx < subsets.size(); idx++)
+        {
+          const std::pair<coord_t,unsigned> start_key(
+              subset_bounds[idx].lo[refinement_dim],idx);
+          lines[start_key] = true;
+          const std::pair<coord_t,unsigned> stop_key(
+              subset_bounds[idx].hi[refinement_dim],idx);
+          lines[stop_key] = false;
+        }
+        // Construct two lists by scanning from left-to-right and
+        // from right-to-left of the number of rectangles that would
+        // be inlcuded on the left or right side by each splitting plane
+        std::map<coord_t,unsigned> left_inclusive, right_inclusive;
+        unsigned count = 0;
+        for (std::map<std::pair<coord_t,unsigned>,bool>::const_iterator it =
+              lines.begin(); it != lines.end(); it++)
+        {
+          // Only increment for new rectangles
+          if (it->second)
+            count++;
+          // Always record the count for all splits
+          left_inclusive[it->first.first] = count;
+        }
+        count = 0;
+        for (std::map<std::pair<coord_t,unsigned>,bool>::const_reverse_iterator
+              it = lines.rbegin(); it != lines.rend(); it++)
+        {
+          // End of rectangles are the beginning in this direction
+          if (!it->second)
+            count++;
+          // Always record the count for all splits
+          right_inclusive[it->first.first] = count;
+        }
+#ifdef DEBUG_LEGION
+        assert(left_inclusive.size() == right_inclusive.size());
+#endif
+        // We want to take the mini-max of the two numbers in order
+        // to try to balance the splitting plane across the two sets
+        unsigned split_max = subsets.size();
+        for (std::map<coord_t,unsigned>::const_iterator it = 
+              left_inclusive.begin(); it != left_inclusive.end(); it++)
+        {
+          const unsigned left = it->second;
+          const unsigned right = right_inclusive[it->first];
+          const unsigned max = (left > right) ? left : right;
+          if (max < split_max)
+          {
+            split_max = max;
+            split = it->first;
+          }
+        }
+      }
+      // Sort the subsets into left and right
+      Rect<DIM> left_bounds, right_bounds;
+      left_bounds = bounds;
+      right_bounds = bounds;
+      left_bounds.hi[refinement_dim] = split;
+      right_bounds.lo[refinement_dim] = split+1;
+      std::vector<EquivalenceSet*> left_set, right_set;
+      for (unsigned idx = 0; idx < subsets.size(); idx++)
+      {
+        const Rect<DIM> &sub_bounds = subset_bounds[idx];
+        if (left_bounds.overlaps(sub_bounds))
+          left_set.push_back(subsets[idx]);
+        if (right_bounds.overlaps(sub_bounds))
+          right_set.push_back(subsets[idx]);
+      }
+      // Check for the non-convex case where we can't refine anymore
+      if ((refinement_dim == last_changed_dim) && 
+          ((left_set.size() == subsets.size()) ||
+           (right_set.size() == subsets.size())))
+        return false;
+      // Recurse down the tree
+      const int next_dim = (refinement_dim + 1) % DIM;
+      bool left_changed = false;
+      if (left_set.size() >= LEGION_MAX_BVH_FANOUT)
+      {
+        // If all the subsets span our splitting plane then we need
+        // to either start tracking the last changed dimension or 
+        // continue propagating the current one
+        const int left_last_dim = (left_set.size() == subsets.size()) ? 
+          ((last_changed_dim != -1) ? last_changed_dim : refinement_dim) : -1;
+        KDNode<DIM> left(left_bounds, runtime, next_dim, left_last_dim);
+        left_changed = left.refine(left_set);
+      }
+      bool right_changed = false;
+      if (right_set.size() >= LEGION_MAX_BVH_FANOUT)
+      {
+        // If all the subsets span our splitting plane then we need
+        // to either start tracking the last changed dimension or 
+        // continue propagating the current one
+        const int right_last_dim = (right_set.size() == subsets.size()) ? 
+          ((last_changed_dim != -1) ? last_changed_dim : refinement_dim) : -1;
+        KDNode<DIM> right(right_bounds, runtime, next_dim, right_last_dim);
+        right_changed = right.refine(right_set);
+      }
+      // If the sum of the left and right equivalence sets 
+      // are too big then build intermediate nodes for each one
+      if (((left_set.size() + right_set.size()) > LEGION_MAX_BVH_FANOUT) &&
+          (left_set.size() < subsets.size()) && 
+          (right_set.size() < subsets.size()))
+      {
+        // Make a new equivalence class and record all the subsets
+        const AddressSpaceID local_space = runtime->address_space;
+        std::set<IndexSpaceExpression*> left_exprs, right_exprs;
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              left_set.begin(); it != left_set.end(); it++)
+          left_exprs.insert((*it)->set_expr);
+        IndexSpaceExpression *left_union_expr = 
+          runtime->forest->union_index_spaces(left_exprs);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              right_set.begin(); it != right_set.end(); it++)
+          right_exprs.insert((*it)->set_expr);
+        IndexSpaceExpression *right_union_expr = 
+          runtime->forest->union_index_spaces(right_exprs);
+        EquivalenceSet *left_temp = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(), local_space,
+            local_space, left_union_expr, NULL/*index space*/,
+            Reservation::NO_RESERVATION, true/*register now*/);
+        EquivalenceSet *right_temp = new EquivalenceSet(runtime,
+            runtime->get_available_distributed_id(), local_space,
+            local_space, right_union_expr, NULL/*index space*/,
+            Reservation::NO_RESERVATION, true/*register now*/);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              left_set.begin(); it != left_set.end(); it++)
+          left_temp->record_subset(*it);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              right_set.begin(); it != right_set.end(); it++)
+          right_temp->record_subset(*it);
+        subsets.clear();
+        subsets.push_back(left_temp);
+        subsets.push_back(right_temp);
+        return true;
+      }
+      else if (left_changed || right_changed)
+      {
+        // If either right or left changed, then we need to recombine
+        // and deduplicate the equivalence sets before we can return
+        std::set<EquivalenceSet*> children;
+        children.insert(left_set.begin(), left_set.end());
+        children.insert(right_set.begin(), right_set.end());
+        // Put the new sets back in the subsets
+        subsets.clear();
+        subsets.insert(subsets.end(), children.begin(), children.end());
+        return true;
+      }
+      else // No changes were made
+        return false;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Copy Fill Aggregator
     /////////////////////////////////////////////////////////////
 
@@ -3038,7 +3276,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_mapping_guard(Operation *op,
                                                const FieldMask &guard_mask,
-               std::vector<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
+                  std::set<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
     //--------------------------------------------------------------------------
     {
       std::vector<EquivalenceSet*> to_recurse;
@@ -3061,7 +3299,16 @@ namespace Legion {
             // See if we have any new fields which we need to check for updates
             finder->second.guard_mask |= guard_mask;
             if (recursed)
-              alt_sets.push_back(this);
+            {
+              const std::pair<std::set<EquivalenceSet*>::iterator,bool> result =
+                alt_sets.insert(this);
+              // Don't double count for reaching this node from different paths
+              // This can happen when we build intermediate nodes to reduce 
+              // fanout and some equivalence sets end up on both sides
+              // See the KDNode 'refine' method to understand
+              if (!result.second)
+                finder->second.count--;
+            }
             return false;
           }
         }
@@ -3161,7 +3408,12 @@ namespace Legion {
       }
       // If we recursed then record ourselves in the alt_sets 
       else if (recursed)
-        alt_sets.push_back(this);
+      {
+#ifdef DEBUG_LEGION
+        assert(alt_sets.find(this) == alt_sets.end());
+#endif
+        alt_sets.insert(this);
+      }
       return false;
     }
 
@@ -6846,8 +7098,51 @@ namespace Legion {
         }
         if (pending_refinements.empty())
         {
-          // TODO: If we have too many subsets we need to make intermediates
-
+          // If we have too many subsets refine them 
+          if ((unrefined_remainder == NULL) &&
+              (disjoint_partition_refinement == NULL) && 
+              (subsets.size() > LEGION_MAX_BVH_FANOUT))
+          {
+            KDTree *tree = NULL;
+            switch (set_expr->get_num_dims())
+            {
+              case 1:
+                {
+                  tree = new KDNode<1>(set_expr, runtime, 0/*dim*/);
+                  break;
+                }
+              case 2:
+                {
+                  tree = new KDNode<2>(set_expr, runtime, 0/*dim*/);
+                  break;
+                }
+              case 3:
+                {
+                  tree = new KDNode<3>(set_expr, runtime, 0/*dim*/);
+                  break;
+                }
+              default:
+                assert(false);
+            }
+            // Refine the tree to make the new subsets
+            std::vector<EquivalenceSet*> new_subsets(subsets);
+            if (tree->refine(new_subsets))
+            {
+              // Add new references
+              for (std::vector<EquivalenceSet*>::const_iterator it =
+                    new_subsets.begin(); it != new_subsets.end(); it++)
+                (*it)->add_nested_resource_ref(did);
+              // Remove old references
+              for (std::vector<EquivalenceSet*>::const_iterator it = 
+                    subsets.begin(); it != subsets.end(); it++)
+                if ((*it)->remove_nested_resource_ref(did))
+                  delete (*it);
+              // Swap the two sets since we only care about the new one
+              subsets.swap(new_subsets);
+            }
+            // Clean up the tree
+            delete tree;
+          }
           // This is the end of the refinement task so we need to update
           // the state and send out any notifications to anyone that the
           // refinements are done
@@ -6919,6 +7214,22 @@ namespace Legion {
       } while (!to_perform.empty());
       if (to_trigger.exists())
         Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_subset(EquivalenceSet *set)
+    //--------------------------------------------------------------------------
+    {
+      // This method is only called when adding extra levels to the 
+      // equivalence set BVH data structure in order to reduce large
+      // fanout. We don't need the lock and we shouldn't have any
+      // remote copies of this equivalence set
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+      assert(!has_remote_instances());
+#endif
+      set->add_nested_resource_ref(did);
+      subsets.push_back(set);
     }
 
     //--------------------------------------------------------------------------
@@ -7786,7 +8097,7 @@ namespace Legion {
       // TODO: log equivalence sets
       assert(false);
       logger->up();
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // RegionTreePath 
