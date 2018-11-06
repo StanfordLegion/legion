@@ -1261,7 +1261,7 @@ end
 
 function type_check.expr_null(cx, node)
   local pointer_type = node.pointer_type
-  if not std.is_bounded_type(pointer_type) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
     report.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Null {

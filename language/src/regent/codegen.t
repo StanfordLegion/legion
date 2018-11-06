@@ -3547,13 +3547,25 @@ function codegen.expr_null(cx, node)
   local pointer_type = node.pointer_type
   local expr_type = std.as_read(node.expr_type)
 
-  return values.value(
-    node,
-    expr.once_only(
-      emit_debuginfo(node),
-      `([pointer_type]{ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }}),
-      expr_type),
-    expr_type)
+  if std.is_bounded_type(pointer_type) then
+    return values.value(
+      node,
+      expr.once_only(
+        emit_debuginfo(node),
+        `([pointer_type]{ __ptr = [ptr] { __ptr = c.legion_ptr_nil() }}),
+        expr_type),
+      expr_type)
+  elseif pointer_type:ispointer() then
+    return values.value(
+      node,
+      expr.once_only(
+        emit_debuginfo(node),
+        `([pointer_type](nil)),
+        expr_type),
+      expr_type)
+  else
+    assert(false, "unreachable")
+  end
 end
 
 function codegen.expr_dynamic_cast(cx, node)
