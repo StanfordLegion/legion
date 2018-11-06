@@ -163,7 +163,7 @@ do
   var srcs : &V_ID = [&V_ID](c.malloc(num_edges * 4))
   var file = c.fopen([rawstring](graph), "rb")
   regentlib.assert(not isnull(file), "failed to open graph file")
-  c.printf("graph = %s\n", graph)
+  c.printf("graph = %s\n", [rawstring](graph))
   c.fread(indices, 8, num_nodes, file)
   for n = 0, num_nodes do
     nodes[n].index = indices[n]
