@@ -1043,9 +1043,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock,1,false/*exclusive*/);
-      for (std::map<InstanceView*,std::set<ApEvent> >::const_iterator it =
-            gc_events.begin(); it != gc_events.end(); it++)
-        preconditions.insert(it->second.begin(), it->second.end());
+      for (std::map<InstanceView*,std::set<ApEvent> >::const_iterator git =
+            gc_events.begin(); git != gc_events.end(); git++)
+      {
+        // Make sure to test these for having triggered or risk a shutdown hang
+        for (std::set<ApEvent>::const_iterator it = git->second.begin();
+              it != git->second.end(); it++)
+          if (!it->has_triggered())
+            preconditions.insert(*it);
+      }
     }
 
     /////////////////////////////////////////////////////////////
