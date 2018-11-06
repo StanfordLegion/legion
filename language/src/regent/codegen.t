@@ -3888,6 +3888,7 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
+    [bounds_actions]
   end
 
   return values.value(node, expr.just(actions, i), ispace_type)
@@ -6986,21 +6987,17 @@ function codegen.expr_binary(cx, node)
     local rhs_type = std.as_read(node.rhs.expr_type)
     if std.is_region(rhs_type) or std.is_ispace(rhs_type) then
       assert(node.op == "<=")
-      local index_space = nil
+      local domain = nil
       if std.is_ispace(rhs_type) then
-        index_space = cx:ispace(rhs_type).index_space
+        domain = cx:ispace(rhs_type).domain
       elseif std.is_region(rhs_type) then
-        index_space = cx:ispace(rhs_type:ispace()).index_space
+        domain = cx:ispace(rhs_type:ispace()).domain
       end
-      assert(index_space ~= nil)
+      assert(domain ~= nil)
       local result = terralib.newsymbol(bool)
       actions = quote
         [actions]
-        var [result] = false
-        do
-          var domain = c.legion_index_space_get_domain([cx.runtime], [index_space])
-          [result] = c.legion_domain_contains(domain, [lhs.value]:to_domain_point())
-        end
+        var [result] = c.legion_domain_contains(domain, [lhs.value]:to_domain_point())
       end
       return values.value(
         node,
