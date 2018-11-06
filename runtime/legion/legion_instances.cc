@@ -712,8 +712,13 @@ namespace Legion {
       // If we have any gc events then launch tasks to actually prune
       // off their references when they are done since we are now eligible
       // for collection by the garbage collector
+      // We can test this without the lock because the race here is with
+      // the shutdown detection code (see find_shutdown_preconditions)
+      // which is also only reading the data structure
       if (!gc_events.empty())
       {
+        // We do need the lock if we're going to be modifying this
+        AutoLock inst(inst_lock);
         for (std::map<InstanceView*,std::set<ApEvent> >::iterator it =
               gc_events.begin(); it != gc_events.end(); it++)
         {
