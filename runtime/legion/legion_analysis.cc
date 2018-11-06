@@ -1817,7 +1817,7 @@ namespace Legion {
       // Recurse down the tree
       const int next_dim = (refinement_dim + 1) % DIM;
       bool left_changed = false;
-      if (left_set.size() >= LEGION_MAX_BVH_FANOUT)
+      if (left_set.size() > LEGION_MAX_BVH_FANOUT)
       {
         // If all the subsets span our splitting plane then we need
         // to either start tracking the last changed dimension or 
@@ -1828,7 +1828,7 @@ namespace Legion {
         left_changed = left.refine(left_set);
       }
       bool right_changed = false;
-      if (right_set.size() >= LEGION_MAX_BVH_FANOUT)
+      if (right_set.size() > LEGION_MAX_BVH_FANOUT)
       {
         // If all the subsets span our splitting plane then we need
         // to either start tracking the last changed dimension or 
