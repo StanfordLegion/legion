@@ -449,6 +449,16 @@ namespace Realm {
 			       measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>());
 	if(report_failure) {
 	  log_inst.info() << "allocation failed: inst=" << me;
+
+	  // poison the completion event, if it exists
+	  Event ready_event = Event::NO_EVENT;
+	  {
+	    AutoHSLLock al(mutex);
+	    ready_event = metadata.ready_event;
+	    metadata.ready_event = Event::NO_EVENT;
+	    metadata.inst_offset = (size_t)-2;
+	  }
+
 	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
 	    ProfilingMeasurements::InstanceStatus stat;
 	    stat.result = ProfilingMeasurements::InstanceStatus::FAILED_ALLOCATION;
@@ -468,14 +478,6 @@ namespace Realm {
           // clear the measurments after we send the response
           measurements.clear();
 
-	  // poison the completion event, if it exists
-	  Event ready_event = Event::NO_EVENT;
-	  {
-	    AutoHSLLock al(mutex);
-	    ready_event = metadata.ready_event;
-	    metadata.ready_event = Event::NO_EVENT;
-	    metadata.inst_offset = (size_t)-2;
-	  }
 	  if(ready_event.exists())
 	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
 	  return;
@@ -539,23 +541,23 @@ namespace Realm {
     {
       log_inst.debug() << "deallocation completed: inst=" << me;
 
-      if (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
-	ProfilingMeasurements::InstanceStatus stat;
-	stat.result = ProfilingMeasurements::InstanceStatus::DESTROYED_SUCCESSFULLY;
-	stat.error_code = 0;
-	measurements.add_measurement(stat);
-      }
-
-      if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
-	timeline.record_delete_time();
-	measurements.add_measurement(timeline);
-      }
-
-      // send any remaining incomplete profiling responses
-      measurements.send_responses(requests);
-
       // was this a successfully allocatated instance?
       if(metadata.inst_offset != size_t(-2)) {
+	if (measurements.wants_measurement<ProfilingMeasurements::InstanceStatus>()) {
+	  ProfilingMeasurements::InstanceStatus stat;
+	  stat.result = ProfilingMeasurements::InstanceStatus::DESTROYED_SUCCESSFULLY;
+	  stat.error_code = 0;
+	  measurements.add_measurement(stat);
+	}
+
+	if (measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>()) {
+	  timeline.record_delete_time();
+	  measurements.add_measurement(timeline);
+	}
+
+	// send any remaining incomplete profiling responses
+	measurements.send_responses(requests);
+
 	// send any required invalidation messages for metadata
 	bool recycle_now = metadata.initiate_cleanup(me.id);
 	if(recycle_now)
