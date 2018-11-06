@@ -7644,14 +7644,15 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!points.empty());
 #endif
-      for (std::vector<PointTask*>::const_iterator it = 
-            points.begin(); it != points.end(); it++)
+      const size_t num_points = points.size();
+      for (unsigned idx = 0; idx < num_points; idx++)
       {
-        RtEvent map_event = (*it)->perform_mapping();
+        PointTask *point = points[idx];
+        const RtEvent map_event = point->perform_mapping();
         if (map_event.exists() && !map_event.has_triggered())
-          (*it)->defer_launch_task(map_event);
+          point->defer_launch_task(map_event);
         else
-          (*it)->launch_task();
+          point->launch_task();
       }
     }
 
