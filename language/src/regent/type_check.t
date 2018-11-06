@@ -2908,6 +2908,13 @@ function type_check.expr_binary(cx, node)
 
     expr_type = std.partition(
       disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
+  elseif std.is_index_type(lhs_type) and (std.is_region(rhs_type) or std.is_ispace(rhs_type)) then
+    if node.op ~= "<=" then
+      report.error(node.rhs, "operator " .. tostring(node.op) ..
+                  " not supported on " .. tostring(lhs_type) .. " and " ..
+                  tostring(rhs_type))
+    end
+    expr_type = bool
   else
     if node.op == "&" or node.op == "|" then
       report.error(node.rhs, "operator " .. tostring(node.op) ..

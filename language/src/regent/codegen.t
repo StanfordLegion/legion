@@ -6990,6 +6990,32 @@ function codegen.expr_binary(cx, node)
     end
 
     local expr_type = std.as_read(node.expr_type)
+    local lhs_type = std.as_read(node.lhs.expr_type)
+    local rhs_type = std.as_read(node.rhs.expr_type)
+    if std.is_region(rhs_type) or std.is_ispace(rhs_type) then
+      assert(node.op == "<=")
+      local index_space = nil
+      if std.is_ispace(rhs_type) then
+        index_space = cx:ispace(rhs_type).index_space
+      elseif std.is_region(rhs_type) then
+        index_space = cx:ispace(rhs_type:ispace()).index_space
+      end
+      assert(index_space ~= nil)
+      local result = terralib.newsymbol(bool)
+      actions = quote
+        [actions]
+        var [result] = false
+        do
+          var domain = c.legion_index_space_get_domain([cx.runtime], [index_space])
+          [result] = c.legion_domain_contains(domain, [lhs.value]:to_domain_point())
+        end
+      end
+      return values.value(
+        node,
+        expr.just(actions, result),
+        expr_type)
+    else
+    end
     return values.value(
       node,
       expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value), expr_type),
