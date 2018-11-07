@@ -31,6 +31,10 @@ report.warn = function(node, ...)
   -- span is used to determine the source location of the warning.
   assert(node.span:is(ast.location))
 
+  io.stderr:write(node.span.source)
+  io.stderr:write(":")
+  io.stderr:write(tostring(node.span.start.line))
+  io.stderr:write(": ")
   io.stderr:write(...)
   io.stderr:write("\n")
 end

@@ -1222,7 +1222,7 @@ end
 function type_check.expr_isnull(cx, node)
   local pointer = type_check.expr(cx, node.pointer)
   local pointer_type = std.check_read(cx, pointer)
-  if not std.is_bounded_type(pointer_type) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
     report.error(node, "isnull requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Isnull {
@@ -1261,7 +1261,7 @@ end
 
 function type_check.expr_null(cx, node)
   local pointer_type = node.pointer_type
-  if not std.is_bounded_type(pointer_type) then
+  if not (std.is_bounded_type(pointer_type) or pointer_type:ispointer()) then
     report.error(node, "null requires bounded type, got " .. tostring(pointer_type))
   end
   return ast.typed.expr.Null {
@@ -1496,6 +1496,14 @@ function type_check.expr_partition(cx, node)
                     tostring(coloring_type))
       end
     end
+  end
+
+  if coloring_type == std.c.legion_coloring_t then
+    report.warn(node, "WARNING: using old style partition API with legion_coloring_t, please consider upgrading to legion_point_coloring_t")
+  end
+
+  if coloring_type == std.c.legion_domain_coloring_t then
+    report.warn(node, "WARNING: using old style partition API with legion_domain_coloring_t, please consider upgrading to legion_domain_point_coloring_t")
   end
 
   local region_symbol
@@ -2908,6 +2916,13 @@ function type_check.expr_binary(cx, node)
 
     expr_type = std.partition(
       disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
+  elseif std.is_index_type(lhs_type) and (std.is_region(rhs_type) or std.is_ispace(rhs_type)) then
+    if node.op ~= "<=" then
+      report.error(node.rhs, "operator " .. tostring(node.op) ..
+                  " not supported on " .. tostring(lhs_type) .. " and " ..
+                  tostring(rhs_type))
+    end
+    expr_type = bool
   else
     if node.op == "&" or node.op == "|" then
       report.error(node.rhs, "operator " .. tostring(node.op) ..

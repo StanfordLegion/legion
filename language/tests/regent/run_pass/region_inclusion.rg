@@ -16,14 +16,14 @@ import "regent"
 
 task main()
   var r = region(ispace(ptr, 5), int)
-  var x = null(ptr(int, r))
-  regentlib.assert(isnull(x), "test failed")
 
-  var is = ispace(ptr, 5)
-  var y = null(ptr(is))
-  regentlib.assert(isnull(y), "test failed")
+  for i = 0, 5 do
+    regentlib.assert([ptr](i) <= r, "test failed")
+  end
 
-  var z = null(&int)
-  regentlib.assert(isnull(z), "test failed")
+  for i = 5, 10 do
+    regentlib.assert(not ([ptr](i) <= r), "test failed")
+  end
 end
+
 regentlib.start(main)

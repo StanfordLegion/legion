@@ -14,11 +14,6 @@
 
 import "regent"
 
--- FIXME: Currently failing in runtime crash.
-
--- runs-with:
--- []
-
 -- Tests privilege and coherence aggregation.
 
 struct t {
