@@ -195,12 +195,14 @@ where
 do
   var node_is = nodes.ispace
   var edge_is = edges.ispace
+  var node_lo = node_is.bounds.lo
+  var edge_lo = edge_is.bounds.lo
   for n in node_is do
     var left = 0
-    if n > node_is.bounds.lo then
+    if n > node_lo then
       left = nodes[n-1].index
     else
-      left = edge_is.bounds.lo
+      left = edge_lo
     end
     var right = nodes[n].index
     var score = 0.0f
