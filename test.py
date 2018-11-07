@@ -286,12 +286,12 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
     # TaskAMR
     # Contact: Jonathan Graham <jgraham@lanl.gov>
-    #task_amr_dir = os.path.join(tmp_dir, 'task_amr')
-    #cmd(['git', 'clone', 'https://github.com/lanl/TaskAMR.git', task_amr_dir])
-    #task_amr_env = dict(list(env.items()) + [
-    #    ('LEGION_ROOT', root_dir),
-    #])
-    #cmd(['make', '-C', os.path.join(task_amr_dir)], env=task_amr_env)
+    task_amr_dir = os.path.join(tmp_dir, 'task_amr')
+    cmd(['git', 'clone', 'https://github.com/lanl/TaskAMR.git', task_amr_dir])
+    task_amr_env = dict(list(env.items()) + [
+        ('LEGION_ROOT', root_dir),
+    ])
+    cmd(['make', '-C', os.path.join(task_amr_dir)], env=task_amr_env)
 
     # Barnes-Hut
     # Contact: Haithem Turki <turki.haithem@gmail.com>
