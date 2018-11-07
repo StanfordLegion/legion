@@ -130,10 +130,6 @@ namespace Legion {
                                         Mapper::CopyProfilingInfo *input,
                                         MappingCallInfo *info = NULL);
     public: // Close mapper calls
-      void invoke_map_close(CloseOp *op,
-                            Mapper::MapCloseInput *input,
-                            Mapper::MapCloseOutput *output,
-                            MappingCallInfo *info = NULL);
       void invoke_select_close_sources(CloseOp *op,
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,

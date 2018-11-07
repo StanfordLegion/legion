@@ -283,13 +283,10 @@ namespace Legion {
       // Logical analysis methods
       void perform_dependence_analysis(Operation *op, unsigned idx,
                                        RegionRequirement &req,
-                                       RestrictInfo &restrict_info,
-                                       VersionInfo &version_info,
-                                       ProjectionInfo &projection_info,
+                                       const ProjectionInfo &projection_info,
                                        RegionTreePath &path);
       void perform_deletion_analysis(DeletionOp *op, unsigned idx,
                                      RegionRequirement &req,
-                                     RestrictInfo &restrict_info,
                                      RegionTreePath &path);
       // Used by dependent partition operations
       void find_open_complete_partitions(Operation *op, unsigned idx,
@@ -303,118 +300,36 @@ namespace Legion {
     public:
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
-                                       const RegionTreePath &path,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       bool partial_traversal = false,
-                                       bool disjoint_close = false,
-                                       FieldMask *filter_mask = NULL,
-                                       RegionTreeNode *parent_node = NULL,
-              // For computing split masks for projection epochs only
-                                       UniqueID logical_context_uid = 0,
-              const LegionMap<ProjectionEpochID,
-                              FieldMask>::aligned *advance_epochs = NULL,
-                                       bool skip_parent_check = false);
-      void advance_version_numbers(Operation *op, unsigned idx,
-                                   bool update_parent_state,
-                                   bool parent_is_upper_bound,
-                                   UniqueID logical_ctx_uid,
-                                   bool dedup_opens, bool dedup_advances, 
-                                   ProjectionEpochID open_epoch,
-                                   ProjectionEpochID advance_epoch,
-                                   RegionTreeNode *parent, 
-                                   const RegionTreePath &path,
-                                   const FieldMask &advance_mask,
-             const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                   std::set<RtEvent> &ready_events);
+                                       bool defer_make_ready = false,
+                                       FieldMask *defer_mask = NULL);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
       void initialize_current_context(RegionTreeContext ctx,
-                    const RegionRequirement &req, const InstanceSet &source,
-                    ApEvent term_event, InnerContext *context, unsigned index,
+                    const RegionRequirement &req, const bool restricted,
+                    const InstanceSet &sources, ApEvent term_event, 
+                    InnerContext *context, unsigned index,
                     std::map<PhysicalManager*,InstanceView*> &top_views,
                     std::set<RtEvent> &applied_events);
-      void initialize_virtual_context(RegionTreeContext ctx,
-                                      const RegionRequirement &req);
       void invalidate_current_context(RegionTreeContext ctx, bool users_only,
                                       LogicalRegion handle);
       bool match_instance_fields(const RegionRequirement &req1,
                                  const RegionRequirement &req2,
                                  const InstanceSet &inst1,
                                  const InstanceSet &inst2);
-    public:
-      Restriction* create_coherence_restriction(const RegionRequirement &req,
-                                                const InstanceSet &instances);
-      bool add_acquisition(const std::list<Restriction*> &restrictions,
-                           AcquireOp *op, const RegionRequirement &req);
-      bool remove_acquisition(const std::list<Restriction*> &restrictions,
-                              ReleaseOp *op, const RegionRequirement &req);
-      void add_restriction(std::list<Restriction*> &restrictions, AttachOp *op,
-                           InstanceManager *inst, const RegionRequirement &req);
-      bool remove_restriction(std::list<Restriction*> &restrictions,
-                              DetachOp *op, const RegionRequirement &req);
-      void perform_restricted_analysis(
-                              const std::list<Restriction*> &restrictions,
-                              const RegionRequirement &req, 
-                              RestrictInfo &restrict_info);
     public: // Physical analysis methods
       void physical_premap_only(Operation *op, unsigned index,
-                                const RegionRequirement &req,
+                                RegionRequirement &req,
                                 VersionInfo &version_info,
                                 InstanceSet &valid_instances);
-      void physical_register_only(const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  RestrictInfo &restrict_info,
-                                  Operation *op, unsigned index,
-                                  ApEvent term_event,
-                                  bool defer_add_users,
-                                  bool need_read_only_reservations,
-                                  std::set<RtEvent> &map_applied,
-                                  InstanceSet &targets,
-                                  const ProjectionInfo *proj_info,
-                                  const PhysicalTraceInfo &trace_info
-#ifdef DEBUG_LEGION
-                                 , const char *log_name
-                                 , UniqueID uid
-#endif
-                                 );
-      // For when we deferred registration of users
-      void physical_register_users(Operation *op, ApEvent term_event,
-                   const std::vector<RegionRequirement> &regions,
-                   const std::vector<bool> &to_skip,
-                   std::vector<VersionInfo> &version_infos,
-                   std::vector<RestrictInfo> &restrict_infos,
-                   std::deque<InstanceSet> &targets,
-                   std::set<RtEvent> &map_applied_events,
-                   const PhysicalTraceInfo &trace_info);
-      void physical_perform_close(const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op, unsigned index,
-                                  RegionTreeNode *close_node,
-                                  const FieldMask &closing_mask,
-                                  const FieldMask &complete_mask,
-                                  WriteSet &partial_writes,
-                                  std::set<RtEvent> &map_applied,
-                                  const RestrictInfo &restrict_info,
-                                  const InstanceSet &targets,
-                                  // projection_info can be NULL
-                                  const ProjectionInfo *projection_info,
-                                  const PhysicalTraceInfo &trace_info
-#ifdef DEBUG_LEGION
-                                  , const char *log_name
-                                  , UniqueID uid
-#endif
-                                  );
-      void physical_disjoint_close(InterCloseOp *op, unsigned index, 
-                                   RegionTreeNode *close_node,
-                                   const FieldMask &closing_mask,
-                                   VersionInfo &version_info);
-      ApEvent physical_close_context(RegionTreeContext ctx,
-                                     const RegionRequirement &req,
+      // Return an event for when the copy-out effects of the 
+      // registration are done (e.g. for restricted coherence)
+      ApEvent physical_register_only(const RegionRequirement &req,
                                      VersionInfo &version_info,
                                      Operation *op, unsigned index,
-                                     std::set<RtEvent> &map_applied,
+                                     ApEvent precondition, ApEvent term_event,
                                      InstanceSet &targets,
                                      const PhysicalTraceInfo &trace_info
 #ifdef DEBUG_LEGION
@@ -422,24 +337,57 @@ namespace Legion {
                                      , UniqueID uid
 #endif
                                      );
+      void acquire_restrictions(const RegionRequirement &req,
+                                VersionInfo &version_info,
+                                Operation *op, unsigned index,
+                                ApEvent term_event,
+                                InstanceSet &restricted_instances,
+                                const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                , const char *log_name
+                                , UniqueID uid
+#endif
+                                );
+      void release_restrictions(const RegionRequirement &req,
+                                VersionInfo &version_info,
+                                Operation *op, unsigned index,
+                                ApEvent precondition, ApEvent term_event,
+                                InstanceSet &restricted_instances,
+                                const PhysicalTraceInfo &trace_info
+#ifdef DEBUG_LEGION
+                                , const char *log_name
+                                , UniqueID uid
+#endif
+                               );
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
-                                InstanceSet &src_targets, 
-                          const InstanceSet &dst_targets,
                           VersionInfo &src_version_info,
-                          VersionInfo &dst_version_info, 
-                          ApEvent term_event, Operation *op,
+                          VersionInfo &dst_version_info,
+                          const InstanceSet &src_targets,
+                          const InstanceSet &dst_targets, Operation *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
-                          std::set<RtEvent> &map_applied,
                           const PhysicalTraceInfo &trace_info);
-      ApEvent reduce_across(const RegionRequirement &src_req,
-                            const RegionRequirement &dst_req,
-                            const InstanceSet &src_targets,
-                            const InstanceSet &dst_targets,
-                            Operation *op, ApEvent precondition,
-                            PredEvent predication_guard,
-                            const PhysicalTraceInfo &trace_info);
+      // This takes ownership of the value buffer
+      ApEvent fill_fields(Operation *op,
+                          const RegionRequirement &req,
+                          const unsigned index,
+                          const void *value, size_t value_size,
+                          VersionInfo &version_info, ApEvent precondition,
+                          PredEvent true_guard,
+                          const PhysicalTraceInfo &trace_info);
+      InstanceRef create_external_instance(AttachOp *attach_op,
+                                const RegionRequirement &req,
+                                const std::vector<FieldID> &field_set);
+      ApEvent attach_external(AttachOp *attach_op, unsigned index,
+                              const RegionRequirement &req,
+                              const InstanceRef &ext_instance,
+                              VersionInfo &version_info,
+                              const PhysicalTraceInfo &trace_info);
+      ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
+                              unsigned index, VersionInfo &version_info, 
+                              const InstanceRef &ref,
+                              const PhysicalTraceInfo &trace_info); 
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -470,32 +418,6 @@ namespace Legion {
       bool are_colocated(const std::vector<InstanceSet*> &instances,
                          FieldSpace handle, const std::set<FieldID> &fields,
                          unsigned &idx1, unsigned &idx2);
-    public:
-      // This takes ownership of the value buffer
-      ApEvent fill_fields(Operation *op,
-                          const RegionRequirement &req,
-                          const unsigned index,
-                          const void *value, size_t value_size,
-                          VersionInfo &version_info,
-                          RestrictInfo &restrict_info,
-                          InstanceSet &instances, ApEvent precondition,
-                          std::set<RtEvent> &map_applied_events,
-                          PredEvent true_guard, PredEvent false_guard,
-                          const PhysicalTraceInfo &trace_info);
-      InstanceManager* create_external_instance(AttachOp *attach_op,
-                                const RegionRequirement &req,
-                                const std::vector<FieldID> &field_set);
-      InstanceRef attach_external(AttachOp *attach_op, unsigned index,
-                                  const RegionRequirement &req,
-                                  InstanceManager *ext_instance,
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events,
-                                  const PhysicalTraceInfo &trace_info);
-      ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
-                              unsigned index, VersionInfo &version_info, 
-                              const InstanceRef &ref, 
-                              std::set<RtEvent> &map_applied_events,
-                              const PhysicalTraceInfo &trace_info);
     public:
       // Debugging method for checking context state
       void check_context_state(RegionTreeContext ctx);
@@ -748,8 +670,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       // Should only be called on inherited types
       virtual void record_remote_instance(AddressSpaceID target) 
@@ -757,6 +681,29 @@ namespace Legion {
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition) = 0;
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold) = 0;
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
     public:
@@ -773,6 +720,39 @@ namespace Legion {
         }
         return empty;
       }
+      inline size_t get_num_dims(void) const
+        { return NT_TemplateHelper::get_dim(type_tag); }
+    protected:
+      template<int DIM, typename T>
+      inline ApEvent issue_fill_internal(RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition);
+      template<int DIM, typename T>
+      inline ApEvent issue_copy_internal(RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+      template<int DIM, typename T>
+      inline Realm::InstanceLayoutGeneric* create_layout_internal(
+                                    const Realm::IndexSpace<DIM,T> &space,
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint) const;
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
@@ -783,6 +763,8 @@ namespace Legion {
       LocalLock &expr_lock;
     protected:
       std::set<IndexSpaceOperation*> parent_operations;
+      size_t volume;
+      bool has_volume;
       bool empty, has_empty;
     };
 
@@ -809,8 +791,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual void record_remote_instance(AddressSpaceID target);
       virtual void add_expression_reference(void);
@@ -846,8 +830,10 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
+      virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
@@ -868,11 +854,36 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       ApEvent get_realm_index_space(Realm::IndexSpace<DIM,T> &space,
                                     bool need_tight_result);
@@ -900,34 +911,32 @@ namespace Legion {
 
     class OperationCreator {
     public:
-      virtual ~OperationCreator(void) { }
+      OperationCreator(void);
+      virtual ~OperationCreator(void); 
     public:
-      virtual IndexSpaceOperation* create(void) = 0;
+      void produce(IndexSpaceOperation *op);
+      IndexSpaceOperation* consume(void);
+    private:
+      IndexSpaceOperation *result;
     };
 
     class UnionOpCreator : public OperationCreator {
     public:
       UnionOpCreator(RegionTreeForest *f, TypeTag t,
                      const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), exprs(e) 
+        { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(UnionOpCreator *creator)
       {
-        creator->result = new IndexSpaceUnion<N::N,T>(creator->exprs,
-            creator->forest);
+        creator->produce(new IndexSpaceUnion<N::N,T>(creator->exprs,
+                                                     creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
@@ -949,25 +958,19 @@ namespace Legion {
     public:
       IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
                             const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), exprs(e) 
+        { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(IntersectionOpCreator *creator)
       {
-        creator->result = new IndexSpaceIntersection<N::N,T>(creator->exprs,
-            creator->forest);
+        creator->produce(new IndexSpaceIntersection<N::N,T>(creator->exprs,
+                                                            creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       const std::vector<IndexSpaceExpression*> &exprs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
@@ -990,26 +993,20 @@ namespace Legion {
     public:
       DifferenceOpCreator(RegionTreeForest *f, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), type_tag(t), lhs(l), rhs(r) { }
-    public:
-      virtual IndexSpaceOperation* create(void)
-      {
-        NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this);
-        return result;
-      }
+        : forest(f), type_tag(t), lhs(l), rhs(r) 
+        { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
     public:
       template<typename N, typename T>
       static inline void demux(DifferenceOpCreator *creator)
       {
-        creator->result = new IndexSpaceDifference<N::N,T>(creator->lhs,
-            creator->rhs, creator->forest);
+        creator->produce(new IndexSpaceDifference<N::N,T>(creator->lhs,
+                                          creator->rhs, creator->forest));
       }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
-      IndexSpaceOperation *result;
     };
 
     template<int DIM, typename T>
@@ -1024,10 +1021,35 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result);
+      virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;
@@ -1071,10 +1093,35 @@ namespace Legion {
     public:
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
                                            bool need_tight_result);
+      virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
+      virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       void set_result(IndexSpaceExpression *result);
     public:
@@ -1166,7 +1213,7 @@ namespace Legion {
       NodeSet child_creation;
       bool destroyed;
     protected:
-      LocalLock &node_lock;
+      mutable LocalLock node_lock;
     protected:
       std::map<IndexTreeNode*,bool> dominators;
     protected:
@@ -1235,6 +1282,17 @@ namespace Legion {
         Runtime *const runtime;
         const AddressSpaceID source;
         Serializer &rez;
+      };
+      class DestroyNodeFunctor {
+      public:
+        DestroyNodeFunctor(IndexSpace h, AddressSpaceID src, Runtime *rt)
+          : handle(h), source(src), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        const IndexSpace handle;
+        const AddressSpaceID source;
+        Runtime *const runtime;
       };
       class DestructionFunctor {
       public:
@@ -1325,6 +1383,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result) = 0;
+      virtual Domain get_domain(ApEvent &ready, bool need_tight) = 0;
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
@@ -1422,27 +1481,6 @@ namespace Legion {
                                       ApEvent instances_ready) = 0;
       virtual bool check_field_size(size_t field_size, bool range) = 0;
     public:
-      virtual ApEvent issue_copy(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &src_fields,
-              const std::vector<CopySrcDstField> &dst_fields,
-              ApEvent precondition, PredEvent predicate_guard,
-              IndexTreeNode *intersect, IndexSpaceExpression *mask,
-              ReductionOpID redop = 0, bool reduction_fold = true,
-              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
-      virtual ApEvent issue_fill(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &dst_fields,
-              const void *fill_value, size_t fill_size,
-              ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-              UniqueID fill_uid,
-#endif
-              IndexTreeNode *intersect = NULL,
-              IndexSpaceExpression *mask = NULL,
-              WriteSet *perf = NULL,const FieldMask *performed_mask = NULL) = 0;
-    public:
-      virtual Realm::InstanceLayoutGeneric* create_layout(
-                           const Realm::InstanceLayoutConstraints &ilc,
-                           const OrderingConstraint &constraint) = 0;
       virtual PhysicalInstance create_file_instance(const char *file_name,
 				   const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1507,6 +1545,7 @@ namespace Legion {
       // From IndexSpaceExpression
       virtual ApEvent get_expr_index_space(void *result, TypeTag tag,
                                            bool need_tight_result);
+      virtual Domain get_domain(ApEvent &ready, bool need_tight);
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
@@ -1634,27 +1673,6 @@ namespace Legion {
                                       ApEvent instances_ready);
       virtual bool check_field_size(size_t field_size, bool range);
     public:
-      virtual ApEvent issue_copy(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &src_fields,
-              const std::vector<CopySrcDstField> &dst_fields,
-              ApEvent precondition, PredEvent predicate_guard,
-              IndexTreeNode *intersect, IndexSpaceExpression *mask,
-              ReductionOpID redop = 0, bool reduction_fold = true,
-              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
-      virtual ApEvent issue_fill(const PhysicalTraceInfo *info,RegionNode *node,
-              const std::vector<CopySrcDstField> &dst_fields,
-              const void *fill_value, size_t fill_size,
-              ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-              UniqueID fill_uid,
-#endif
-              IndexTreeNode *intersect = NULL,
-              IndexSpaceExpression *mask = NULL,
-              WriteSet *perf = NULL, const FieldMask *performed_mask = NULL);
-    public:
-      virtual Realm::InstanceLayoutGeneric* create_layout(
-                           const Realm::InstanceLayoutConstraints &ilc,
-                           const OrderingConstraint &constraint);
       virtual PhysicalInstance create_file_instance(const char *file_name,
                                    const std::vector<Realm::FieldID> &field_ids,
                                    const std::vector<size_t> &field_sizes,
@@ -1668,6 +1686,29 @@ namespace Legion {
       virtual PhysicalInstance create_external_instance(Memory memory,
                              uintptr_t base, Realm::InstanceLayoutGeneric *ilg,
                              ApEvent &ready_event);
+    public:
+      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition);
+      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold);
+      virtual Realm::InstanceLayoutGeneric*
+                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
+                                 const OrderingConstraint &constraint);
     public:
       virtual void get_launch_space_domain(Domain &launch_domain);
       virtual void validate_slicing(const std::vector<IndexSpace> &slice_spaces,
@@ -2314,7 +2355,7 @@ namespace Legion {
                                 std::vector<CustomSerdezID> &serdez,
                                 FieldMask &instance_mask);
     public:
-      InstanceManager* create_external_instance(
+      InstanceRef create_external_instance(
             const std::vector<FieldID> &fields, RegionNode *node, AttachOp *op);
     public:
       LayoutDescription* find_layout_description(const FieldMask &field_mask,
@@ -2379,7 +2420,7 @@ namespace Legion {
       const FieldSpace handle;
       RegionTreeForest *const context;
     private:
-      LocalLock &node_lock;
+      mutable LocalLock node_lock;
       // Top nodes in the trees for which this field space is used
       std::set<LogicalRegion> logical_trees;
       std::set<RegionNode*> local_trees;
@@ -2422,15 +2463,6 @@ namespace Legion {
     public:
       static AddressSpaceID get_owner_space(RegionTreeID tid, Runtime *rt);
     public:
-      inline PhysicalState* get_physical_state(VersionInfo &info)
-      {
-        // First check to see if the version info already has a state
-        PhysicalState *result = info.find_physical_state(this);  
-#ifdef DEBUG_LEGION
-        assert(result != NULL);
-#endif
-        return result;
-      }
       inline LogicalState& get_logical_state(ContextID ctx)
       {
         return *(logical_states.lookup_entry(ctx, this, ctx));
@@ -2447,26 +2479,6 @@ namespace Legion {
       {
         return current_versions.lookup_entry(ctx, this, ctx);
       }
-      // Trampolines for copies and fills
-      inline ApEvent issue_copy(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop = 0, bool reduction_fold = true,
-                  WriteSet *performed = NULL,
-                  const FieldMask *performed_mask = NULL);
-      inline ApEvent issue_fill(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-                  UniqueID fill_uid,
-#endif
-                  RegionTreeNode *intersect = NULL,
-                  IndexSpaceExpression *mask = NULL,
-                  WriteSet *performed = NULL,
-                  const FieldMask *performed_mask = NULL);
     public:
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
                             const void *buffer, size_t size, bool is_mutable);
@@ -2479,49 +2491,23 @@ namespace Legion {
                          RtUserEvent ready = RtUserEvent::NO_RT_USER_EVENT) = 0;
     public:
       // Logical traversal operations
-      void initialize_logical_state(ContextID ctx,
-                                    const FieldMask &init_dirty_mask);
       void register_logical_user(ContextID ctx,
                                  const LogicalUser &user,
                                  RegionTreePath &path,
                                  const LogicalTraceInfo &trace_info,
-                                 VersionInfo &version_info,
-                                 ProjectionInfo &projection_info,
-                                 FieldMask &unopened_field_mask,
-                     LegionMap<AdvanceOp*,LogicalUser>::aligned &advances);
-      void create_logical_open(ContextID ctx,
-                               const FieldMask &open_mask,
-                               const LogicalUser &creator,
-                               const RegionTreePath &path,
-                               const LogicalTraceInfo &trace_info);
-      void create_logical_advance(ContextID ctx, LogicalState &state,
-                                  const FieldMask &advance_mask,
-                                  const LogicalUser &creator,
-                                  const LogicalTraceInfo &trace_info,
-                    LegionMap<AdvanceOp*,LogicalUser>::aligned &advances,
-                                  bool parent_is_upper_bound,
-                                  const LegionColor next_child);
+                                 const ProjectionInfo &projection_info,
+                                 FieldMask &unopened_field_mask);
       void register_local_user(LogicalState &state,
                                const LogicalUser &user,
                                const LogicalTraceInfo &trace_info);
       void add_open_field_state(LogicalState &state, bool arrived,
-                                ProjectionInfo &projection_info,
+                                const ProjectionInfo &projection_info,
                                 const LogicalUser &user,
                                 const FieldMask &open_mask,
                                 const LegionColor next_child);
-      void traverse_advance_analysis(ContextID ctx, AdvanceOp *advance,
-                                     const LogicalUser &advance_user,
-                                     const LogicalUser &create_user);
-      void perform_advance_analysis(ContextID ctx, LogicalState &state, 
-                                    AdvanceOp *advance,
-                                    const LogicalUser &advance_user,
-                                    const LogicalUser &create_user,
-                                    const LegionColor next_child,
-                                    const bool already_traced,
-                                    const bool advance_root = true);
       void close_logical_node(LogicalCloser &closer,
                               const FieldMask &closing_mask,
-                              bool read_only_close);
+                              const bool read_only_close);
       void siphon_logical_children(LogicalCloser &closer,
                                    LogicalState &state,
                                    const FieldMask &closing_mask,
@@ -2532,7 +2518,7 @@ namespace Legion {
       void siphon_logical_projection(LogicalCloser &closer,
                                      LogicalState &state,
                                      const FieldMask &closing_mask,
-                                     ProjectionInfo &proj_info,
+                                     const ProjectionInfo &proj_info,
                                      bool record_close_operations,
                                      FieldMask &open_below);
       void flush_logical_reductions(LogicalCloser &closer,
@@ -2562,6 +2548,7 @@ namespace Legion {
       void filter_prev_epoch_users(LogicalState &state, const FieldMask &mask);
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
+                                      const RegionUsage usage,
                                       const FieldMask &uninitialized);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
@@ -2575,8 +2562,6 @@ namespace Legion {
                                      const LogicalUser &user,
                                      const FieldMask &check_mask,
                                      RegionTreePath &path,
-                                     RestrictInfo &restrict_info,
-                                     VersionInfo &version_info,
                                      const LogicalTraceInfo &trace_info);
       void siphon_logical_deletion(LogicalCloser &closer,
                                    LogicalState &state,
@@ -2590,33 +2575,7 @@ namespace Legion {
       void process_logical_state_return(ContextID ctx, Deserializer &derez,
                                         AddressSpaceID source);
       static void handle_logical_state_return(Runtime *runtime,
-                              Deserializer &derez, AddressSpaceID source);
-    public:
-      void compute_version_numbers(ContextID ctx, 
-                                   const RegionTreePath &path,
-                                   const RegionUsage &usage,
-                                   const FieldMask &version_mask,
-                                   FieldMask &unversioned_mask,
-                                   Operation *op, unsigned idx,
-                                   InnerContext *parent_ctx,
-                                   VersionInfo &version_info,
-                                   std::set<RtEvent> &ready_events,
-                                   bool partial_traversal,
-                                   bool disjoint_close,
-                                   UniqueID logical_context_uid,
-        const LegionMap<ProjectionEpochID,FieldMask>::aligned *advance_epochs);
-      void advance_version_numbers(ContextID ctx,
-                                   const RegionTreePath &path,
-                                   const FieldMask &advance_mask,
-                                   InnerContext *parent_ctx,
-                                   bool update_parent_state,
-                                   bool skip_update_parent,
-                                   UniqueID logical_context_uid,
-                                   bool dedup_opens, bool dedup_advances, 
-                                   ProjectionEpochID open_epoch,
-                                   ProjectionEpochID advance_epoch,
-            const LegionMap<unsigned,FieldMask>::aligned &dirty_previous,
-                                   std::set<RtEvent> &ready_events);
+                              Deserializer &derez, AddressSpaceID source); 
     public:
       void initialize_current_state(ContextID ctx);
       void invalidate_current_state(ContextID ctx, bool users_only);
@@ -2624,160 +2583,6 @@ namespace Legion {
                                     const FieldMask &deleted_mask);
       bool invalidate_version_state(ContextID ctx);
       void invalidate_version_managers(void);
-    public:
-      // Physical traversal operations
-      CompositeView* create_composite_instance(ContextID ctx_id,
-                                     const FieldMask &closing_mask,
-                                     VersionInfo &version_info,
-                                     UniqueID logical_context_uid,
-                                     InnerContext *owner_context,
-                                     const FieldMask &complete_mask,
-                                     WriteSet &partial_writes,
-                                     std::set<RtEvent> &ready_events,
-                                     const ProjectionInfo *proj_info);
-      // This method will always add valid references to the set of views
-      // that are returned.  It is up to the caller to remove the references.
-      void find_valid_instance_views(ContextID ctx,
-                                     PhysicalState *state,
-                                     const FieldMask &valid_mask,
-                                     const FieldMask &space_mask, 
-                                     VersionInfo &version_info,
-                                     bool needs_space,
-                 LegionMap<LogicalView*,FieldMask>::aligned &valid_views);
-      void find_valid_reduction_views(ContextID ctx, PhysicalState *state, 
-                                      ReductionOpID redop,
-                                      const FieldMask &valid_mask,
-                                      VersionInfo &version_info,
-                                      std::set<ReductionView*> &valid_views);
-      void pull_valid_instance_views(ContextID ctx, PhysicalState *state,
-                                     const FieldMask &mask, bool needs_space,
-                                     VersionInfo &version_info);
-      void find_copy_across_instances(const TraversalInfo &info,
-                                      MaterializedView *target,
-                 LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-               LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
-      // Since figuring out how to issue copies is expensive, try not
-      // to hold the physical state lock when doing them. NOTE IT IS UNSOUND
-      // TO CALL THIS METHOD WITH A SET OF VALID INSTANCES ACQUIRED BY PASSING
-      // 'TRUE' TO THE find_valid_instance_views METHOD!!!!!!!!
-      void issue_update_copies(const TraversalInfo &info,
-                               MaterializedView *target, 
-                               FieldMask copy_mask,
-            const LegionMap<LogicalView*,FieldMask>::aligned &valid_instances,
-                               const RestrictInfo &restrict_info,
-                               bool restrict_out = false);
-      void sort_copy_instances(const TraversalInfo &info,
-                               MaterializedView *target,
-                               FieldMask &copy_mask,
-               const LegionMap<LogicalView*,FieldMask>::aligned &copy_instances,
-                 LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-               LegionMap<DeferredView*,FieldMask>::aligned &deferred_instances);
-      bool sort_copy_instances_single(const TraversalInfo &info,
-                                      MaterializedView *target,
-                                      const FieldMask &copy_mask,
-                              const std::vector<LogicalView*> &copy_instances,
-                                      MaterializedView *&src_instance,
-                                      DeferredView *&deferred_instance);
-      // Issue copies for fields with the same event preconditions and masks
-      void issue_grouped_copies(const TraversalInfo &info,
-                                MaterializedView *dst, bool restrict_out,
-                                PredEvent predicate_guard,
-                      LegionMap<ApEvent,FieldMask>::aligned &preconditions,
-                                const FieldMask &update_mask,
-           const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                                VersionTracker *version_tracker,
-                      LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                                CopyAcrossHelper *across_helper = NULL,
-                                RegionTreeNode *intersect = NULL,
-                                const WriteMasks *masks = NULL,
-                                WriteSet *perf = NULL);
-      // Helper method for the above to issue copies with a mask
-      void issue_masked_copy(const TraversalInfo &info, 
-                             const FieldMask &copy_mask,
-                             MaterializedView *dst, bool restrict_out,
-                             PredEvent predicate_guard, ApEvent copy_pre,
-            const LegionMap<MaterializedView*,FieldMask>::aligned &src_instances,
-                             VersionTracker *version_tracker,
-                  LegionMap<ApEvent,FieldMask>::aligned &postconditions,
-                             CopyAcrossHelper *across_helper,
-                             RegionTreeNode *intersect,
-                             IndexSpaceExpression* mask,
-                             WriteSet *performed);
-      ApEvent issue_single_copy(const TraversalInfo &info,
-                                MaterializedView *dst, bool restrict_out,
-                                PredEvent predicate_guard, ApEvent copy_pre,
-                                const FieldMask &copy_mask,
-                                MaterializedView *src,
-                                VersionTracker *version_tracker,
-                                CopyAcrossHelper *across_helper,
-                                RegionTreeNode *intersect,
-                                IndexSpaceExpression *mask);
-      void issue_update_reductions(LogicalView *target,
-                                   const FieldMask &update_mask,
-                                   VersionInfo &version_info,
-          const LegionMap<ReductionView*,FieldMask>::aligned &valid_reductions,
-                                   Operation *op, unsigned index,
-                                   std::set<RtEvent> &map_applied_events,
-                                   const PhysicalTraceInfo &trace_info,
-                                   bool restrict_out = false);
-      void invalidate_instance_views(PhysicalState *state,
-                                     const FieldMask &invalid_mask); 
-      void invalidate_reduction_views(PhysicalState *state,
-                                      const FieldMask &invalid_mask);
-      // Helper methods for doing copy/reduce-out for restricted coherence
-      void issue_restricted_copies(const TraversalInfo &info,
-         const RestrictInfo &restrict_info, 
-         const InstanceSet &restricted_instances,
-         const std::vector<MaterializedView*> &restricted_views,
-         const LegionMap<LogicalView*,FieldMask>::aligned &copy_out_views);
-      void issue_restricted_reductions(const TraversalInfo &info,
-         const RestrictInfo &restrict_info,
-         const InstanceSet &restricted_instances,
-         const std::vector<InstanceView*> &restricted_views,
-         const LegionMap<ReductionView*,FieldMask>::aligned &reduce_out_views);
-      // Look for a view to remove from the set of valid views
-      void filter_valid_views(PhysicalState *state, LogicalView *to_filter);
-      void update_valid_views(PhysicalState *state, const FieldMask &valid_mask,
-                              bool dirty, LogicalView *new_view);
-      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
-                              const std::vector<LogicalView*> &new_views,
-                              const InstanceSet &corresponding_references);
-      // I hate the container problem, same as previous except InstanceView 
-      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
-                              const std::vector<InstanceView*> &new_views,
-                              const InstanceSet &corresponding_references);
-      // More containter problems, we could use templates but whatever
-      void update_valid_views(PhysicalState *state, const FieldMask &dirty_mask,
-                              const std::vector<MaterializedView*> &new_views,
-                              const InstanceSet &corresponding_references);
-      void update_reduction_views(PhysicalState *state, 
-                                  const FieldMask &valid_mask,
-                                  ReductionView *new_view);
-    public: // Help for physical analysis
-      void find_complete_fields(const FieldMask &scope_fields,
-          const LegionMap<LegionColor,FieldMask>::aligned &children,
-          FieldMask &complete_fields);
-      InstanceView* convert_manager(PhysicalManager *manager,InnerContext *ctx);
-      InstanceView* convert_reference(const InstanceRef &ref,InnerContext *ctx);
-      void convert_target_views(const InstanceSet &targets, 
-          InnerContext *context, std::vector<InstanceView*> &target_views);
-      // I hate the container problem, same as previous except MaterializedView
-      void convert_target_views(const InstanceSet &targets, 
-          InnerContext *context, std::vector<MaterializedView*> &target_views);
-    public:
-      bool register_instance_view(PhysicalManager *manager, 
-                                  UniqueID context_uid, InstanceView *view);
-      void unregister_instance_view(PhysicalManager *manager, 
-                                    UniqueID context_uid);
-      InstanceView* find_instance_view(PhysicalManager *manager,
-                                       InnerContext *context);
-    public:
-      bool register_physical_manager(PhysicalManager *manager);
-      void unregister_physical_manager(PhysicalManager *manager);
-      PhysicalManager* find_manager(DistributedID did);
-    public:
-      void register_tracking_context(InnerContext *context);
-      void unregister_tracking_context(InnerContext *context);
     public:
       virtual unsigned get_depth(void) const = 0;
       virtual LegionColor get_color(void) const = 0;
@@ -2808,8 +2613,6 @@ namespace Legion {
     public:
       virtual size_t get_num_children(void) const = 0;
       virtual void send_node(AddressSpaceID target) = 0;
-      virtual InstanceView* find_context_view(PhysicalManager *manager, 
-                                              InnerContext *context) = 0;
       virtual void print_logical_context(ContextID ctx, 
                                          TreeStateLogger *logger,
                                          const FieldMask &mask) = 0;
@@ -2837,7 +2640,7 @@ namespace Legion {
           bool validates_regions, Operation *to_skip = NULL, 
           GenerationID skip_gen = 0);
       template<AllocationType ALLOC>
-      static void perform_closing_checks(LogicalCloser &closer, bool read_only,
+      static void perform_closing_checks(LogicalCloser &closer,
           typename LegionList<LogicalUser, ALLOC>::track_aligned &users, 
           const FieldMask &check_mask);
     public:
@@ -2858,19 +2661,7 @@ namespace Legion {
       DynamicTable<LogicalStateAllocator> logical_states;
       DynamicTable<VersionManagerAllocator> current_versions;
     protected:
-      LocalLock &node_lock;
-      // While logical states and version managers have dense keys
-      // within a node, distributed IDs don't so we use a map that
-      // should rarely need to be accessed for tracking views
-      // The distributed IDs here correspond to the Instance Manager
-      // distributed ID.
-      LegionMap<std::pair<PhysicalManager*,UniqueID>,InstanceView*,
-                LOGICAL_VIEW_ALLOC>::tracked instance_views;
-      LegionMap<DistributedID,PhysicalManager*,
-                PHYSICAL_MANAGER_ALLOC>::tracked physical_managers;
-      // Also need to track any contexts that are tracking this
-      // region tree node in case we get deleted during execution
-      std::set<InnerContext*> tracking_contexts;
+      mutable LocalLock node_lock;
     protected:
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
     };
@@ -2993,76 +2784,14 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
+      void perform_versioning_analysis(ContextID ctx,
+                                       InnerContext *parent_ctx,
+                                       VersionInfo *version_info,
+                                       LogicalRegion upper_bound);
+    public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
                     std::vector<LogicalPartition> &partitions);
-    public:
-      void premap_region(ContextID ctx, 
-                         const RegionRequirement &req,
-                         const FieldMask &valid_mask,
-                         VersionInfo &version_info,
-                         InstanceSet &targets);
-      void register_region(const TraversalInfo &info, UniqueID logical_ctx_uid,
-                           InnerContext *context, RestrictInfo &restrict_info, 
-                           ApEvent term_event, const RegionUsage &usage, 
-                           bool defer_add_users, InstanceSet &targets,
-                           const ProjectionInfo *proj_info);
-      void seed_state(ContextID ctx, ApEvent term_event,
-                             const RegionUsage &usage,
-                             const FieldMask &user_mask,
-                             const InstanceSet &targets,
-                             InnerContext *context, unsigned init_index,
-                             const std::vector<LogicalView*> &corresponding,
-                             std::set<RtEvent> &applied_events);
-      void close_state(const TraversalInfo &info, RegionUsage &usage, 
-                       UniqueID logical_context_uid, InnerContext *context, 
-                       InstanceSet &targets);
-      void fill_fields(ContextID ctx, const FieldMask &fill_mask,
-                       const void *value, size_t value_size, 
-                       UniqueID logical_ctx_uid, InnerContext *context, 
-                       VersionInfo &version_info,
-                       std::set<RtEvent> &map_applied_events,
-                       PredEvent true_guard, PredEvent false_guard,
-                       const PhysicalTraceInfo &trace_info
-#ifdef LEGION_SPY
-                       , UniqueID fill_op_uid
-#endif
-                       );
-      ApEvent eager_fill_fields(ContextID ctx, Operation *op,
-                              const unsigned index, 
-                              UniqueID logical_ctx_uid, InnerContext *context,
-                              const FieldMask &fill_mask,
-                              const void *value, size_t value_size,
-                              VersionInfo &version_info, InstanceSet &instances,
-                              ApEvent precondition, PredEvent true_guard,
-                              std::set<RtEvent> &map_applied_events,
-                              const PhysicalTraceInfo &trace_info);
-      InstanceRef attach_external(ContextID ctx, AttachOp *attach_op,
-                                  unsigned index, InnerContext *parent_ctx,
-                                  const UniqueID logical_ctx_uid,
-                                  const FieldMask &attach_mask,
-                                  const RegionRequirement &req, 
-                                  InstanceManager *manager, 
-                                  VersionInfo &version_info,
-                                  std::set<RtEvent> &map_applied_events,
-                                  const PhysicalTraceInfo &trace_info);
-      ApEvent detach_external(ContextID ctx, DetachOp *detach_op,
-                              unsigned index, InnerContext *context, 
-                              const UniqueID logical_ctx_uid,
-                              const RegionRequirement &req,
-                              VersionInfo &version_info, 
-                              const InstanceRef &ref,
-                              std::set<RtEvent> &map_applied_events,
-                              const PhysicalTraceInfo &trace_info);
-    public:
-      virtual InstanceView* find_context_view(PhysicalManager *manager,
-                                              InnerContext *context);
-      InstanceView* convert_reference_region(PhysicalManager *manager, 
-                                             InnerContext *context);
-      void convert_references_region(
-                              const std::vector<PhysicalManager*> &managers,
-                              std::vector<bool> &up_mask, InnerContext *context,
-                              std::vector<InstanceView*> &results);
     public:
       const LogicalRegion handle;
       PartitionNode *const parent;
@@ -3148,20 +2877,6 @@ namespace Legion {
       virtual size_t get_num_children(void) const;
       virtual void send_node(AddressSpaceID target);
     public:
-      virtual InstanceView* find_context_view(PhysicalManager *manager,
-                                              InnerContext *context);
-      InstanceView* convert_reference_partition(PhysicalManager *manager,
-                                                InnerContext *context);
-      void convert_references_partition(
-                                  const std::vector<PhysicalManager*> &managers,
-                                  std::vector<bool> &up_mask, 
-                                  InnerContext *context,
-                                  std::vector<InstanceView*> &results);
-    public:
-      void perform_disjoint_close(InterCloseOp *op, unsigned idx,
-              InnerContext *context, const FieldMask &closing_mask, 
-              VersionInfo &version_info);
-    public:
       virtual void send_semantic_request(AddressSpaceID target, 
            SemanticTag tag, bool can_fail, bool wait_until, RtUserEvent ready);
       virtual void send_semantic_info(AddressSpaceID target, SemanticTag tag,
@@ -3235,51 +2950,6 @@ namespace Legion {
       return static_cast<PartitionNode*>(const_cast<RegionTreeNode*>(this));
     }
 #endif
-
-    //--------------------------------------------------------------------------
-    inline ApEvent RegionTreeNode::issue_copy(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &src_fields,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  ApEvent precondition, PredEvent predicate_guard,
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  ReductionOpID redop, bool reduction_fold,
-                  WriteSet *performed, const FieldMask *performed_mask)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = is_region() ? 
-        as_region_node() : as_partition_node()->parent;
-      return node->row_source->issue_copy(info, node, src_fields, dst_fields,
-          precondition, predicate_guard, 
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, redop, reduction_fold, performed, performed_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    inline ApEvent RegionTreeNode::issue_fill(const PhysicalTraceInfo *info,
-                  const std::vector<CopySrcDstField> &dst_fields,
-                  const void *fill_value, size_t fill_size,
-                  ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-                  UniqueID fill_uid,
-#endif
-                  RegionTreeNode *intersect, IndexSpaceExpression *mask,
-                  WriteSet *performed, const FieldMask *performed_mask)
-    //--------------------------------------------------------------------------
-    {
-      RegionNode *node = is_region() ? 
-        as_region_node() : as_partition_node()->parent;
-#ifdef LEGION_SPY
-      return node->row_source->issue_fill(info, node, dst_fields, 
-          fill_value, fill_size, precondition, predicate_guard, fill_uid,
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, performed, performed_mask);
-#else
-      return node->row_source->issue_fill(info, node, dst_fields, 
-          fill_value, fill_size, precondition, predicate_guard,
-          (intersect == NULL) ? NULL : intersect->get_row_source(),
-          mask, performed, performed_mask);
-#endif
-    }
 
   }; // namespace Internal
 }; // namespace Legion

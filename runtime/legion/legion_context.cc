@@ -1883,16 +1883,6 @@ namespace Legion {
           std::pair<void*,void (*)(void*)>(const_cast<void*>(value),destructor);
     }
 
-#ifdef LEGION_SPY
-    //--------------------------------------------------------------------------
-    RtEvent TaskContext::update_previous_mapped_event(RtEvent next)
-    //--------------------------------------------------------------------------
-    {
-      RtEvent result = previous_mapped_event;
-      previous_mapped_event = next;
-      return result;
-    }
-#endif
     /////////////////////////////////////////////////////////////
     // Inner Context 
     /////////////////////////////////////////////////////////////
@@ -2013,13 +2003,24 @@ namespace Legion {
         }
       }
       // Unregister ourselves from any tracking contexts that we might have
-      if (!region_tree_owners.empty())
+      if (!tree_equivalence_sets.empty())
       {
-        for (std::map<RegionTreeNode*,
-                      std::pair<AddressSpaceID,bool> >::const_iterator it =
-              region_tree_owners.begin(); it != region_tree_owners.end(); it++)
-          it->first->unregister_tracking_context(this);
-        region_tree_owners.clear();
+        for (std::map<RegionTreeID,EquivalenceSet*>::const_iterator it = 
+              tree_equivalence_sets.begin(); it != 
+              tree_equivalence_sets.end(); it++)
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            delete it->second;
+        tree_equivalence_sets.clear();
+      }
+      if (!empty_equivalence_sets.empty())
+      {
+        for (std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
+                                EquivalenceSet*>::const_iterator it = 
+              empty_equivalence_sets.begin(); it != 
+              empty_equivalence_sets.end(); it++)
+          if (it->second->remove_base_resource_ref(CONTEXT_REF))
+            delete it->second;
+        empty_equivalence_sets.clear();
       }
 #ifdef DEBUG_LEGION
       assert(pending_top_views.empty());
@@ -2076,40 +2077,98 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID InnerContext::get_version_owner(RegionTreeNode *node,
-                                                   AddressSpaceID source)
+    RtEvent InnerContext::compute_equivalence_sets(VersionManager *manager,
+                              RegionTreeID tree_id, IndexSpace handle,
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      AutoLock tree_lock(tree_owner_lock); 
-      // See if we've already assigned it
-      std::map<RegionTreeNode*,std::pair<AddressSpaceID,bool> >::iterator
-        finder = region_tree_owners.find(node);
-      // If we already assigned it then we are done
-      if (finder != region_tree_owners.end())
-      {
-        // If it is remote only, see if it gets to stay that way
-        if (finder->second.second && (source == runtime->address_space))
-          finder->second.second = false; // no longer remote only
-        return finder->second.first;
-      }
-      // Otherwise assign it to the source
-      region_tree_owners[node] = 
-        std::pair<AddressSpaceID,bool>(source, 
-                                      (source != runtime->address_space));
-      node->register_tracking_context(this);
-      return source;
-    } 
-
-    //--------------------------------------------------------------------------
-    void InnerContext::notify_region_tree_node_deletion(RegionTreeNode *node)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock tree_lock(tree_owner_lock);
 #ifdef DEBUG_LEGION
-      assert(region_tree_owners.find(node) != region_tree_owners.end());
+      assert(handle.exists());
 #endif
-      region_tree_owners.erase(node);
-    }
+      EquivalenceSet *root = NULL;
+      if (expr->is_empty())
+      {
+        // Special case for empty expression
+        {
+          const std::pair<RegionTreeID,IndexSpaceExprID> 
+            key(tree_id, expr->expr_id);
+          AutoLock tree_lock(tree_set_lock);
+          // Check to see if we already have an empty equivalence set
+          // and if not make it
+          std::map<std::pair<RegionTreeID,IndexSpaceExprID>,
+                   EquivalenceSet*>::const_iterator finder = 
+                     empty_equivalence_sets.find(key);
+          if (finder == empty_equivalence_sets.end())
+          {
+            const AddressSpaceID local_space = runtime->address_space;
+            IndexSpaceNode *node = runtime->forest->get_node(handle);
+            root = new EquivalenceSet(runtime,
+              runtime->get_available_distributed_id(),
+              local_space, local_space, expr, node,
+              Reservation::NO_RESERVATION, true/*register now*/); 
+            empty_equivalence_sets[key] = root;
+            root->add_base_resource_ref(CONTEXT_REF);
+          }
+          else
+            root = finder->second;
+        }
+        // Now that we have the empty equivalence set, either record it
+        // or send it back to the source node for the response
+        if (source != runtime->address_space)
+        {
+          // Not local so we need to send a message
+          RtUserEvent recorded_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(root->did);
+            rez.serialize(manager);
+            rez.serialize(recorded_event);
+          }
+          runtime->send_equivalence_set_ray_trace_response(source, rez);
+          return recorded_event;
+        }
+        else
+          manager->record_equivalence_set(root);
+        return RtEvent::NO_RT_EVENT;
+      }
+      else
+      {
+        AutoLock tree_lock(tree_set_lock,1,false/*exclusive*/);
+        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
+          tree_equivalence_sets.find(tree_id);
+        if (finder != tree_equivalence_sets.end())
+          root = finder->second;
+      }
+      if (root == NULL)
+      {
+        RegionNode *root_node = runtime->forest->get_tree(tree_id);
+        IndexSpaceExpression *root_expr = 
+          root_node->get_index_space_expression();
+        AutoLock tree_lock(tree_set_lock);
+        // See if we lost the race
+        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
+          tree_equivalence_sets.find(tree_id);
+        if (finder == tree_equivalence_sets.end())
+        {
+          // Didn't loose the race so we have to make the top-level
+          // equivalence set for this region tree
+          const AddressSpaceID local_space = runtime->address_space;
+          root = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(),
+              local_space, local_space, root_expr, root_node->row_source,
+              Reservation::NO_RESERVATION, true/*register now*/); 
+          tree_equivalence_sets[tree_id] = root;
+          root->add_base_resource_ref(CONTEXT_REF);
+        }
+        else
+          root = finder->second;
+      }
+#ifdef DEBUG_LEGION
+      assert(root != NULL);
+#endif
+      return root->ray_trace_equivalence_sets(manager, expr, handle, source);
+    } 
 
     //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_parent_logical_context(unsigned index)
@@ -2181,27 +2240,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(owner_task != NULL);
-      assert(regions.size() == virtual_mapped.size()); 
-#endif
-      // If this isn't one of our original region requirements then 
-      // we don't have any versions that the child won't discover itself
-      // Same if the region was not virtually mapped
-      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
-        return;
-      // We now need to clone any version info from the parent into the child
-      const VersionInfo &parent_info = owner_task->get_version_info(index);  
-      parent_info.clone_to_depth(depth, version_mask, context, 
-                                 version_info, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* InnerContext::find_outermost_local_context(
                                                          InnerContext *previous)
     //--------------------------------------------------------------------------
@@ -2251,21 +2289,6 @@ namespace Legion {
       rez.serialize<size_t>(virtual_indexes.size());
       for (unsigned idx = 0; idx < virtual_indexes.size(); idx++)
         rez.serialize(virtual_indexes[idx]);
-      // Pack up the version numbers only 
-      const std::vector<VersionInfo> *version_infos = 
-        owner_task->get_version_infos();
-#ifdef DEBUG_LEGION
-      assert(version_infos->size() == regions.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        const VersionInfo &info = (*version_infos)[idx];
-        // If we're virtually mapped, we need all the information
-        if (virtual_mapped[idx])
-          info.pack_version_info(rez);
-        else
-          info.pack_version_numbers(rez);
-      }
       rez.serialize(owner_task->get_task_completion());
       rez.serialize(find_parent_context()->get_context_uid());
       // Finally pack the local field infos
@@ -5708,82 +5731,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::add_acquisition(AcquireOp *op,
-                                       const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      if (!runtime->forest->add_acquisition(coherence_restrictions, op, req))
-        // We faiiled to acquire, report the error
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_ACQUIRE_OPERATION,
-          "Illegal acquire operation (ID %lld) performed in "
-                      "task %s (ID %lld). Acquire was performed on a non-"
-                      "restricted region.", op->get_unique_op_id(),
-                      get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::remove_acquisition(ReleaseOp *op, 
-                                          const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      if (!runtime->forest->remove_acquisition(coherence_restrictions, op, req))
-        // We failed to release, report the error
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RELEASE_OPERATION,
-          "Illegal release operation (ID %lld) performed in "
-                      "task %s (ID %lld). Release was performed on a region "
-                      "that had not previously been acquired.",
-                      op->get_unique_op_id(), get_task_name(), 
-                      get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::add_restriction(AttachOp *op, InstanceManager *inst,
-                                       const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      runtime->forest->add_restriction(coherence_restrictions, op, inst, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::remove_restriction(DetachOp *op, 
-                                          const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      // Try to remove the restriction, it is alright if it fails
-      runtime->forest->remove_restriction(coherence_restrictions, op, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      for (std::list<Restriction*>::const_iterator it = 
-            coherence_restrictions.begin(); it != 
-            coherence_restrictions.end(); it++)
-        delete (*it);
-      coherence_restrictions.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    bool InnerContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return !coherence_restrictions.empty();
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::perform_restricted_analysis(const RegionRequirement &req,
-                                                   RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!coherence_restrictions.empty());
-#endif
-      runtime->forest->perform_restricted_analysis(
-                                coherence_restrictions, req, restrict_info);
-    }
-
-    //--------------------------------------------------------------------------
     void InnerContext::record_dynamic_collective_contribution(
                                           DynamicCollective dc, const Future &f) 
     //--------------------------------------------------------------------------
@@ -5918,33 +5865,21 @@ namespace Legion {
         // not a leaf and it wasn't virtual mapped
         if (!virtual_mapped[idx])
         {
+          // The parent region requirement is restricted if it is
+          // simultaneous or it is reduce-only. Simultaneous is 
+          // restricted because of normal Legion coherence semantics.
+          // Reduce-only is restricted because we don't issue close
+          // operations at the end of a context for reduce-only cases
+          // right now so by making it restricted things are eagerly
+          // flushed out to the parent task's instance.
+          const bool restricted = 
+            IS_SIMULT(regions[idx]) || IS_REDUCE(regions[idx]);
           runtime->forest->initialize_current_context(tree_context,
-              clone_requirements[idx], physical_instances[idx],
+              clone_requirements[idx], restricted, physical_instances[idx],
               unmap_events[idx], this, idx, top_views, applied_events);
 #ifdef DEBUG_LEGION
           assert(!physical_instances[idx].empty());
 #endif
-          // Always make reduce-only privileges restricted so that
-          // we always flush data back, this will prevent us from 
-          // needing a post close op later
-          if (IS_REDUCE(regions[idx]))
-            coherence_restrictions.push_back(
-                runtime->forest->create_coherence_restriction(regions[idx],
-                                                  physical_instances[idx]));
-          // If we need to add restricted coherence, do that now
-          // Not we only need to do this for non-virtually mapped task
-          else if ((regions[idx].prop == SIMULTANEOUS) && 
-                   ((regions[idx].privilege == READ_ONLY) ||
-                    (regions[idx].privilege == READ_WRITE) ||
-                    (regions[idx].privilege == WRITE_DISCARD)))
-            coherence_restrictions.push_back(
-                runtime->forest->create_coherence_restriction(regions[idx],
-                                                  physical_instances[idx]));
-        }
-        else
-        {
-          runtime->forest->initialize_virtual_context(tree_context,
-                                          clone_requirements[idx]);
         }
       }
     }
@@ -6063,6 +5998,62 @@ namespace Legion {
       // Should only be called on RemoteContext
       assert(false);
     } 
+
+    //--------------------------------------------------------------------------
+    void InnerContext::convert_target_views(const InstanceSet &targets,
+                                       std::vector<InstanceView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+      target_views.resize(targets.size());
+      std::vector<unsigned> still_needed;
+      {
+        AutoLock inst_lock(instance_view_lock,1,false/*exclusive*/); 
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          // See if we can find it
+          PhysicalManager *manager = targets[idx].get_manager();
+          std::map<PhysicalManager*,InstanceView*>::const_iterator finder = 
+            instance_top_views.find(manager);     
+          if (finder != instance_top_views.end())
+            target_views[idx] = finder->second;
+          else
+            still_needed.push_back(idx);
+        }
+      }
+      if (!still_needed.empty())
+      {
+        std::set<RtEvent> ready_events;
+        const AddressSpaceID local_space = runtime->address_space;
+        for (std::vector<unsigned>::const_iterator it = 
+              still_needed.begin(); it != still_needed.end(); it++)
+        {
+          PhysicalManager *manager = targets[*it].get_manager();
+          RtEvent ready;
+          target_views[*it] = 
+            create_instance_top_view(manager, local_space, &ready);
+          if (ready.exists())
+            ready_events.insert(ready);
+        }
+        if (!ready_events.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(ready_events);
+          if (wait_on.exists())
+            wait_on.wait();
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::convert_target_views(const InstanceSet &targets,
+                                   std::vector<MaterializedView*> &target_views)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<InstanceView*> inst_views(targets.size());
+      convert_target_views(targets, inst_views);
+      target_views.resize(inst_views.size());
+      for (unsigned idx = 0; idx < inst_views.size(); idx++)
+        target_views[idx] = inst_views[idx]->as_materialized_view();
+    }
 
     //--------------------------------------------------------------------------
     InstanceView* InnerContext::create_instance_top_view(
@@ -6570,96 +6561,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_version_owner_request(
+    /*static*/ void InnerContext::handle_compute_equivalence_sets_request(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+      DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
       InnerContext *local_ctx = runtime->find_context(context_uid);
-      InnerContext *remote_ctx;
-      derez.deserialize(remote_ctx);
-      bool is_region;
-      derez.deserialize(is_region);
+      VersionManager *target_manager;
+      derez.deserialize(target_manager);
+      RegionTreeID tree_id;
+      derez.deserialize(tree_id);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      AddressSpaceID origin;
+      derez.deserialize(origin);
+      RtUserEvent ready_event;
+      derez.deserialize(ready_event);
 
-      Serializer rez;
-      rez.serialize(remote_ctx);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(true);
-        rez.serialize(handle);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-
-        AddressSpaceID result = local_ctx->get_version_owner(node, source);
-        rez.serialize(result);
-        rez.serialize<bool>(false);
-        rez.serialize(handle);
-      }
-      runtime->send_version_owner_response(source, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::process_version_owner_response(RegionTreeNode *node,
-                                                      AddressSpaceID result)
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent to_trigger;
-      {
-        AutoLock tree_lock(tree_owner_lock);
-#ifdef DEBUG_LEGION
-        assert(region_tree_owners.find(node) == region_tree_owners.end());
-#endif
-        region_tree_owners[node] = 
-          std::pair<AddressSpaceID,bool>(result, false/*remote only*/); 
-        node->register_tracking_context(this);
-        // Find the event to trigger
-        std::map<RegionTreeNode*,RtUserEvent>::iterator finder = 
-          pending_version_owner_requests.find(node);
-#ifdef DEBUG_LEGION
-        assert(finder != pending_version_owner_requests.end());
-#endif
-        to_trigger = finder->second;
-        pending_version_owner_requests.erase(finder);
-      }
-      Runtime::trigger_event(to_trigger);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InnerContext::handle_version_owner_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext *ctx;
-      derez.deserialize(ctx);
-      AddressSpaceID result;
-      derez.deserialize(result);
-      bool is_region;
-      derez.deserialize(is_region);
-      if (is_region)
-      {
-        LogicalRegion handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
-      else
-      {
-        LogicalPartition handle;
-        derez.deserialize(handle);
-        RegionTreeNode *node = runtime->forest->get_node(handle);
-        ctx->process_version_owner_response(node, result);
-      }
+      const RtEvent done = local_ctx->compute_equivalence_sets(target_manager, 
+                                               tree_id, handle, expr, origin);
+      Runtime::trigger_event(ready_event, done);
     }
 
     //--------------------------------------------------------------------------
@@ -6974,70 +6899,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID TopLevelContext::get_version_owner(RegionTreeNode *node, 
-                                                      AddressSpaceID source)
+    RtEvent TopLevelContext::compute_equivalence_sets(VersionManager *manager,
+                              RegionTreeID tree_id, IndexSpace handle, 
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // We're the top-level task, so we handle the request on the node
       // that made the region
-      const AddressSpaceID owner_space = node->get_owner_space();
+      const AddressSpaceID owner_space = 
+        RegionTreeNode::get_owner_space(tree_id, runtime);
       if (owner_space == runtime->address_space)
-        return InnerContext::get_version_owner(node, source);
+        return InnerContext::compute_equivalence_sets(manager, tree_id, 
+                                                      handle, expr, source);
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
+      // Send off a request to the owner node to handle it
+      RtUserEvent ready_event = Runtime::create_rt_user_event();
+      Serializer rez;
       {
-        AutoLock tree_lock(tree_owner_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
+        RezCheck z(rez);
         rez.serialize(context_uid);
-        rez.serialize<InnerContext*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space 
-        runtime->send_version_owner_request(owner_space, rez);
+        rez.serialize(manager);
+        rez.serialize(tree_id);
+        expr->pack_expression(rez, owner_space);
+        rez.serialize(handle);
+        rez.serialize(source);
+        rez.serialize(ready_event);
       }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
+      // Send it to the owner space 
+      runtime->send_compute_equivalence_sets_request(owner_space, rez);
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -7056,24 +6948,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return this;
-    }
-
-    //--------------------------------------------------------------------------
-    VersionInfo& TopLevelContext::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *new VersionInfo();
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* TopLevelContext::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return NULL;
     }
 
     /////////////////////////////////////////////////////////////
@@ -7250,27 +7124,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    VersionInfo& RemoteContext::get_version_info(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-      assert(idx < version_infos.size());
-#endif
-      return version_infos[idx];
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* RemoteContext::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!top_level_context);
-#endif
-      return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
     TaskContext* RemoteContext::find_parent_context(void)
     //--------------------------------------------------------------------------
     {
@@ -7293,96 +7146,43 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    AddressSpaceID RemoteContext::get_version_owner(RegionTreeNode *node,
-                                                    AddressSpaceID source)
+    RtEvent RemoteContext::compute_equivalence_sets(VersionManager *manager,
+                              RegionTreeID tree_id, IndexSpace handle,
+                              IndexSpaceExpression *expr, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      const AddressSpaceID owner_space = node->get_owner_space(); 
+      const AddressSpaceID owner_space = 
+        RegionTreeNode::get_owner_space(tree_id, runtime);
       // If we are the top-level context then we handle the request
       // on the node that made the region
       if (top_level_context && (owner_space == runtime->address_space))
-        return InnerContext::get_version_owner(node, source);
-        // Otherwise we fall through and issue the request to the 
-        // the node that actually made the region
+        return InnerContext::compute_equivalence_sets(manager, tree_id, 
+                                                      handle, expr, source);
+      // Otherwise we fall through and issue the request to the 
+      // the node that actually made the region
 #ifdef DEBUG_LEGION
       assert(source == runtime->address_space); // should always be local
 #endif
-      // See if we already have it, or we already sent a request for it
-      bool send_request = false;
-      RtEvent wait_on;
+      // Send it to the owner space if we are the top-level context
+      // otherwise we send it to the owner of the context
+      const AddressSpaceID target = top_level_context ? owner_space :  
+                        runtime->get_runtime_owner(context_uid);
+      RtUserEvent ready_event = Runtime::create_rt_user_event();
+      // Send off a request to the owner node to handle it
+      Serializer rez;
       {
-        AutoLock tree_lock(tree_owner_lock);
-        std::map<RegionTreeNode*,
-                 std::pair<AddressSpaceID,bool> >::const_iterator finder =
-          region_tree_owners.find(node);
-        if (finder != region_tree_owners.end())
-          return finder->second.first;
-        // See if we already have an outstanding request
-        std::map<RegionTreeNode*,RtUserEvent>::const_iterator request_finder =
-          pending_version_owner_requests.find(node);
-        if (request_finder == pending_version_owner_requests.end())
-        {
-          // We haven't sent the request yet, so do that now
-          RtUserEvent request_event = Runtime::create_rt_user_event();
-          pending_version_owner_requests[node] = request_event;
-          wait_on = request_event;
-          send_request = true;
-        }
-        else
-          wait_on = request_finder->second;
-      }
-      if (send_request)
-      {
-        Serializer rez;
+        RezCheck z(rez);
         rez.serialize(context_uid);
-        rez.serialize<InnerContext*>(this);
-        if (node->is_region())
-        {
-          rez.serialize<bool>(true);
-          rez.serialize(node->as_region_node()->handle);
-        }
-        else
-        {
-          rez.serialize<bool>(false);
-          rez.serialize(node->as_partition_node()->handle);
-        }
-        // Send it to the owner space if we are the top-level context
-        // otherwise we send it to the owner of the context
-        const AddressSpaceID target = top_level_context ? owner_space :  
-                          runtime->get_runtime_owner(context_uid);
-        runtime->send_version_owner_request(target, rez);
+        rez.serialize(manager);
+        rez.serialize(tree_id);
+        expr->pack_expression(rez, target);
+        rez.serialize(handle);
+        rez.serialize(source);
+        rez.serialize(ready_event);
       }
-      wait_on.wait();
-      // Retake the lock in read-only mode and get the answer
-      AutoLock tree_lock(tree_owner_lock,1,false/*exclusive*/);
-      std::map<RegionTreeNode*,
-               std::pair<AddressSpaceID,bool> >::const_iterator finder = 
-        region_tree_owners.find(node);
-#ifdef DEBUG_LEGION
-      assert(finder != region_tree_owners.end());
-#endif
-      return finder->second.first;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == virtual_mapped.size()); 
-#endif
-      // If this isn't one of our original region requirements then 
-      // we don't have any versions that the child won't discover itself
-      // Same if the region was not virtually mapped
-      if ((index >= virtual_mapped.size()) || !virtual_mapped[index])
-        return;
-#ifdef DEBUG_LEGION
-      assert(index < version_infos.size());
-#endif
-      version_infos[index].clone_to_depth(depth, version_mask, context,
-                                          version_info, ready_events);
+      // Send it to the owner space 
+      runtime->send_compute_equivalence_sets_request(target, rez);
+      return ready_event;
     }
 
     //--------------------------------------------------------------------------
@@ -7563,14 +7363,6 @@ namespace Legion {
         unsigned index;
         derez.deserialize(index);
         local_virtual_mapped[index] = true;
-      }
-      version_infos.resize(regions.size());
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (virtual_mapped[idx])
-          version_infos[idx].unpack_version_info(derez, runtime, preconditions);
-        else
-          version_infos[idx].unpack_version_numbers(derez, runtime->forest);
       }
       derez.deserialize(remote_completion_event);
       derez.deserialize(parent_context_uid);
@@ -8820,15 +8612,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* LeafContext::find_outermost_local_context(InnerContext *prev)
     //--------------------------------------------------------------------------
     {
@@ -8975,60 +8758,6 @@ namespace Legion {
         owner_task->trigger_children_complete();
       if (need_commit)
         owner_task->trigger_children_committed();
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::add_acquisition(AcquireOp *op, 
-                                      const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::remove_acquisition(ReleaseOp *op,
-                                         const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::add_restriction(AttachOp *op, InstanceManager *instance,
-                                      const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::remove_restriction(DetachOp *op,
-                                         const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    bool LeafContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::perform_restricted_analysis(const RegionRequirement &req,
-                                                  RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -10014,16 +9743,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::find_parent_version_info(unsigned index, unsigned depth,
-                     const FieldMask &version_mask, InnerContext *context,
-                     VersionInfo &version_info, std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->find_parent_version_info(index, depth, version_mask, 
-                                          context, version_info, ready_events);
-    }
-
-    //--------------------------------------------------------------------------
     InnerContext* InlineContext::find_outermost_local_context(InnerContext *pre)
     //--------------------------------------------------------------------------
     {
@@ -10095,60 +9814,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_acquisition(AcquireOp *op,
-                                        const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_acquisition(op, req);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::remove_acquisition(ReleaseOp *op,
-                                           const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->remove_acquisition(op, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::add_restriction(AttachOp *op, InstanceManager *instance,
-                                        const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->add_restriction(op, instance, req);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::remove_restriction(DetachOp *op,
-                                           const RegionRequirement &req)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->remove_restriction(op, req);
-    }
-    
-    //--------------------------------------------------------------------------
-    void InlineContext::release_restrictions(void)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->release_restrictions();
-    }
-
-    //--------------------------------------------------------------------------
-    bool InlineContext::has_restrictions(void) const
-    //--------------------------------------------------------------------------
-    {
-      return enclosing->has_restrictions();
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::perform_restricted_analysis(
-                      const RegionRequirement &req, RestrictInfo &restrict_info)
-    //--------------------------------------------------------------------------
-    {
-      enclosing->perform_restricted_analysis(req, restrict_info);
     }
 
     //--------------------------------------------------------------------------

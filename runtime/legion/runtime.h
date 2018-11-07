@@ -263,6 +263,7 @@ namespace Legion {
 #endif
     private:
       FRIEND_ALL_RUNTIME_CLASSES
+      mutable LocalLock future_lock;
       ApUserEvent ready_event;
       void *result; 
       size_t result_size;
@@ -327,6 +328,7 @@ namespace Legion {
       Operation *const op;
       const GenerationID op_gen;
     private:
+      mutable LocalLock future_map_lock;
       ApEvent ready_event;
       std::map<DomainPoint,Future> futures;
       bool valid;
@@ -738,6 +740,7 @@ namespace Legion {
     public:
       MemoryManager& operator=(const MemoryManager &rhs);
     public:
+      void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
       void prepare_for_shutdown(void);
       void finalize(void);
     public:
@@ -787,7 +790,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool tight_bounds, bool remote = false);
-      void release_tree_instances(RegionTreeID tree_id);
+      void release_tree_instances(RegionTreeID tid);
       void set_garbage_collection_priority(PhysicalManager *manager,
                                     MapperID mapper_id, Processor proc,
                                     GCPriority priority);
@@ -1017,39 +1020,6 @@ namespace Legion {
       unsigned needed_responses;
       std::set<RtEvent> wait_for;
       bool result;
-    };
-
-    /**
-     * \class GarbageCollectionEpoch
-     * A class for managing the a set of garbage collections
-     */
-    class GarbageCollectionEpoch {
-    public:
-      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
-      public:
-        GarbageCollectionArgs(GarbageCollectionEpoch *e)
-          : LgTaskArgs<GarbageCollectionArgs>(0), epoch(e) { }
-      public:
-        GarbageCollectionEpoch *const epoch;
-        LogicalView *view;
-      };
-    public:
-      GarbageCollectionEpoch(Runtime *runtime);
-      GarbageCollectionEpoch(const GarbageCollectionEpoch &rhs);
-      ~GarbageCollectionEpoch(void);
-    public:
-      GarbageCollectionEpoch& operator=(const GarbageCollectionEpoch &rhs);
-    public:
-      void add_collection(LogicalView *view, ApEvent term_event,
-                          ReferenceMutator *mutator);
-      bool launch(RtEvent *done = NULL);
-      bool handle_collection(const GarbageCollectionArgs *args);
-    private:
-      Runtime *const runtime;
-      int remaining;
-      std::map<LogicalView*,std::set<ApEvent> > collections;
     };
 
     /**
@@ -1322,8 +1292,7 @@ namespace Legion {
       const bool internal;
     protected:
       char *constraints_name;
-      // Use the base gc_lock as the layout_lock too
-      LocalLock &layout_lock;
+      mutable LocalLock layout_lock;
     protected:
       std::map<LayoutConstraintID,bool> conflict_cache;
       std::map<LayoutConstraintID,bool> entailment_cache;
@@ -2182,8 +2151,6 @@ namespace Legion {
                                            AddressSpaceID target);
       void send_logical_partition_destruction(LogicalPartition handle,
                                               AddressSpaceID target);
-      void send_individual_remote_mapped(Processor target, 
-                                         Serializer &rez, bool flush = true);
       void send_individual_remote_complete(Processor target, Serializer &rez);
       void send_individual_remote_commit(Processor target, Serializer &rez);
       void send_slice_remote_mapped(Processor target, Serializer &rez);
@@ -2192,10 +2159,6 @@ namespace Legion {
       void send_did_remote_registration(AddressSpaceID target, Serializer &rez);
       void send_did_remote_valid_update(AddressSpaceID target, Serializer &rez);
       void send_did_remote_gc_update(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_resource_update(AddressSpaceID target,
-                                           Serializer &rez);
-      void send_did_remote_invalidate(AddressSpaceID target, Serializer &rez);
-      void send_did_remote_deactivate(AddressSpaceID target, Serializer &rez);
       void send_did_add_create_reference(AddressSpaceID target,Serializer &rez);
       void send_did_remove_create_reference(AddressSpaceID target,
                                             Serializer &rez, bool flush = true);
@@ -2208,7 +2171,6 @@ namespace Legion {
       void send_atomic_reservation_response(AddressSpaceID target, 
                                             Serializer &rez);
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
-      void send_composite_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_phi_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
@@ -2216,12 +2178,12 @@ namespace Legion {
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_request(AddressSpaceID target, Serializer &rez);
       void send_create_top_view_response(AddressSpaceID target,Serializer &rez);
-      void send_subview_did_request(AddressSpaceID target, Serializer &rez);
-      void send_subview_did_response(AddressSpaceID target, Serializer &rez);
-      void send_view_update_request(AddressSpaceID target, Serializer &rez);
-      void send_view_update_response(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_update(AddressSpaceID target, Serializer &rez);
-      void send_view_remote_invalidate(AddressSpaceID target, Serializer &rez);
+      void send_view_register_user(AddressSpaceID target, Serializer &rez);
+      void send_view_find_copy_preconditions_request(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_view_find_copy_preconditions_response(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_view_add_copy_user(AddressSpaceID target, Serializer &rez);
       void send_future_result(AddressSpaceID target, Serializer &rez);
       void send_future_subscription(AddressSpaceID target, Serializer &rez);
       void send_future_map_request_future(AddressSpaceID target, 
@@ -2264,8 +2226,33 @@ namespace Legion {
                                                 Serializer &rez);
       void send_remote_context_physical_response(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_version_owner_request(AddressSpaceID target, Serializer &rez);
-      void send_version_owner_response(AddressSpaceID target, Serializer &rez);
+      void send_compute_equivalence_sets_request(AddressSpaceID target, 
+                                                 Serializer &rez);
+      void send_equivalence_set_response(AddressSpaceID target,Serializer &rez);
+      void send_equivalence_set_subset_request(AddressSpaceID target, 
+                                               Serializer &rez);
+      void send_equivalence_set_subset_response(AddressSpaceID target, 
+                                                Serializer &rez);
+      void send_equivalence_set_subset_invalidation(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_equivalence_set_valid_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_valid_response(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_update_request(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_update_response(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_invalidate_request(AddressSpaceID target,
+                                                   Serializer &rez);
+      void send_equivalence_set_invalidate_response(AddressSpaceID target,
+                                                    Serializer &rez);
+      void send_equivalence_set_reduction_application(AddressSpaceID target,
+                                                      Serializer &rez);
       void send_version_state_response(AddressSpaceID target, Serializer &rez);
       void send_version_state_update_request(AddressSpaceID target, 
                                              Serializer &rez);
@@ -2273,15 +2260,6 @@ namespace Legion {
                                               Serializer &rez);
       void send_version_state_valid_notification(AddressSpaceID target,
                                                  Serializer &rez);
-      void send_version_manager_advance(AddressSpaceID target, Serializer &rez);
-      void send_version_manager_invalidate(AddressSpaceID target,
-                                           Serializer &rez);
-      void send_version_manager_request(AddressSpaceID target, Serializer &rez);
-      void send_version_manager_response(AddressSpaceID target,Serializer &rez);
-      void send_version_manager_unversioned_request(AddressSpaceID target,
-                                                    Serializer &rez);
-      void send_version_manager_unversioned_response(AddressSpaceID target,
-                                                     Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
       void send_external_detach(AddressSpaceID target, Serializer &rez);
@@ -2361,7 +2339,6 @@ namespace Legion {
                                              AddressSpaceID source);
       void handle_logical_partition_destruction(Deserializer &derez,
                                                 AddressSpaceID source);
-      void handle_individual_remote_mapped(Deserializer &derez); 
       void handle_individual_remote_complete(Deserializer &derez);
       void handle_individual_remote_commit(Deserializer &derez);
       void handle_slice_remote_mapped(Deserializer &derez, 
@@ -2372,9 +2349,6 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_did_remote_valid_update(Deserializer &derez);
       void handle_did_remote_gc_update(Deserializer &derez);
-      void handle_did_remote_resource_update(Deserializer &derez);
-      void handle_did_remote_invalidate(Deserializer &derez);
-      void handle_did_remote_deactivate(Deserializer &derez);
       void handle_did_create_add(Deserializer &derez);
       void handle_did_create_remove(Deserializer &derez);
       void handle_did_remote_unregister(Deserializer &derez);
@@ -2385,8 +2359,6 @@ namespace Legion {
       void handle_send_atomic_reservation_response(Deserializer &derez);
       void handle_send_materialized_view(Deserializer &derez, 
                                          AddressSpaceID source);
-      void handle_send_composite_view(Deserializer &derez,
-                                      AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
@@ -2398,17 +2370,13 @@ namespace Legion {
       void handle_create_top_view_request(Deserializer &derez,
                                           AddressSpaceID source);
       void handle_create_top_view_response(Deserializer &derez);
-      void handle_subview_did_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_subview_did_response(Deserializer &derez);
       void handle_view_request(Deserializer &derez, AddressSpaceID source);
-      void handle_view_update_request(Deserializer &derez, 
-                                      AddressSpaceID source);
-      void handle_view_update_response(Deserializer &derez,
-                                       AddressSpaceID source);
-      void handle_view_remote_update(Deserializer &derez,
-                                     AddressSpaceID source);
-      void handle_view_remote_invalidate(Deserializer &derez);
+      void handle_view_register_user(Deserializer &derez,AddressSpaceID source);
+      void handle_view_copy_pre_request(Deserializer &derez,
+                                        AddressSpaceID source);
+      void handle_view_copy_pre_response(Deserializer &derez,
+                                         AddressSpaceID source);
+      void handle_view_add_copy_user(Deserializer &derez,AddressSpaceID source);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
       void handle_future_subscription(Deserializer &derez);
@@ -2453,9 +2421,27 @@ namespace Legion {
       void handle_remote_context_physical_request(Deserializer &derez,
                                                   AddressSpaceID source);
       void handle_remote_context_physical_response(Deserializer &derez);
-      void handle_version_owner_request(Deserializer &derez, 
-                                        AddressSpaceID source);
-      void handle_version_owner_response(Deserializer &derez);
+      void handle_compute_equivalence_sets_request(Deserializer &derez, 
+                                                   AddressSpaceID source);
+      void handle_equivalence_set_request(Deserializer &derez,
+                                          AddressSpaceID source);
+      void handle_equivalence_set_response(Deserializer &derez,
+                                           AddressSpaceID source);
+      void handle_equivalence_set_subset_request(Deserializer &derez,
+                                                 AddressSpaceID source);
+      void handle_equivalence_set_subset_response(Deserializer &derez);
+      void handle_equivalence_set_subset_invalidation(Deserializer &derez);
+      void handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                    AddressSpaceID source);
+      void handle_equivalence_set_ray_trace_response(Deserializer &derez);
+      void handle_equivalence_set_valid_request(Deserializer &derez,
+                                                AddressSpaceID source);
+      void handle_equivalence_set_valid_response(Deserializer &derez);
+      void handle_equivalence_set_update_request(Deserializer &derez);
+      void handle_equivalence_set_update_response(Deserializer &derez);
+      void handle_equivalence_set_invalidate_request(Deserializer &derez);
+      void handle_equivalence_set_invalidate_response(Deserializer &derez);
+      void handle_equivalence_set_reduction_application(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,
@@ -2464,14 +2450,6 @@ namespace Legion {
       void handle_version_state_update_response(Deserializer &derez);
       void handle_version_state_valid_notification(Deserializer &derez,
                                                    AddressSpaceID source);
-      void handle_version_manager_advance(Deserializer &derez);
-      void handle_version_manager_invalidate(Deserializer &derez);
-      void handle_version_manager_request(Deserializer &derez, 
-                                          AddressSpaceID source);
-      void handle_version_manager_response(Deserializer &derez);
-      void handle_version_manager_unversioned_request(Deserializer &derez,
-                                                      AddressSpaceID source);
-      void handle_version_manager_unversioned_response(Deserializer &derez);
       void handle_instance_request(Deserializer &derez, AddressSpaceID source);
       void handle_instance_response(Deserializer &derez,AddressSpaceID source);
       void handle_external_detach(Deserializer &derez);
@@ -2537,7 +2515,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool acquire,
                                     bool tight_region_bounds);
-      void release_tree_instances(RegionTreeID tree_id);
+      void release_tree_instances(RegionTreeID tid);
     public:
       // Helper methods for the RegionTreeForest
       inline unsigned get_context_count(void) { return total_contexts; }
@@ -2583,8 +2561,8 @@ namespace Legion {
                                                 RtEvent &ready);
       PhysicalManager* find_or_request_physical_manager(DistributedID did, 
                                                         RtEvent &ready);
-      VersionState* find_or_request_version_state(DistributedID did,
-                                                  RtEvent &ready);
+      EquivalenceSet* find_or_request_equivalence_set(DistributedID did,
+                                                      RtEvent &ready);
     protected:
       template<typename T, MessageKind MK, VirtualChannelKind VC>
       DistributedCollectable* find_or_request_distributed_collectable(
@@ -2598,10 +2576,6 @@ namespace Legion {
       IndexSpace find_or_create_index_launch_space(const Domain &launch_domain,
                                                    const void *realm_is,
                                                    TypeTag type_tag);
-    public:
-      void defer_collect_user(LogicalView *view, ApEvent term_event, 
-                              ReferenceMutator *mutator);
-      void complete_gc_epoch(GarbageCollectionEpoch *epoch);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
@@ -2643,10 +2617,7 @@ namespace Legion {
       FenceOp*              get_available_fence_op(void);
       FrameOp*              get_available_frame_op(void);
       DeletionOp*           get_available_deletion_op(void);
-      OpenOp*               get_available_open_op(void);
-      AdvanceOp*            get_available_advance_op(void);
-      InterCloseOp*         get_available_inter_close_op(void);
-      ReadCloseOp*          get_available_read_close_op(void);
+      MergeCloseOp*         get_available_merge_close_op(void);
       PostCloseOp*          get_available_post_close_op(void);
       VirtualCloseOp*       get_available_virtual_close_op(void);
       DynamicCollectiveOp*  get_available_dynamic_collective_op(void);
@@ -2683,10 +2654,7 @@ namespace Legion {
       void free_fence_op(FenceOp *op);
       void free_frame_op(FrameOp *op);
       void free_deletion_op(DeletionOp *op);
-      void free_open_op(OpenOp *op);
-      void free_advance_op(AdvanceOp *op);
-      void free_inter_close_op(InterCloseOp *op); 
-      void free_read_close_op(ReadCloseOp *op);
+      void free_merge_close_op(MergeCloseOp *op); 
       void free_post_close_op(PostCloseOp *op);
       void free_virtual_close_op(VirtualCloseOp *op);
       void free_dynamic_collective_op(DynamicCollectiveOp *op);
@@ -2918,12 +2886,6 @@ namespace Legion {
       mutable LocalLock is_launch_lock;
       std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
     protected:
-      mutable LocalLock gc_epoch_lock;
-      GarbageCollectionEpoch *current_gc_epoch;
-      LegionSet<GarbageCollectionEpoch*,
-                RUNTIME_GC_EPOCH_ALLOC>::tracked  pending_gc_epochs;
-      unsigned gc_epoch_counter;
-    protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely
       mutable LocalLock context_lock;
@@ -2964,10 +2926,7 @@ namespace Legion {
       mutable LocalLock fence_op_lock;
       mutable LocalLock frame_op_lock;
       mutable LocalLock deletion_op_lock;
-      mutable LocalLock open_op_lock;
-      mutable LocalLock advance_op_lock;
-      mutable LocalLock inter_close_op_lock;
-      mutable LocalLock read_close_op_lock;
+      mutable LocalLock merge_close_op_lock;
       mutable LocalLock post_close_op_lock;
       mutable LocalLock virtual_close_op_lock;
       mutable LocalLock dynamic_collective_op_lock;
@@ -3001,10 +2960,7 @@ namespace Legion {
       std::deque<FenceOp*>              available_fence_ops;
       std::deque<FrameOp*>              available_frame_ops;
       std::deque<DeletionOp*>           available_deletion_ops;
-      std::deque<OpenOp*>               available_open_ops;
-      std::deque<AdvanceOp*>            available_advance_ops;
-      std::deque<InterCloseOp*>         available_inter_close_ops;
-      std::deque<ReadCloseOp*>          available_read_close_ops;
+      std::deque<MergeCloseOp*>         available_merge_close_ops;
       std::deque<PostCloseOp*>          available_post_close_ops;
       std::deque<VirtualCloseOp*>       available_virtual_close_ops;
       std::deque<DynamicCollectiveOp*>  available_dynamic_collective_ops;

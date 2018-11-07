@@ -1419,13 +1419,6 @@ namespace Legion {
       dmapper->report_profiling(ctx, copy, input);
     }
 
-    void WrapperMapper::map_close(const MapperContext       ctx,
-	const Close&              close,
-	const MapCloseInput&      input,
-	MapCloseOutput&     output){
-      dmapper->map_close(ctx, close, input, output);
-    }
-
     void WrapperMapper::select_close_sources(const MapperContext        ctx,
 	const Close&               close,
 	const SelectCloseSrcInput&  input,

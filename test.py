@@ -240,7 +240,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     cmd(['git', 'clone', 'https://github.com/Charles-Chao-Chen/fastSolver2.git', solver_dir])
     # cmd(['git', 'checkout', '4c7a59de63dd46a0abcc7f296fa3b0f511e5e6d2', ], cwd=solver_dir)
     solver = [[os.path.join(solver_dir, 'spmd_driver/solver'),
-               ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8']]]
+        ['-machine', '1', '-core', '8', '-mtxlvl', '6', '-ll:cpu', '8', '-ll:csize', '1024']]]
     run_cxx(solver, flags, launcher, root_dir, None, env, thread_count)
 
     # Parallel Research Kernels: Stencil
@@ -320,7 +320,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
     cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
         cwd=miniaero_dir)
-    for test in ['3D_Sod', '3D_Sod_2nd_Order'
+    for test in ['3D_Sod' #, '3D_Sod_2nd_Order'
                  # These tests take a long time so skip them by default.
                  # , 'FlatPlate', 'Ramp'
                 ]:

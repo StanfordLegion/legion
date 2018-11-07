@@ -13,7 +13,8 @@
 -- limitations under the License.
 
 -- runs-with:
--- [
+-- [ ]
+
 --  [ "-dm:memoize" ],
 --  [ "-dm:memoize", "-lg:no_fence_elision" ],
 --  [ "-dm:memoize", "-lg:no_trace_optimization" ]
@@ -59,9 +60,9 @@ end
 task check(r : region(ispace(int1d), fs), n : int)
 where reads writes(r)
 do
-  -- for e in r do
-  --  regentlib.assert(e.input % 3 == n, "test, failed")
-  -- end
+  for e in r do
+    regentlib.assert(e.input % 3 == n, "test, failed")
+  end
 end
 
 task main()

@@ -266,7 +266,6 @@ namespace Legion {
       LG_DEFERRED_EXECUTION_TRIGGER_ID,
       LG_DEFERRED_RESOLUTION_TRIGGER_ID,
       LG_DEFERRED_COMMIT_TRIGGER_ID,
-      LG_DEFERRED_POST_MAPPED_ID,
       LG_DEFERRED_EXECUTE_ID,
       LG_DEFERRED_COMPLETE_ID,
       LG_DEFERRED_COMMIT_ID,
@@ -295,8 +294,6 @@ namespace Legion {
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_PENDING_CHILD_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
-      LG_SEND_VERSION_STATE_UPDATE_TASK_ID,
-      LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID,
       LG_ISSUE_FRAME_TASK_ID,
       LG_MAPPER_CONTINUATION_TASK_ID,
       LG_TASK_IMPL_SEMANTIC_INFO_REQ_TASK_ID,
@@ -312,24 +309,10 @@ namespace Legion {
       LG_DEFERRED_ENQUEUE_OP_ID,
       LG_DEFERRED_ENQUEUE_TASK_ID,
       LG_DEFER_MAPPER_MESSAGE_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_REF_TASK_ID,
-      LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID,
-      LG_CONVERT_VIEW_TASK_ID,
-      LG_UPDATE_VIEW_REFERENCES_TASK_ID,
-      LG_REMOVE_VERSION_STATE_REF_TASK_ID,
-      LG_DEFER_RESTRICTED_MANAGER_TASK_ID,
       LG_REMOTE_VIEW_CREATION_TASK_ID,
       LG_DEFER_DISTRIBUTE_TASK_ID,
       LG_DEFER_PERFORM_MAPPING_TASK_ID,
       LG_DEFER_LAUNCH_TASK_ID,
-      LG_DEFER_MAP_AND_LAUNCH_TASK_ID,
-      LG_ADD_VERSIONING_SET_REF_TASK_ID,
-      LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID,
-      LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID,
-      LG_DISJOINT_CLOSE_TASK_ID,
-      LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
@@ -338,6 +321,11 @@ namespace Legion {
       LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID,
       LG_REPLAY_SLICE_ID,
       LG_DELETE_TEMPLATE_ID,
+      LG_REFINEMENT_TASK_ID,
+      LG_REMOTE_REF_TASK_ID,
+      LG_DEFER_RAY_TRACE_TASK_ID,
+      LG_DEFER_REMOTE_DECREMENT_TASK_ID,
+      LG_DEFER_VERSION_FINALIZE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -353,7 +341,6 @@ namespace Legion {
         "Deferred Execution Trigger",                             \
         "Deferred Resolution Trigger",                            \
         "Deferred Commit Trigger",                                \
-        "Deferred Post Mapped",                                   \
         "Deferred Execute",                                       \
         "Deferred Complete",                                      \
         "Deferred Commit",                                        \
@@ -382,8 +369,6 @@ namespace Legion {
         "Index Space Independence Test",                          \
         "Remove Pending Child",                                   \
         "Post Decrement Task",                                    \
-        "Send Version State Update",                              \
-        "Update Version State Reduce",                            \
         "Issue Frame",                                            \
         "Mapper Continuation",                                    \
         "Task Impl Semantic Request",                             \
@@ -399,24 +384,10 @@ namespace Legion {
         "Deferred Enqueue Op",                                    \
         "Deferred Enqueue Task",                                  \
         "Deferred Mapper Message",                                \
-        "Deferred Composite View Ref",                            \
-        "Deferred Composite View Registration",                   \
-        "Deferred Composite Node Ref",                            \
-        "Deferred Composite Node Capture",                        \
-        "Convert View for Version State",                         \
-        "Update View References for Version State",               \
-        "Deferred Remove Version State Valid Ref",                \
-        "Deferred Restricted Manager GC Ref",                     \
         "Remote View Creation",                                   \
         "Defer Task Distribution",                                \
         "Defer Task Perform Mapping",                             \
         "Defer Task Launch",                                      \
-        "Defer Task Map and Launch",                              \
-        "Defer Versioning Set Reference",                         \
-        "Version State Capture Dirty",                            \
-        "Version State Reclaim Pending Advance",                  \
-        "Disjoint Close",                                         \
-        "Defer Materialized View Creation",                       \
         "Handle Mapping Misspeculation",                          \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
@@ -425,6 +396,11 @@ namespace Legion {
         "Remote Physical Context Response",                       \
         "Replay Physical Trace",                                  \
         "Delete Physical Template",                               \
+        "Refinement",                                             \
+        "Remove Remote References",                               \
+        "Defer Ray Trace",                                        \
+        "Defer Remote Decrement",                                 \
+        "Defer Version Info Finalize",                            \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -448,7 +424,6 @@ namespace Legion {
       COPY_SELECT_SOURCES_CALL,
       COPY_SPECULATE_CALL,
       COPY_REPORT_PROFILING_CALL,
-      MAP_CLOSE_CALL,
       CLOSE_SELECT_SOURCES_CALL,
       CLOSE_REPORT_PROFILING_CALL,
       MAP_ACQUIRE_CALL,
@@ -495,7 +470,6 @@ namespace Legion {
       "select_copy_sources",                        \
       "speculate (for copy)",                       \
       "report_profiling (for copy)",                \
-      "map_close",                                  \
       "select_close_sources",                       \
       "report_profiling (for close)",               \
       "map_acquire",                                \
@@ -621,7 +595,6 @@ namespace Legion {
       FIELD_SPACE_DESTRUCTION_MESSAGE,
       LOGICAL_REGION_DESTRUCTION_MESSAGE,
       LOGICAL_PARTITION_DESTRUCTION_MESSAGE,
-      INDIVIDUAL_REMOTE_MAPPED,
       INDIVIDUAL_REMOTE_COMPLETE,
       INDIVIDUAL_REMOTE_COMMIT,
       SLICE_REMOTE_MAPPED,
@@ -630,9 +603,6 @@ namespace Legion {
       DISTRIBUTED_REMOTE_REGISTRATION,
       DISTRIBUTED_VALID_UPDATE,
       DISTRIBUTED_GC_UPDATE,
-      DISTRIBUTED_RESOURCE_UPDATE,
-      DISTRIBUTED_INVALIDATE,
-      DISTRIBUTED_DEACTIVATE,
       DISTRIBUTED_CREATE_ADD,
       DISTRIBUTED_CREATE_REMOVE,
       DISTRIBUTED_UNREGISTER,
@@ -640,7 +610,6 @@ namespace Legion {
       SEND_ATOMIC_RESERVATION_RESPONSE,
       SEND_BACK_LOGICAL_STATE,
       SEND_MATERIALIZED_VIEW,
-      SEND_COMPOSITE_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
       SEND_REDUCTION_VIEW,
@@ -648,13 +617,11 @@ namespace Legion {
       SEND_REDUCTION_MANAGER,
       SEND_CREATE_TOP_VIEW_REQUEST,
       SEND_CREATE_TOP_VIEW_RESPONSE,
-      SEND_SUBVIEW_DID_REQUEST,
-      SEND_SUBVIEW_DID_RESPONSE,
       SEND_VIEW_REQUEST,
-      SEND_VIEW_UPDATE_REQUEST,
-      SEND_VIEW_UPDATE_RESPONSE,
-      SEND_VIEW_REMOTE_UPDATE,
-      SEND_VIEW_REMOTE_INVALIDATE,
+      SEND_VIEW_REGISTER_USER,
+      SEND_VIEW_FIND_COPY_PRE_REQUEST,
+      SEND_VIEW_FIND_COPY_PRE_RESPONSE,
+      SEND_VIEW_ADD_COPY_USER,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -682,19 +649,21 @@ namespace Legion {
       SEND_REMOTE_CONTEXT_FREE,
       SEND_REMOTE_CONTEXT_PHYSICAL_REQUEST,
       SEND_REMOTE_CONTEXT_PHYSICAL_RESPONSE,
-      SEND_VERSION_OWNER_REQUEST,
-      SEND_VERSION_OWNER_RESPONSE,
-      SEND_VERSION_STATE_REQUEST,
-      SEND_VERSION_STATE_RESPONSE,
-      SEND_VERSION_STATE_UPDATE_REQUEST,
-      SEND_VERSION_STATE_UPDATE_RESPONSE,
-      SEND_VERSION_STATE_VALID_NOTIFICATION,
-      SEND_VERSION_MANAGER_ADVANCE,
-      SEND_VERSION_MANAGER_INVALIDATE,
-      SEND_VERSION_MANAGER_REQUEST,
-      SEND_VERSION_MANAGER_RESPONSE,
-      SEND_VERSION_MANAGER_UNVERSIONED_REQUEST,
-      SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE,
+      SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
+      SEND_EQUIVALENCE_SET_REQUEST,
+      SEND_EQUIVALENCE_SET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
+      SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
+      SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
+      SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+      SEND_EQUIVALENCE_SET_VALID_REQUEST,
+      SEND_EQUIVALENCE_SET_VALID_RESPONSE,
+      SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
+      SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
+      SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
+      SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
+      SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -761,7 +730,6 @@ namespace Legion {
         "Field Space Destruction",                                    \
         "Logical Region Destruction",                                 \
         "Logical Partition Destruction",                              \
-        "Individual Remote Mapped",                                   \
         "Individual Remote Complete",                                 \
         "Individual Remote Commit",                                   \
         "Slice Remote Mapped",                                        \
@@ -770,9 +738,6 @@ namespace Legion {
         "Distributed Remote Registration",                            \
         "Distributed Valid Update",                                   \
         "Distributed GC Update",                                      \
-        "Distributed Resource Update",                                \
-        "Distributed Invalidate",                                     \
-        "Distributed Deactivate",                                     \
         "Distributed Create Add",                                     \
         "Distributed Create Remove",                                  \
         "Distributed Unregister",                                     \
@@ -780,7 +745,6 @@ namespace Legion {
         "Send Atomic Reservation Response",                           \
         "Send Back Logical State",                                    \
         "Send Materialized View",                                     \
-        "Send Composite View",                                        \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
         "Send Reduction View",                                        \
@@ -788,13 +752,11 @@ namespace Legion {
         "Send Reduction Manager",                                     \
         "Send Create Top View Request",                               \
         "Send Create Top View Response",                              \
-        "Send Subview DID Request",                                   \
-        "Send Subview DID Response",                                  \
         "Send View Request",                                          \
-        "Send View Update Request",                                   \
-        "Send View Update Response",                                  \
-        "Send View Remote Update",                                    \
-        "Send View Remote Invalidate",                                \
+        "Send View Register User",                                    \
+        "Send View Find Copy Preconditions Request",                  \
+        "Send View Find Copy Preconditions Response",                 \
+        "Send View Add Copy User",                                    \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \
@@ -822,19 +784,21 @@ namespace Legion {
         "Send Remote Context Free",                                   \
         "Send Remote Context Physical Request",                       \
         "Send Remote Context Physical Response",                      \
-        "Send Version Owner Request",                                 \
-        "Send Version Owner Response",                                \
-        "Send Version State Request",                                 \
-        "Send Version State Response",                                \
-        "Send Version State Update Request",                          \
-        "Send Version State Update Response",                         \
-        "Send Version State Valid Notification",                      \
-        "Send Version Manager Advance",                               \
-        "Send Version Manager Invalidate",                            \
-        "Send Version Manager Request",                               \
-        "Send Version Manager Response",                              \
-        "Send Version Manager Unversioned Request",                   \
-        "Send Version Manager Unversioned Response",                  \
+        "Compute Equivalence Sets Request",                           \
+        "Send Equivalence Set Request",                               \
+        "Send Equivalence Set Response",                              \
+        "Send Equivalence Set Subset Request",                        \
+        "Send Equivalence Set Subset Response",                       \
+        "Send Equivalence Set Subset Invalidation",                   \
+        "Send Equivalence Set Ray Trace Request",                     \
+        "Send Equivalence Set Ray Trace Response",                    \
+        "Send Equivalence Set Valid Request",                         \
+        "Send Equivalence Set Valid Response",                        \
+        "Send Equivalence Set Update Request",                        \
+        "Send Equivalence Set Update Response",                       \
+        "Send Equivalence Set Invalidate Request",                    \
+        "Send Equivalence Set Invalidate Response",                   \
+        "Send Equivalence Set Reduction Application",                 \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \
@@ -992,23 +956,11 @@ namespace Legion {
       PHYSICAL_STATE_APPLY_PATH_ONLY_CALL,
       PHYSICAL_STATE_APPLY_STATE_CALL,
       PHYSICAL_STATE_MAKE_LOCAL_CALL,
-      VERSION_STATE_UPDATE_PATH_ONLY_CALL,
-      VERSION_STATE_MERGE_PHYSICAL_STATE_CALL,
-      VERSION_STATE_REQUEST_CHILDREN_CALL,
-      VERSION_STATE_REQUEST_INITIAL_CALL,
-      VERSION_STATE_REQUEST_FINAL_CALL,
-      VERSION_STATE_SEND_STATE_CALL,
-      VERSION_STATE_HANDLE_REQUEST_CALL,
-      VERSION_STATE_HANDLE_RESPONSE_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL,
       MATERIALIZED_VIEW_FILTER_PREVIOUS_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_CURRENT_USERS_CALL,
       MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL,
-      COMPOSITE_VIEW_SIMPLIFY_CALL,
-      COMPOSITE_VIEW_ISSUE_DEFERRED_COPIES_CALL,
-      COMPOSITE_NODE_CAPTURE_PHYSICAL_STATE_CALL,
-      COMPOSITE_NODE_SIMPLIFY_CALL,
       REDUCTION_VIEW_PERFORM_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_CALL,
       REDUCTION_VIEW_PERFORM_DEFERRED_REDUCTION_ACROSS_CALL,
@@ -1153,23 +1105,11 @@ namespace Legion {
       "Physical State Apply Path Only",                               \
       "Physical State Apply State",                                   \
       "Physical State Make Local",                                    \
-      "Version State Update Path Only",                               \
-      "Version State Merge Physical State",                           \
-      "Version State Request Children",                               \
-      "Version State Request Initial",                                \
-      "Version State Request Final",                                  \
-      "Version State Send State",                                     \
-      "Version State Handle Request",                                 \
-      "Version State Handle Response",                                \
       "Materialized View Find Local Preconditions",                   \
       "Materialized View Find Local Copy Preconditions",              \
       "Materialized View Filter Previous Users",                      \
       "Materialized View Filter Current Users",                       \
       "Materialized View Filter Local Users",                         \
-      "Composite View Simplify",                                      \
-      "Composite View Issue Deferred Copies",                         \
-      "Composite Node Capture Physical State",                        \
-      "Composite Node Simplify",                                      \
       "Reduction View Perform Reduction",                             \
       "Reduction View Perform Deferred Reduction",                    \
       "Reduction View Perform Deferred Reduction Across",             \
@@ -1239,7 +1179,6 @@ namespace Legion {
     class VirtualChannel;
     class MessageManager;
     class ShutdownManager;
-    class GarbageCollectionEpoch;
     class TaskImpl;
     class VariantImpl;
     class LayoutConstraints;
@@ -1271,11 +1210,8 @@ namespace Legion {
     class FrameOp;
     class DeletionOp;
     class InternalOp;
-    class OpenOp;
-    class AdvanceOp;
     class CloseOp;
-    class InterCloseOp;
-    class ReadCloseOp;
+    class MergeCloseOp;
     class PostCloseOp;
     class VirtualCloseOp;
     class AcquireOp;
@@ -1415,12 +1351,9 @@ namespace Legion {
 
     class ProjectionEpoch;
     class LogicalState;
-    class PhysicalState;
-    class VersionState;
+    class EquivalenceSet;
+    class VersionManager;
     class VersionInfo;
-    class RestrictInfo;
-    class Restriction;
-    class Acquisition;
 
     class Collectable;
     class Notifiable;
@@ -1437,10 +1370,6 @@ namespace Legion {
     class InstanceView;
     class DeferredView;
     class MaterializedView;
-    class CompositeBase;
-    class CompositeView;
-    class CompositeVersionInfo;
-    class CompositeNode;
     class FillView;
     class PhiView;
     class MappingRef;
@@ -1457,8 +1386,6 @@ namespace Legion {
     class RegionAnalyzer;
     class RegionMapper;
 
-    struct EscapedUser;
-    struct EscapedCopy;
     struct GenericUser;
     struct LogicalUser;
     struct PhysicalUser;
@@ -1502,11 +1429,8 @@ namespace Legion {
     friend class Internal::DynamicCollectiveOp;             \
     friend class Internal::FuturePredOp;                    \
     friend class Internal::DeletionOp;                      \
-    friend class Internal::OpenOp;                          \
-    friend class Internal::AdvanceOp;                       \
     friend class Internal::CloseOp;                         \
-    friend class Internal::InterCloseOp;                    \
-    friend class Internal::ReadCloseOp;                     \
+    friend class Internal::MergeCloseOp;                    \
     friend class Internal::PostCloseOp;                     \
     friend class Internal::VirtualCloseOp;                  \
     friend class Internal::AcquireOp;                       \
@@ -1546,8 +1470,6 @@ namespace Legion {
     friend class Internal::DeferredView;                    \
     friend class Internal::ReductionView;                   \
     friend class Internal::MaterializedView;                \
-    friend class Internal::CompositeView;                   \
-    friend class Internal::CompositeNode;                   \
     friend class Internal::FillView;                        \
     friend class Internal::LayoutDescription;               \
     friend class Internal::PhysicalManager;                 \

@@ -125,12 +125,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    LogicalRegion PhysicalInstance::get_logical_region(void) const
+    FieldSpace PhysicalInstance::get_field_space(void) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
-        return LogicalRegion::NO_REGION;
-      return impl->region_node->handle;
+        return FieldSpace::NO_SPACE;
+      return impl->field_space_node->handle;
     }
 
     //--------------------------------------------------------------------------

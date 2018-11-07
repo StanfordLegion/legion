@@ -10689,40 +10689,76 @@ namespace Legion {
       // forward declaration
       class const_iterator;
       class iterator : public std::iterator<std::input_iterator_tag,
-                              std::pair<T*,FieldMask> > {
+                              std::pair<T*const,FieldMask> > {
       public:
         iterator(FieldMaskSet *_set, 
-            std::pair<T*,FieldMask> *_result, bool _single)
-          : set(_set), result(_result), single(_single) { }
+            std::pair<T*const,FieldMask> *_result)
+          : set(_set), result(_result), single(true) { }
+        iterator(FieldMaskSet *_set,
+            typename LegionMap<T*,FieldMask>::aligned::iterator _it)
+          : set(_set), result(&(*_it)), it(_it), single(false) { }
       public:
         iterator(const iterator &rhs)
-          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+          : set(rhs.set), result(rhs.result), 
+            it(rhs.it), single(rhs.single) { }
         ~iterator(void) { }
       public:
         inline iterator& operator=(const iterator &rhs)
           { set = rhs.set; result = rhs.result; 
-            single = rhs.single; return *this; }
+            it = rhs.it; single = rhs.single; return *this; }
       public:
         inline bool operator==(const iterator &rhs) const
-          { return (set == rhs.set) && (result == rhs.result) && 
-                    (single == rhs.single); }
+          { 
+            if (set != rhs.set) 
+              return false;
+            if (single)
+              return (result == rhs.result);
+            else
+              return (it == rhs.it);
+          }
         inline bool operator!=(const iterator &rhs) const
-          { return (set != rhs.set) || (result != rhs.result) || 
-                    (single != rhs.single); }
+          {
+            if (set != rhs.set)
+              return true;
+            if (single)
+              return (result != rhs.result);
+            else
+              return (it != rhs.it);
+          }
       public:
-        inline const std::pair<T*,FieldMask> operator*(void) 
+        inline const std::pair<T*const,FieldMask> operator*(void) 
           { return *result; }
-        inline const std::pair<T*,FieldMask>* operator->(void)
+        inline const std::pair<T*const,FieldMask>* operator->(void)
           { return result; }
         inline iterator& operator++(/*prefix*/void)
-          { if (single) result = NULL; 
-            else result = set->next(result->first); 
-            return *this; }
+          {
+            if (!single)
+            {
+              ++it;
+              if ((*this) != set->end())
+                result = &(*it);
+              else
+                result = NULL;
+            }
+            else
+              result = NULL;
+            return *this;
+          }
         inline iterator operator++(/*postfix*/int)
-          { iterator copy(*this); 
-            if (single) result = NULL; 
-            else result = set->next(result->first); 
-            return copy; }
+          {
+            iterator copy(*this);
+            if (!single)
+            {
+              ++it;
+              if ((*this) != set->end())
+                result = &(*it);
+              else
+                result = NULL;
+            }
+            else
+              result = NULL;
+            return copy;
+          }
       public:
         inline operator bool(void) const
           { return (result != NULL); }
@@ -10738,60 +10774,109 @@ namespace Legion {
             result->second -= mask;
             // Don't filter valid fields since its unsound
           }
+      public:
+        inline void erase(typename LegionMap<T*,FieldMask>::aligned &target)
+        {
+#ifdef DEBUG_LEGION
+          assert(!single);
+#endif
+          // Erase it from the target
+          target.erase(it);
+          // Invalidate the iterator
+          it = target.end();
+          result = NULL;
+        }
       private:
         friend class const_iterator;
         FieldMaskSet *set;
-        std::pair<T*,FieldMask> *result;
+        std::pair<T*const,FieldMask> *result;
+        typename LegionMap<T*,FieldMask>::aligned::iterator it;
         bool single;
       };
     public:
       class const_iterator : public std::iterator<std::input_iterator_tag,
-                              std::pair<T*,FieldMask> > {
+                              std::pair<T*const,FieldMask> > {
       public:
         const_iterator(const FieldMaskSet *_set, 
-            const std::pair<T*,FieldMask> *_result, bool _single)
-          : set(_set), result(_result), single(_single) { }
+            const std::pair<T*const,FieldMask> *_result)
+          : set(_set), result(_result), single(true) { }
+        const_iterator(const FieldMaskSet *_set,
+            typename LegionMap<T*,FieldMask>::aligned::const_iterator _it)
+          : set(_set), result(&(*_it)), it(_it), single(false) { }
       public:
         const_iterator(const const_iterator &rhs)
-          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+          : set(rhs.set), result(rhs.result), it(rhs.it), single(rhs.single) { }
         // We can also make a const_iterator from a normal iterator
         const_iterator(const iterator &rhs)
-          : set(rhs.set), result(rhs.result), single(rhs.single) { }
+          : set(rhs.set), result(rhs.result), it(rhs.it), single(rhs.single) { }
         ~const_iterator(void) { }
       public:
         inline const_iterator& operator=(const const_iterator &rhs)
-          { set = rhs.set; result = rhs.result; 
+          { set = rhs.set; result = rhs.result; it = rhs.it;
             single = rhs.single; return *this; }
         inline const_iterator& operator=(const iterator &rhs)
-          { set = rhs.set; result = rhs.result;
+          { set = rhs.set; result = rhs.result; it = rhs.it;
             single = rhs.single; return *this; }
       public:
         inline bool operator==(const const_iterator &rhs) const
-          { return (set == rhs.set) && (result == rhs.result) && 
-                    (single == rhs.single); }
+          { 
+            if (set != rhs.set) 
+              return false;
+            if (single)
+              return (result == rhs.result);
+            else
+              return (it == rhs.it);
+          }
         inline bool operator!=(const const_iterator &rhs) const
-          { return (set != rhs.set) || (result != rhs.result) || 
-                    (single != rhs.single); }
+          {
+            if (set != rhs.set)
+              return true;
+            if (single)
+              return (result != rhs.result);
+            else
+              return (it != rhs.it);
+          }
       public:
-        inline const std::pair<T*,FieldMask> operator*(void) 
+        inline const std::pair<T*const,FieldMask> operator*(void) 
           { return *result; }
-        inline const std::pair<T*,FieldMask>* operator->(void)
+        inline const std::pair<T*const,FieldMask>* operator->(void)
           { return result; }
         inline const_iterator& operator++(/*prefix*/void)
-          { if (single) result = NULL; 
-            else result = set->next(result->first); 
-            return *this; }
+          {
+            if (!single)
+            {
+              ++it;
+              if ((*this) != set->end())
+                result = &(*it);
+              else
+                result = NULL;
+            }
+            else
+              result = NULL;
+            return *this;
+          }
         inline const_iterator operator++(/*postfix*/int)
-          { const_iterator copy(*this); 
-            if (single) result = NULL; 
-            else result = set->next(result->first); 
-            return copy; }
+          {
+            const_iterator copy(*this);
+            if (!single)
+            {
+              ++it;
+              if ((*this) != set->end())
+                result = &(*it);
+              else
+                result = NULL;
+            }
+            else
+              result = NULL;
+            return copy;
+          }
       public:
         inline operator bool(void) const
           { return (result != NULL); }
       private:
         const FieldMaskSet *set;
-        const std::pair<T*,FieldMask> *result;
+        const std::pair<T*const,FieldMask> *result;
+        typename LegionMap<T*,FieldMask>::aligned::const_iterator it;
         bool single;
       };
     public:
@@ -10806,6 +10891,7 @@ namespace Legion {
         { return single && (entries.single_entry == NULL); }
       inline const FieldMask& get_valid_mask(void) const 
         { return valid_fields; }
+      inline const FieldMask& tighten_valid_mask(void);
     public:
       inline const FieldMask& operator[](T *entry) const;
     public:
@@ -10816,19 +10902,16 @@ namespace Legion {
       inline void clear(void);
       inline size_t size(void) const;
     public:
-      inline std::pair<T*,FieldMask>* next(T *current) const;
-    public:
       inline void swap(FieldMaskSet &other);
     public:
       inline iterator begin(void);
       inline iterator find(T *entry);
       inline void erase(iterator &it);
-      inline iterator end(void) { return iterator(this, NULL, single); }
+      inline iterator end(void);
     public:
       inline const_iterator begin(void) const;
       inline const_iterator find(T *entry) const;
-      inline const_iterator end(void) const 
-        { return const_iterator(this, NULL, single); }
+      inline const_iterator end(void) const;
     public:
       inline void compute_field_sets(FieldMask universe_mask,
           typename LegionList<FieldSet<T*> >::aligned &output_sets) const;
@@ -10903,6 +10986,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
+    inline const FieldMask& FieldMaskSet<T>::tighten_valid_mask(void)
+    //--------------------------------------------------------------------------
+    {
+      // If we're single then there is nothing to do as we're already tight
+      if (single)
+        return valid_fields;
+      valid_fields.clear();
+      for (typename LegionMap<T*,FieldMask>::aligned::const_iterator it = 
+            entries.multi_entries->begin(); it !=
+            entries.multi_entries->end(); it++)
+        valid_fields |= it->second;
+      return valid_fields;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
     inline const FieldMask& FieldMaskSet<T>::operator[](T *entry) const
     //--------------------------------------------------------------------------
     {
@@ -10929,9 +11028,6 @@ namespace Legion {
     inline bool FieldMaskSet<T>::insert(T *entry, const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(!!mask);
-#endif
       bool result = true;
       if (single)
       {
@@ -11058,7 +11154,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(finder != entries.multi_entries->end());
 #endif
-        valid_fields -= finder->second;
         entries.multi_entries->erase(finder);
         if (entries.multi_entries->size() == 1)
         {
@@ -11110,33 +11205,6 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline std::pair<T*,FieldMask>* FieldMaskSet<T>::next(T *current) const
-    //--------------------------------------------------------------------------
-    {
-      if (single)
-      {
-#ifdef DEBUG_LEGION
-        assert(current == entries.single_entry);
-#endif
-        return NULL; 
-      }
-      else
-      {
-        typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
-          entries.multi_entries->find(current);
-#ifdef DEBUG_LEGION
-        assert(finder != entries.multi_entries->end());
-#endif
-        finder++;
-        if (finder == entries.multi_entries->end())
-          return NULL;
-        else
-          return reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder));
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    template<typename T>
     inline void FieldMaskSet<T>::swap(FieldMaskSet &other)
     //--------------------------------------------------------------------------
     {
@@ -11166,13 +11234,11 @@ namespace Legion {
         if (entries.single_entry == NULL)
           return end();
         return iterator(this, 
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+            reinterpret_cast<std::pair<T*const,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)));
       }
       else
-        return iterator(this,
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              &(*(entries.multi_entries->begin()))), false);
+        return iterator(this, entries.multi_entries->begin());
     }
 
     //--------------------------------------------------------------------------
@@ -11185,8 +11251,8 @@ namespace Legion {
         if ((entries.single_entry == NULL) || (entries.single_entry != e))
           return end();
         return iterator(this, 
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+            reinterpret_cast<std::pair<T*const,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)));
       }
       else
       {
@@ -11194,8 +11260,7 @@ namespace Legion {
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
-        return iterator(this,
-            reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder)), false);
+        return iterator(this, finder);
       }
     }
 
@@ -11207,7 +11272,40 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(it != end());
 #endif
-      erase(it->first);
+      if (single)
+      {
+#ifdef DEBUG_LEGION
+        assert(entries.single_entry == it->first);
+#endif
+        entries.single_entry = NULL;
+        valid_fields.clear();
+      }
+      else
+      {
+        it.erase(*(entries.multi_entries));
+        if (entries.multi_entries->size() == 1)
+        {
+          // go back to single
+          typename LegionMap<T*,FieldMask>::aligned::iterator finder = 
+            entries.multi_entries->begin();
+          valid_fields = finder->second;
+          T *first = finder->first;
+          delete entries.multi_entries;
+          entries.single_entry = first;
+          single = true;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::iterator FieldMaskSet<T>::end(void)
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        return iterator(this, NULL);
+      else
+        return iterator(this, entries.multi_entries->end());
     }
 
     //--------------------------------------------------------------------------
@@ -11223,13 +11321,11 @@ namespace Legion {
         if (entries.single_entry == NULL)
           return end();
         return const_iterator(this, 
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+            reinterpret_cast<const std::pair<T*const,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)));
       }
       else
-        return const_iterator(this,
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              &(*(entries.multi_entries->begin()))), false);
+        return const_iterator(this, entries.multi_entries->begin());
     }
 
     //--------------------------------------------------------------------------
@@ -11243,8 +11339,8 @@ namespace Legion {
         if ((entries.single_entry == NULL) || (entries.single_entry != e))
           return end();
         return const_iterator(this, 
-            reinterpret_cast<std::pair<T*,FieldMask>*>(
-              const_cast<FieldMaskSet<T>*>(this)), true/*single*/);
+            reinterpret_cast<const std::pair<T*const,FieldMask>*>(
+              const_cast<FieldMaskSet<T>*>(this)));
       }
       else
       {
@@ -11252,9 +11348,20 @@ namespace Legion {
           entries.multi_entries->find(e);
         if (finder == entries.multi_entries->end())
           return end();
-        return const_iterator(this,
-            reinterpret_cast<std::pair<T*,FieldMask>*>(&(*finder)), false);
+        return const_iterator(this, finder);
       }
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename T>
+    inline typename FieldMaskSet<T>::const_iterator 
+                                                FieldMaskSet<T>::end(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (single)
+        return const_iterator(this, NULL);
+      else
+        return const_iterator(this, entries.multi_entries->end());
     }
 
     //--------------------------------------------------------------------------

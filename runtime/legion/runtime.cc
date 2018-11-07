@@ -532,7 +532,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -557,7 +557,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -587,7 +587,7 @@ namespace Legion {
       assert(is_owner());
 #endif
       // Need to hold the lock when reading the set of remote spaces
-      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      AutoLock f_lock(future_lock,1,false/*exclusive*/);
       if (!registered_waiters.empty())
       {
         Serializer rez;
@@ -613,7 +613,7 @@ namespace Legion {
       {
         bool send_result;
         {
-          AutoLock gc(gc_lock);
+          AutoLock f_lock(future_lock);
           if (registered_waiters.find(sid) == registered_waiters.end())
           {
             send_result = ready_event.has_triggered();
@@ -804,7 +804,7 @@ namespace Legion {
     {
       // If we are not the owner, send a gc reference back to the owner
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -829,7 +829,7 @@ namespace Legion {
     {
       // If we are not the owner, remove our gc reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -840,7 +840,7 @@ namespace Legion {
       {
         // See if we already have it
         {
-          AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+          AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
           std::map<DomainPoint,Future>::const_iterator finder = 
                                                 futures.find(point);
           if (finder != futures.end())
@@ -860,7 +860,7 @@ namespace Legion {
         runtime->send_future_map_request_future(owner_space, rez);
         ready_event.wait(); 
         // When we wake up it should be here
-        AutoLock m_lock(gc_lock,1,false/*exlusive*/);
+        AutoLock fm_lock(future_map_lock,1,false/*exlusive*/);
         std::map<DomainPoint,Future>::const_iterator finder = 
                                               futures.find(point);
         if (allow_empty && (finder == futures.end()))
@@ -897,7 +897,7 @@ namespace Legion {
         {
           Future result;
           {
-            AutoLock gc(gc_lock);
+            AutoLock fm_lock(future_map_lock);
             // Check to see if we already have a future for the point
             std::map<DomainPoint,Future>::const_iterator finder = 
                                                   futures.find(point);
@@ -932,7 +932,7 @@ namespace Legion {
 #endif
       // Add the reference first and then set the future
       impl->add_base_gc_ref(FUTURE_HANDLE_REF, mutator);
-      AutoLock g_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       futures[point] = Future(impl, false/*need reference*/);
     }
 
@@ -984,7 +984,7 @@ namespace Legion {
       assert(is_owner());
       assert(valid);
 #endif
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -1001,7 +1001,7 @@ namespace Legion {
       assert(valid);
 #endif
       bool result = false;
-      AutoLock l_lock(gc_lock);
+      AutoLock fm_lock(future_map_lock);
       for (std::map<DomainPoint,Future>::const_iterator it = 
             futures.begin(); it != futures.end(); it++)
       {
@@ -1762,7 +1762,7 @@ namespace Legion {
           if (check_field_size)
           {
             const size_t actual_size = 
-              manager->region_node->column_source->get_field_size(fid);
+              manager->field_space_node->get_field_size(fid);
             if (actual_size != field_size)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_FIELD_SIZE_CHECK,
                             "Error creating accessor for field %d with a "
@@ -3245,6 +3245,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MemoryManager::find_shutdown_preconditions(
+                                               std::set<ApEvent> &preconditions)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<PhysicalManager*> to_check;
+      {
+        AutoLock m_lock(manager_lock,1,false/*exclusive*/);
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              current_instances.begin(); it != current_instances.end(); it++)
+        {
+          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+          to_check.push_back(it->first);
+        }
+      }
+      for (std::vector<PhysicalManager*>::const_iterator it = 
+            to_check.begin(); it != to_check.end(); it++)
+      {
+        (*it)->find_shutdown_preconditions(preconditions);
+        if ((*it)->remove_base_resource_ref(MEMORY_MANAGER_REF))
+          delete (*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void MemoryManager::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
@@ -3923,7 +3947,7 @@ namespace Legion {
         {
           // If the region for the instance is not for the tree then
           // we get to skip it
-          if (it->first->region_node->handle.get_tree_id() != tree_id)
+          if (it->first->tree_id != tree_id)
             continue;
           // If it's already been deleted, then there is nothing to do
           if (it->second.current_state == PENDING_COLLECTED_STATE)
@@ -4064,9 +4088,13 @@ namespace Legion {
           bool remove_duplicate = false;
           if (success)
           {
+            LocalReferenceMutator local_mutator;
             // Add our local reference
-            manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
-            manager->send_remote_valid_update(owner_space,NULL,1,false/*add*/);
+            manager->add_base_valid_ref(NEVER_GC_REF, &local_mutator);
+            const RtEvent reference_effects = local_mutator.get_done_event();
+            manager->send_remote_valid_decrement(owner_space,reference_effects);
+            if (reference_effects.exists())
+              mutator.record_reference_mutation_effect(reference_effects);
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
@@ -4172,6 +4200,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!is_owner); // should never be called on the owner
+      assert(results.empty());
 #endif
       results.resize(managers.size(), false/*assume everything fails*/);
       // Package everything up and send the request 
@@ -4534,8 +4563,12 @@ namespace Legion {
       // and then remove the remote DID
       if (acquire)
       {
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);
+        LocalReferenceMutator local_mutator;
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+        const RtEvent reference_effects = local_mutator.get_done_event();
+        manager->send_remote_valid_decrement(source, reference_effects);
+        if (reference_effects.exists())
+          mutator.record_reference_mutation_effect(reference_effects);
       }
       *target = MappingInstance(manager);
       *success = true;
@@ -4763,7 +4796,7 @@ namespace Legion {
           manager->remove_base_resource_ref(MEMORY_MANAGER_REF);
         }
       }
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -4797,21 +4830,24 @@ namespace Legion {
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      std::vector<unsigned> *target;
+      std::vector<bool> *target;
       derez.deserialize(target);
-      size_t num_failures;
-      derez.deserialize(num_failures);
+      size_t num_successes;
+      derez.deserialize(num_successes);
       std::set<RtEvent> preconditions;
-      WrapperReferenceMutator mutator(preconditions);
-      for (unsigned idx = 0; idx < num_failures; idx++)
+      for (unsigned idx = 0; idx < num_successes; idx++)
       {
         unsigned index;
         derez.deserialize(index);
         (*target)[index] = true;
         PhysicalManager *manager;
         derez.deserialize(manager);
-        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &mutator);
-        manager->send_remote_valid_update(source, NULL, 1, false/*add*/);  
+        LocalReferenceMutator local_mutator;
+        manager->add_base_valid_ref(MAPPING_ACQUIRE_REF, &local_mutator);
+        const RtEvent reference_effects = local_mutator.get_done_event();
+        manager->send_remote_valid_decrement(source, reference_effects);  
+        if (reference_effects.exists())
+          preconditions.insert(reference_effects);
       }
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
@@ -5877,11 +5913,6 @@ namespace Legion {
                                                           remote_address_space);
               break;
             }
-          case INDIVIDUAL_REMOTE_MAPPED:
-            {
-              runtime->handle_individual_remote_mapped(derez); 
-              break;
-            }
           case INDIVIDUAL_REMOTE_COMPLETE:
             {
               runtime->handle_individual_remote_complete(derez);
@@ -5923,21 +5954,6 @@ namespace Legion {
               runtime->handle_did_remote_gc_update(derez); 
               break;
             }
-          case DISTRIBUTED_RESOURCE_UPDATE:
-            {
-              runtime->handle_did_remote_resource_update(derez);
-              break;
-            }
-          case DISTRIBUTED_INVALIDATE:
-            {
-              runtime->handle_did_remote_invalidate(derez);
-              break;
-            }
-          case DISTRIBUTED_DEACTIVATE:
-            {
-              runtime->handle_did_remote_deactivate(derez);
-              break;
-            }
           case DISTRIBUTED_CREATE_ADD:
             {
               runtime->handle_did_create_add(derez);
@@ -5974,11 +5990,6 @@ namespace Legion {
             {
               runtime->handle_send_materialized_view(derez, 
                                                      remote_address_space);
-              break;
-            }
-          case SEND_COMPOSITE_VIEW:
-            {
-              runtime->handle_send_composite_view(derez, remote_address_space);
               break;
             }
           case SEND_FILL_VIEW:
@@ -6019,39 +6030,30 @@ namespace Legion {
               runtime->handle_create_top_view_response(derez);
               break;
             }
-          case SEND_SUBVIEW_DID_REQUEST:
-            {
-              runtime->handle_subview_did_request(derez, remote_address_space);
-              break;
-            }
-          case SEND_SUBVIEW_DID_RESPONSE:
-            {
-              runtime->handle_subview_did_response(derez);
-              break;
-            }
           case SEND_VIEW_REQUEST:
             {
               runtime->handle_view_request(derez, remote_address_space);
               break;
             }
-          case SEND_VIEW_UPDATE_REQUEST:
+          case SEND_VIEW_REGISTER_USER:
             {
-              runtime->handle_view_update_request(derez, remote_address_space);
+              runtime->handle_view_register_user(derez, remote_address_space);
               break;
             }
-          case SEND_VIEW_UPDATE_RESPONSE:
+          case SEND_VIEW_FIND_COPY_PRE_REQUEST:
             {
-              runtime->handle_view_update_response(derez, remote_address_space);
+              runtime->handle_view_copy_pre_request(derez,remote_address_space);
               break;
             }
-          case SEND_VIEW_REMOTE_UPDATE:
+          case SEND_VIEW_FIND_COPY_PRE_RESPONSE:
             {
-              runtime->handle_view_remote_update(derez, remote_address_space);
+              runtime->handle_view_copy_pre_response(derez,
+                                                    remote_address_space);
               break;
             }
-          case SEND_VIEW_REMOTE_INVALIDATE:
+          case SEND_VIEW_ADD_COPY_USER:
             {
-              runtime->handle_view_remote_invalidate(derez);
+              runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
           case SEND_MANAGER_REQUEST:
@@ -6205,73 +6207,85 @@ namespace Legion {
               runtime->handle_remote_context_physical_response(derez);
               break;
             }
-          case SEND_VERSION_OWNER_REQUEST: 
+          case SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST: 
             {
-              runtime->handle_version_owner_request(derez,remote_address_space);
+              runtime->handle_compute_equivalence_sets_request(derez,
+                                               remote_address_space);
               break;
             }
-          case SEND_VERSION_OWNER_RESPONSE:
+          case SEND_EQUIVALENCE_SET_REQUEST:
             {
-              runtime->handle_version_owner_response(derez);
+              runtime->handle_equivalence_set_request(derez, 
+                                      remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_REQUEST:
+          case SEND_EQUIVALENCE_SET_RESPONSE:
             {
-              runtime->handle_version_state_request(derez,remote_address_space);
+              runtime->handle_equivalence_set_response(derez,
+                                                       remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_RESPONSE:
+          case SEND_EQUIVALENCE_SET_SUBSET_REQUEST:
             {
-              runtime->handle_version_state_response(derez,
-                                                     remote_address_space);
+              runtime->handle_equivalence_set_subset_request(derez, 
+                                              remote_address_space);
               break;
             }
-          case SEND_VERSION_STATE_UPDATE_REQUEST:
+          case SEND_EQUIVALENCE_SET_SUBSET_RESPONSE:
             {
-              runtime->handle_version_state_update_request(derez);
+              runtime->handle_equivalence_set_subset_response(derez);
               break;
             }
-          case SEND_VERSION_STATE_UPDATE_RESPONSE:
+          case SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION:
             {
-              runtime->handle_version_state_update_response(derez);
+              runtime->handle_equivalence_set_subset_invalidation(derez);
               break;
             }
-          case SEND_VERSION_STATE_VALID_NOTIFICATION:
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST:
             {
-              runtime->handle_version_state_valid_notification(derez,
-                                                 remote_address_space);
+              runtime->handle_equivalence_set_ray_trace_request(derez,
+                                                remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_ADVANCE:
+          case SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE:
             {
-              runtime->handle_version_manager_advance(derez);
+              runtime->handle_equivalence_set_ray_trace_response(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_INVALIDATE:
+          case SEND_EQUIVALENCE_SET_VALID_REQUEST:
             {
-              runtime->handle_version_manager_invalidate(derez);
-              break;
-            }
-          case SEND_VERSION_MANAGER_REQUEST:
-            {
-              runtime->handle_version_manager_request(derez,
+              runtime->handle_equivalence_set_valid_request(derez,
                                                       remote_address_space);
               break;
             }
-          case SEND_VERSION_MANAGER_RESPONSE:
+          case SEND_EQUIVALENCE_SET_VALID_RESPONSE:
             {
-              runtime->handle_version_manager_response(derez);
+              runtime->handle_equivalence_set_valid_response(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_UNVERSIONED_REQUEST:
+          case SEND_EQUIVALENCE_SET_UPDATE_REQUEST:
             {
-              runtime->handle_version_manager_unversioned_request(derez,
-                                                  remote_address_space);
+              runtime->handle_equivalence_set_update_request(derez);
               break;
             }
-          case SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE:
+          case SEND_EQUIVALENCE_SET_UPDATE_RESPONSE:
             {
-              runtime->handle_version_manager_unversioned_response(derez);
+              runtime->handle_equivalence_set_update_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST:
+            {
+              runtime->handle_equivalence_set_invalidate_request(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE:
+            {
+              runtime->handle_equivalence_set_invalidate_response(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION:
+            {
+              runtime->handle_equivalence_set_reduction_application(derez);
               break;
             }
           case SEND_INSTANCE_REQUEST:
@@ -6799,103 +6813,6 @@ namespace Legion {
       result = false;
       wait_for.insert(pending_event);
       log_shutdown.info("Pending message on node %d", runtime->address_space);
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Garbage Collection Epoch 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(Runtime *rt)
-      : runtime(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::GarbageCollectionEpoch(
-                                              const GarbageCollectionEpoch &rhs)
-      : runtime(rhs.runtime)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch::~GarbageCollectionEpoch(void)
-    //--------------------------------------------------------------------------
-    {
-      runtime->complete_gc_epoch(this);
-    }
-
-    //--------------------------------------------------------------------------
-    GarbageCollectionEpoch& GarbageCollectionEpoch::operator=(
-                                              const GarbageCollectionEpoch &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void GarbageCollectionEpoch::add_collection(LogicalView *view, ApEvent term,
-                                                ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(view);
-      if (finder == collections.end())
-      {
-        // Add a garbage collection reference to the view, it will
-        // be removed in LogicalView::handle_deferred_collect
-        view->add_base_gc_ref(PENDING_GC_REF, mutator);
-        collections[view].insert(term);
-      }
-      else
-        finder->second.insert(term);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::launch(RtEvent *done/*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      if (collections.empty())
-        return true;
-      // Set remaining to the total number of collections + 1 for a guard
-      remaining = collections.size() + 1;
-      GarbageCollectionArgs args(this);
-      std::set<RtEvent> events;
-      for (std::map<LogicalView*,std::set<ApEvent> >::const_iterator it =
-            collections.begin(); it != collections.end(); it++)
-      {
-        args.view = it->first;
-        RtEvent precondition = Runtime::protect_merge_events(it->second);
-        RtEvent e = runtime->issue_runtime_meta_task(args,
-                LG_THROUGHPUT_WORK_PRIORITY, precondition);
-        if (done != NULL)
-          events.insert(e);
-      }
-      if (done != NULL)
-        *done = Runtime::merge_events(events);
-      // Remove our guard and return if we should delete this or not
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
-    }
-
-    //--------------------------------------------------------------------------
-    bool GarbageCollectionEpoch::handle_collection(
-                                              const GarbageCollectionArgs *args)
-    //--------------------------------------------------------------------------
-    {
-      std::map<LogicalView*,std::set<ApEvent> >::iterator finder = 
-        collections.find(args->view);
-#ifdef DEBUG_LEGION
-      assert(finder != collections.end());
-#endif
-      LogicalView::handle_deferred_collect(args->view, finder->second);
-      // See if we are done
-      return (__sync_add_and_fetch(&remaining, -1) == 0);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7988,7 +7905,7 @@ namespace Legion {
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
           (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
-        constraints_name(NULL), layout_lock(gc_lock)
+        constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_GC
@@ -8003,8 +7920,7 @@ namespace Legion {
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
             rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(registrar.handle), internal(inter), 
-        layout_lock(gc_lock)
+        layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
       if (registrar.layout_name == NULL)
@@ -8026,7 +7942,7 @@ namespace Legion {
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
-        layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
+        layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
       constraints_name = (char*)malloc(64*sizeof(char));
@@ -8040,8 +7956,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     LayoutConstraints::LayoutConstraints(const LayoutConstraints &rhs)
       : LayoutConstraintSet(rhs), DistributedCollectable(NULL, 0, 0), 
-        layout_id(rhs.layout_id), handle(rhs.handle), internal(false),
-        layout_lock(gc_lock)
+        layout_id(rhs.layout_id), handle(rhs.handle), internal(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8071,7 +7986,7 @@ namespace Legion {
     {
       // If we're not the owner add a remote reference
       if (!is_owner())
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, true/*add*/);
+        send_remote_gc_increment(owner_space, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8081,7 +7996,7 @@ namespace Legion {
       if (is_owner())
         runtime->unregister_layout(layout_id);
       else
-        send_remote_gc_update(owner_space, mutator, 1/*count*/, false/*add*/);
+        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8121,9 +8036,7 @@ namespace Legion {
         rez.serialize(done_event);
       }
       runtime->send_constraint_response(target, rez);
-      // Hold our lock when updating our se of remote instances
-      AutoLock lay_lock(layout_lock);
-      remote_instances.add(target);
+      update_remote_instances(target);
     }
 
     //--------------------------------------------------------------------------
@@ -8892,8 +8805,7 @@ namespace Legion {
         unique_library_mapper_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_projection_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
         unique_library_task_id(LEGION_INITIAL_LIBRARY_ID_OFFSET),
-        unique_distributed_id((unique == 0) ? runtime_stride : unique),
-        gc_epoch_counter(0)
+        unique_distributed_id((unique == 0) ? runtime_stride : unique)
     //--------------------------------------------------------------------------
     {
       log_run.debug("Initializing high-level runtime in address space %x",
@@ -8950,9 +8862,6 @@ namespace Legion {
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
       }
-      // Create our first GC epoch
-      current_gc_epoch = new GarbageCollectionEpoch(this);
-      pending_gc_epochs.insert(current_gc_epoch);
       // Initialize our random number generator state
       random_state[0] = address_space & 0xFFFF; // low-order bits of node ID 
       random_state[1] = (address_space >> 16) & 0xFFFF; // high-order bits
@@ -9168,33 +9077,13 @@ namespace Legion {
         delete (*it);
       }
       available_deletion_ops.clear();
-      for (std::deque<OpenOp*>::const_iterator it = 
-            available_open_ops.begin(); it !=
-            available_open_ops.end(); it++)
+      for (std::deque<MergeCloseOp*>::const_iterator it = 
+            available_merge_close_ops.begin(); it !=
+            available_merge_close_ops.end(); it++)
       {
         delete (*it);
       }
-      available_open_ops.clear();
-      for (std::deque<AdvanceOp*>::const_iterator it = 
-            available_advance_ops.begin(); it !=
-            available_advance_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_advance_ops.clear();
-      for (std::deque<InterCloseOp*>::const_iterator it = 
-            available_inter_close_ops.begin(); it !=
-            available_inter_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
-      available_inter_close_ops.clear();
-      for (std::deque<ReadCloseOp*>::const_iterator it = 
-            available_read_close_ops.begin(); it != 
-            available_read_close_ops.end(); it++)
-      {
-        delete (*it);
-      }
+      available_merge_close_ops.clear();
       for (std::deque<PostCloseOp*>::const_iterator it = 
             available_post_close_ops.begin(); it !=
             available_post_close_ops.end(); it++)
@@ -13588,8 +13477,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, INDEX_SPACE_DESTRUCTION_MESSAGE,
-                               INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+                                      REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13602,8 +13494,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-        INDEX_PARTITION_DESTRUCTION_MESSAGE, INDEX_SPACE_VIRTUAL_CHANNEL,
+        INDEX_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                              true/*flush*/);
     }
 
@@ -13617,8 +13512,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          FIELD_SPACE_DESTRUCTION_MESSAGE, FIELD_SPACE_VIRTUAL_CHANNEL,
+          FIELD_SPACE_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
@@ -13632,8 +13530,11 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_REGION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_REGION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                               true/*flush*/);
     }
 
@@ -13647,20 +13548,12 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(handle);
       }
+      // Put this message on the same virtual channel as the unregister
+      // messages for distributed collectables to make sure that they 
+      // are properly ordered
       find_messenger(target)->send_message(rez, 
-          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, LOGICAL_TREE_VIRTUAL_CHANNEL,
+          LOGICAL_PARTITION_DESTRUCTION_MESSAGE, REFERENCE_VIRTUAL_CHANNEL,
                                                                 true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_individual_remote_mapped(Processor target,
-                                        Serializer &rez, bool flush /*= true*/)
-    //--------------------------------------------------------------------------
-    {
-      // Very important that this goes on the physical state channel
-      // so that it is properly serialized with state updates
-      find_messenger(target)->send_message(rez, INDIVIDUAL_REMOTE_MAPPED,
-                       DEFAULT_VIRTUAL_CHANNEL, flush, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -13743,33 +13636,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_resource_update(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_RESOURCE_UPDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_invalidate(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_INVALIDATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_did_remote_deactivate(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, DISTRIBUTED_DEACTIVATE,
-                                    REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_did_add_create_reference(AddressSpaceID target,
                                                  Serializer &rez)
     //--------------------------------------------------------------------------
@@ -13832,14 +13698,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_composite_view(AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_COMPOSITE_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
-    } 
-
-    //--------------------------------------------------------------------------
     void Runtime::send_fill_view(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -13898,57 +13756,37 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_request(AddressSpaceID target, 
-                                           Serializer &rez)
+    void Runtime::send_view_register_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_REQUEST,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_REGISTER_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_subview_did_response(AddressSpaceID target,
-                                            Serializer &rez)
+    void Runtime::send_view_find_copy_preconditions_request(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_SUBVIEW_DID_RESPONSE,
-                    VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_FIND_COPY_PRE_REQUEST,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_view_update_request(AddressSpaceID target,
-                                           Serializer &rez)
+    void Runtime::send_view_find_copy_preconditions_response(
+                                         AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_REQUEST,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez,SEND_VIEW_FIND_COPY_PRE_RESPONSE,
+                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
-
+    
     //--------------------------------------------------------------------------
-    void Runtime::send_view_update_response(AddressSpaceID target,
-                                            Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_UPDATE_RESPONSE,
-                  UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_update(AddressSpaceID target, 
-                                          Serializer &rez)
+    void Runtime::send_view_add_copy_user(AddressSpaceID target,Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_UPDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_view_remote_invalidate(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VIEW_REMOTE_INVALIDATE,
-                                        UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+      find_messenger(target)->send_message(rez, SEND_VIEW_ADD_COPY_USER,
+                                         UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14191,125 +14029,144 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_request(AddressSpaceID target,
-                                             Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_REQUEST,
-                            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_owner_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_OWNER_RESPONSE,
-            VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_response(AddressSpaceID target,
-                                              Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_STATE_RESPONSE,
-                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_request(AddressSpaceID target,
-                                                    Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-                               SEND_VERSION_STATE_UPDATE_REQUEST,
-                               ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_update_response(AddressSpaceID target,
-                                                     Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_UPDATE_RESPONSE,
-                                ANALYSIS_VIRTUAL_CHANNEL, 
-                                true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_state_valid_notification(AddressSpaceID target,
+    void Runtime::send_compute_equivalence_sets_request(AddressSpaceID target,
                                                         Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-                                SEND_VERSION_STATE_VALID_NOTIFICATION,
-                                ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_advance(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_ADVANCE,
-                                      ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_invalidate(AddressSpaceID target,
-                                                  Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This comes back on the version manager channel so that it is 
-      // properly ordered with respect to the version manager responses
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_INVALIDATE,
-                                VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_request(AddressSpaceID target,
-                                               Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This goes on the analysis virtual channel so that it can 
-      // be ordered with respect to advances
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_REQUEST,
-                                       ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_response(AddressSpaceID target,
-                                                Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      // This comes back on the version manager channel in case we need to page
-      // in any version managers from remote nodes
-      find_messenger(target)->send_message(rez, SEND_VERSION_MANAGER_RESPONSE,
-             VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_request(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_REQUEST, 
+          SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
           VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_version_manager_unversioned_response(
+    void Runtime::send_equivalence_set_response(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_RESPONSE,
+                    VERSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_request(AddressSpaceID target,
+                                                      Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_REQUEST, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_response(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_SUBSET_RESPONSE, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_subset_invalidation(
                                          AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, 
-          SEND_VERSION_MANAGER_UNVERSIONED_RESPONSE, 
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
     }
-    
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_request(AddressSpaceID target,
+                                                         Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST, 
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_ray_trace_response(AddressSpaceID target,
+                                                          Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
+          ANALYSIS_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_valid_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_VALID_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_valid_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_VALID_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_update_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_update_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_invalidate_request(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_invalidate_response(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_reduction_application(
+                                         AddressSpaceID target, Serializer &rez) 
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::send_instance_request(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
@@ -14817,13 +14674,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_individual_remote_mapped(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      IndividualTask::process_unpack_remote_mapped(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_individual_remote_complete(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -14882,27 +14732,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_resource_update(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_resource_update(this, derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_invalidate(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_did_remote_deactivate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DistributedCollectable::handle_did_remote_deactivate(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_did_create_add(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -14953,14 +14782,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       MaterializedView::handle_send_materialized_view(this, derez, source); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_send_composite_view(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      CompositeView::handle_send_composite_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15019,21 +14840,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_subview_did_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      MaterializedView::handle_subview_did_response(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_view_request(Deserializer &derez, 
                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -15042,34 +14848,35 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_request(Deserializer &derez,
-                                             AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_request(derez, this, source);
-    }
-    
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_update_response(Deserializer &derez,
-                                              AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InstanceView::handle_view_update_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_update(Deserializer &derez,
+    void Runtime::handle_view_register_user(Deserializer &derez,
                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_view_remote_update(derez, this, source);
+      InstanceView::handle_view_register_user(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_view_remote_invalidate(Deserializer &derez)
+    void Runtime::handle_view_copy_pre_request(Deserializer &derez,
+                                               AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      InstanceView::handle_view_remote_invalidate(derez, this);
+      InstanceView::handle_view_find_copy_pre_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_copy_pre_response(Deserializer &derez,
+                                                AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_find_copy_pre_response(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_add_copy_user(Deserializer &derez,
+                                            AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_add_copy_user(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -15331,103 +15138,119 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_request(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::handle_version_owner_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_owner_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      InnerContext::handle_version_owner_response(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_request(Deserializer &derez,
-                                               AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_response(Deserializer &derez,
-                                                AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::handle_version_state_response(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_request(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_update_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionState::process_version_state_update_response(this, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_state_valid_notification(Deserializer &derez,
+    void Runtime::handle_compute_equivalence_sets_request(Deserializer &derez,
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionState::process_version_state_valid_notification(derez,this,source);
+      InnerContext::handle_compute_equivalence_sets_request(derez, this,source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_advance(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_advance(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_invalidate(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      VersionManager::handle_remote_invalidate(derez, this);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_request(Deserializer &derez,
+    void Runtime::handle_equivalence_set_request(Deserializer &derez,
                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_request(derez, this, source);
+      EquivalenceSet::handle_equivalence_set_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_response(Deserializer &derez)
+    void Runtime::handle_equivalence_set_response(Deserializer &derez,
+                                                  AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_response(derez);
+      EquivalenceSet::handle_equivalence_set_response(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_request(
-                                     Deserializer &derez, AddressSpaceID source)
+    void Runtime::handle_equivalence_set_subset_request(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_unversioned_request(derez, this, source);
+      EquivalenceSet::handle_subset_request(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_version_manager_unversioned_response(
+    void Runtime::handle_equivalence_set_subset_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_subset_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_subset_invalidation(
                                                             Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      VersionManager::handle_unversioned_response(derez, this);
+      EquivalenceSet::handle_subset_invalidation(derez, this);
     }
-    
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_request(Deserializer &derez,
+                                                         AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_ray_trace_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_ray_trace_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_valid_request(Deserializer &derez,
+                                                       AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_valid_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_valid_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_valid_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_update_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_update_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_update_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_update_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_invalidate_request(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_invalidate_request(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_invalidate_response(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_invalidate_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_reduction_application(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_reduction_application(derez, this);
+    }
+
     //--------------------------------------------------------------------------
     void Runtime::handle_instance_request(Deserializer &derez, 
                                           AddressSpaceID source)
@@ -15883,7 +15706,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::release_tree_instances(RegionTreeID tree_id)
+    void Runtime::release_tree_instances(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
       std::map<Memory,MemoryManager*> copy_managers;
@@ -15893,7 +15716,7 @@ namespace Legion {
       }
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             copy_managers.begin(); it != copy_managers.end(); it++)
-        it->second->release_tree_instances(tree_id);
+        it->second->release_tree_instances(tid);
     }
 
     //--------------------------------------------------------------------------
@@ -16291,9 +16114,6 @@ namespace Legion {
       else if (LogicalView::is_reduction_did(did))
         dc = find_or_request_distributed_collectable<
           ReductionView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
-      else if (LogicalView::is_composite_did(did))
-        dc = find_or_request_distributed_collectable<
-          CompositeView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
       else if (LogicalView::is_fill_did(did))
         dc = find_or_request_distributed_collectable<
           FillView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
@@ -16328,15 +16148,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    VersionState* Runtime::find_or_request_version_state(DistributedID did,
-                                                         RtEvent &ready)
+    EquivalenceSet* Runtime::find_or_request_equivalence_set(DistributedID did,
+                                                             RtEvent &ready)
     //--------------------------------------------------------------------------
     {
       DistributedCollectable *dc = find_or_request_distributed_collectable<
-        VersionState, SEND_VERSION_STATE_REQUEST, VERSION_VIRTUAL_CHANNEL>(did,
-                                                                        ready);
+        EquivalenceSet, SEND_EQUIVALENCE_SET_REQUEST, VERSION_VIRTUAL_CHANNEL>(
+                                                                    did, ready);
       // Have to static cast since the memory might not have been initialized
-      return static_cast<VersionState*>(dc);
+      return static_cast<EquivalenceSet*>(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -16539,43 +16359,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::defer_collect_user(LogicalView *view, ApEvent term_event,
-                                     ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      GarbageCollectionEpoch *to_trigger = NULL;
-      {
-        AutoLock gc(gc_epoch_lock);
-        current_gc_epoch->add_collection(view, term_event, mutator);
-        gc_epoch_counter++;
-        if (gc_epoch_counter == Runtime::gc_epoch_size)
-        {
-          to_trigger = current_gc_epoch;
-          current_gc_epoch = new GarbageCollectionEpoch(this);
-          pending_gc_epochs.insert(current_gc_epoch);
-          gc_epoch_counter = 0;
-        }
-      }
-      if ((to_trigger != NULL) && to_trigger->launch())
-        delete to_trigger;
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::complete_gc_epoch(GarbageCollectionEpoch *epoch)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock gc(gc_epoch_lock);
-#ifdef DEBUG_LEGION
-      std::set<GarbageCollectionEpoch*>::iterator finder = 
-        pending_gc_epochs.find(epoch);
-      assert(finder != pending_gc_epochs.end());
-      pending_gc_epochs.erase(finder);
-#else
-      pending_gc_epochs.erase(epoch);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::increment_outstanding_top_level_tasks(void)
     //--------------------------------------------------------------------------
     {
@@ -16646,22 +16429,23 @@ namespace Legion {
       // If this is the first phase, do all our normal stuff
       if (phase == ShutdownManager::CHECK_TERMINATION)
       {
-        // Launch our last garbage collection epoch and wait for it to
-        // finish so we can try to have no outstanding tasks
-        RtEvent gc_done;
-        GarbageCollectionEpoch *to_delete = NULL;
+        // Get the preconditions for any outstanding operations still
+        // available for garabage collection and wait on them to 
+        // try and get close to when there are no more outstanding tasks
+        std::map<Memory,MemoryManager*> copy_managers;
         {
-          AutoLock gc(gc_epoch_lock);
-          if (current_gc_epoch != NULL)
-          {
-            if (current_gc_epoch->launch(&gc_done))
-              to_delete = current_gc_epoch;
-            current_gc_epoch = NULL;
-          }
+          AutoLock m_lock(memory_manager_lock,1,false/*exclusive*/);
+          copy_managers = memory_managers;
         }
-        if (to_delete != NULL)
-          delete to_delete;
-        gc_done.wait();
+        std::set<ApEvent> wait_events;
+        for (std::map<Memory,MemoryManager*>::const_iterator it = 
+              copy_managers.begin(); it != copy_managers.end(); it++)
+          it->second->find_shutdown_preconditions(wait_events);
+        if (!wait_events.empty())
+        {
+          RtEvent wait_on = Runtime::protect_merge_events(wait_events);
+          wait_on.wait();
+        }
       }
       else if ((phase == ShutdownManager::CHECK_SHUTDOWN) && 
                 !prepared_for_shutdown)
@@ -16918,31 +16702,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    OpenOp* Runtime::get_available_open_op(void)
+    MergeCloseOp* Runtime::get_available_merge_close_op(void)
     //--------------------------------------------------------------------------
     {
-      return get_available(open_op_lock, available_open_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    AdvanceOp* Runtime::get_available_advance_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(advance_op_lock, available_advance_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    InterCloseOp* Runtime::get_available_inter_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(inter_close_op_lock, available_inter_close_ops);
-    }
-
-    //--------------------------------------------------------------------------
-    ReadCloseOp* Runtime::get_available_read_close_op(void)
-    //--------------------------------------------------------------------------
-    {
-      return get_available(read_close_op_lock, available_read_close_ops);
+      return get_available(merge_close_op_lock, available_merge_close_ops);
     }
 
     //--------------------------------------------------------------------------
@@ -17231,35 +16994,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::free_open_op(OpenOp *op)
+    void Runtime::free_merge_close_op(MergeCloseOp *op)
     //--------------------------------------------------------------------------
     {
-      AutoLock o_lock(open_op_lock);
-      release_operation<false>(available_open_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_advance_op(AdvanceOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock a_lock(advance_op_lock);
-      release_operation<false>(available_advance_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_inter_close_op(InterCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inter_close_op_lock);
-      release_operation<false>(available_inter_close_ops, op);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_read_close_op(ReadCloseOp *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock r_lock(read_close_op_lock);
-      release_operation<false>(available_read_close_ops, op);
+      AutoLock i_lock(merge_close_op_lock);
+      release_operation<false>(available_merge_close_ops, op);
     }
 
     //--------------------------------------------------------------------------
@@ -18042,8 +17781,6 @@ namespace Legion {
           return "List Reduction Manager";
         case FOLD_MANAGER_ALLOC:
           return "Fold Reduction Manager";
-        case COMPOSITE_NODE_ALLOC:
-          return "Composite Node";
         case TREE_CLOSE_ALLOC:
           return "Tree Close List";
         case TREE_CLOSE_IMPL_ALLOC:
@@ -18052,8 +17789,6 @@ namespace Legion {
           return "Materialized View";
         case REDUCTION_VIEW_ALLOC:
           return "Reduction View";
-        case COMPOSITE_VIEW_ALLOC:
-          return "Composite View";
         case FILL_VIEW_ALLOC:
           return "Fill View";
         case PHI_VIEW_ALLOC:
@@ -18082,10 +17817,6 @@ namespace Legion {
           return "Frame Op";
         case DELETION_OP_ALLOC:
           return "Deletion Op";
-        case OPEN_OP_ALLOC:
-          return "Open Op";
-        case ADVANCE_OP_ALLOC:
-          return "Advance Op";
         case CLOSE_OP_ALLOC:
           return "Close Op";
         case DYNAMIC_COLLECTIVE_OP_ALLOC:
@@ -18194,6 +17925,8 @@ namespace Legion {
           return "Version Manager";
         case PHYSICAL_STATE_ALLOC:
           return "Physical State";
+        case EQUIVALENCE_SET_ALLOC:
+          return "Equivalence Set";
         case VERSION_STATE_ALLOC:
           return "Version State";
         case AGGREGATE_VERSION_ALLOC:
@@ -19734,13 +19467,6 @@ namespace Legion {
                 deferred_commit_args->gen);
             break;
           }
-        case LG_DEFERRED_POST_MAPPED_ID:
-          {
-            const SingleTask::DeferredPostMappedArgs *post_mapped_args = 
-              (const SingleTask::DeferredPostMappedArgs*)args;
-            post_mapped_args->task->handle_post_mapped();
-            break;
-          }
         case LG_DEFERRED_EXECUTE_ID:
           {
             const Operation::DeferredExecArgs *deferred_exec_args = 
@@ -19772,11 +19498,11 @@ namespace Legion {
           }
         case LG_DEFERRED_COLLECT_ID:
           {
-            const GarbageCollectionEpoch::GarbageCollectionArgs *collect_args =
-              (const GarbageCollectionEpoch::GarbageCollectionArgs*)args;
-            bool done = collect_args->epoch->handle_collection(collect_args);
-            if (done)
-              delete collect_args->epoch;
+            const PhysicalManager::GarbageCollectionArgs *collect_args =
+              (const PhysicalManager::GarbageCollectionArgs*)args;
+            InstanceView::handle_deferred_collect(collect_args->view,
+                                            *collect_args->to_collect);
+            delete collect_args->to_collect;
             break;
           }
         case LG_PRE_PIPELINE_ID:
@@ -19964,18 +19690,6 @@ namespace Legion {
             runtime->activate_context(dargs->parent_ctx);
             break;
           }
-        case LG_SEND_VERSION_STATE_UPDATE_TASK_ID:
-          {
-            VersionState::SendVersionStateArgs *vargs = 
-              (VersionState::SendVersionStateArgs*)args;
-            vargs->proxy_this->send_version_state_update(vargs->target, 
-                                                  vargs->context,
-                                                  *(vargs->request_mask),
-                                                  vargs->request_kind,
-                                                  vargs->to_trigger);
-            delete (vargs->request_mask);
-            break;
-          }
         case LG_ISSUE_FRAME_TASK_ID:
           {
             InnerContext::IssueFrameArgs *fargs = 
@@ -20092,51 +19806,6 @@ namespace Legion {
             MapperManager::handle_deferred_message(args);
             break;
           }
-        case LG_DEFER_COMPOSITE_VIEW_REF_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_VIEW_REGISTRATION_TASK_ID:
-          {
-            CompositeView::handle_deferred_view_registration(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_REF_TASK_ID:
-          {
-            CompositeNode::handle_deferred_node_ref(args);
-            break;
-          }
-        case LG_DEFER_COMPOSITE_NODE_CAPTURE_TASK_ID:
-          {
-            CompositeNode::handle_deferred_capture(args);
-            break;
-          }
-        case LG_CONVERT_VIEW_TASK_ID:
-          {
-            VersionState::process_convert_view(args);
-            break;
-          }
-        case LG_UPDATE_VIEW_REFERENCES_TASK_ID:
-          {
-            VersionState::process_view_references(args);
-            break;
-          }
-        case LG_UPDATE_VERSION_STATE_REDUCE_TASK_ID:
-          {
-            VersionState::process_version_state_reduction(args);
-            break;
-          }
-        case LG_REMOVE_VERSION_STATE_REF_TASK_ID:
-          {
-            VersionState::process_remove_version_state_ref(args);
-            break;
-          }
-        case LG_DEFER_RESTRICTED_MANAGER_TASK_ID:
-          {
-            RestrictInfo::handle_deferred_reference(args);
-            break;
-          }
         case LG_REMOTE_VIEW_CREATION_TASK_ID:
           {
             InnerContext::handle_remote_view_creation(args);
@@ -20154,7 +19823,7 @@ namespace Legion {
             const TaskOp::DeferMappingArgs *margs = 
               (const TaskOp::DeferMappingArgs*)args;
             RtEvent wait_on = margs->proxy_this->perform_mapping(
-                                                    margs->must_op);
+                        margs->must_op, false/*first invocation*/);
             if (wait_on.exists())
               wait_on.wait();
             break;
@@ -20164,41 +19833,6 @@ namespace Legion {
             const TaskOp::DeferLaunchArgs *largs = 
               (const TaskOp::DeferLaunchArgs*)args;
             largs->proxy_this->launch_task();
-            break;
-          }
-        case LG_DEFER_MAP_AND_LAUNCH_TASK_ID:
-          {
-            const SliceTask::DeferMapAndLaunchArgs *margs = 
-              (const SliceTask::DeferMapAndLaunchArgs*)args;
-            margs->proxy_this->map_and_launch();
-            break;
-          }
-        case LG_ADD_VERSIONING_SET_REF_TASK_ID:
-          {
-            const VersioningSetRefArgs *ref_args = 
-              (const VersioningSetRefArgs*)args;
-            LocalReferenceMutator mutator;
-            ref_args->state->add_base_valid_ref(ref_args->kind, &mutator);
-            break;
-          }
-        case LG_VERSION_STATE_CAPTURE_DIRTY_TASK_ID:
-          {
-            VersionManager::process_capture_dirty(args);
-            break;
-          }
-        case LG_VERSION_STATE_PENDING_ADVANCE_TASK_ID:
-          {
-            VersionManager::process_pending_advance(args);
-            break;
-          }
-        case LG_DISJOINT_CLOSE_TASK_ID:
-          {
-            InterCloseOp::handle_disjoint_close(args);
-            break;
-          }
-        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
-          {
-            MaterializedView::handle_deferred_materialized_view(runtime, args);
             break;
           }
         case LG_MISSPECULATE_TASK_ID:
@@ -20241,6 +19875,31 @@ namespace Legion {
         case LG_DELETE_TEMPLATE_ID:
           {
             PhysicalTemplate::handle_delete_template(args);
+            break;
+          }
+        case LG_REFINEMENT_TASK_ID:
+          {
+            EquivalenceSet::handle_refinement(args);
+            break;
+          }
+        case LG_REMOTE_REF_TASK_ID:
+          {
+            EquivalenceSet::handle_remote_references(args);
+            break;
+          }
+        case LG_DEFER_RAY_TRACE_TASK_ID:
+          {
+            EquivalenceSet::handle_ray_trace(args);
+            break;
+          }
+        case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
+          {
+            DistributedCollectable::handle_defer_remote_decrement(args);
+            break;
+          }
+        case LG_DEFER_VERSION_FINALIZE_TASK_ID:
+          {
+            VersionInfo::handle_defer_finalize(args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

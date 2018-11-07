@@ -341,9 +341,6 @@ namespace Legion {
                                           LogicalRegion *handle = NULL) = 0;
       // No-op for most contexts except remote ones
       virtual void record_using_physical_context(LogicalRegion handle) { }
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                const FieldMask &version_mask, InnerContext *context,
-                VersionInfo &version_info, std::set<RtEvent> &ready_events) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
@@ -368,19 +365,6 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0;
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void release_restrictions(void) = 0;
-      virtual bool has_restrictions(void) const = 0; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info) = 0;
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f) = 0;
@@ -574,11 +558,8 @@ namespace Legion {
       bool children_complete_invoked;
       bool children_commit_invoked;
 #ifdef LEGION_SPY
-    public:
-      RtEvent update_previous_mapped_event(RtEvent next);
     protected:
       UniqueID current_fence_uid;
-      RtEvent previous_mapped_event;
 #endif
     };
 
@@ -720,9 +701,9 @@ namespace Legion {
       virtual void pack_remote_context(Serializer &rez, AddressSpaceID target);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-      void notify_region_tree_node_deletion(RegionTreeNode *node);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -978,9 +959,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
     public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
@@ -1012,19 +990,6 @@ namespace Legion {
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
-    public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
@@ -1033,12 +998,8 @@ namespace Legion {
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
     public:
-      static void handle_version_owner_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      void process_version_owner_response(RegionTreeNode *node, 
-                                          AddressSpaceID result);
-      static void handle_version_owner_response(Deserializer &derez,
-                                                Runtime *runtime);
+      static void handle_compute_equivalence_sets_request(Deserializer &derez,
+                                     Runtime *runtime, AddressSpaceID source);
     public:
       static void handle_prepipeline_stage(const void *args);
       static void handle_dependence_stage(const void *args);
@@ -1048,6 +1009,12 @@ namespace Legion {
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+    public:
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<InstanceView*> &target_views);
+      // I hate the container problem, same as previous except MaterializedView
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<MaterializedView*> &target_views);
     protected:
       // Find an index space name for a concrete launch domain
       IndexSpace find_index_launch_space(const Domain &launch_domain);
@@ -1139,18 +1106,15 @@ namespace Legion {
       // For managing changing task priorities
       ApEvent realm_done_event;
       TaskPriority current_priority;
-    protected:
-      // For tracking restricted coherence
-      std::list<Restriction*> coherence_restrictions;
     protected: // Instance top view data structures
       mutable LocalLock                         instance_view_lock;
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
-      mutable LocalLock                         tree_owner_lock;
-      std::map<RegionTreeNode*,
-        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
-      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
+      mutable LocalLock                         tree_set_lock;
+      std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
+      std::map<std::pair<RegionTreeID,
+        IndexSpaceExprID>,EquivalenceSet*>      empty_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
@@ -1195,10 +1159,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                      const void *result, size_t size, PhysicalInstance inst);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle, 
+                        IndexSpaceExpression *expr, AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1288,13 +1251,9 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);
@@ -1319,7 +1278,6 @@ namespace Legion {
     protected:
       int depth;
       ApEvent remote_completion_event;
-      std::vector<VersionInfo> version_infos;
       bool top_level_context;
       RemoteTask remote_task;
     protected:
@@ -1603,9 +1561,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -1624,19 +1579,6 @@ namespace Legion {
       virtual void end_task(const void *res, size_t res_size, bool owned,
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -1921,9 +1863,6 @@ namespace Legion {
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
@@ -1945,19 +1884,6 @@ namespace Legion {
       virtual void end_task(const void *res, size_t res_size, bool owned,
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
