@@ -3103,13 +3103,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::RefinementThunk::RefinementThunk(IndexSpaceExpression *exp,
               IndexSpaceNode *node, EquivalenceSet *own, AddressSpaceID source)
-      : owner(own), expr(exp), refinement(NULL)
+      : owner(own), expr(exp), refinement(new EquivalenceSet(owner->runtime, 
+            owner->runtime->get_available_distributed_id(), 
+            owner->runtime->address_space, source, expr, node, 
+            Reservation::NO_RESERVATION, true/*register*/))
     //--------------------------------------------------------------------------
     {
-      Runtime *runtime = owner->runtime;
-      DistributedID did = runtime->get_available_distributed_id();
-      refinement = new EquivalenceSet(runtime, did, runtime->address_space, 
-            source, expr, node, Reservation::NO_RESERVATION, true/*register*/);
     }
 
     //--------------------------------------------------------------------------
@@ -3135,20 +3134,6 @@ namespace Legion {
       assert(refinement != NULL);
 #endif
       return refinement;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::RefinementThunk::record_refinement(
-                                          EquivalenceSet *result, RtEvent ready)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(refinement == NULL);
-      assert(refinement_ready.exists());
-      assert(!refinement_ready.has_triggered());
-#endif
-      refinement = result;
-      Runtime::trigger_event(refinement_ready, ready);
     }
 
     //--------------------------------------------------------------------------
@@ -3648,7 +3633,7 @@ namespace Legion {
                   }
                   // Record this child for the future
                   disjoint_partition_refinement->children[node] = 
-                    refinement->owner;
+                    refinement->refinement;
                 }
                 else
                 {

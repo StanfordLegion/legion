@@ -761,17 +761,16 @@ namespace Legion {
         RefinementThunk(IndexSpaceExpression *expr, IndexSpaceNode *node,
             EquivalenceSet *owner, AddressSpaceID source);
         RefinementThunk(const RefinementThunk &rhs) 
-          : owner(NULL), expr(NULL) { assert(false); }
+          : owner(NULL), expr(NULL), refinement(NULL) { assert(false); }
         virtual ~RefinementThunk(void) { }
       public:
         EquivalenceSet* perform_refinement(void);
         EquivalenceSet* get_refinement(void);
-        void record_refinement(EquivalenceSet *result, RtEvent ready);
       public:
         EquivalenceSet *const owner;
         IndexSpaceExpression *const expr;
+        EquivalenceSet *const refinement;
       protected:
-        EquivalenceSet *refinement;
         RtUserEvent refinement_ready;
       };
       class LocalRefinement : public RefinementThunk {
