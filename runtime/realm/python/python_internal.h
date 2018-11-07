@@ -66,14 +66,14 @@ namespace Realm {
     PyGILState_STATE (*PyGILState_Ensure)(void);
     void (*PyGILState_Release)(PyGILState_STATE);
 #else
-    void (*PyEval_RestoreThread)(PyThreadState *);
-    PyThreadState *(*PyEval_SaveThread)(void);
-
     PyThreadState *(*PyThreadState_New)(PyInterpreterState *);
     void (*PyThreadState_Clear)(PyThreadState *);
     void (*PyThreadState_Delete)(PyThreadState *);
     PyThreadState *(*PyThreadState_Get)(void);
 #endif
+    void (*PyEval_RestoreThread)(PyThreadState *);
+    PyThreadState *(*PyEval_SaveThread)(void);
+
     PyThreadState *(*PyThreadState_Swap)(PyThreadState *);
 
     void (*PyErr_PrintEx)(int set_sys_last_vars);

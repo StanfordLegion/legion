@@ -106,21 +106,12 @@ task main()
   if true then
     regentlib.c.printf("test 1\n")
     fill_region(r1, 2)
-    -- fill_region(r2, 3)
     for x in r2 do x.{a, b, c} = 1 end -- force an inline mapping
 
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     acquire(r2)
     fill_region(r2, 2)
     release(r2)
-    -- for c in cs do
-    --   acquire((p2[c]))
-    --   -- copy(r2.a, r1.a)
-    --   -- copy(r2.b, r1.b)
-    --   -- copy(r2.c, r1.c)
-    --   compare_regions(p1[c].ispace, p1[c], p2[c])
-    --   release((p2[c]))
-    -- end
     detach(hdf5, r2.{a, b, c})
 
     -- FIXME: The runtime can't track dependencies across different
@@ -132,15 +123,11 @@ task main()
     attach(hdf5, r2.{a, b, c}, filename, regentlib.file_read_write)
     for c in cs do
       acquire((p2[c]))
-      -- copy(r2.a, r1.a)
-      -- copy(r2.b, r1.b)
-      -- copy(r2.c, r1.c)
       errors += compare_regions(p1[c].ispace, p1[c], p2[c])
       release((p2[c]))
     end
     regentlib.assert(errors == 0, "errors detected")
     detach(hdf5, r2.{a, b, c})
-
   end
 end
 
