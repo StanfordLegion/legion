@@ -3801,7 +3801,7 @@ namespace Legion {
                 refinement_done = transition_event;
                 // Save this for the future
                 disjoint_partition_refinement->children[node] = 
-                  refinement->owner;
+                  refinement->refinement;
               }
             }
             // If we didn't make a disjoint partition refeinement
