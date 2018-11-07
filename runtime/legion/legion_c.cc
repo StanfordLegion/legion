@@ -196,6 +196,14 @@ legion_domain_get_bounds_3d(legion_domain_t d_)
   return CObjectWrapper::wrap(space.bounds);
 }
 
+bool
+legion_domain_contains(legion_domain_t d_, legion_domain_point_t p_)
+{
+  Domain d = CObjectWrapper::unwrap(d_);
+  DomainPoint p = CObjectWrapper::unwrap(p_);
+  return d.contains(p);
+}
+
 size_t
 legion_domain_get_volume(legion_domain_t d_)
 {
