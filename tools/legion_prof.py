@@ -2934,7 +2934,7 @@ def main():
             state.show_copy_matrix(copy_output_prefix)
 
 if __name__ == '__main__':
-    start = time.ime()
+    start = time.time()
     main()
     end = time.time()
     print("elapsed: " + str(end - start) + "s")
