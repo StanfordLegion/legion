@@ -32,6 +32,8 @@ import time
 import itertools
 from legion_serializer import LegionProfASCIIDeserializer, LegionProfBinaryDeserializer, GetFileTypeInfo
 
+root_dir = os.path.dirname(os.path.realpath(__file__))
+
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
     1 : 'GPU',
@@ -2134,8 +2136,7 @@ class State(object):
                 kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
-        template_file_name = os.path.join(os.path.dirname(sys.argv[0]),
-                "legion_prof_copy.html.template")
+        template_file_name = os.path.join(root_dir, "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
         print('Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name))
@@ -2679,7 +2680,7 @@ class State(object):
             output_dirname = self.find_unique_dirname(output_dirname)
 
         print('Generating interactive visualization files in directory ' + output_dirname)
-        src_directory = os.path.join(os.path.dirname(sys.argv[0]), "legion_prof_files")
+        src_directory = os.path.join(root_dir, "legion_prof_files")
 
         shutil.copytree(src_directory, output_dirname)
 
