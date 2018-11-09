@@ -33,6 +33,7 @@ override CC_FLAGS := $(filter-out -DBOUNDS_CHECKS, \
                        $(CC_FLAGS))))
 
 TESTARGS.default =
+TESTARGS.short = -d 128
 RUNMODE ?= default
 
 run : $(OUTFILE)

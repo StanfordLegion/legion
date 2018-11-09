@@ -20,6 +20,8 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace Realm {
   
@@ -423,37 +425,46 @@ namespace Realm {
   
   // default constructor makes an inactive message
   inline LoggerMessage::LoggerMessage(void)
-  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE), oss(0)
+    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE), stream(0)
   {}
   
   inline LoggerMessage::LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level)
-  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level), oss(0)
+    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level)
   {
     if(active)
-    oss = new std::ostringstream;
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level)
-  : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level), oss(0)
+    : messageID(messageID), logger(_logger), active(_active), level(_level)
   {
-    if(active) {
-      oss = new std::ostringstream;
-      this->messageID = messageID;
-    }
+    if(active)
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::LoggerMessage(const LoggerMessage& to_copy)
-  : logger(to_copy.logger), active(to_copy.active), level(to_copy.level), oss(0)
+    : messageID(to_copy.messageID), logger(to_copy.logger), active(to_copy.active), level(to_copy.level)
   {
     if(active)
-    oss = new std::ostringstream;
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::~LoggerMessage(void)
   {
     if(active) {
-      logger->log_msg(level, oss->str());
-      delete oss;
+      //logger->log_msg(level, buffer.str());
+      logger->log_msg(level, buffer.data(), buffer.size());
+      // clang does not like 'get_stream().std::ostream::~ostream', so import
+      //  std namespace here
+      using namespace std;
+      get_stream().ostream::~ostream();
+      active = false;
     }
   }
   
@@ -462,7 +473,7 @@ namespace Realm {
   {
     // send through to normal ostringstream formatting routines if active
     if(active)
-    (*oss) << val;
+      get_stream() << val;
     return *this;
   }
   
@@ -473,8 +484,11 @@ namespace Realm {
   
   inline std::ostream& LoggerMessage::get_stream(void)
   {
+#ifdef DEBUG_REALM
     assert(active);
-    return (*oss);
+#endif
+    return *stream;
   }
   
+
 }; // namespace Realm
