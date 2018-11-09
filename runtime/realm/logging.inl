@@ -425,28 +425,34 @@ namespace Realm {
   
   // default constructor makes an inactive message
   inline LoggerMessage::LoggerMessage(void)
-    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE)
+    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE), stream(0)
   {}
   
   inline LoggerMessage::LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level)
     : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level)
   {
     if(active)
-      new(stream_storage) std::ostream(&buffer);
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level)
     : messageID(messageID), logger(_logger), active(_active), level(_level)
   {
     if(active)
-      new(stream_storage) std::ostream(&buffer);
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::LoggerMessage(const LoggerMessage& to_copy)
     : messageID(to_copy.messageID), logger(to_copy.logger), active(to_copy.active), level(to_copy.level)
   {
     if(active)
-      new(stream_storage) std::ostream(&buffer);
+      stream = new(stream_storage) std::ostream(&buffer);
+    else
+      stream = 0;
   }
   
   inline LoggerMessage::~LoggerMessage(void)
@@ -478,7 +484,7 @@ namespace Realm {
 #ifdef DEBUG_REALM
     assert(active);
 #endif
-    return *reinterpret_cast<std::ostream *>(stream_storage);
+    return *stream;
   }
   
 
