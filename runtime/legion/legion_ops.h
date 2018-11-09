@@ -2506,6 +2506,8 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual int get_depth(void) const;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
