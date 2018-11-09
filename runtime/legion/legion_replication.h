@@ -296,6 +296,35 @@ namespace Legion {
     };
 
     /**
+     * \class ShardEventTree
+     * This collective will construct an event broadcast tree
+     * so that one shard can notify all the other shards once
+     * an event has triggered
+     */
+    class ShardEventTree : public BroadcastCollective {
+    public:
+      ShardEventTree(ReplicateContext *ctx, ShardID origin, 
+                     CollectiveID id);
+      ShardEventTree(const ShardEventTree &rhs) 
+        : BroadcastCollective(rhs), is_origin(false) { assert(false); }
+      virtual ~ShardEventTree(void);
+    public:
+      ShardEventTree& operator=(const ShardEventTree &rhs) 
+        { assert(false); return *this; }
+    public:
+      void signal_tree(RtEvent precondition); // origin
+      RtEvent get_local_event(void);
+    public:
+      virtual void pack_collective(Serializer &rez) const;
+      virtual void unpack_collective(Deserializer &derez);
+    protected:
+      RtUserEvent local_event;
+      RtEvent trigger_event;
+      RtEvent finished_event;
+      const bool is_origin;
+    };
+
+    /**
      * \class CrossProductExchange
      * A class for exchanging the names of partitions created by
      * a call for making cross-product partitions
@@ -643,9 +672,6 @@ namespace Legion {
       mutable std::vector<std::set<RtEvent> > local_preconditions;
     };
 
-    // Forward declaration for this here, but it lives below ReplIndividualTask
-    class VersioningInfoBroadcast;
-
     /**
      * \class ReplIndividualTask
      * An individual task that is aware that it is 
@@ -664,30 +690,22 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void deferred_execute(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL);
+      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
+                                      bool first_invocation = true);
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);
-      virtual void handle_post_mapped(bool deferral, 
-                                      RtEvent pre = RtEvent::NO_RT_EVENT);
       virtual void trigger_task_complete(void);
-    public:
-      virtual bool is_repl_individual_task(void) const { return true; }
-      virtual void unpack_remote_versions(Deserializer &derez);
     public:
       void initialize_replication(ReplicateContext *ctx);
       void set_sharding_function(ShardingID functor,ShardingFunction *function);
-      void perform_unowned_shard(ReplicateContext *ctx);
-      void pack_versioning_advance_states(VersioningInfoBroadcast &broad);
     protected:
       ShardID owner_shard;
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
-      std::vector<ProjectionInfo> projection_infos;
-      CollectiveID versioning_collective_id; // id for version state broadcasts
+      CollectiveID mapped_collective_id; // id for mapped event broadcast
       CollectiveID future_collective_id; // id for the future broadcast 
-      VersioningInfoBroadcast *version_broadcast_collective;
+      ShardEventTree *mapped_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -695,58 +713,6 @@ namespace Legion {
     protected:
       ShardingGatherCollective *sharding_collective;
 #endif
-    };
-
-    /**
-     * \class VersioningInfoBroadcast
-     * A class for broadcasting the names of version state
-     * objects for one or more region requirements
-     */
-    class VersioningInfoBroadcast : public BroadcastCollective {
-    public:
-      struct DeferVersionBroadcastArgs :
-        public LgTaskArgs<DeferVersionBroadcastArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_VERSION_BROADCAST_TASK_ID;
-      public:
-        DeferVersionBroadcastArgs(ReplIndividualTask *t, 
-                                  VersioningInfoBroadcast *b)
-          : LgTaskArgs<DeferVersionBroadcastArgs>(t->get_unique_op_id()),
-            proxy_this(b), task(t) { }
-      public:
-        VersioningInfoBroadcast *proxy_this;
-        ReplIndividualTask *task;
-      };
-    public:
-      VersioningInfoBroadcast(ReplicateContext *ctx, CollectiveID id, 
-                              ShardID owner, RtEvent mapped_event);
-      VersioningInfoBroadcast(const VersioningInfoBroadcast &rhs);
-      virtual ~VersioningInfoBroadcast(void);
-    public:
-      VersioningInfoBroadcast& operator=(const VersioningInfoBroadcast &rhs);
-    public:
-      virtual void pack_collective(Serializer &rez) const;
-      virtual void unpack_collective(Deserializer &derez);
-    public:
-      void explicit_unpack(Deserializer &derez);
-      void common_unpack(Deserializer &derez);
-      void pack_states(unsigned index, 
-                 const VersionInfo &version_info, bool advance = true);
-      void wait_for_states(std::set<RtEvent> &applied_events);
-      const VersioningSet<>& find_advance_states(unsigned index) const;
-      void record_precondition(RtEvent precondition);
-      RtEvent defer_perform_collective(ReplIndividualTask *task, 
-                                       RtEvent precondition);
-      static void handle_deferral(const void *args);
-    protected:
-      std::map<unsigned/*index*/,
-               LegionMap<DistributedID,FieldMask>::aligned> versions;
-      LegionMap<unsigned/*index*/,VersioningSet<> >::aligned results;
-    protected:
-      RtEvent mapped_event;
-      RtUserEvent acknowledge_event;
-      mutable std::set<RtEvent> ack_preconditions;
-      std::set<VersionState*> held_references;
     };
 
     /**
@@ -793,59 +759,62 @@ namespace Legion {
     };
 
     /**
-     * \class ReplReadCloseOp
-     * A read-only close operation that is aware that it
-     * is being executed in a control replication context
+     * \class ReplMergeCloseOp
+     * A close operation that is aware that it is being
+     * executed in a control replication context.
      */
-    class ReplReadCloseOp : public ReadCloseOp {
+    class ReplMergeCloseOp : public MergeCloseOp {
     public:
-      ReplReadCloseOp(Runtime *runtime);
-      ReplReadCloseOp(const ReplReadCloseOp &rhs);
-      virtual ~ReplReadCloseOp(void);
+      ReplMergeCloseOp(Runtime *runtime);
+      ReplMergeCloseOp(const ReplMergeCloseOp &rhs);
+      virtual ~ReplMergeCloseOp(void);
     public:
-      ReplReadCloseOp& operator=(const ReplReadCloseOp &rhs);
+      ReplMergeCloseOp& operator=(const ReplMergeCloseOp &rhs);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_mapped_barrier(RtBarrier mapped_barrier);
-      virtual void trigger_mapping(void);
+      void set_repl_close_info(RtBarrier mapped_barrier);
+      virtual void trigger_dependence_analysis(void);
+      virtual void trigger_mapping(void); 
     protected:
       RtBarrier mapped_barrier;
     };
 
     /**
-     * \class ReplInterCloseOp
-     * A close operation that is aware that it is being
+     * \class ReplFillOp
+     * A copy operation that is aware that it is being
      * executed in a control replication context.
      */
-    class ReplInterCloseOp : public InterCloseOp {
+    class ReplFillOp : public FillOp {
     public:
-      ReplInterCloseOp(Runtime *runtime);
-      ReplInterCloseOp(const ReplInterCloseOp &rhs);
-      virtual ~ReplInterCloseOp(void);
+      ReplFillOp(Runtime *rt);
+      ReplFillOp(const ReplFillOp &rhs);
+      virtual ~ReplFillOp(void);
     public:
-      ReplInterCloseOp& operator=(const ReplInterCloseOp &rhs);
+      ReplFillOp& operator=(const ReplFillOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *ctx);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      void set_repl_close_info(unsigned close_index,
-                               RtBarrier mapped_barrier,RtBarrier view_barrier);
-      virtual void trigger_dependence_analysis(void);
-      virtual void invoke_mapper(const InstanceSet &valid_instances);
-      virtual void complete_close_mapping(CompositeView *view,
-                    RtEvent precondition = RtEvent::NO_RT_EVENT);
-      virtual bool is_replicate_close(void) const { return true; }
-    public:
-      inline RtBarrier get_view_barrier(void) const { return view_barrier; }
-      inline unsigned get_close_index(void) const { return close_index; }
-      inline unsigned get_next_clone_index(void) { return clone_index++; }
+      virtual void trigger_prepipeline_stage(void);
+      virtual void trigger_ready(void);
     protected:
-      RtBarrier mapped_barrier;
-      RtBarrier view_barrier;
-      unsigned close_index;
-      unsigned clone_index;
+      ShardingID sharding_functor;
+      ShardingFunction *sharding_function;
+      MapperManager *mapper;
+    public:
+      CollectiveID mapped_collective_id;
+      ShardEventTree *mapped_collective;
+#ifdef DEBUG_LEGION
+    public:
+      inline void set_sharding_collective(ShardingGatherCollective *collective)
+        { sharding_collective = collective; }
+    protected:
+      ShardingGatherCollective *sharding_collective;
+#endif
     };
 
     /**
@@ -884,7 +853,7 @@ namespace Legion {
 
     /**
      * \class ReplCopyOp
-     * A fill operation that is aware that it is being
+     * A copy operation that is aware that it is being
      * executed in a control replication context.
      */
     class ReplCopyOp : public CopyOp {
@@ -902,14 +871,12 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual void trigger_mapping(void);
-      virtual void deferred_execute(void);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
     public:
-      std::vector<ProjectionInfo>   src_projection_infos;
-      std::vector<ProjectionInfo>   dst_projection_infos;
+      CollectiveID mapped_collective_id;
+      ShardEventTree *mapped_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)
@@ -917,9 +884,6 @@ namespace Legion {
     protected:
       ShardingGatherCollective *sharding_collective;
 #endif
-    protected:
-      CollectiveID versioning_collective_id; // id for version state broadcasts
-      VersioningInfoBroadcast *version_broadcast_collective;
     };
 
     /**
@@ -1274,14 +1238,12 @@ namespace Legion {
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
       void initialize_replication(ReplicateContext *ctx, RtBarrier inline_bar);
+      RtEvent complete_inline_mapping(RtEvent mapping_applied,
+                                      const InstanceSet &mapped_insts);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual bool is_ctrl_repl_map_op(void) const { return true; }
-      virtual void add_deferred_users(InstanceSet &mapped_instances,
-                                      const PhysicalTraceInfo &trace_info);
-      virtual RtEvent complete_inline_mapping(RtEvent mapping_applied,
-                                  const InstanceSet &mapped_instances);
+      virtual void trigger_mapping(void);
     protected:
       RtBarrier inline_barrier;
       RtUserEvent repl_mapping_applied;
@@ -1387,7 +1349,7 @@ namespace Legion {
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       void complete_startup_initialization(void) const;
     public:
-      void handle_post_mapped(bool local);
+      void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 
                                  bool owned, bool local);
       void trigger_task_complete(bool local);
@@ -1398,23 +1360,9 @@ namespace Legion {
     public:
       void send_future_map_request(ShardID target, Serializer &rez);
       void handle_future_map_request(Deserializer &derez);
-#ifndef DISABLE_CVOPT
     public:
-      void send_composite_view_copy_request(ShardID target, Serializer &rez);
-      void send_composite_view_reduction_request(ShardID target, 
-                                                 Serializer &rez);
-      void handle_composite_view_copy_request(Deserializer &derez,
-                                              AddressSpaceID source);
-      void handle_composite_view_reduction_request(Deserializer &derez,
-                                                   AddressSpaceID source);
-#else
-    public:
-      void send_composite_view_request(ShardID target, Serializer &rez);
-      void handle_composite_view_request(Deserializer &derez);
-#endif
-    public:
-      void broadcast_clone_barrier(unsigned close_index,
-          unsigned clone_index, RtBarrier bar, AddressSpaceID origin);
+      void send_equivalence_set_request(ShardID target, Serializer &rez);
+      void handle_equivalence_set_request(Deserializer &derez);
     public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
@@ -1428,20 +1376,10 @@ namespace Legion {
       static void handle_trigger_commit(Deserializer &derez, Runtime *rt);
       static void handle_collective_message(Deserializer &derez, Runtime *rt);
       static void handle_future_map_request(Deserializer &derez, Runtime *rt);
-#ifndef DISABLE_CVOPT
-      static void handle_composite_view_copy_request(Deserializer &derez, 
-                                     Runtime *rt, AddressSpaceID source);
-      static void handle_composite_view_reduction_request(Deserializer &derez, 
-                                           Runtime *rt, AddressSpaceID source);
-#else
-      static void handle_composite_view_request(Deserializer &derez, 
-                                                Runtime *rt);
-#endif
       static void handle_top_view_request(Deserializer &derez, Runtime *rt,
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
-      static void handle_clone_barrier(Deserializer &derez, Runtime *rt,
-                                       AddressSpaceID source);
+      static void handle_eq_request(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:
@@ -1480,6 +1418,7 @@ namespace Legion {
       unsigned    remote_constituents;
       void*       local_future_result; size_t local_future_size;
       bool        local_future_set;
+      std::set<RtEvent> mapping_preconditions;
     protected:
       RtBarrier startup_barrier;
       ApBarrier pending_partition_barrier;

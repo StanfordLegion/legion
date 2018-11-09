@@ -19,6 +19,179 @@ namespace Legion {
     LEGION_EXTERN_LOGGER_DECLARATIONS
 
     /////////////////////////////////////////////////////////////
+    // Index Space Expression 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline ApEvent IndexSpaceExpression::issue_fill_internal(
+                                 RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
+#ifdef DEBUG_LEGION
+      assert(!space.empty());
+#endif
+      // Now that we know we're going to do this fill add any profiling requests
+      Realm::ProfilingRequestSet requests;
+      if (trace_info.op != NULL)
+        trace_info.op->add_copy_profiling_request(requests);
+      if (forest->runtime->profiler != NULL)
+        forest->runtime->profiler->add_fill_request(requests, trace_info.op);
+#ifdef LEGION_SPY
+      // Have to convert back to Realm data structures because C++ is dumb
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+#endif
+#ifdef LEGION_SPY
+      ApEvent result = ApEvent(space.fill(realm_dst_fields, requests, 
+                                          fill_value, fill_size, precondition));
+#else
+      ApEvent result = ApEvent(space.fill(dst_fields, requests, 
+                                          fill_value, fill_size, precondition));
+#endif
+#ifdef LEGION_SPY
+      if (trace_info.op != NULL)
+      {
+        if (!result.exists())
+        {
+          ApUserEvent new_result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(new_result);
+          result = new_result;
+        }
+        LegionSpy::log_fill_events(trace_info.op->get_unique_op_id(), 
+            expr_id, handle, tree_id, precondition, result, fill_uid);
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
+                                    dst_fields[idx].inst_event);
+      }
+#endif
+      if (trace_info.recording)
+      {
+        trace_info.record_issue_fill(result, this, dst_fields,
+                                     fill_value, fill_size,
+#ifdef LEGION_SPY
+                                     fill_uid, handle, tree_id,
+#endif
+                                     precondition);
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline ApEvent IndexSpaceExpression::issue_copy_internal(
+                                 RegionTreeForest *forest,
+                                 const Realm::IndexSpace<DIM,T> &space,
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
+#ifdef DEBUG_LEGION
+      assert(!space.empty());
+#endif
+      // Now that we know we're going to do this copy add any profling requests
+      Realm::ProfilingRequestSet requests;
+      if (trace_info.op != NULL)
+        trace_info.op->add_copy_profiling_request(requests);
+      if (forest->runtime->profiler != NULL)
+        forest->runtime->profiler->add_copy_request(requests, trace_info.op);
+#ifdef LEGION_SPY
+      // Have to convert back to Realm structures because C++ is dumb  
+      std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
+      for (unsigned idx = 0; idx < src_fields.size(); idx++)
+        realm_src_fields[idx] = src_fields[idx];
+      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
+      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+        realm_dst_fields[idx] = dst_fields[idx];
+#endif 
+#ifdef LEGION_SPY
+      ApEvent result = ApEvent(space.copy(realm_src_fields, 
+            realm_dst_fields, requests, precondition, redop, reduction_fold));
+#else
+      ApEvent result = ApEvent(space.copy(src_fields, dst_fields,
+                              requests, precondition, redop, reduction_fold));
+#endif
+      if (trace_info.recording)
+      {
+        trace_info.record_issue_copy(result, this, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                     handle, src_tree_id, dst_tree_id,
+#endif
+                                     precondition, redop, reduction_fold);
+      }
+#ifdef LEGION_SPY
+      if (trace_info.op != NULL)
+      {
+        if (!result.exists())
+        {
+          ApUserEvent new_result = Runtime::create_ap_user_event();
+          Runtime::trigger_event(new_result);
+          result = new_result;
+        }
+        LegionSpy::log_copy_events(trace_info.op->get_unique_op_id(), 
+            expr_id, handle, src_tree_id, dst_tree_id, precondition, result);
+        for (unsigned idx = 0; idx < src_fields.size(); idx++)
+          LegionSpy::log_copy_field(result, src_fields[idx].field_id,
+                                    src_fields[idx].inst_event,
+                                    dst_fields[idx].field_id,
+                                    dst_fields[idx].inst_event, redop);
+      }
+#endif
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceExpression::create_layout_internal(
+                                    const Realm::IndexSpace<DIM,T> &space,
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint) const
+    //--------------------------------------------------------------------------
+    {
+      int dim_order[DIM];
+      // Construct the dimension ordering
+      unsigned next_dim = 0;
+      for (std::vector<DimensionKind>::const_iterator it = 
+            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
+      {
+        // Skip the field dimension we already handled it
+        if ((*it) == DIM_F)
+          continue;
+        if ((*it) > DIM_F)
+          assert(false); // TODO: handle split dimensions
+        if ((*it) >= DIM) // Skip dimensions bigger than ours
+          continue;
+        dim_order[next_dim++] = *it;
+      }
+#ifdef DEBUG_LEGION
+      assert(next_dim == DIM); // should have filled them all in
+#endif
+      return Realm::InstanceLayoutGeneric::choose_instance_layout(space,
+                                                            ilc, dim_order);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Index Space Operations 
     /////////////////////////////////////////////////////////////
     
@@ -53,6 +226,16 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> *space = 
         reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
       return get_realm_index_space(*space, need_tight_result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Domain IndexSpaceOperationT<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> result;
+      ready = get_realm_index_space(result, tight);
+      return DomainT<DIM,T>(result);
     }
 
     //--------------------------------------------------------------------------
@@ -105,6 +288,23 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       return temp.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    size_t IndexSpaceOperationT<DIM,T>::get_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      if (has_volume)
+        return volume;
+      Realm::IndexSpace<DIM,T> temp;
+      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      volume = temp.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
@@ -172,6 +372,100 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return issue_fill_internal(context, local_space, trace_info, 
+            dst_fields, fill_value, fill_size, 
+#ifdef LEGION_SPY
+            fill_uid, handle, tree_id,
+#endif
+            Runtime::merge_events(&trace_info, space_ready, precondition));
+      else if (space_ready.exists())
+        return issue_fill_internal(context, local_space, trace_info, 
+                                   dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+                                   space_ready);
+      else
+        return issue_fill_internal(context, local_space, trace_info, 
+                                   dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+                                   precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceOperationT<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle, 
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists() && precondition.exists())
+        return issue_copy_internal(context, local_space, trace_info, 
+            dst_fields, src_fields,
+#ifdef LEGION_SPY
+            handle, src_tree_id, dst_tree_id,
+#endif
+            Runtime::merge_events(&trace_info, precondition, space_ready),
+            redop, reduction_fold);
+      else if (space_ready.exists())
+        return issue_copy_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                handle, src_tree_id, dst_tree_id,
+#endif
+                space_ready, redop, reduction_fold);
+      else
+        return issue_copy_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                handle, src_tree_id, dst_tree_id,
+#endif
+                precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceOperationT<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (space_ready.exists())
+        space_ready.wait();
+      return create_layout_internal(local_space, ilc, constraint);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     IndexSpaceUnion<DIM,T>::IndexSpaceUnion(
                             const std::vector<IndexSpaceExpression*> &to_union,
                             RegionTreeForest *ctx)
@@ -208,6 +502,13 @@ namespace Legion {
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
                       Runtime::protect_event(this->realm_index_space_ready));
+      if (ctx->runtime->legion_spy_enabled)
+      {
+        std::vector<IndexSpaceExprID> sources(this->sub_expressions.size()); 
+        for (unsigned idx = 0; idx < this->sub_expressions.size(); idx++)
+          sources[idx] = this->sub_expressions[idx]->expr_id;
+        LegionSpy::log_index_space_union(this->expr_id, sources);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -251,7 +552,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_union_operation(this, sub_expressions);
+      if (forest != NULL)
+        forest->remove_union_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -294,6 +596,13 @@ namespace Legion {
       this->tight_index_space_ready = 
         ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                       Runtime::protect_event(this->realm_index_space_ready));
+      if (ctx->runtime->legion_spy_enabled)
+      {
+        std::vector<IndexSpaceExprID> sources(this->sub_expressions.size()); 
+        for (unsigned idx = 0; idx < this->sub_expressions.size(); idx++)
+          sources[idx] = this->sub_expressions[idx]->expr_id;
+        LegionSpy::log_index_space_intersection(this->expr_id, sources);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -339,7 +648,8 @@ namespace Legion {
       for (unsigned idx = 0; idx < sub_expressions.size(); idx++)
         sub_expressions[idx]->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_intersection_operation(this, sub_expressions);
+      if (forest != NULL)
+        forest->remove_intersection_operation(this, sub_expressions);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -391,6 +701,9 @@ namespace Legion {
           ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
                         Runtime::protect_event(this->realm_index_space_ready));
       }
+      if (ctx->runtime->legion_spy_enabled)
+        LegionSpy::log_index_space_difference(this->expr_id,
+                                              lhs->expr_id, rhs->expr_id);
     }
 
     //--------------------------------------------------------------------------
@@ -436,7 +749,8 @@ namespace Legion {
       if (lhs != rhs)
         rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      forest->remove_subtraction_operation(this, lhs, rhs);
+      if (forest != NULL)
+        forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
@@ -503,6 +817,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
+    Domain RemoteExpression<DIM,T>::get_domain(ApEvent &ready, bool tight)
+    //--------------------------------------------------------------------------
+    {
+      ready = realm_index_space_ready;
+      return DomainT<DIM,T>(realm_index_space);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
     void RemoteExpression<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
@@ -516,6 +839,22 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return realm_index_space.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    size_t RemoteExpression<DIM,T>::get_volume(void)
+    //--------------------------------------------------------------------------
+    {
+      if (has_volume)
+        return volume;
+      if (realm_index_space_ready.exists() &&
+          !realm_index_space_ready.has_triggered())
+        realm_index_space_ready.wait();
+      volume = realm_index_space.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
@@ -574,6 +913,104 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_top_index_space(node->handle.get_id());
       return node;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent RemoteExpression<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+      {
+        if (precondition.exists())
+          return issue_fill_internal(context, realm_index_space, trace_info, 
+                                     dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                     fill_uid, handle, tree_id,
+#endif
+                                     Runtime::merge_events(&trace_info, 
+                                      precondition, realm_index_space_ready));
+        else
+          return issue_fill_internal(context, realm_index_space, trace_info, 
+                                     dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                     fill_uid, handle, tree_id,
+#endif
+                                     realm_index_space_ready);
+      }
+      else
+        return issue_fill_internal(context, realm_index_space, trace_info, 
+                                   dst_fields, fill_value, fill_size, 
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+                                   precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent RemoteExpression<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle, 
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+      {
+        if (precondition.exists())
+          return issue_copy_internal(context, realm_index_space, trace_info, 
+              dst_fields, src_fields, 
+#ifdef LEGION_SPY
+              handle, src_tree_id, dst_tree_id,
+#endif
+              Runtime::merge_events(&trace_info, 
+                precondition, realm_index_space_ready), redop, reduction_fold);
+        else
+          return issue_copy_internal(context, realm_index_space, trace_info, 
+                             dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                             handle, src_tree_id, dst_tree_id,
+#endif
+                             realm_index_space_ready, redop, reduction_fold);
+      }
+      else
+        return issue_copy_internal(context, realm_index_space, trace_info, 
+                dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                handle, src_tree_id, dst_tree_id,
+#endif
+                precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* RemoteExpression<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      if (realm_index_space_ready.exists() && 
+          !realm_index_space_ready.has_triggered())
+        realm_index_space_ready.wait();
+      return create_layout_internal(realm_index_space, ilc, constraint);
     }
 
     /////////////////////////////////////////////////////////////
@@ -701,7 +1138,7 @@ namespace Legion {
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
         Runtime::trigger_event(realm_index_space_set);
-        if (!remote_instances.empty())
+        if (has_remote_instances())
         {
           // We're the owner, send messages to everyone else that we've 
           // sent this node to except the source
@@ -712,7 +1149,7 @@ namespace Legion {
             pack_index_space(rez, false/*include size*/);
           }
           IndexSpaceSetFunctor functor(context->runtime, source, rez);
-          remote_instances.map(functor); 
+          map_over_remote_instances(functor);
         }
       }
       // Now we can tighten it
@@ -731,6 +1168,16 @@ namespace Legion {
       Realm::IndexSpace<DIM,T> *space = 
         reinterpret_cast<Realm::IndexSpace<DIM,T>*>(result);
       return get_realm_index_space(*space, need_tight_result);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Domain IndexSpaceNodeT<DIM,T>::get_domain(ApEvent &ready, bool need_tight)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> result;
+      ready = get_realm_index_space(result, need_tight);
+      return DomainT<DIM,T>(result);
     }
 
     //--------------------------------------------------------------------------
@@ -1067,9 +1514,14 @@ namespace Legion {
     size_t IndexSpaceNodeT<DIM,T>::get_volume(void)
     //--------------------------------------------------------------------------
     {
+      if (has_volume)
+        return volume;
       Realm::IndexSpace<DIM,T> volume_space;
       get_realm_index_space(volume_space, true/*tight*/);
-      return volume_space.volume();
+      volume = volume_space.volume();
+      __sync_synchronize();
+      has_volume = true;
+      return volume;
     }
 
     //--------------------------------------------------------------------------
@@ -1147,11 +1599,19 @@ namespace Legion {
       // the application reference
       if (!is_owner())
       {
-        runtime->send_index_space_destruction(handle, owner_space);
+        if (source != owner_space)
+          runtime->send_index_space_destruction(handle, owner_space);
         return false;
       }
       else
+      {
+        if (has_remote_instances())
+        {
+          DestroyNodeFunctor functor(handle, source, runtime);
+          map_over_remote_instances(functor);
+        }
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3101,337 +3561,7 @@ namespace Legion {
         return (sizeof(Realm::Rect<DIM,T>) == field_size);
       else
         return (sizeof(Realm::Point<DIM,T>) == field_size);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
-                      const PhysicalTraceInfo *info, RegionNode *node,
-                      const std::vector<CopySrcDstField> &src_fields,
-                      const std::vector<CopySrcDstField> &dst_fields,
-                      ApEvent precondition, PredEvent predicate_guard,
-                      IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                      ReductionOpID redop /*=0*/,bool reduction_fold/*=true*/,
-                      WriteSet *performed /*=NULL*/, 
-                      const FieldMask *performed_mask/*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_COPY_CALL); 
-      // Compute the Index space to use for the copy
-      IndexSpaceExpression *copy_expr = this;
-      // Do the intersection first if we need it
-      if ((intersect != NULL) && (intersect != this))
-      {
-        if (intersect->is_index_space_node())
-          copy_expr = context->intersect_index_spaces(copy_expr, 
-                                    intersect->as_index_space_node());
-        else
-          copy_expr = context->intersect_index_spaces(copy_expr,
-              intersect->as_index_part_node()->get_union_expression());
-      }
-      // Then remove any mask from the copy
-      if (mask != NULL)
-        copy_expr = context->subtract_index_spaces(copy_expr, mask);
-      Realm::IndexSpace<DIM,T> local_space;
-      ApEvent local_space_ready = copy_expr->get_expr_index_space(&local_space,
-                             handle.get_type_tag(), true/*need tight result*/);
-      if (local_space_ready.exists() && !local_space_ready.has_triggered())
-      {
-        if ((info != NULL) && (info->op != NULL) && 
-            info->op->has_execution_fence_event())
-          precondition = Runtime::merge_events(info, precondition, 
-              local_space_ready, info->op->get_execution_fence_event());
-        else
-          precondition = 
-            Runtime::merge_events(info, precondition, local_space_ready);
-      }
-      else if (local_space.empty())
-      {
-        // Quick out if the space is actually empty
-#ifdef LEGION_SPY
-        ApUserEvent result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(result);
-        return result;
-#else
-        return ApEvent::NO_AP_EVENT;
-#endif
-      }
-      else if ((info != NULL) && (info->op != NULL) && 
-                info->op->has_execution_fence_event())
-        precondition = Runtime::merge_events(info, precondition, 
-                        info->op->get_execution_fence_event());
-      
-      // If we make it here then record our performed write
-      if (performed != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(performed_mask != NULL);
-#endif
-        WriteSet::iterator finder = performed->find(copy_expr);
-        if (finder == performed->end())
-          performed->insert(copy_expr, *performed_mask);
-        else
-          finder.merge(*performed_mask);
-      }
-      ApEvent result;
-      // Now that we know we're going to do this copy add any profling requests
-      Realm::ProfilingRequestSet requests;
-      if ((info != NULL) && (info->op != NULL))
-        info->op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_copy_request(requests, info->op);
-#ifdef LEGION_SPY
-      // Have to convert back to Realm structures because C++ is dumb  
-      std::vector<Realm::CopySrcDstField> realm_src_fields(src_fields.size());
-      for (unsigned idx = 0; idx < src_fields.size(); idx++)
-        realm_src_fields[idx] = src_fields[idx];
-      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
-      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-        realm_dst_fields[idx] = dst_fields[idx];
-#endif
-      // Have to protect against misspeculation
-      if (predicate_guard.exists())
-      {
-        ApEvent pred_pre = Runtime::merge_events(info, precondition,
-                                                 ApEvent(predicate_guard));
-#ifdef LEGION_SPY
-        result = Runtime::ignorefaults(local_space.copy(realm_src_fields, 
-              realm_dst_fields, requests, pred_pre, redop, reduction_fold));
-#else
-        result = Runtime::ignorefaults(local_space.copy(src_fields, 
-              dst_fields, requests, pred_pre, redop, reduction_fold));
-#endif
-      }
-      else
-#ifdef LEGION_SPY
-        result = ApEvent(local_space.copy(realm_src_fields, realm_dst_fields,
-                      requests, precondition, redop, reduction_fold));
-#else
-        result = ApEvent(local_space.copy(src_fields, dst_fields,
-                      requests, precondition, redop, reduction_fold));
-#endif
-      if (info->recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(!predicate_guard.exists());
-#endif
-        info->record_issue_copy(result, node, src_fields, dst_fields,
-                                precondition, predicate_guard, intersect, 
-                                mask, redop, reduction_fold);
-      }
-#ifdef LEGION_SPY
-      if (info != NULL)
-      {
-        if (!result.exists())
-        {
-          ApUserEvent new_result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(new_result);
-          result = new_result;
-        }
-        LegionSpy::log_copy_events(info->op->get_unique_op_id(), 
-            node->handle, precondition, result);
-        for (unsigned idx = 0; idx < src_fields.size(); idx++)
-          LegionSpy::log_copy_field(result, src_fields[idx].field_id,
-                                    src_fields[idx].inst_event,
-                                    dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event, redop);
-        if (intersect != NULL)
-        {
-          if (intersect->is_index_space_node())
-          {
-            IndexSpaceNode *node = intersect->as_index_space_node();
-            LegionSpy::log_copy_intersect(result, 1, node->handle.get_id());
-          }
-          else
-          {
-            IndexPartNode *node = intersect->as_index_part_node();
-            LegionSpy::log_copy_intersect(result, 0, node->handle.get_id());
-          }
-        }
-      }
-#endif
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
-                      const PhysicalTraceInfo *info, RegionNode *node,
-                      const std::vector<CopySrcDstField> &dst_fields,
-                      const void *fill_value, size_t fill_size,
-                      ApEvent precondition, PredEvent predicate_guard,
-#ifdef LEGION_SPY
-                      UniqueID fill_uid,
-#endif
-                      IndexTreeNode *intersect, IndexSpaceExpression *mask,
-                      WriteSet *performed /*=NULL*/,
-                      const FieldMask *performed_mask/*=NULL*/)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(context->runtime, REALM_ISSUE_FILL_CALL); 
-      // Compute the Index space to use for the fill
-      IndexSpaceExpression *fill_expr = this;
-      // Do the intersection first if we need it
-      if ((intersect != NULL) && (intersect != this))
-      {
-        if (intersect->is_index_space_node())
-          fill_expr = context->intersect_index_spaces(fill_expr, 
-                                    intersect->as_index_space_node());
-        else
-          fill_expr = context->intersect_index_spaces(fill_expr,
-              intersect->as_index_part_node()->get_union_expression());
-      }
-      // Then remove any mask from the fill 
-      if (mask != NULL)
-        fill_expr = context->subtract_index_spaces(fill_expr, mask); 
-      Realm::IndexSpace<DIM,T> local_space;
-      ApEvent local_space_ready = fill_expr->get_expr_index_space(&local_space,
-                             handle.get_type_tag(), true/*need tight result*/);
-      if (local_space_ready.exists() && !local_space_ready.has_triggered())
-      {
-        if ((info != NULL) && (info->op != NULL) && 
-              info->op->has_execution_fence_event())
-          precondition = Runtime::merge_events(info, precondition, 
-              local_space_ready, info->op->get_execution_fence_event());
-        else
-          precondition = 
-            Runtime::merge_events(info, precondition, local_space_ready);
-      }
-      else if (local_space.empty())
-      {
-        // Quick out if the space is actually empty
-#ifdef LEGION_SPY
-        ApUserEvent result = Runtime::create_ap_user_event();
-        Runtime::trigger_event(result);
-        return result;
-#else
-        return ApEvent::NO_AP_EVENT;
-#endif
-      }
-      else if ((info != NULL) && (info->op != NULL) && 
-                info->op->has_execution_fence_event())
-        precondition = Runtime::merge_events(info, precondition, 
-                        info->op->get_execution_fence_event());
-      // If we make it here then record our performed write
-      if (performed != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(performed_mask != NULL);
-#endif
-        WriteSet::iterator finder = performed->find(fill_expr);
-        if (finder == performed->end())
-          performed->insert(fill_expr, *performed_mask);
-        else
-          finder.merge(*performed_mask);
-      }
-      ApEvent result;
-      // Now that we know we're going to do this fill add any profiling requests
-      Realm::ProfilingRequestSet requests;
-      if ((info != NULL) && (info->op != NULL))
-        info->op->add_copy_profiling_request(requests);
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_fill_request(requests, info->op);
-#ifdef LEGION_SPY
-      // Have to convert back to Realm data structures because C++ is dumb
-      std::vector<Realm::CopySrcDstField> realm_dst_fields(dst_fields.size());
-      for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-        realm_dst_fields[idx] = dst_fields[idx];
-#endif
-      // Have to protect against misspeculation
-      if (predicate_guard.exists())
-      {
-        ApEvent pred_pre = Runtime::merge_events(info, precondition,
-                                                 ApEvent(predicate_guard));
-#ifdef LEGION_SPY
-        result = Runtime::ignorefaults(local_space.fill(realm_dst_fields, 
-              requests, fill_value, fill_size, pred_pre));
-#else
-        result = Runtime::ignorefaults(local_space.fill(dst_fields, 
-              requests, fill_value, fill_size, pred_pre));
-#endif
-      }
-      else
-#ifdef LEGION_SPY
-        result = ApEvent(local_space.fill(realm_dst_fields, requests, 
-              fill_value, fill_size, precondition));
-#else
-        result = ApEvent(local_space.fill(dst_fields, requests, 
-              fill_value, fill_size, precondition));
-#endif
-#ifdef LEGION_SPY
-      if ((info != NULL) && (info->op != NULL))
-      {
-        if (!result.exists())
-        {
-          ApUserEvent new_result = Runtime::create_ap_user_event();
-          Runtime::trigger_event(new_result);
-          result = new_result;
-        }
-        LegionSpy::log_fill_events(info->op->get_unique_op_id(), 
-            node->handle, precondition, result, fill_uid);
-        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
-          LegionSpy::log_fill_field(result, dst_fields[idx].field_id,
-                                    dst_fields[idx].inst_event);
-        if (intersect != NULL)
-        {
-          if (intersect->is_index_space_node())
-          {
-            IndexSpaceNode *node = intersect->as_index_space_node();
-            LegionSpy::log_fill_intersect(result, 1, node->handle.get_id());
-          }
-          else
-          {
-            IndexPartNode *node = intersect->as_index_part_node();
-            LegionSpy::log_fill_intersect(result, 0, node->handle.get_id());
-          }
-        }
-      }
-#endif
-      if ((info != NULL) && info->recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(!predicate_guard.exists());
-#endif
-        info->record_issue_fill(result, node, dst_fields,
-            fill_value, fill_size, precondition, predicate_guard,
-#ifdef LEGION_SPY
-            fill_uid,
-#endif
-            intersect, mask);
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM, typename T>
-    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint)
-    //--------------------------------------------------------------------------
-    {
-      Realm::IndexSpace<DIM,T> local_is;
-      get_realm_index_space(local_is, true/*tight*/);
-      int dim_order[DIM];
-      // Construct the dimension ordering
-      unsigned next_dim = 0;
-      for (std::vector<DimensionKind>::const_iterator it = 
-            constraint.ordering.begin(); it != constraint.ordering.end(); it++)
-      {
-        // Skip the field dimension we already handled it
-        if ((*it) == DIM_F)
-          continue;
-        if ((*it) > DIM_F)
-          assert(false); // TODO: handle split dimensions
-        if ((*it) >= DIM) // Skip dimensions bigger than ours
-          continue;
-        dim_order[next_dim++] = *it;
-      }
-#ifdef DEBUG_LEGION
-      assert(next_dim == DIM); // should have filled them all in
-#endif
-      return Realm::InstanceLayoutGeneric::choose_instance_layout(local_is,
-                                                            ilc, dim_order);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
@@ -3501,6 +3631,100 @@ namespace Legion {
       ready_event = ApEvent(PhysicalInstance::create_external(result,
                                         memory, base, ilg, requests));
       return result;
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_fill(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const void *fill_value, size_t fill_size,
+#ifdef LEGION_SPY
+                                 UniqueID fill_uid,
+                                 FieldSpace handle,
+                                 RegionTreeID tree_id,
+#endif
+                                 ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return issue_fill_internal(context, local_space, trace_info, 
+                                   dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+            Runtime::merge_events(&trace_info, space_ready, precondition));
+      else if (space_ready.exists())
+        return issue_fill_internal(context, local_space, trace_info, 
+                                   dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+                                   space_ready);
+      else
+        return issue_fill_internal(context, local_space, trace_info, 
+                                   dst_fields, fill_value, fill_size,
+#ifdef LEGION_SPY
+                                   fill_uid, handle, tree_id,
+#endif
+                                   precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    ApEvent IndexSpaceNodeT<DIM,T>::issue_copy(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+#ifdef LEGION_SPY
+                                 FieldSpace handle,
+                                 RegionTreeID src_tree_id,
+                                 RegionTreeID dst_tree_id,
+#endif
+                                 ApEvent precondition,
+                                 ReductionOpID redop, bool reduction_fold)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_space;
+      ApEvent space_ready = get_realm_index_space(local_space, true/*tight*/);
+      if (precondition.exists() && space_ready.exists())
+        return issue_copy_internal(context, local_space, trace_info, dst_fields,
+            src_fields,
+#ifdef LEGION_SPY
+            handle, src_tree_id, dst_tree_id,
+#endif
+            Runtime::merge_events(&trace_info, space_ready, precondition),
+            redop, reduction_fold);
+      else if (space_ready.exists())
+        return issue_copy_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                handle, src_tree_id, dst_tree_id,
+#endif
+                space_ready, redop, reduction_fold);
+      else
+        return issue_copy_internal(context, local_space, trace_info, 
+                dst_fields, src_fields, 
+#ifdef LEGION_SPY
+                handle, src_tree_id, dst_tree_id,
+#endif
+                precondition, redop, reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    Realm::InstanceLayoutGeneric* IndexSpaceNodeT<DIM,T>::create_layout(
+                                    const Realm::InstanceLayoutConstraints &ilc,
+                                    const OrderingConstraint &constraint)
+    //--------------------------------------------------------------------------
+    {
+      Realm::IndexSpace<DIM,T> local_is;
+      ApEvent space_ready = get_realm_index_space(local_is, true/*tight*/);
+      if (space_ready.exists())
+        space_ready.wait();
+      return create_layout_internal(local_is, ilc, constraint); 
     }
     
     //--------------------------------------------------------------------------

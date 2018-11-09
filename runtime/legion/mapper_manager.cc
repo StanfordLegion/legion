@@ -560,31 +560,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapperManager::invoke_map_close(CloseOp *op,
-                                         Mapper::MapCloseInput *input,
-                                         Mapper::MapCloseOutput *output,
-                                         MappingCallInfo *info)
-    //--------------------------------------------------------------------------
-    {
-      if (info == NULL)
-      {
-        RtEvent continuation_precondition;
-        info = begin_mapper_call(MAP_CLOSE_CALL,
-                                 op, continuation_precondition);
-        if (continuation_precondition.exists())
-        {
-          MapperContinuation3<CloseOp, Mapper::MapCloseInput, 
-                  Mapper::MapCloseOutput, &MapperManager::invoke_map_close>
-                    continuation(this, op, input, output, info);
-          continuation.defer(runtime, continuation_precondition, op);
-          return;
-        }
-      }
-      mapper->map_close(info, *op, *input, *output);
-      finish_mapper_call(info);
-    }
-
-    //--------------------------------------------------------------------------
     void MapperManager::invoke_select_close_sources(CloseOp *op,
                                          Mapper::SelectCloseSrcInput *input,
                                          Mapper::SelectCloseSrcOutput *output,

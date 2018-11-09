@@ -83,7 +83,8 @@ namespace Legion {
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
-          Deserializer &derez, AddressSpaceID source, RegionNode *node);
+                            Deserializer &derez, Runtime *runtime,
+                            FieldSpaceNode *field_space, size_t total_dims);
     public:
       const FieldMask allocated_fields;
       LayoutConstraints *const constraints;
@@ -107,12 +108,24 @@ namespace Legion {
      */
     class PhysicalManager : public DistributedCollectable {
     public:
+      struct GarbageCollectionArgs : public LgTaskArgs<GarbageCollectionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
+      public:
+        GarbageCollectionArgs(InstanceView *v, std::set<ApEvent> *collect)
+          : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
+            view(v), to_collect(collect) { }
+      public:
+        InstanceView *const view;
+        std::set<ApEvent> *const to_collect;
+      };
+    public:
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
                       LayoutDescription *layout, const PointerConstraint &cons,
                       DistributedID did, AddressSpaceID owner_space, 
-                      RegionNode *node, PhysicalInstance inst, 
-                      IndexSpaceNode *instance_domain,
-                      bool own_domain, bool register_now);
+                      FieldSpaceNode *node, PhysicalInstance inst, 
+                      IndexSpaceExpression *index_domain, 
+                      RegionTreeID tree_id, bool register_now);
       virtual ~PhysicalManager(void);
     public:
       virtual LegionRuntime::Accessor::RegionAccessor<
@@ -198,6 +211,10 @@ namespace Legion {
                                            GCPriority priority); 
       RtEvent detach_external_instance(void);
     public:
+      bool defer_collect_user(InstanceView *view, ApEvent term_event,
+                              std::set<ApEvent> &to_collect);
+      void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
+    public:
       static inline DistributedID encode_instance_did(DistributedID did,
                                                       bool external);
       static inline DistributedID encode_reduction_fold_did(DistributedID did);
@@ -209,14 +226,18 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       MemoryManager *const memory_manager;
-      RegionNode *const region_node;
+      FieldSpaceNode *const field_space_node;
       LayoutDescription *const layout;
       const PhysicalInstance instance;
-      IndexSpaceNode *instance_domain;
-      const bool own_domain;
+      IndexSpaceExpression *instance_domain;
+      const RegionTreeID tree_id;
       const PointerConstraint pointer_constraint;
     protected:
+      mutable LocalLock inst_lock;
       std::set<InnerContext*> active_contexts;
+    private:
+      // Events that have to trigger before we can remove our GC reference
+      std::map<InstanceView*,std::set<ApEvent> > gc_events;
     };
 
     /**
@@ -226,16 +247,21 @@ namespace Legion {
      */
     class CopyAcrossHelper {
     public:
-      CopyAcrossHelper(const FieldMask &full)
-        : full_mask(full) { }
+      CopyAcrossHelper(const FieldMask &full,
+                       const std::vector<unsigned> &src,
+                       const std::vector<unsigned> &dst)
+        : full_mask(full), src_indexes(src), dst_indexes(dst) { }
     public:
       const FieldMask &full_mask;
+      const std::vector<unsigned> &src_indexes;
+      const std::vector<unsigned> &dst_indexes;
+      std::map<unsigned,unsigned> forward_map;
+      std::map<unsigned,unsigned> backward_map;
     public:
       void compute_across_offsets(const FieldMask &src_mask,
                    std::vector<CopySrcDstField> &dst_fields);
-      void pack(Serializer &rez, const FieldMask &copy_mask);
-      static CopyAcrossHelper* unpack(Deserializer &derez, 
-                                      const FieldMask &copy_mask);
+      FieldMask convert_src_to_dst(const FieldMask &src_mask);
+      FieldMask convert_dst_to_src(const FieldMask &dst_mask);
     public:
       std::vector<CopySrcDstField> offsets; 
       LegionDeque<std::pair<FieldMask,FieldMask> >::aligned compressed_cache;
@@ -253,12 +279,12 @@ namespace Legion {
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space,
                       MemoryManager *memory, PhysicalInstance inst, 
-                      IndexSpaceNode *instance_domain, bool own_domain,
-                      RegionNode *node, LayoutDescription *desc, 
+                      IndexSpaceExpression *instance_domain,
+                      FieldSpaceNode *node, RegionTreeID tree_id,
+                      LayoutDescription *desc, 
                       const PointerConstraint &constraint,
                       bool register_now, ApEvent use_event,
-                      bool external_instance,
-                      Reservation read_only_mapping_reservation); 
+                      bool external_instance);
       InstanceManager(const InstanceManager &rhs);
       virtual ~InstanceManager(void);
     public:
@@ -274,8 +300,6 @@ namespace Legion {
       virtual size_t get_instance_size(void) const;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
-      inline Reservation get_read_only_mapping_reservation(void) const
-        { return read_only_mapping_reservation; }
     public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
@@ -293,13 +317,11 @@ namespace Legion {
       virtual void send_manager(AddressSpaceID target);
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
-                                      Deserializer &derez);
+                                      Deserializer &derez); 
     public:
       // Event that needs to trigger before we can start using
       // this physical instance.
-      const ApEvent use_event;
-    protected:
-      Reservation read_only_mapping_reservation;
+      const ApEvent use_event; 
     };
 
     /**
@@ -313,8 +335,9 @@ namespace Legion {
                        MemoryManager *mem, PhysicalInstance inst, 
                        LayoutDescription *description,
                        const PointerConstraint &constraint,
-                       IndexSpaceNode *inst_domain, bool own_domain,
-                       RegionNode *region_node, ReductionOpID redop, 
+                       IndexSpaceExpression *inst_domain,
+                       FieldSpaceNode *field_node, 
+                       RegionTreeID tree_id, ReductionOpID redop, 
                        const ReductionOp *op, ApEvent use_event,
                        bool register_now);
       virtual ~ReductionManager(void);
@@ -331,12 +354,6 @@ namespace Legion {
       virtual bool is_foldable(void) const = 0;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields) = 0;
-      virtual ApEvent issue_reduction(const PhysicalTraceInfo &trace_info,
-          const std::vector<CopySrcDstField> &src_fields,
-          const std::vector<CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
-          bool reduction_fold, bool precise_domain, 
-          RegionTreeNode *intersect, IndexSpaceExpression *mask) = 0;
       virtual Domain get_pointer_space(void) const = 0;
     public:
       virtual ApEvent get_use_event(void) const { return use_event; }
@@ -350,22 +367,11 @@ namespace Legion {
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);
     public:
-      // This method is very important, it helps us prevent duplicate
-      // applications of a reduction to a target physical instance
-      //Domain compute_reduction_domain(PhysicalInstance target,
-      //                const Domain &copy_domain, ApEvent copy_domain_pre);
-    public:
       const ReductionOp *const op;
       const ReductionOpID redop;
       const ApEvent use_event;
     protected:
       mutable LocalLock manager_lock;
-#if 0
-    protected:
-      // Need to deduplicate reductions to target instances
-      std::map<PhysicalInstance,std::vector<Domain> > reduction_domains;
-      std::vector<Realm::IndexSpace> created_index_spaces;
-#endif
     };
 
     /**
@@ -382,8 +388,9 @@ namespace Legion {
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
-                           IndexSpaceNode *inst_domain, bool own_domain,
-                           RegionNode *node, ReductionOpID redop, 
+                           IndexSpaceExpression *inst_domain,
+                           FieldSpaceNode *node, 
+                           RegionTreeID tree_id, ReductionOpID redop, 
                            const ReductionOp *op, Domain dom,
                            ApEvent use_event, bool register_now);
       ListReductionManager(const ListReductionManager &rhs);
@@ -402,12 +409,6 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
-      virtual ApEvent issue_reduction(const PhysicalTraceInfo &info,
-          const std::vector<CopySrcDstField> &src_fields,
-          const std::vector<CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
-          bool reduction_fold, bool precise_domain, 
-          RegionTreeNode *intersect, IndexSpaceExpression *mask);
       virtual Domain get_pointer_space(void) const;
     protected:
       const Domain ptr_space;
@@ -427,8 +428,9 @@ namespace Legion {
                            MemoryManager *mem, PhysicalInstance inst, 
                            LayoutDescription *description,
                            const PointerConstraint &constraint,
-                           IndexSpaceNode *inst_dom, bool own_dom,
-                           RegionNode *node, ReductionOpID redop, 
+                           IndexSpaceExpression *inst_dom,
+                           FieldSpaceNode *node, 
+                           RegionTreeID tree_id, ReductionOpID redop, 
                            const ReductionOp *op, ApEvent use_event,
                            bool register_now);
       FoldReductionManager(const FoldReductionManager &rhs);
@@ -447,12 +449,6 @@ namespace Legion {
       virtual bool is_foldable(void) const;
       virtual void find_field_offsets(const FieldMask &reduce_mask,
           std::vector<CopySrcDstField> &fields);
-      virtual ApEvent issue_reduction(const PhysicalTraceInfo &info,
-          const std::vector<CopySrcDstField> &src_fields,
-          const std::vector<CopySrcDstField> &dst_fields,
-          RegionTreeNode *dst, ApEvent precondition, PredEvent pred_guard,
-          bool reduction_fold, bool precise_domain, 
-          RegionTreeNode *intersect, IndexSpaceExpression *mask);
       virtual Domain get_pointer_space(void) const;
     public:
       const ApEvent use_event;
@@ -498,9 +494,9 @@ namespace Legion {
                       const LayoutConstraintSet &cons, Runtime *rt,
                       MemoryManager *memory, UniqueID cid)
         : regions(regs), constraints(cons), runtime(rt), memory_manager(memory),
-          creator_id(cid), instance(PhysicalInstance::NO_INST), ancestor(NULL), 
-          instance_domain(NULL), own_domain(false), redop_id(0), 
-          reduction_op(NULL), valid(false) { }
+          creator_id(cid), instance(PhysicalInstance::NO_INST), 
+          field_space_node(NULL), instance_domain(NULL), tree_id(0),
+          redop_id(0), reduction_op(NULL), valid(false) { }
       virtual ~InstanceBuilder(void);
     public:
       void initialize(RegionTreeForest *forest);
@@ -510,8 +506,7 @@ namespace Legion {
       virtual void handle_profiling_response(
                     const Realm::ProfilingResponse &response);
     protected:
-      void compute_ancestor_and_domain(RegionTreeForest *forest);
-      RegionNode* find_common_ancestor(RegionNode *one, RegionNode *two) const;
+      void compute_space_and_domain(RegionTreeForest *forest);
     protected:
       void compute_layout_parameters(void);
     public:
@@ -530,9 +525,9 @@ namespace Legion {
       PhysicalInstance instance;
       RtUserEvent profiling_ready;
     protected:
-      RegionNode *ancestor;
-      IndexSpaceNode *instance_domain;
-      bool own_domain;
+      FieldSpaceNode *field_space_node;
+      IndexSpaceExpression *instance_domain;
+      RegionTreeID tree_id;
       // Mapping from logical field order to layout order
       std::vector<unsigned> mask_index_map;
       std::vector<size_t> field_sizes;

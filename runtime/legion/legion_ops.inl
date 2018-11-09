@@ -148,6 +148,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename OP>
+    ApEvent MemoizableOp<OP>::compute_init_precondition(
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      ApEvent sync_precondition = compute_sync_precondition(&trace_info);
+      if (sync_precondition.exists())
+      {
+        if (this->execution_fence_event.exists())
+          return Runtime::merge_events(&trace_info, sync_precondition,
+                                       this->execution_fence_event);
+        else
+          return sync_precondition;
+      }
+      else
+        return this->execution_fence_event;
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename OP>
     void MemoizableOp<OP>::invoke_memoize_operation(MapperID mapper_id)
     //--------------------------------------------------------------------------
     {

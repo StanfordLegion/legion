@@ -1672,7 +1672,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < num_requirements; ++idx)
         initialize_privilege_path(privilege_paths[idx], requirements[idx]);
       version_infos.resize(num_requirements);
-      restrict_infos.resize(num_requirements);
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_summary_operation(parent_ctx->get_unique_id(),
@@ -1726,7 +1725,6 @@ namespace Legion {
       parent_indices.clear();
       privilege_paths.clear();
       version_infos.clear();
-      restrict_infos.clear();
       map_applied_conditions.clear();
       mapped_preconditions.clear();
     }
@@ -1762,8 +1760,6 @@ namespace Legion {
       {
         runtime->forest->perform_dependence_analysis(this, idx,
                                                      requirements[idx],
-                                                     restrict_infos[idx],
-                                                     version_infos[idx],
                                                      projection_info,
                                                      privilege_paths[idx]);
       }
@@ -1778,7 +1774,6 @@ namespace Legion {
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
         runtime->forest->perform_versioning_analysis(this, idx,
                                                      requirements[idx],
-                                                     privilege_paths[idx],
                                                      version_infos[idx],
                                                      preconditions);
       if (!preconditions.empty())
@@ -1795,14 +1790,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
         runtime->forest->physical_register_only(requirements[idx],
                                                 version_infos[idx],
-                                                restrict_infos[idx],
                                                 this, idx,
+                                                ApEvent::NO_AP_EVENT,
                                                 completion_event,
-                                                false/*defer add users*/,
-                                                false/*read only locks*/,
-                                                map_applied_conditions,
                                                 instances[idx],
-                                                NULL/*advance projections*/,
                                                 trace_info
 #ifdef DEBUG_LEGION
                                                 , get_logging_name()
@@ -1810,7 +1801,7 @@ namespace Legion {
 #endif
                                                 );
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        version_infos[idx].apply_mapping(map_applied_conditions);
+        version_infos[idx].finalize_mapping(map_applied_conditions);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
@@ -1833,9 +1824,6 @@ namespace Legion {
     void TraceSummaryOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      for (std::vector<VersionInfo>::iterator it = version_infos.begin();
-           it != version_infos.end(); it++)
-        it->clear();
       commit_operation(true);
     }
 
@@ -2109,6 +2097,7 @@ namespace Legion {
                                                          FieldMask fields)
     //--------------------------------------------------------------------------
     {
+#if 0
       {
         const LogicalState &state = node->get_logical_state(ctx);
         state.filter_dirty_fields(fields);
@@ -2160,6 +2149,9 @@ namespace Legion {
           continue;
         fields -= overlap;
       }
+#else
+      assert(false);
+#endif
       return !fields;
     }
 
@@ -2169,6 +2161,7 @@ namespace Legion {
                            LegionMap<IndexSpaceNode*, FieldMask>::aligned projs)
     //--------------------------------------------------------------------------
     {
+#if 0
       const LogicalState &state = node->get_logical_state(ctx);
       for (LegionList<FieldState>::aligned::const_iterator fit =
            state.field_states.begin(); fit !=
@@ -2195,6 +2188,9 @@ namespace Legion {
         assert(false);
 #endif
       }
+#else
+      assert(false);
+#endif
       return projs.size() == 0;
     }
 
@@ -2202,6 +2198,7 @@ namespace Legion {
     bool PhysicalTemplate::check_preconditions(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       for (LegionMap<std::pair<RegionTreeNode*, ContextID>,
                      FieldMask>::aligned::iterator it =
            previous_open_nodes.begin(); it !=
@@ -2275,7 +2272,9 @@ namespace Legion {
         if (!found)
           return false;
       }
-
+#else
+      assert(false);
+#endif
       return true;
     }
 
@@ -2283,6 +2282,7 @@ namespace Legion {
     bool PhysicalTemplate::check_replayable(void) const
     //--------------------------------------------------------------------------
     {
+#if 0
       if (untracked_fill_views.size() > 0)
         return false;
       for (LegionMap<InstanceView*, FieldMask>::aligned::const_iterator it =
@@ -2301,6 +2301,9 @@ namespace Legion {
         if (finder == valid_views.end() || !!(it->second - finder->second))
           return false;
       }
+#else
+      assert(false);
+#endif
       return true;
     }
 
@@ -2528,12 +2531,12 @@ namespace Legion {
               for (unsigned idx = 0; idx < copy->src_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->src_fields[idx];
-                find_last_users(field.inst, copy->node, field.field_id, users);
+                find_last_users(field.inst, copy->expr, field.field_id, users);
               }
               for (unsigned idx = 0; idx < copy->dst_fields.size(); ++idx)
               {
                 const CopySrcDstField &field = copy->dst_fields[idx];
-                find_last_users(field.inst, copy->node, field.field_id, users);
+                find_last_users(field.inst, copy->expr, field.field_id, users);
               }
               precondition_idx = &copy->precondition_idx;
               break;
@@ -2544,7 +2547,7 @@ namespace Legion {
               for (unsigned idx = 0; idx < fill->fields.size(); ++idx)
               {
                 const CopySrcDstField &field = fill->fields[idx];
-                find_last_users(field.inst, fill->node, field.field_id, users);
+                find_last_users(field.inst, fill->expr, field.field_id, users);
               }
               precondition_idx = &fill->precondition_idx;
               break;
@@ -3328,8 +3331,9 @@ namespace Legion {
                                                        const InstanceView *view)
     //--------------------------------------------------------------------------
     {
-      assert(view->logical_node->is_region());
       std::stringstream ss;
+#if 0
+      assert(view->logical_node->is_region());
       LogicalRegion handle = view->logical_node->as_region_node()->handle;
       ss << "pointer: " << std::hex << view
          << ", instance: " << std::hex << view->get_manager()->get_instance().id
@@ -3341,6 +3345,9 @@ namespace Legion {
          << "," << handle.get_field_space().get_id()
          << "," << handle.get_tree_id()
          << ")";
+#else
+      assert(false);
+#endif
       return ss.str();
     }
 
@@ -3349,14 +3356,18 @@ namespace Legion {
                                                        const FillView *view)
     //--------------------------------------------------------------------------
     {
-      assert(view->logical_node->is_region());
       std::stringstream ss;
+#if 0
+      assert(view->logical_node->is_region());
       LogicalRegion handle = view->logical_node->as_region_node()->handle;
       ss << "pointer: " << std::hex << view
          << ", region: " << "(" << handle.get_index_space().get_id()
          << "," << handle.get_field_space().get_id()
          << "," << handle.get_tree_id()
          << ")";
+#else
+      assert(false);
+#endif
       return ss.str();
     }
 
@@ -3676,6 +3687,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_copy_views(InstanceView *src,
                                              const FieldMask &src_mask,
@@ -3696,16 +3708,19 @@ namespace Legion {
       update_valid_view(
           false, false, false, dst, dst_mask, dst_logical_ctx, dst_physical_ctx);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_copy(Operation* op, ApEvent &lhs,
-                                             RegionNode *node,
+                                             IndexSpaceExpression *expr,
                                  const std::vector<CopySrcDstField>& src_fields,
                                  const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                                             FieldSpace handle,
+                                             RegionTreeID src_tree_id,
+                                             RegionTreeID dst_tree_id,
+#endif
                                              ApEvent precondition,
-                                             PredEvent predicate_guard,
-                                             IndexTreeNode *intersect,
-                                             IndexSpaceExpression *mask,
                                              ReductionOpID redop,
                                              bool reduction_fold)
     //--------------------------------------------------------------------------
@@ -3746,19 +3761,21 @@ namespace Legion {
       for (unsigned idx = 0; idx < src_fields.size(); ++idx)
       {
         const CopySrcDstField &field = src_fields[idx];
-        record_last_user(field.inst, node, field.field_id, lhs_, true);
+        record_last_user(field.inst, expr, field.field_id, lhs_, true);
       }
       for (unsigned idx = 0; idx < dst_fields.size(); ++idx)
       {
         const CopySrcDstField &field = dst_fields[idx];
-        record_last_user(field.inst, node, field.field_id, lhs_, false);
+        record_last_user(field.inst, expr, field.field_id, lhs_, false);
       }
 
       unsigned precondition_idx = pre_finder->second;
       instructions.push_back(new IssueCopy(
-            *this, lhs_, node, op_key, src_fields, dst_fields,
-            precondition_idx, predicate_guard,
-            intersect, mask, redop, reduction_fold));
+            *this, lhs_, expr, op_key, src_fields, dst_fields,
+#ifdef LEGION_SPY
+            handle, src_tree_id, dst_tree_id,
+#endif
+            precondition_idx, redop, reduction_fold));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
@@ -3800,6 +3817,7 @@ namespace Legion {
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::update_valid_view(bool is_reduction,
                                                     bool has_read,
@@ -3902,7 +3920,7 @@ namespace Legion {
       logical_contexts[view] = logical_ctx;
       physical_contexts[view] = physical_ctx;
     }
-
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_summary_info(const RegionRequirement &region,
@@ -3920,6 +3938,7 @@ namespace Legion {
       parent_indices.push_back(parent_idx);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_ready_event(Operation *op,
                                                   unsigned region_idx,
@@ -3964,6 +3983,7 @@ namespace Legion {
 
         void *fill_buffer = malloc(reduction_op->sizeof_rhs);
         reduction_op->init(fill_buffer, 1);
+
 #ifdef DEBUG_LEGION
         assert(view->logical_node->is_region());
 #endif
@@ -3983,17 +4003,16 @@ namespace Legion {
         ready_event = lhs;
 
         instructions.push_back(
-            new IssueFill(*this, lhs_, region_node,
+            new IssueFill(*this, lhs_,region_node->get_index_space_expression(),
                           op_key, fields, fill_buffer, reduction_op->sizeof_rhs,
-                          ready_event_idx, PredEvent::NO_PRED_EVENT,
 #ifdef LEGION_SPY
                           0,
 #endif
-                          NULL, NULL));
+                          ready_event_idx));
         for (unsigned idx = 0; idx < fields.size(); ++idx)
         {
           const CopySrcDstField &field = fields[idx];
-          record_last_user(field.inst, region_node, 
+          record_last_user(field.inst,region_node->get_index_space_expression(),
                            field.field_id, lhs_, true);
         }
         free(fill_buffer);
@@ -4018,6 +4037,7 @@ namespace Legion {
         record_last_user(inst_req.instance, region_node, *it, 
                          finder->second, inst_req.read);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_set_op_sync_event(ApEvent &lhs, Operation *op)
@@ -4093,17 +4113,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_issue_fill(Operation *op, ApEvent &lhs,
-                                             RegionNode *node,
+                                             IndexSpaceExpression *expr,
                                      const std::vector<CopySrcDstField> &fields,
-                                             const void *fill_buffer,
+                                             const void *fill_value, 
                                              size_t fill_size,
-                                             ApEvent precondition,
-                                             PredEvent predicate_guard,
 #ifdef LEGION_SPY
                                              UniqueID fill_uid,
+                                             FieldSpace handle,
+                                             RegionTreeID tree_id,
 #endif
-                                             IndexTreeNode *intersect,
-                                             IndexSpaceExpression *mask)
+                                             ApEvent precondition)
     //--------------------------------------------------------------------------
     {
       if (!lhs.exists())
@@ -4144,18 +4163,18 @@ namespace Legion {
 #endif
       unsigned precondition_idx = pre_finder->second;
 
-      instructions.push_back(new IssueFill(*this, lhs_, node, key,
-                             fields, fill_buffer, fill_size, precondition_idx,
-                             predicate_guard,
+      instructions.push_back(new IssueFill(*this, lhs_, expr, key,
+                                           fields, fill_value, fill_size, 
 #ifdef LEGION_SPY
-                             fill_uid,
+                                           fill_uid, handle, tree_id,
 #endif
-                             intersect, mask));
+                                           precondition_idx));
 #ifdef DEBUG_LEGION
       assert(instructions.size() == events.size());
 #endif
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_fill_view(
                                 FillView *fill_view, const FieldMask &fill_mask)
@@ -4168,6 +4187,7 @@ namespace Legion {
 #endif
       fill_views[fill_view] = fill_mask;
     }
+#endif
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_deferred_copy_from_fill_view(
@@ -4284,7 +4304,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::record_last_user(const PhysicalInstance &inst,
-                                                   RegionNode *node,
+                                                   IndexSpaceExpression *expr,
                                                    unsigned field,
                                                    unsigned user, bool read)
     //--------------------------------------------------------------------------
@@ -4295,17 +4315,19 @@ namespace Legion {
       if (finder == last_users.end())
       {
         UserInfos &infos = last_users[key];
-        infos.push_back(UserInfo(read, user, node));
+        infos.push_back(UserInfo(read, user, expr));
       }
       else
       {
         bool joined = false;
+        RegionTreeForest *forest = trace->runtime->forest;
         for (UserInfos::iterator it = finder->second.begin();
              it != finder->second.end();)
         {
-          if ((read && it->read) || !it->node->intersects_with(node, false))
+          if ((read && it->read) || 
+              forest->intersect_index_spaces(it->expr, expr)->is_empty())
           {
-            if (it->node == node)
+            if (it->expr == expr)
             {
 #ifdef DEBUG_LEGION
               assert(!joined);
@@ -4319,13 +4341,13 @@ namespace Legion {
             it = finder->second.erase(it);
         }
         if (!joined)
-          finder->second.push_back(UserInfo(read, user, node));
+          finder->second.push_back(UserInfo(read, user, expr));
       }
     }
 
     //--------------------------------------------------------------------------
     inline void PhysicalTemplate::find_last_users(const PhysicalInstance &inst,
-                                                  RegionNode *node,
+                                                  IndexSpaceExpression *expr,
                                                   unsigned field,
                                                   std::set<unsigned> &users)
     //--------------------------------------------------------------------------
@@ -4336,11 +4358,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != last_users.end());
 #endif
+      RegionTreeForest *forest = trace->runtime->forest;
       for (UserInfos::iterator uit = finder->second.begin();
            uit != finder->second.end(); ++uit)
         for (std::set<unsigned>::iterator it = uit->users.begin(); it !=
              uit->users.end(); ++it)
-          if (node->intersects_with(uit->node, false))
+          if (!forest->intersect_index_spaces(expr, uit->expr)->is_empty())
           {
 #ifdef DEBUG_LEGION
             assert(frontiers.find(*it) != frontiers.end());
@@ -4627,16 +4650,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IssueCopy::IssueCopy(PhysicalTemplate& tpl,
-                         unsigned l, RegionNode *n,
+                         unsigned l, IndexSpaceExpression *e,
                          const TraceLocalID& key,
                          const std::vector<CopySrcDstField>& s,
                          const std::vector<CopySrcDstField>& d,
-                         unsigned pi, PredEvent pg, 
-                         IndexTreeNode *i, IndexSpaceExpression *m,
-                         ReductionOpID ro, bool rf)
-      : Instruction(tpl, key), lhs(l), node(n), src_fields(s),
-        dst_fields(d), precondition_idx(pi), predicate_guard(pg),
-        intersect(i), mask(m), redop(ro), reduction_fold(rf)
+#ifdef LEGION_SPY
+                         FieldSpace h,RegionTreeID src_tid,RegionTreeID dst_tid,
+#endif
+                         unsigned pi, ReductionOpID ro, bool rf)
+      : Instruction(tpl, key), lhs(l), expr(e), src_fields(s), dst_fields(d), 
+#ifdef LEGION_SPY
+        handle(h), src_tree_id(src_tid), dst_tree_id(dst_tid),
+#endif
+        precondition_idx(pi), redop(ro), reduction_fold(rf)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4645,25 +4671,17 @@ namespace Legion {
       assert(src_fields.size() > 0);
       assert(dst_fields.size() > 0);
       assert(precondition_idx < events.size());
-      assert(node != NULL);
+      assert(expr != NULL);
 #endif
-      node->add_base_resource_ref(TRACE_REF);
-      if (intersect != NULL)
-        intersect->add_base_resource_ref(TRACE_REF);
-      if (mask != NULL)
-        mask->add_expression_reference();
+      expr->add_expression_reference();
     }
 
     //--------------------------------------------------------------------------
     IssueCopy::~IssueCopy(void)
     //--------------------------------------------------------------------------
     {
-      if (node->remove_base_resource_ref(TRACE_REF))
-        delete node;
-      if ((intersect != NULL) && intersect->remove_base_resource_ref(TRACE_REF))
-        delete intersect;
-      if ((mask != NULL) && mask->remove_expression_reference())
-        delete mask;
+      if (expr->remove_expression_reference())
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -4677,9 +4695,11 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
-      events[lhs] = node->row_source->issue_copy(&trace_info, node, src_fields, 
-          dst_fields, precondition, predicate_guard, intersect, mask, 
-          redop, reduction_fold);
+      events[lhs] = expr->issue_copy(trace_info, src_fields, dst_fields,
+#ifdef LEGION_SPY
+                                     handle, src_tree_id, dst_tree_id,
+#endif
+                                     precondition, redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4727,9 +4747,12 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueCopy(tpl, lfinder->second, node, owner, src_fields,
-        dst_fields, pfinder->second, predicate_guard, intersect, mask,
-        redop, reduction_fold);
+      return new IssueCopy(tpl, lfinder->second, expr, owner, src_fields,
+                           dst_fields, 
+#ifdef LEGION_SPY
+                           handle, src_tree_id, dst_tree_id,
+#endif
+                           pfinder->second, redop, reduction_fold);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4737,21 +4760,19 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, RegionNode *n,
-                         const TraceLocalID &key,
+    IssueFill::IssueFill(PhysicalTemplate& tpl, unsigned l, 
+                         IndexSpaceExpression *e, const TraceLocalID &key,
                          const std::vector<CopySrcDstField> &f,
-                         const void *fb, size_t fs, unsigned pi,
-                         PredEvent pg,
+                         const void *value, size_t size, 
 #ifdef LEGION_SPY
-                         UniqueID u,
+                         UniqueID uid, FieldSpace h, RegionTreeID tid,
 #endif
-                         IndexTreeNode *i, IndexSpaceExpression *m)
-      : Instruction(tpl, key), lhs(l), node(n), fields(f),
-        precondition_idx(pi), predicate_guard(pg),
+                         unsigned pi)
+      : Instruction(tpl, key), lhs(l), expr(e), fields(f), fill_size(size),
 #ifdef LEGION_SPY
-        fill_uid(u),
+        fill_uid(uid), handle(h), tree_id(tid),
 #endif
-        intersect(i), mask(m)
+        precondition_idx(pi)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4760,27 +4781,18 @@ namespace Legion {
       assert(fields.size() > 0);
       assert(precondition_idx < events.size());
 #endif
-      fill_size = fs;
-      fill_buffer = malloc(fs);
-      memcpy(fill_buffer, fb, fs);
-      node->add_base_resource_ref(TRACE_REF);
-      if (intersect != NULL)
-        intersect->add_base_resource_ref(TRACE_REF);
-      if (mask != NULL)
-        mask->add_expression_reference();
+      expr->add_expression_reference();
+      fill_value = malloc(fill_size);
+      memcpy(fill_value, value, fill_size);
     }
 
     //--------------------------------------------------------------------------
     IssueFill::~IssueFill(void)
     //--------------------------------------------------------------------------
     {
-      free(fill_buffer);
-      if (node->remove_base_resource_ref(TRACE_REF))
-        delete node;
-      if ((intersect != NULL) && intersect->remove_base_resource_ref(TRACE_REF))
-        delete intersect;
-      if ((mask != NULL) && mask->remove_expression_reference())
-        delete mask;
+      if (expr->remove_expression_reference())
+        delete expr;
+      free(fill_value);
     }
 
     //--------------------------------------------------------------------------
@@ -4794,12 +4806,12 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
-      events[lhs] = node->row_source->issue_fill(&trace_info, node,
-          fields, fill_buffer, fill_size, precondition, predicate_guard,
+      events[lhs] = expr->issue_fill(trace_info, fields, 
+                                     fill_value, fill_size,
 #ifdef LEGION_SPY
-          fill_uid,
+                                     fill_uid, handle, tree_id,
 #endif
-          intersect, mask);
+                                     precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4834,12 +4846,12 @@ namespace Legion {
       assert(lfinder != rewrite.end());
       assert(pfinder != rewrite.end());
 #endif
-      return new IssueFill(tpl, lfinder->second, node, owner, fields,
-          fill_buffer, fill_size, pfinder->second, predicate_guard,
+      return new IssueFill(tpl, lfinder->second, expr, owner, fields, 
+                           fill_value, fill_size, 
 #ifdef LEGION_SPY
-          fill_uid,
+                           fill_uid, handle, tree_id,
 #endif
-          intersect, mask);
+                           pfinder->second);
     }
 
     /////////////////////////////////////////////////////////////

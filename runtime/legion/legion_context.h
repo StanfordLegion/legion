@@ -83,7 +83,6 @@ namespace Legion {
       virtual VariantImpl* select_inline_variant(TaskOp *child) const = 0;
       virtual bool is_leaf_context(void) const;
       virtual bool is_inner_context(void) const;
-      virtual bool is_replicate_context(void) const;
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
@@ -360,16 +359,10 @@ namespace Legion {
       virtual void decrement_frame(void) = 0;
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node) = 0;
-      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node) = 0;
-      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
-                                                   RegionTreeNode *node) = 0;
 #else
-      virtual InterCloseOp* get_inter_close_op(void) = 0;
-      virtual IndexCloseOp* get_index_close_op(void) = 0;
-      virtual ReadCloseOp*  get_read_only_close_op(void) = 0;
+      virtual MergeCloseOp* get_merge_close_op(void) = 0;
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
@@ -377,9 +370,6 @@ namespace Legion {
                                           LogicalRegion *handle = NULL) = 0;
       // No-op for most contexts except remote ones
       virtual void record_using_physical_context(LogicalRegion handle) { }
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                const FieldMask &version_mask, InnerContext *context,
-                VersionInfo &version_info, std::set<RtEvent> &ready_events) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
@@ -404,19 +394,6 @@ namespace Legion {
                                  size_t res_size, bool owned) = 0;
       void begin_misspeculation(void);
       void end_misspeculation(const void *res, size_t res_size);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req) = 0;
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req) = 0;
-      virtual void release_restrictions(void) = 0;
-      virtual bool has_restrictions(void) const = 0; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info) = 0;
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f) = 0;
@@ -622,11 +599,8 @@ namespace Legion {
       bool children_complete_invoked;
       bool children_commit_invoked;
 #ifdef LEGION_SPY
-    public:
-      RtEvent update_previous_mapped_event(RtEvent next);
     protected:
       UniqueID current_fence_uid;
-      RtEvent previous_mapped_event;
 #endif
     };
 
@@ -769,9 +743,9 @@ namespace Legion {
           AddressSpaceID target, bool replicate = false);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-      void notify_region_tree_node_deletion(RegionTreeNode *node);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1046,24 +1020,15 @@ namespace Legion {
       virtual void decrement_frame(void);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
-      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
-                                                   RegionTreeNode *node);
 #else
-      virtual InterCloseOp* get_inter_close_op(void);
-      virtual IndexCloseOp* get_index_close_op(void);
-      virtual ReadCloseOp*  get_read_only_close_op(void);
+      virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
     public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
@@ -1095,49 +1060,18 @@ namespace Legion {
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
     public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
-    public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-      virtual CompositeView* create_composite_view(RegionTreeNode *node,
-                                    DeferredVersionInfo *version_info, 
-                                    InterCloseOp *op, bool clone,
-                                    CompositeViewSummary &summary);
-#ifndef DISABLE_CVOPT
-      virtual AddressSpaceID find_shard_space(ShardID sid) const;
-      virtual void send_composite_view_shard_copy_request(ShardID sid,
-                                                          Serializer &rez);
-      virtual void send_composite_view_shard_reduction_request(ShardID sid,
-                                                          Serializer &rez);
-#else
-      virtual void send_composite_view_shard_request(ShardID sid,
-                                                     Serializer &rez);
-#endif
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
     public:
-      static void handle_version_owner_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      void process_version_owner_response(RegionTreeNode *node, 
-                                          AddressSpaceID result);
-      static void handle_version_owner_response(Deserializer &derez,
-                                                Runtime *runtime);
+      static void handle_compute_equivalence_sets_request(Deserializer &derez,
+                                     Runtime *runtime, AddressSpaceID source);
     public:
       void invalidate_remote_contexts(void);
       void clear_instance_top_views(void); 
@@ -1145,10 +1079,17 @@ namespace Legion {
       void free_remote_contexts(void);
       void send_remote_context(AddressSpaceID remote_instance, 
                                RemoteContext *target);
+    public:
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<InstanceView*> &target_views);
+      // I hate the container problem, same as previous except MaterializedView
+      void convert_target_views(const InstanceSet &targets, 
+                                std::vector<MaterializedView*> &target_views);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
+      EquivalenceSet* find_or_create_top_equivalence_set(RegionTreeID tree_id);
     public:
       void clone_local_fields(
           std::map<FieldSpace,std::vector<LocalFieldInfo> > &child_local) const;
@@ -1239,18 +1180,15 @@ namespace Legion {
       // For managing changing task priorities
       ApEvent realm_done_event;
       TaskPriority current_priority;
-    protected:
-      // For tracking restricted coherence
-      std::list<Restriction*> coherence_restrictions;
     protected: // Instance top view data structures
       mutable LocalLock                         instance_view_lock;
       std::map<PhysicalManager*,InstanceView*>  instance_top_views;
       std::map<PhysicalManager*,RtUserEvent>    pending_top_views;
     protected:
-      mutable LocalLock                         tree_owner_lock;
-      std::map<RegionTreeNode*,
-        std::pair<AddressSpaceID,bool/*remote only*/> > region_tree_owners;
-      std::map<RegionTreeNode*,RtUserEvent> pending_version_owner_requests;
+      mutable LocalLock                         tree_set_lock;
+      std::map<RegionTreeID,EquivalenceSet*>    tree_equivalence_sets;
+      std::map<std::pair<RegionTreeID,
+        IndexSpaceExprID>,EquivalenceSet*>      empty_equivalence_sets;
     protected:
       mutable LocalLock                       remote_lock;
       std::map<AddressSpaceID,RemoteContext*> remote_instances;
@@ -1296,10 +1234,9 @@ namespace Legion {
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
                      const void *result, size_t size, PhysicalInstance inst);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle, 
+                        IndexSpaceExpression *expr, AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1325,30 +1262,6 @@ namespace Legion {
         ReplicateContext *const ctx;
         ReplFutureMapImpl *const impl;
       };
-#ifndef DISABLE_CVOPT
-      struct DeferCompositeCopyArgs :
-        public LgTaskArgs<DeferCompositeCopyArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_COMPOSITE_COPY_TASK_ID;
-      public:
-        DeferCompositeCopyArgs(ReplicateContext *c, Runtime *rt,
-                               CompositeView *v, AddressSpaceID src,
-                               void *b, size_t l, bool r)
-          : LgTaskArgs<DeferCompositeCopyArgs>(0), ctx(c), runtime(rt),
-            view(v), source(src), buffer(b), length(l), reduce(r) { }
-      public:
-        ReplicateContext *const ctx;
-        Runtime *const runtime;
-        CompositeView *const view;
-        const AddressSpaceID source;
-        void *const buffer;
-        const size_t length;
-        const bool reduce;
-#ifdef DEBUG_LEGION
-        size_t context_bytes;
-#endif
-      };
-#endif
       struct ISBroadcast {
       public:
         ISBroadcast(void) : did(0) { }
@@ -1395,8 +1308,6 @@ namespace Legion {
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; }
     public:
-      virtual bool is_replicate_context(void) const;
-    public:
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
     public:
@@ -1404,6 +1315,9 @@ namespace Legion {
                                           LogicalRegion *handle = NULL);
       virtual void invalidate_region_tree_contexts(void);
     public:
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
@@ -1580,7 +1494,7 @@ namespace Legion {
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       // Unmapping region is the same as for an inner context
-      // Single fill ops are the same as normal inner context
+      virtual void fill_fields(const FillLauncher &launcher);
       virtual void fill_fields(const IndexFillLauncher &launcher);
       virtual void issue_copy(const CopyLauncher &launcher);
       virtual void issue_copy(const IndexCopyLauncher &launcher);
@@ -1617,16 +1531,10 @@ namespace Legion {
                                                    DynamicCollective dc);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
-      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
-                                                   RegionTreeNode *node);
 #else
-      virtual InterCloseOp* get_inter_close_op(void);
-      virtual IndexCloseOp* get_index_close_op(void);
-      virtual ReadCloseOp*  get_read_only_close_op(void);
+      virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
       virtual void pack_remote_context(Serializer &rez, 
@@ -1634,20 +1542,6 @@ namespace Legion {
                                        bool replicate = false);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-      virtual CompositeView* create_composite_view(RegionTreeNode *node,
-                                    DeferredVersionInfo *version_info, 
-                                    InterCloseOp *op, bool clone,
-                                    CompositeViewSummary &summary);
-#ifndef DISABLE_CVOPT
-      virtual AddressSpaceID find_shard_space(ShardID sid) const;
-      virtual void send_composite_view_shard_copy_request(ShardID sid,
-                                                          Serializer &rez);
-      virtual void send_composite_view_shard_reduction_request(ShardID sid,
-                                                          Serializer &rez);
-#else
-      virtual void send_composite_view_shard_request(ShardID sid,
-                                                     Serializer &rez);
-#endif
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                                                      AddressSpaceID source);
@@ -1659,15 +1553,10 @@ namespace Legion {
       void exchange_common_resources(void);
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
-#ifndef DISABLE_CVOPT
-      void handle_composite_view_copy_request(Deserializer &derez,
-                                              AddressSpaceID source);
-      void handle_composite_view_reduction_request(Deserializer &derez,
-                                              AddressSpaceID source);
-      static void handle_deferred_copy_request(const void *args);
-#else
-      void handle_composite_view_request(Deserializer &derez);
-#endif
+      void handle_equivalence_set_request(Deserializer &derez);
+      void handle_equivalence_set_response(RegionTreeID tree_id, 
+                                           EquivalenceSet *result);
+      static void handle_eq_response(Deserializer &derez, Runtime *rt);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);
@@ -1682,23 +1571,6 @@ namespace Legion {
       void unregister_future_map(ReplFutureMapImpl *map);
       static void handle_future_map_reclaim(const void *args);
     public:
-      // Composite view methods
-      void register_composite_view(CompositeView* view, RtEvent close_done);
-#ifndef DISABLE_CVOPT
-      CompositeView* find_or_buffer_composite_view_copy_request(
-                                    Deserializer &derez, AddressSpaceID source);
-      CompositeView* find_or_buffer_composite_view_reduction_request(
-                                    Deserializer &derez, AddressSpaceID source);
-#else
-      CompositeView* find_or_buffer_composite_view_request(Deserializer &derez);
-#endif
-      void unregister_composite_view(CompositeView *view, RtEvent close_done);
-    public:
-      // Clone barrier methods
-      RtBarrier find_clone_barrier(unsigned close_index, unsigned clone_index);
-      void record_clone_barrier(unsigned close_index, unsigned clone_index,
-                                RtBarrier bar);
-    public:
       // Fence barrier methods
       RtBarrier get_next_mapping_fence_barrier(void);
       ApBarrier get_next_execution_fence_barrier(void);
@@ -1710,16 +1582,6 @@ namespace Legion {
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;
       unsigned                next_close_mapped_bar_index;
-      // These are barriers used to identify composite views for inter close ops
-      std::vector<RtBarrier>  view_close_barriers;
-      unsigned                next_view_close_bar_index;
-      // These barriers are used for composite views that are created as part
-      // of cloning that occurs with creating a composite view to avoid the
-      // infinite nested composite view problem, the outer vector is the
-      // same size as view_close_barriers
-      std::vector<std::vector<RtBarrier> > clone_close_barriers;
-      // The next shard to make any dynamic clone close barriers if necessary
-      std::vector<ShardID> clone_close_creators;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;
@@ -1756,32 +1618,9 @@ namespace Legion {
       std::map<ApEvent,std::vector<
                 std::pair<void*,size_t> > > pending_future_map_requests;
     protected:
-      // Composite views that are still valid across the shards
-      std::map<RtEvent/*done event*/,CompositeView*> live_composite_views;
-#ifndef DISABLE_CVOPT
-      struct PendingCopy {
-      public:
-        PendingCopy(void *buf, size_t size, AddressSpaceID src)
-          : buffer(buf), buffer_size(size), source(src) { }
-      public:
-        void *buffer;
-        size_t buffer_size;
-        AddressSpaceID source;
-#ifdef DEBUG_LEGION
-        size_t context_bytes;
-#endif
-      };
-      std::map<RtEvent,std::vector<PendingCopy> > 
-                                    pending_composite_view_copy_requests;
-      std::map<RtEvent,std::vector<PendingCopy> >
-                                    pending_composite_view_reduction_requests;
-#else
-      std::map<RtEvent,std::vector<
-                std::pair<void*,size_t> > > pending_composite_view_requests;
-#endif
-    protected:
       // Different from pending_top_views as this applies to our requests
       std::map<PhysicalManager*,RtUserEvent> pending_request_views;
+      std::map<RegionTreeID,RtUserEvent> pending_tree_requests;
     protected:
       std::map<std::pair<unsigned,unsigned>,RtBarrier> ready_clone_barriers;
       std::map<std::pair<unsigned,unsigned>,RtUserEvent> pending_clone_barriers;
@@ -1870,13 +1709,9 @@ namespace Legion {
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
     public:
-      virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
-      virtual AddressSpaceID get_version_owner(RegionTreeNode *node,
-                                               AddressSpaceID source);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
+      virtual RtEvent compute_equivalence_sets(VersionManager *manager,
+                        RegionTreeID tree_id, IndexSpace handle,
+                        IndexSpaceExpression *expr, AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);
@@ -1886,20 +1721,6 @@ namespace Legion {
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
       virtual ShardingFunction* find_sharding_function(ShardingID sid);
-#ifndef DISABLE_CVOPT
-      virtual AddressSpaceID find_shard_space(ShardID sid) const;
-      virtual void send_composite_view_shard_copy_request(ShardID sid,
-                                                          Serializer &rez);
-      static void handle_shard_copy_request(Deserializer &derez, Runtime *rt);
-      virtual void send_composite_view_shard_reduction_request(ShardID sid,
-                                                          Serializer &rez);
-      static void handle_shard_reduction_request(Deserializer &derez, 
-                                                 Runtime *runtime);
-#else
-      virtual void send_composite_view_shard_request(ShardID sid,
-                                                     Serializer &rez);
-      static void handle_shard_request(Deserializer &derez, Runtime *runtime);
-#endif
     public:
       void unpack_local_field_update(Deserializer &derez);
       static void handle_local_field_update(Deserializer &derez);
@@ -1920,7 +1741,6 @@ namespace Legion {
     protected:
       int depth;
       ApEvent remote_completion_event;
-      std::vector<VersionInfo> version_infos;
       bool top_level_context;
       RemoteTask remote_task;
     protected:
@@ -2226,24 +2046,15 @@ namespace Legion {
       virtual void decrement_frame(void);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
-      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
-                                                   RegionTreeNode *node);
 #else
-      virtual InterCloseOp* get_inter_close_op(void);
-      virtual IndexCloseOp* get_index_close_op(void);
-      virtual ReadCloseOp*  get_read_only_close_op(void);
+      virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -2262,19 +2073,6 @@ namespace Legion {
       virtual void end_task(const void *res, size_t res_size, bool owned,
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);
@@ -2576,24 +2374,15 @@ namespace Legion {
       virtual void decrement_frame(void);
     public:
 #ifdef DEBUG_LEGION_COLLECTIVES
-      virtual InterCloseOp* get_inter_close_op(const LogicalUser &user,
+      virtual MergeCloseOp* get_merge_close_op(const LogicalUser &user,
                                                RegionTreeNode *node);
-      virtual IndexCloseOp* get_index_close_op(const LogicalUser &user,
-                                               RegionTreeNode *node);
-      virtual ReadCloseOp*  get_read_only_close_op(const LogicalUser &user,
-                                                   RegionTreeNode *node);
 #else
-      virtual InterCloseOp* get_inter_close_op(void);
-      virtual IndexCloseOp* get_index_close_op(void);
-      virtual ReadCloseOp*  get_read_only_close_op(void);
+      virtual MergeCloseOp* get_merge_close_op(void);
 #endif
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);
-      virtual void find_parent_version_info(unsigned index, unsigned depth, 
-                  const FieldMask &version_mask, InnerContext *context,
-                  VersionInfo &version_info, std::set<RtEvent> &ready_events);
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
@@ -2615,19 +2404,6 @@ namespace Legion {
       virtual void end_task(const void *res, size_t res_size, bool owned,
                             PhysicalInstance inst = PhysicalInstance::NO_INST);
       virtual void post_end_task(const void *res, size_t res_size, bool owned);
-    public:
-      virtual void add_acquisition(AcquireOp *op, 
-                                   const RegionRequirement &req);
-      virtual void remove_acquisition(ReleaseOp *op, 
-                                      const RegionRequirement &req);
-      virtual void add_restriction(AttachOp *op, InstanceManager *instance,
-                                   const RegionRequirement &req);
-      virtual void remove_restriction(DetachOp *op, 
-                                      const RegionRequirement &req);
-      virtual void release_restrictions(void);
-      virtual bool has_restrictions(void) const; 
-      virtual void perform_restricted_analysis(const RegionRequirement &req, 
-                                               RestrictInfo &restrict_info);
     public:
       virtual void record_dynamic_collective_contribution(DynamicCollective dc,
                                                           const Future &f);

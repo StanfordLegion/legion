@@ -244,9 +244,9 @@ namespace Legion {
       owner_shard = 0;
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      versioning_collective_id = UINT_MAX;
+      mapped_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
-      version_broadcast_collective = NULL;
+      mapped_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -260,10 +260,9 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (version_broadcast_collective != NULL)
-        delete version_broadcast_collective;
+      if (mapped_collective != NULL)
+        delete mapped_collective;
       deactivate_individual_task();
-      projection_infos.clear();
       runtime->free_repl_individual_task(this);
     }
 
@@ -339,103 +338,53 @@ namespace Legion {
         owner_shard = sharding_function->find_owner(index_point, index_domain);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
+#ifdef DEBUG_LEGION
+      assert(mapped_collective == NULL);
+#endif
+      mapped_collective = 
+        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
-        perform_unowned_shard(repl_ctx);
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this copy already
+        // Before we do this though we have to get the version state
+        // names for any writes so we can update our local state
+        RtEvent local_done = mapped_collective->get_local_event();
+        complete_mapping(local_done);
+        complete_execution();
+        trigger_children_complete();
+        trigger_children_committed();
+      }
       else // We own it, so it goes on the ready queue
+      {
+        // Signal the tree when we are done our mapping
+        mapped_collective->signal_tree(mapped_event);
+        // Then we can do the normal analysis
         IndividualTask::trigger_ready();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndividualTask::perform_unowned_shard(ReplicateContext *repl_ctx)
-    //--------------------------------------------------------------------------
-    {
-      // Since we're not going to run this task, we need to tell the
-      // profiler about its task ID so it can give it a name
-      // We use the same method as we do normally for multi tasks
-      if (runtime->profiler != NULL)
-        runtime->profiler->register_multi_task(this, task_id);
-#ifdef DEBUG_LEGION
-      assert(version_broadcast_collective == NULL);
-#endif
-      // We don't own it, so we can pretend like we
-      // mapped and executed this task already
-      // Before we can do that though we have to get the version state
-      // names for any writes so we can update our local state
-      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
-              versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
-      RtEvent versions_ready = 
-        version_broadcast_collective->perform_collective_wait(false/*block*/);
-      if (versions_ready.exists() && !versions_ready.has_triggered())
-      {
-        // Defer completion until the versions are ready
-        DeferredExecuteArgs deferred_execute_args(this);
-        runtime->issue_runtime_meta_task(deferred_execute_args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, versions_ready);
       }
-      else
-        deferred_execute();
-      trigger_children_complete();
-      trigger_children_committed();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndividualTask::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(version_broadcast_collective != NULL);
-#endif
-      version_broadcast_collective->wait_for_states(map_applied_conditions);
-      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (IS_WRITE(regions[idx]))
-        {
-          const VersioningSet<> &remote_advance_states = 
-            version_broadcast_collective->find_advance_states(idx);
-          const RegionRequirement &req = regions[idx];
-          const bool parent_is_upper_bound = (req.region == req.parent);
-          runtime->forest->advance_remote_versions(this, idx, req,
-              parent_is_upper_bound, logical_context_uid, 
-              remote_advance_states, map_applied_conditions);
-        }
-      }
-      if (!map_applied_conditions.empty())
-      {
-        RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
-        complete_mapping(map_applied);
-        // Record the map applied precondition in the versioning
-        // broadcast as well so we know when it is safe to remove
-        // our valid references
-        version_broadcast_collective->record_precondition(map_applied);
-      }
-      else
-        complete_mapping();
-      complete_execution();
     }
 
     //--------------------------------------------------------------------------
     RtEvent ReplIndividualTask::perform_mapping(
-                                         MustEpochOp *must_epoch_owner/*=NULL*/)
+                                         MustEpochOp *must_epoch_owner/*=NULL*/,
+                                         bool first_invocation)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(sharding_function != NULL);
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
       // If we're part of a must epoch operation see if we're the owner
       // and if not then just do the normal broadcast receive
       if (must_epoch_owner != NULL)
       {
 #ifdef DEBUG_LEGION
+        assert(sharding_function != NULL);
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
         ReplMustEpochOp *repl_epoch_owner = 
           dynamic_cast<ReplMustEpochOp*>(must_epoch_owner);
         assert(repl_epoch_owner != NULL);
 #else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
         ReplMustEpochOp *repl_epoch_owner = 
           static_cast<ReplMustEpochOp*>(must_epoch_owner);
 #endif
@@ -443,42 +392,13 @@ namespace Legion {
                             repl_epoch_owner->get_shard_domain());
         if (owner_shard != repl_ctx->owner_shard->shard_id)
         {
-          perform_unowned_shard(repl_ctx); 
+          complete_mapping();
+          complete_execution();
           return RtEvent::NO_RT_EVENT;
         }
       }
-      // See if we need to do any versioning computations first
-      RtEvent version_ready_event = perform_versioning_analysis();
-      if (version_ready_event.exists() && !version_ready_event.has_triggered())
-        return defer_perform_mapping(version_ready_event, must_epoch_owner); 
-      // Then broadcast the versioning results for any region requirements
-      // that are writes which are going to advance the version numbers
-      // Have to new this on the heap in case we have to defer it
-      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx, 
-          versioning_collective_id, owner_shard, (must_epoch_owner == NULL) ? 
-            get_mapped_event() : RtEvent::NO_RT_EVENT);
-      // Do the base call  
-      RtEvent result = IndividualTask::perform_mapping(must_epoch_owner);
-      // Have to wait for the mapping to be complete before sending to 
-      // guarantee correctness of mapping dependences on remote nodes
-      // Must epoch launches don't need to wait as their mapping dependences
-      // are handled by a different mechanism
-      const bool finish_mapping = is_leaf() && !has_virtual_instances();
-      if (finish_mapping || (must_epoch_owner != NULL))
-      {
-        pack_versioning_advance_states(*version_broadcast_collective);
-        version_broadcast_collective->perform_collective_async();
-        if (must_epoch_owner != NULL)
-        {
-          // We have to delete this now to know the effects are propagated
-          delete version_broadcast_collective;
-          version_broadcast_collective = NULL;
-        }
-        // We're done with our mapping so we can finish this now
-        if (finish_mapping) 
-          finish_individual_mapping();
-      }
-      return result;
+      // Then we can do the same thing that the base tasks do
+      return IndividualTask::perform_mapping(must_epoch_owner,first_invocation);
     }
 
     //--------------------------------------------------------------------------
@@ -503,63 +423,6 @@ namespace Legion {
         }
       }
       IndividualTask::handle_future(future_store, future_size, false/*owned*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndividualTask::pack_versioning_advance_states(
-                                            VersioningInfoBroadcast &collective)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(regions.size() == version_infos.size());
-#endif
-      for (unsigned idx = 0; idx < regions.size(); idx++)
-      {
-        if (IS_WRITE(regions[idx]))
-        {
-          // If this was virtually mapped then we have to re-run 
-          // the versioning analysis so gather the new meta-data
-          if (virtual_mapped[idx])
-          {
-            RegionTreePath privilege_path;
-            initialize_privilege_path(privilege_path, regions[idx]);
-            std::set<RtEvent> ready_events;
-            VersionInfo virtual_version_info;
-            virtual_version_info.resize(privilege_path.get_max_depth());
-            runtime->forest->perform_versioning_analysis(this, idx, 
-              regions[idx], privilege_path, virtual_version_info, ready_events);
-            collective.pack_states(idx, virtual_version_info, false/*advance*/);
-          }
-          else // Common case where this was normally mapped
-            collective.pack_states(idx, version_infos[idx]);
-        }
-      }
-      // TODO: Handle created region privileges here
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplIndividualTask::handle_post_mapped(bool deferral, 
-                                                RtEvent mapped_precondition)
-    //--------------------------------------------------------------------------
-    {
-      if (!deferral && (version_broadcast_collective != NULL))
-      {
-        if (mapped_precondition.exists() && 
-            !mapped_precondition.has_triggered())
-        {
-          mapped_precondition = 
-            version_broadcast_collective->defer_perform_collective(this, 
-                                                    mapped_precondition);
-        }
-        else
-        {
-          // It's ready now so we can do the collective here
-          pack_versioning_advance_states(*version_broadcast_collective);
-          version_broadcast_collective->perform_collective_async();
-        }
-      }
-      // Then call the base implementation
-      IndividualTask::handle_post_mapped(deferral, mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -593,33 +456,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::unpack_remote_versions(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-      assert(version_broadcast_collective == NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      // Then broadcast the versioning results for any region requirements
-      // that are writes which are going to advance the version numbers
-      // We put this one on the heap because we don't want to end up blocking
-      // the virtual channel on which the message was sent
-      version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx,
-              versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
-      // Explicitly unpack into the data structure
-      version_broadcast_collective->explicit_unpack(derez);
-      // Now do the broadcast
-      version_broadcast_collective->perform_collective_async();
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      versioning_collective_id = 
+      mapped_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_0);
       future_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_1);
@@ -804,13 +644,10 @@ namespace Legion {
       perform_base_dependence_analysis();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        projection_infos[idx] = 
-         ProjectionInfo(runtime, regions[idx], launch_space, 
-                        sharding_function, sharding_space);
+       ProjectionInfo projection_info(runtime, regions[idx], launch_space, 
+                                      sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, regions[idx], 
-                                                     restrict_infos[idx],
-                                                     version_infos[idx],
-                                                     projection_infos[idx],
+                                                     projection_info,
                                                      privilege_paths[idx]);
       }
     }
@@ -935,19 +772,19 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Repl Read Close Op 
+    // Repl Merge Close Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ReplReadCloseOp::ReplReadCloseOp(Runtime *rt)
-      : ReadCloseOp(rt)
+    ReplMergeCloseOp::ReplMergeCloseOp(Runtime *rt)
+      : MergeCloseOp(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ReplReadCloseOp::ReplReadCloseOp(const ReplReadCloseOp &rhs)
-      : ReadCloseOp(rhs)
+    ReplMergeCloseOp::ReplMergeCloseOp(const ReplMergeCloseOp &rhs)
+      : MergeCloseOp(rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -955,13 +792,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ReplReadCloseOp::~ReplReadCloseOp(void)
+    ReplMergeCloseOp::~ReplMergeCloseOp(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    ReplReadCloseOp& ReplReadCloseOp::operator=(const ReplReadCloseOp &rhs)
+    ReplMergeCloseOp& ReplMergeCloseOp::operator=(const ReplMergeCloseOp &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -970,23 +807,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplReadCloseOp::activate(void)
+    void ReplMergeCloseOp::activate(void)
     //--------------------------------------------------------------------------
     {
-      ReadCloseOp::activate();
+      activate_close();
       mapped_barrier = RtBarrier::NO_RT_BARRIER;
     }
 
     //--------------------------------------------------------------------------
-    void ReplReadCloseOp::deactivate(void)
+    void ReplMergeCloseOp::deactivate(void)
     //--------------------------------------------------------------------------
     {
-      deactivate_read_only();
-      runtime->free_repl_read_close_op(this);
+      deactivate_close();
+      runtime->free_repl_merge_close_op(this);
     }
 
     //--------------------------------------------------------------------------
-    void ReplReadCloseOp::set_mapped_barrier(RtBarrier mapped)
+    void ReplMergeCloseOp::set_repl_close_info(RtBarrier mapped)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -996,87 +833,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplReadCloseOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // Now trigger our phase barrier contingent on the precondition and then
-      // complete the operation contingent on the phase barrier triggering
-      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
-      complete_mapping(mapped_barrier);
-      // Then we can do the normal execution
-      complete_execution();
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Repl Inter Close Op 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    ReplInterCloseOp::ReplInterCloseOp(Runtime *rt)
-      : InterCloseOp(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplInterCloseOp::ReplInterCloseOp(const ReplInterCloseOp &rhs)
-      : InterCloseOp(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    ReplInterCloseOp::~ReplInterCloseOp(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    ReplInterCloseOp& ReplInterCloseOp::operator=(const ReplInterCloseOp &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplInterCloseOp::activate(void)
-    //--------------------------------------------------------------------------
-    {
-      activate_inter_close();
-      mapped_barrier = RtBarrier::NO_RT_BARRIER;
-      view_barrier = RtBarrier::NO_RT_BARRIER;
-      close_index = 0;
-      clone_index = 0;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplInterCloseOp::deactivate(void)
-    //--------------------------------------------------------------------------
-    {
-      deactivate_inter_close();
-      runtime->free_repl_inter_close_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplInterCloseOp::set_repl_close_info(unsigned index,
-                                               RtBarrier mapped, RtBarrier view)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!mapped_barrier.exists());
-      assert(!view_barrier.exists());
-#endif
-      mapped_barrier = mapped;
-      view_barrier = view;
-      close_index = index;
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplInterCloseOp::trigger_dependence_analysis(void)
+    void ReplMergeCloseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1091,24 +848,179 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::invoke_mapper(const InstanceSet &valid_instances)
+    void ReplMergeCloseOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Currently we virtually map all fields as it is very difficult to shard
-      // a close operation and distributed any instances we want to update
-      chosen_instances.add_instance(
-          InstanceRef(runtime->virtual_manager, close_mask));
+#ifdef DEBUG_LEGION
+      assert(mapped_barrier.exists());
+#endif
+      // Arrive on our barrier with the precondition
+      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/);
+      // Then complete the mapping once the barrier has triggered
+      complete_mapping(mapped_barrier);
+      complete_execution();
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Fill Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplFillOp::ReplFillOp(Runtime *rt)
+      : FillOp(rt)
+    //--------------------------------------------------------------------------
+    {
     }
 
     //--------------------------------------------------------------------------
-    void ReplInterCloseOp::complete_close_mapping(CompositeView *view,
-                                                  RtEvent precondition)
+    ReplFillOp::ReplFillOp(const ReplFillOp &rhs)
+      : FillOp(rhs)
     //--------------------------------------------------------------------------
     {
-      // Arrive on our barrier with the precondition
-      Runtime::phase_barrier_arrive(mapped_barrier, 1/*count*/, precondition);
-      // Then complete the mapping once the barrier has triggered
-      complete_mapping(mapped_barrier);
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFillOp::~ReplFillOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplFillOp& ReplFillOp::operator=(const ReplFillOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::initialize_replication(ReplicateContext *ctx)
+    //--------------------------------------------------------------------------
+    {
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_2);
+      // Initialize our index domain of a single point
+      index_domain = Domain(index_point, index_point);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_fill();
+      sharding_functor = UINT_MAX;
+      sharding_function = NULL;
+      mapper = NULL;
+#ifdef DEBUG_LEGION
+      sharding_collective = NULL;
+#endif
+      mapped_collective_id = UINT_MAX;
+      mapped_collective = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      if (sharding_collective != NULL)
+        delete sharding_collective;
+#endif
+      if (mapped_collective != NULL)
+        delete mapped_collective;
+      deactivate_fill();
+      runtime->free_repl_fill_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::trigger_prepipeline_stage(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Do the mapper call to get the sharding function to use
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(
+            parent_ctx->get_executing_processor(), map_id); 
+      Mapper::SelectShardingFunctorInput* input = repl_ctx->shard_manager;
+      Mapper::SelectShardingFunctorOutput output;
+      output.chosen_functor = UINT_MAX; 
+      mapper->invoke_fill_select_sharding_functor(this, input, &output);
+      if (output.chosen_functor == UINT_MAX)
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s failed to pick a valid sharding functor for "
+                      "fill in task %s (UID %lld)", mapper->get_mapper_name(),
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+      this->sharding_functor = output.chosen_functor;
+      sharding_function = 
+        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+#ifdef DEBUG_LEGION
+      assert(sharding_collective != NULL);
+      sharding_collective->contribute(this->sharding_functor);
+      if (sharding_collective->is_target() &&
+          !sharding_collective->validate(this->sharding_functor))
+        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                      "Mapper %s chose different sharding functions "
+                      "for fill in task %s (UID %lld)", 
+                      mapper->get_mapper_name(), parent_ctx->get_task_name(), 
+                      parent_ctx->get_unique_id())
+#endif
+      // Now we can do the normal prepipeline stage
+      FillOp::trigger_prepipeline_stage();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplFillOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+      // Figure out whether this shard owns this point
+      ShardID owner_shard;
+      if (sharding_space.exists())
+      {
+        Domain shard_domain;
+        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
+        owner_shard = sharding_function->find_owner(index_point, shard_domain);
+      }
+      else
+        owner_shard = sharding_function->find_owner(index_point, index_domain); 
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
+#ifdef DEBUG_LEGION
+      assert(mapped_collective == NULL);
+#endif
+      mapped_collective = 
+        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
+      // If we own it we go on the queue, otherwise we complete early
+      if (owner_shard != repl_ctx->owner_shard->shard_id)
+      {
+        // We don't own it, so we can pretend like we
+        // mapped and executed this fill already
+        // Before we do this though we have to get the version state
+        // names for any writes so we can update our local state
+        RtEvent local_done = mapped_collective->get_local_event();
+        complete_mapping(local_done);
+        complete_execution();
+      }
+      else // We own it, so do the base call
+      {
+        // Signal the tree when we are done our mapping
+        mapped_collective->signal_tree(mapped_event);
+        // Perform the base operation 
+        FillOp::trigger_ready();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -1219,12 +1131,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       perform_base_dependence_analysis();
-      projection_info = ProjectionInfo(runtime, requirement, 
-             launch_space, sharding_function, sharding_space);
+      ProjectionInfo projection_info(runtime, requirement, launch_space, 
+                                     sharding_function, sharding_space);
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
-                                                   restrict_info,
-                                                   version_info,
                                                    projection_info,
                                                    privilege_path);
     }
@@ -1320,7 +1230,7 @@ namespace Legion {
     void ReplCopyOp::initialize_replication(ReplicateContext *ctx)
     //--------------------------------------------------------------------------
     {
-      versioning_collective_id = 
+      mapped_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_2);
       // Initialize our index domain of a single point
       index_domain = Domain(index_point, index_point);
@@ -1336,8 +1246,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
-      versioning_collective_id = UINT_MAX;
-      version_broadcast_collective = NULL;
+      mapped_collective_id = UINT_MAX;
+      mapped_collective = NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1348,11 +1258,9 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
-      if (version_broadcast_collective != NULL)
-        delete version_broadcast_collective;
+      if (mapped_collective != NULL)
+        delete mapped_collective;
       deactivate_copy();
-      src_projection_infos.clear();
-      dst_projection_infos.clear();
       runtime->free_repl_copy_op(this);
     }
 
@@ -1419,6 +1327,11 @@ namespace Legion {
         owner_shard = sharding_function->find_owner(index_point, index_domain); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_owner_shard(get_unique_id(), owner_shard);
+#ifdef DEBUG_LEGION
+      assert(mapped_collective == NULL);
+#endif
+      mapped_collective = 
+        new ShardEventTree(repl_ctx, owner_shard, mapped_collective_id);
       // If we own it we go on the queue, otherwise we complete early
       if (owner_shard != repl_ctx->owner_shard->shard_id)
       {
@@ -1426,116 +1339,17 @@ namespace Legion {
         // mapped and executed this copy already
         // Before we do this though we have to get the version state
         // names for any writes so we can update our local state
-#ifdef DEBUG_LEGION
-        assert(version_broadcast_collective == NULL);
-#endif
-        version_broadcast_collective = new VersioningInfoBroadcast(repl_ctx, 
-                versioning_collective_id, owner_shard, RtEvent::NO_RT_EVENT);
-        RtEvent versions_ready = 
-          version_broadcast_collective->perform_collective_wait(false/*block*/);
-        if (versions_ready.exists() && !versions_ready.has_triggered())
-        {
-          // Defer completion until the versions are ready
-          DeferredExecuteArgs deferred_execute_args(this);
-          runtime->issue_runtime_meta_task(deferred_execute_args,
-                LG_THROUGHPUT_DEFERRED_PRIORITY, versions_ready);
-        }
-        else
-          deferred_execute();
+        RtEvent local_done = mapped_collective->get_local_event();
+        complete_mapping(local_done);
+        complete_execution();
       }
       else // We own it, so do the base call
       {
-        // Do the versioning analysis
-        RtEvent ready = perform_local_versioning_analysis();
-        // Then we can do the enqueue
-        enqueue_ready_operation(ready);
+        // Signal the tree when we are done our mapping
+        mapped_collective->signal_tree(mapped_event);
+        // Perform the base operation 
+        CopyOp::trigger_ready();
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplCopyOp::deferred_execute(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(version_broadcast_collective != NULL);
-#endif
-      version_broadcast_collective->wait_for_states(map_applied_conditions);
-      const UniqueID logical_context_uid = parent_ctx->get_context_uid();
-      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-      {
-        const VersioningSet<> &remote_advance_states = 
-          version_broadcast_collective->find_advance_states(idx);
-        RegionRequirement &req = dst_requirements[idx];
-        // Switch the privileges to read-write if necessary
-        const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
-        if (is_reduce_req)
-          req.privilege = READ_WRITE;
-        const bool parent_is_upper_bound = (req.region == req.parent);
-        runtime->forest->advance_remote_versions(this, 
-            src_requirements.size() + idx, req,
-            parent_is_upper_bound, logical_context_uid, 
-            remote_advance_states, map_applied_conditions);
-        // Switch the privileges back when we are done
-        if (is_reduce_req)
-          req.privilege = REDUCE;
-      }
-      if (!map_applied_conditions.empty())
-      {
-        RtEvent map_applied = Runtime::merge_events(map_applied_conditions);
-        complete_mapping(map_applied);
-        // Also record a precondition for our versioning info being done
-        version_broadcast_collective->record_precondition(map_applied);
-      }
-      else
-        complete_mapping();
-      complete_execution();
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplCopyOp::trigger_mapping(void)
-    //--------------------------------------------------------------------------
-    {
-      // A little trick to avoid the completion race for once we call
-      // the base CopyOp trigger_mapping call: we add a user event to the
-      // map applied events which means the operation isn't mapped until 
-      // we actually trigger this event, which we can do after we gather
-      // the data that we need
-      RtUserEvent prevent_completion_race = Runtime::create_rt_user_event();
-      map_applied_conditions.insert(prevent_completion_race);
-      // Do the base trigger mapping
-      CopyOp::trigger_mapping();
-#ifdef DEBUG_LEGION
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-#endif
-      ShardID owner_shard;
-      if (sharding_space.exists())
-      {
-        Domain shard_domain;
-        runtime->forest->find_launch_space_domain(sharding_space, shard_domain);
-        owner_shard = sharding_function->find_owner(index_point, shard_domain);
-      }
-      else
-        owner_shard = sharding_function->find_owner(index_point, index_domain);
-      // Have to new this on the heap in case we end up needing to defer it
-      VersioningInfoBroadcast *version_broadcast = new VersioningInfoBroadcast(
-           repl_ctx, versioning_collective_id, owner_shard, get_mapped_event());
-#ifdef DEBUG_LEGION
-      assert(dst_requirements.size() == dst_versions.size());
-#endif
-      for (unsigned idx = 0; idx < dst_versions.size(); idx++)
-        version_broadcast->pack_states(idx, dst_versions[idx]);
-      // Now that we have all our information, we can trigger our map user event
-      Runtime::trigger_event(prevent_completion_race);
-      // We can do it now
-      version_broadcast->perform_collective_async();
-#ifdef DEBUG_LEGION
-      assert(version_broadcast_collective == NULL);
-#endif
-      // By copying this here we take ownership of it and will clean it up
-      version_broadcast_collective = version_broadcast;
     }
 
     /////////////////////////////////////////////////////////////
@@ -1647,21 +1461,17 @@ namespace Legion {
       perform_base_dependence_analysis();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        src_projection_infos[idx] = 
-          ProjectionInfo(runtime, src_requirements[idx], 
-                         launch_space, sharding_function, sharding_space);
+        ProjectionInfo projection_info (runtime, src_requirements[idx], 
+                       launch_space, sharding_function, sharding_space);
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
-                                                     src_restrict_infos[idx],
-                                                     src_versions[idx],
-                                                     src_projection_infos[idx],
+                                                     projection_info,
                                                      src_privilege_paths[idx]);
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        dst_projection_infos[idx] = 
-          ProjectionInfo(runtime, dst_requirements[idx], 
-                         launch_space, sharding_function, sharding_space);
+        ProjectionInfo projection_info(runtime, dst_requirements[idx], 
+                       launch_space, sharding_function, sharding_space);
         unsigned index = src_requirements.size()+idx;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
@@ -1670,9 +1480,7 @@ namespace Legion {
           dst_requirements[idx].privilege = READ_WRITE;
         runtime->forest->perform_dependence_analysis(this, index, 
                                                      dst_requirements[idx],
-                                                     dst_restrict_infos[idx],
-                                                     dst_versions[idx],
-                                                     dst_projection_infos[idx],
+                                                     projection_info,
                                                      dst_privilege_paths[idx]);
         // Switch the privileges back when we are done
         if (is_reduce_req)
@@ -3618,6 +3426,171 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMapOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      const PhysicalTraceInfo trace_info(this);
+      // If we have any wait preconditions from phase barriers or 
+      // grants then we use them to compute a precondition for doing
+      // any copies or anything else for this operation
+      ApEvent init_precondition = execution_fence_event;
+      if (!wait_barriers.empty() || !grants.empty())
+      {
+        ApEvent sync_precondition = 
+          merge_sync_preconditions(trace_info, grants, wait_barriers);
+        if (sync_precondition.exists())
+        {
+          if (init_precondition.exists())
+            init_precondition = Runtime::merge_events(&trace_info, 
+                                  init_precondition, sync_precondition); 
+          else
+            init_precondition = sync_precondition;
+        }
+      }
+      InstanceSet mapped_instances;
+      // If we are remapping then we know the answer
+      // so we don't need to do any premapping
+      ApEvent effects_done;
+      if (remap_region)
+      {
+        region.impl->get_references(mapped_instances);
+        // First kick off the exchange to get that in flight
+        exchange->initiate_exchange(repl_mapping_applied, mapped_instances);
+        effects_done = runtime->forest->physical_register_only(
+                                                requirement, version_info,
+                                                this, 0/*idx*/, 
+                                                init_precondition,
+                                                termination_event,
+                                                mapped_instances, 
+                                                trace_info,
+#ifdef DEBUG_LEGION
+                                               get_logging_name(),
+                                               unique_op_id,
+#endif
+                                               &inline_barrier);
+      }
+      else
+      {
+        // We're going to need to invoke the mapper, find the set of valid
+        // instances as part of our traversal
+        InstanceSet valid_instances;
+        runtime->forest->physical_premap_only(this, 0/*idx*/, requirement,
+                                              version_info, valid_instances);
+        // Now we've got the valid instances so invoke the mapper
+        invoke_mapper(valid_instances, mapped_instances);
+        // First kick off the exchange to get that in flight
+        exchange->initiate_exchange(repl_mapping_applied, mapped_instances);
+        // Then we can register our mapped instances
+        effects_done = runtime->forest->physical_register_only(
+                                                requirement, version_info,
+                                                this, 0/*idx*/,
+                                                init_precondition,
+                                                termination_event,
+                                                mapped_instances,
+                                                trace_info,
+#ifdef DEBUG_LEGION
+                                                get_logging_name(),
+                                                unique_op_id,
+#endif
+                                                &inline_barrier);
+      } 
+      // We're also done with our mapper so tell it that
+      version_info.finalize_mapping(map_applied_conditions);
+#ifdef DEBUG_LEGION
+      if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
+      {
+        assert(!mapped_instances.empty());
+        dump_physical_state(&requirement, 0);
+      } 
+#endif
+      // Update our physical instance with the newly mapped instances
+      // Have to do this before triggering the mapped event
+      if (effects_done.exists())
+      {
+        region.impl->reset_references(mapped_instances, termination_event,
+          Runtime::merge_events(&trace_info, init_precondition, effects_done));
+      }
+      else
+        region.impl->reset_references(mapped_instances, termination_event,
+                                      init_precondition);
+      ApEvent map_complete_event = ApEvent::NO_AP_EVENT;
+      if (mapped_instances.size() > 1)
+      {
+        std::set<ApEvent> mapped_events;
+        for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
+          mapped_events.insert(mapped_instances[idx].get_ready_event());
+        map_complete_event = Runtime::merge_events(&trace_info, mapped_events);
+      }
+      else if (!mapped_instances.empty())
+        map_complete_event = mapped_instances[0].get_ready_event();
+      if (runtime->legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement,
+                                              mapped_instances);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, map_complete_event,
+                                        termination_event);
+#endif
+      }
+      // See if we have any reservations to take as part of this map
+      if (!atomic_locks.empty() || !arrive_barriers.empty())
+      {
+        if (!effects_done.exists())
+          effects_done = 
+            Runtime::merge_events(&trace_info, effects_done, termination_event);
+        else
+          effects_done = termination_event;
+        // They've already been sorted in order 
+        for (std::map<Reservation,bool>::const_iterator it = 
+              atomic_locks.begin(); it != atomic_locks.end(); it++)
+        {
+          map_complete_event = 
+                Runtime::acquire_ap_reservation(it->first, it->second,
+                                                map_complete_event);
+          // We can also issue the release condition on our termination
+          Runtime::release_reservation(it->first, effects_done);
+        }
+        for (std::vector<PhaseBarrier>::iterator it = 
+              arrive_barriers.begin(); it != arrive_barriers.end(); it++)
+        {
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_phase_barrier_arrival(unique_op_id, 
+                                                 it->phase_barrier);
+          Runtime::phase_barrier_arrive(it->phase_barrier, 1/*count*/,
+                                        effects_done);    
+        }
+      }
+      // Remove profiling our guard and trigger the profiling event if necessary
+      if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
+          profiling_reported.exists())
+        Runtime::trigger_event(profiling_reported);
+      // Now we can trigger the mapping event and indicate
+      // to all our mapping dependences that we are mapped.
+      if (!map_applied_conditions.empty())
+        complete_mapping(complete_inline_mapping(
+              Runtime::merge_events(map_applied_conditions), mapped_instances));
+      else
+        complete_mapping(
+            complete_inline_mapping(RtEvent::NO_RT_EVENT, mapped_instances));
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
+      if (!map_complete_event.has_triggered())
+      {
+        // Issue a deferred trigger on our completion event
+        // and mark that we are no longer responsible for 
+        // triggering our completion event
+        request_early_complete(map_complete_event);
+        DeferredExecuteArgs deferred_execute_args(this);
+        runtime->issue_runtime_meta_task(deferred_execute_args,
+                                         LG_THROUGHPUT_DEFERRED_PRIORITY,
+                                   Runtime::protect_event(map_complete_event));
+      }
+      else
+        deferred_execute();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
     //--------------------------------------------------------------------------
     {
@@ -3638,42 +3611,6 @@ namespace Legion {
       if (exchange != NULL)
         delete exchange;
       runtime->free_repl_map_op(this);
-    }
-
-    //--------------------------------------------------------------------------
-    void ReplMapOp::add_deferred_users(InstanceSet &mapped_instances,
-                                       const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(exchange != NULL);
-      assert(inline_barrier.exists());
-      assert(repl_mapping_applied.exists() && 
-              !repl_mapping_applied.has_triggered());
-#endif
-      // First kick off the exchange to get that in flight
-      exchange->initiate_exchange(repl_mapping_applied, mapped_instances);
-      // Then make sure that we've done all our applied mapping effects  
-      // for any copies that we may have issued
-      if (!map_applied_conditions.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(map_applied_conditions);
-        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/, wait_on);
-        // We can clear this since we're about to wait on it implicitly
-        map_applied_conditions.clear();
-      }
-      else
-        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
-      // Wait for everyone else to finish their registration too
-      inline_barrier.wait();
-      // Now we can do our registration with the region tree
-      runtime->forest->physical_register_users(this, termination_event,
-                                               requirement,
-                                               version_info,
-                                               restrict_info,
-                                               mapped_instances,
-                                               map_applied_conditions,
-                                               trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -4125,12 +4062,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_post_mapped(bool local)
+    void ShardManager::handle_post_mapped(bool local, RtEvent precondition)
     //--------------------------------------------------------------------------
     {
       bool notify = false;   
       {
         AutoLock m_lock(manager_lock);
+        if (precondition.exists())
+          mapping_preconditions.insert(precondition);
         if (local)
         {
           local_mapping_complete++;
@@ -4150,14 +4089,19 @@ namespace Legion {
       }
       if (notify)
       {
+        RtEvent mapped_precondition;
+        if (!mapping_preconditions.empty())
+          mapped_precondition = Runtime::merge_events(mapping_preconditions);
         if (original_task == NULL)
         {
           Serializer rez;
           rez.serialize(repl_id);
+          rez.serialize(mapped_precondition);
           runtime->send_replicate_post_mapped(owner_space, rez);
         }
         else
-          original_task->handle_post_mapped(false/*deferral*/);
+          original_task->handle_post_mapped(false/*deferral*/, 
+                                            mapped_precondition);
       }
     }
 
@@ -4401,54 +4345,9 @@ namespace Legion {
       assert(false);
     }
 
-#ifndef DISABLE_CVOPT
     //--------------------------------------------------------------------------
-    void ShardManager::send_composite_view_copy_request(ShardID target, 
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(target < address_spaces->size());
-#endif
-      AddressSpaceID target_space = (*address_spaces)[target];
-      // Check to see if this is a local shard
-      if (target_space == runtime->address_space)
-      {
-        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        // Have to unpack the preample we already know
-        ReplicationID local_repl;
-        derez.deserialize(local_repl);
-        handle_composite_view_copy_request(derez, target_space);
-      }
-      else
-        runtime->send_control_replicate_composite_view_copy_request(
-                                                  target_space, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::handle_composite_view_copy_request(Deserializer &derez,
-                                                          AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out which shard we are going to
-      ShardID target;
-      derez.deserialize(target);
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
-      {
-        if ((*it)->shard_id == target)
-        {
-          (*it)->handle_composite_view_copy_request(derez, source);
-          return;
-        }
-      }
-      // Should never get here
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::send_composite_view_reduction_request(ShardID target, 
-                                                             Serializer &rez)
+    void ShardManager::send_equivalence_set_request(ShardID target, 
+                                                    Serializer &rez)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -4461,17 +4360,16 @@ namespace Legion {
         Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
         // Have to unpack the preample we already know
         ReplicationID local_repl;
-        derez.deserialize(local_repl);
-        handle_composite_view_reduction_request(derez, target_space);
+        derez.deserialize(local_repl);     
+        handle_equivalence_set_request(derez);
       }
       else
-        runtime->send_control_replicate_composite_view_reduction_request(
-                                                        target_space, rez);
+        runtime->send_control_replicate_equivalence_set_request(target_space, 
+                                                                rez);
     }
 
     //--------------------------------------------------------------------------
-    void ShardManager::handle_composite_view_reduction_request(
-                                     Deserializer &derez, AddressSpaceID source)
+    void ShardManager::handle_equivalence_set_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       // Figure out which shard we are going to
@@ -4482,88 +4380,12 @@ namespace Legion {
       {
         if ((*it)->shard_id == target)
         {
-          (*it)->handle_composite_view_reduction_request(derez, source);
+          (*it)->handle_equivalence_set_request(derez);
           return;
         }
       }
       // Should never get here
       assert(false);
-    }
-#else
-    //--------------------------------------------------------------------------
-    void ShardManager::send_composite_view_request(ShardID target, 
-                                                   Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(target < address_spaces->size());
-#endif
-      AddressSpaceID target_space = (*address_spaces)[target];
-      // Check to see if this is a local shard
-      if (target_space == runtime->address_space)
-      {
-        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
-        // Have to unpack the preample we already know
-        ReplicationID local_repl;
-        derez.deserialize(local_repl);
-        handle_composite_view_request(derez);
-      }
-      else
-        runtime->send_control_replicate_composite_view_request(target_space, 
-                                                               rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void ShardManager::handle_composite_view_request(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Figure out which shard we are going to
-      ShardID target;
-      derez.deserialize(target);
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
-      {
-        if ((*it)->shard_id == target)
-        {
-          (*it)->handle_composite_view_request(derez);
-          return;
-        }
-      }
-      // Should never get here
-      assert(false);
-    }
-#endif
-
-    //--------------------------------------------------------------------------
-    void ShardManager::broadcast_clone_barrier(unsigned close_index,
-                     unsigned clone_index, RtBarrier bar, AddressSpaceID origin)
-    //--------------------------------------------------------------------------
-    {
-      // For now we will do a dumb broadcast where the owner sends it to
-      // everyone since this will be a rare event, if it ever becomes
-      // a performance bottleneck we can make this a radix broadcast
-      if (origin == runtime->address_space)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(repl_id);
-          rez.serialize(close_index);
-          rez.serialize(clone_index);
-          rez.serialize(bar);
-        }
-        for (std::set<AddressSpaceID>::const_iterator it = 
-             unique_shard_spaces.begin(); it != unique_shard_spaces.end(); it++)
-        {
-          if ((*it) == origin)
-            continue;
-          runtime->send_control_replicate_clone_barrier(*it, rez);
-        }
-      }
-      // Then we can notify our local shards
-      for (std::vector<ShardTask*>::const_iterator it = 
-            local_shards.begin(); it != local_shards.end(); it++)
-        (*it)->handle_clone_barrier_broadcast(close_index, clone_index, bar);
     }
 
     //--------------------------------------------------------------------------
@@ -4623,8 +4445,10 @@ namespace Legion {
     {
       ReplicationID repl_id;
       derez.deserialize(repl_id);
+      RtEvent precondition;
+      derez.deserialize(precondition);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_post_mapped(false/*local*/);
+      manager->handle_post_mapped(false/*local*/, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -4688,41 +4512,6 @@ namespace Legion {
       manager->handle_future_map_request(derez);
     }
 
-#ifndef DISABLE_CVOPT
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_composite_view_copy_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ReplicationID repl_id;
-      derez.deserialize(repl_id);
-      ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_composite_view_copy_request(derez, source);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_composite_view_reduction_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      ReplicationID repl_id;
-      derez.deserialize(repl_id);
-      ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_composite_view_reduction_request(derez, source);
-    }
-#else
-    //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_composite_view_request(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      ReplicationID repl_id;
-      derez.deserialize(repl_id);
-      ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->handle_composite_view_request(derez);
-    }
-#endif
-
     //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_top_view_request(Deserializer &derez,
                                 Runtime *runtime, AddressSpaceID request_source)
@@ -4773,21 +4562,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ShardManager::handle_clone_barrier(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
+    /*static*/ void ShardManager::handle_eq_request(Deserializer &derez,
+                                                    Runtime *runtime)
     //--------------------------------------------------------------------------
     {
-      DerezCheck z(derez);
       ReplicationID repl_id;
       derez.deserialize(repl_id);
-      unsigned close_index, clone_index;
-      derez.deserialize(close_index);
-      derez.deserialize(clone_index);
-      RtBarrier bar;
-      derez.deserialize(bar);
-
       ShardManager *manager = runtime->find_shard_manager(repl_id);
-      manager->broadcast_clone_barrier(close_index, clone_index, bar, source);
+      manager->handle_equivalence_set_request(derez);
     }
 
     //--------------------------------------------------------------------------
@@ -5711,6 +5493,71 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       derez.deserialize(done_event);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Shard Event Tree 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ShardEventTree::ShardEventTree(ReplicateContext *ctx, ShardID origin,
+                                   CollectiveID id)
+      : BroadcastCollective(ctx, id, origin),
+        is_origin(origin == ctx->owner_shard->shard_id)
+    //--------------------------------------------------------------------------
+    {
+      if (!is_origin)
+      {
+        local_event = Runtime::create_rt_user_event();
+        trigger_event = local_event;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    ShardEventTree::~ShardEventTree(void)
+    //--------------------------------------------------------------------------
+    {
+      if (finished_event.exists() && !finished_event.has_triggered())
+        finished_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardEventTree::signal_tree(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_origin);
+      assert(!trigger_event.exists());
+#endif
+      trigger_event = precondition;
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent ShardEventTree::get_local_event(void)
+    //--------------------------------------------------------------------------
+    {
+      finished_event = perform_collective_wait(false/*block*/); 
+      return local_event;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardEventTree::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(trigger_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardEventTree::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_event.exists());
+#endif
+      RtEvent precondition;
+      derez.deserialize(precondition);
+      Runtime::trigger_event(local_event, precondition);
     }
 
     /////////////////////////////////////////////////////////////
@@ -7444,289 +7291,6 @@ namespace Legion {
         }
       }
       return Runtime::merge_events(local_preconditions.back());
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Versioning Info Broadcast 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    VersioningInfoBroadcast::VersioningInfoBroadcast(ReplicateContext *ctx,
-                                CollectiveID id, ShardID own, RtEvent map_event)
-      : BroadcastCollective(ctx, id, own), mapped_event(map_event)
-    //--------------------------------------------------------------------------
-    {
-      // If we own it then make our done event
-      if (local_shard == origin)
-      {
-        acknowledge_event = Runtime::create_rt_user_event();
-      }
-#ifdef DEBUG_LEGION
-      else
-      {
-        assert(!mapped_event.exists());
-      }
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    VersioningInfoBroadcast::VersioningInfoBroadcast(
-                                             const VersioningInfoBroadcast &rhs)
-      : BroadcastCollective(rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    VersioningInfoBroadcast::~VersioningInfoBroadcast(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // Everybody should have a done event at this point
-      assert(acknowledge_event.exists());
-#endif
-      if (!ack_preconditions.empty())
-        Runtime::trigger_event(acknowledge_event, 
-            Runtime::merge_events(ack_preconditions));
-      else
-        Runtime::trigger_event(acknowledge_event);
-      // If we're the owner, we need to wait for all the triggers to 
-      // happen and then we can remove our valid references 
-      if ((local_shard == origin) && !held_references.empty())
-      {
-        acknowledge_event.wait();
-        for (std::set<VersionState*>::const_iterator it = 
-              held_references.begin(); it != held_references.end(); it++)
-          (*it)->remove_base_valid_ref(REPLICATION_REF);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    VersioningInfoBroadcast& VersioningInfoBroadcast::operator=(
-                                             const VersioningInfoBroadcast &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::pack_collective(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      RtUserEvent precondition = Runtime::create_rt_user_event();
-      rez.serialize(precondition);
-      ack_preconditions.insert(precondition);
-      rez.serialize(mapped_event);
-      rez.serialize<size_t>(versions.size());
-      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
-            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
-      {
-        rez.serialize(vit->first);
-        rez.serialize<size_t>(vit->second.size());
-        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
-              vit->second.begin(); it != vit->second.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::unpack_collective(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!acknowledge_event.exists());
-      assert(versions.empty());
-#endif
-      derez.deserialize(acknowledge_event);
-      common_unpack(derez); 
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::explicit_unpack(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // This better happen on the owner
-      assert(local_shard == origin);
-#endif
-      common_unpack(derez);
-      // Now record valid references on all our version state objects
-      // Record a valid reference to all the version state objects
-      // that we will hold until we get acknowledgements from all
-      // the other shards that we will broadcast to
-      std::set<RtEvent> reference_preconditions;
-      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
-            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
-      {
-        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
-              vit->second.begin(); it != vit->second.end(); it++)
-        {
-          RtEvent ready;
-          VersionState *state = 
-            context->runtime->find_or_request_version_state(it->first, ready);
-          if (ready.exists())
-            reference_preconditions.insert(ready);
-          // Check to see if we already have a reference
-          if (held_references.find(state) != held_references.end())
-            continue;
-          held_references.insert(state);
-        }
-      }
-      if (!reference_preconditions.empty())
-      {
-        RtEvent wait_for = Runtime::merge_events(reference_preconditions);
-        wait_for.wait();
-      }
-      // Now we can add the references
-      WrapperReferenceMutator mutator(ack_preconditions);
-      for (std::set<VersionState*>::const_iterator it = 
-            held_references.begin(); it != held_references.end(); it++)
-        (*it)->add_base_valid_ref(REPLICATION_REF, &mutator);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::common_unpack(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!mapped_event.exists());
-#endif
-      derez.deserialize(mapped_event);
-      size_t num_versions;
-      derez.deserialize(num_versions);
-      for (unsigned idx1 = 0; idx1 < num_versions; idx1++)
-      {
-        unsigned index;
-        derez.deserialize(index);
-        LegionMap<DistributedID,FieldMask>::aligned &target = versions[index];
-        size_t num_states;
-        derez.deserialize(num_states);
-        for (unsigned idx2 = 0; idx2 < num_states; idx2++)
-        {
-          DistributedID did;
-          derez.deserialize(did);
-          derez.deserialize(target[did]);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::pack_states(unsigned index,
-                           const VersionInfo &version_info, bool advance_states)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      // We should be on the owner
-      assert(local_shard == origin);
-#endif
-      LegionMap<DistributedID,FieldMask>::aligned &dids = versions[index];
-      version_info.capture_base_states(advance_states, dids);
-      // Record a valid reference to all the version state objects
-      // that we will hold until we get acknowledgements from all
-      // the other shards that we will broadcast to
-      WrapperReferenceMutator mutator(ack_preconditions);
-      for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
-            dids.begin(); it != dids.end(); it++)
-      {
-        // We know it already exists
-#ifdef DEBUG_LEGION
-        VersionState *state = dynamic_cast<VersionState*>(
-            context->runtime->find_distributed_collectable(it->first));
-        assert(state != NULL);
-#else
-        VersionState *state = static_cast<VersionState*>(
-            context->runtime->find_distributed_collectable(it->first));
-#endif
-        // Check to see if we already have a reference
-        if (held_references.find(state) != held_references.end())
-          continue;
-        state->add_base_valid_ref(REPLICATION_REF, &mutator);
-        held_references.insert(state);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::wait_for_states(
-                                              std::set<RtEvent> &applied_events)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(get_done_event().has_triggered());
-#endif
-      std::set<RtEvent> wait_on;
-      Runtime *runtime = context->runtime;
-      // Now convert everything over to the results
-      for (std::map<unsigned,LegionMap<DistributedID,FieldMask>::aligned>::
-            const_iterator vit = versions.begin(); vit != versions.end(); vit++)
-      {
-        VersioningSet<> &target = results[vit->first];
-        for (LegionMap<DistributedID,FieldMask>::aligned::const_iterator it = 
-              vit->second.begin(); it != vit->second.end(); it++)
-        {
-          RtEvent ready;
-          VersionState *state = 
-            runtime->find_or_request_version_state(it->first, ready);
-          ready = target.insert(state, it->second, runtime, ready);
-          if (ready.exists() && !ready.has_triggered())
-            wait_on.insert(ready);
-        }
-      }
-      // Add the mapped_event from the origin to our map applied events
-      // To ensure that we get the proper preconditions for this 
-      if (mapped_event.exists())
-        applied_events.insert(mapped_event);
-      if (!wait_on.empty())
-      {
-        RtEvent wait_for = Runtime::merge_events(wait_on);
-        wait_for.wait();
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    const VersioningSet<>& 
-              VersioningInfoBroadcast::find_advance_states(unsigned index) const
-    //--------------------------------------------------------------------------
-    {
-      LegionMap<unsigned,VersioningSet<> >::aligned::const_iterator finder = 
-        results.find(index);
-#ifdef DEBUG_LEGION
-      assert(finder != results.end());
-#endif
-      return finder->second;
-    }
-
-    //--------------------------------------------------------------------------
-    void VersioningInfoBroadcast::record_precondition(RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      ack_preconditions.insert(precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent VersioningInfoBroadcast::defer_perform_collective(
-                                   ReplIndividualTask *op, RtEvent precondition)
-    //--------------------------------------------------------------------------
-    {
-      DeferVersionBroadcastArgs args(op, this);
-      return context->runtime->issue_runtime_meta_task(args, 
-                LG_LATENCY_DEFERRED_PRIORITY, precondition);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersioningInfoBroadcast::handle_deferral(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferVersionBroadcastArgs *dargs = 
-        (const DeferVersionBroadcastArgs*)args;
-      dargs->task->pack_versioning_advance_states(*dargs->proxy_this);
-      dargs->proxy_this->perform_collective_async();
     }
 
   }; // namespace Internal

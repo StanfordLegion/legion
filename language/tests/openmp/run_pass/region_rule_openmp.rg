@@ -63,7 +63,9 @@ end
 
 task toplevel()
   var r1 = region(ispace(ptr, 10), int)
+  fill(r1,1)
   var r2 = region(ispace(ptr, 10), int)
+  fill(r2,2)
   foo(r1, r2)
 end
 

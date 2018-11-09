@@ -450,7 +450,6 @@ namespace Legion {
       std::vector<unsigned> parent_indices;
       std::vector<RegionTreePath> privilege_paths;
       std::vector<VersionInfo> version_infos;
-      std::vector<RestrictInfo> restrict_infos;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> mapped_preconditions;
     };
@@ -605,6 +604,7 @@ namespace Legion {
                                ApEvent e3, Operation *owner);
       void record_merge_events(ApEvent &lhs, const std::set<ApEvent>& rhs,
                                Operation *owner);
+#if 0
       void record_copy_views(InstanceView *src,
                              const FieldMask &src_mask,
                              ContextID src_logical_ctx,
@@ -613,14 +613,17 @@ namespace Legion {
                              const FieldMask &dst_mask,
                              ContextID dst_logical_ctx,
                              ContextID dst_physical_ctx);
+#endif
       void record_issue_copy(Operation* op, ApEvent &lhs,
-                             RegionNode *node,
+                             IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField>& src_fields,
                              const std::vector<CopySrcDstField>& dst_fields,
+#ifdef LEGION_SPY
+                             FieldSpace handle,
+                             RegionTreeID src_tree_id,
+                             RegionTreeID dst_tree_id,
+#endif
                              ApEvent precondition,
-                             PredEvent predicate_guard,
-                             IndexTreeNode *intersect,
-                             IndexSpaceExpression *mask,
                              ReductionOpID redop,
                              bool reduction_fold);
       void record_empty_copy(DeferredView *src,
@@ -642,17 +645,18 @@ namespace Legion {
       void record_set_op_sync_event(ApEvent &lhs, Operation *op);
       void record_complete_replay(Operation *op, ApEvent rhs);
       void record_issue_fill(Operation *op, ApEvent &lhs,
-                             RegionNode *node,
+                             IndexSpaceExpression *expr,
                              const std::vector<CopySrcDstField> &fields,
-                             const void *fill_buffer, size_t fill_size,
-                             ApEvent precondition,
-                             PredEvent predicate_guard,
+                             const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                              UniqueID fill_uid,
+                             FieldSpace handle,
+                             RegionTreeID tree_id,
 #endif
-                             IndexTreeNode *intersect,
-                             IndexSpaceExpression *mask);
+                             ApEvent precondition);
+#if 0
       void record_fill_view(FillView *fill_view, const FieldMask &fill_mask);
+#endif
       void record_deferred_copy_from_fill_view(FillView *fill_view,
                                                InstanceView *dst_view,
                                                const FieldMask &copy_mask,
@@ -669,6 +673,7 @@ namespace Legion {
       static void handle_replay_slice(const void *args);
       static void handle_delete_template(const void *args);
     private:
+#if 0
       void update_valid_view(bool is_reduction,
                              bool has_read,
                              bool has_write,
@@ -676,10 +681,21 @@ namespace Legion {
                              const FieldMask &fields,
                              ContextID logical_ctx,
                              ContextID physical_ctx);
-      void record_last_user(const PhysicalInstance &inst, RegionNode *node,
+#endif
+      void record_last_user(const PhysicalInstance &inst, 
+                            IndexSpaceExpression *expr,
                             unsigned field, unsigned user, bool read);
-      void find_last_users(const PhysicalInstance &inst, RegionNode *node,
+      inline void record_last_user(const PhysicalInstance &inst,
+                                   RegionNode *node,
+                                   unsigned field, unsigned user, bool read)
+       { record_last_user(inst, node->get_index_space_expression(),
+                          field, user, read); }
+      void find_last_users(const PhysicalInstance &inst,
+                           IndexSpaceExpression *expr,
                            unsigned field, std::set<unsigned> &users);
+      inline void find_last_users(const PhysicalInstance &inst,RegionNode *node,
+                                  unsigned field, std::set<unsigned> &users)
+       { find_last_users(inst,node->get_index_space_expression(),field,users); }
     private:
       PhysicalTrace *trace;
       volatile bool recording;
@@ -697,12 +713,12 @@ namespace Legion {
       std::map<TraceLocalID, unsigned> memo_entries;
       typedef std::pair<PhysicalInstance, unsigned> InstanceAccess;
       struct UserInfo {
-        UserInfo(bool r, unsigned u, RegionNode *n)
-          : read(r), node(n)
+        UserInfo(bool r, unsigned u, IndexSpaceExpression *e)
+          : read(r), expr(e)
           { users.insert(u); }
         bool read;
         std::set<unsigned> users;
-        RegionNode *node;
+        IndexSpaceExpression *expr;
       };
       typedef std::list<UserInfo> UserInfos;
       std::map<InstanceAccess, UserInfos> last_users;
@@ -1006,17 +1022,16 @@ namespace Legion {
      */
     struct IssueFill : public Instruction {
       IssueFill(PhysicalTemplate& tpl,
-                unsigned lhs, RegionNode *node,
+                unsigned lhs, IndexSpaceExpression *expr,
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField> &fields,
-                const void *fill_buffer, size_t fill_size,
-                unsigned precondition_idx,
-                PredEvent predicate_guard,
+                const void *fill_value, size_t fill_size,
 #ifdef LEGION_SPY
                 UniqueID fill_uid,
+                FieldSpace handle,
+                RegionTreeID tree_id,
 #endif
-                IndexTreeNode *intersect,
-                IndexSpaceExpression *mask);
+                unsigned precondition_idx);
       virtual ~IssueFill(void);
       virtual void execute(void);
       virtual std::string to_string(void);
@@ -1048,17 +1063,16 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      RegionNode *node;
+      IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> fields;
-      void *fill_buffer;
+      void *fill_value;
       size_t fill_size;
-      unsigned precondition_idx;
-      PredEvent predicate_guard;
 #ifdef LEGION_SPY
       UniqueID fill_uid;
+      FieldSpace handle;
+      RegionTreeID tree_id;
 #endif
-      IndexTreeNode *intersect;
-      IndexSpaceExpression *mask;
+      unsigned precondition_idx;
     };
 
     /**
@@ -1072,12 +1086,16 @@ namespace Legion {
      */
     struct IssueCopy : public Instruction {
       IssueCopy(PhysicalTemplate &tpl,
-                unsigned lhs, RegionNode *node,
+                unsigned lhs, IndexSpaceExpression *expr,
                 const TraceLocalID &op_key,
                 const std::vector<CopySrcDstField>& src_fields,
                 const std::vector<CopySrcDstField>& dst_fields,
-                unsigned precondition_idx, PredEvent predicate_guard,
-                IndexTreeNode *intersect, IndexSpaceExpression *mask,
+#ifdef LEGION_SPY
+                FieldSpace handle,
+                RegionTreeID src_tree_id,
+                RegionTreeID dst_tree_id,
+#endif
+                unsigned precondition_idx,
                 ReductionOpID redop, bool reduction_fold);
       virtual ~IssueCopy(void);
       virtual void execute(void);
@@ -1110,13 +1128,15 @@ namespace Legion {
     private:
       friend struct PhysicalTemplate;
       unsigned lhs;
-      RegionNode *node;
+      IndexSpaceExpression *expr;
       std::vector<CopySrcDstField> src_fields;
       std::vector<CopySrcDstField> dst_fields;
+#ifdef LEGION_SPY
+      FieldSpace handle;
+      RegionTreeID src_tree_id;
+      RegionTreeID dst_tree_id;
+#endif
       unsigned precondition_idx;
-      PredEvent predicate_guard;
-      IndexTreeNode *intersect;
-      IndexSpaceExpression *mask;
       ReductionOpID redop;
       bool reduction_fold;
     };
