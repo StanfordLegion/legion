@@ -460,7 +460,10 @@ namespace Realm {
     if(active) {
       //logger->log_msg(level, buffer.str());
       logger->log_msg(level, buffer.data(), buffer.size());
-      get_stream().std::ostream::~ostream();
+      // clang does not like 'get_stream().std::ostream::~ostream', so import
+      //  std namespace here
+      using namespace std;
+      get_stream().ostream::~ostream();
       active = false;
     }
   }
