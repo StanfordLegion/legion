@@ -1002,6 +1002,8 @@ namespace Legion {
       void finalize_disjoint_refinement(void);
       void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
+      void pack_initial_reduction_state(Serializer &rez) const;
+      void unpack_initial_reduction_state(Deserializer &derez);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
       void launch_refinement_task(void); // call with lock
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
