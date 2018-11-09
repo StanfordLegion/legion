@@ -3237,6 +3237,26 @@ namespace Legion {
               restricted_instances.end(); it++)
           it->first->add_nested_valid_ref(did);
       }
+      // Handle updates for the reduction fields so that we get
+      // the right meta-data for those fields
+      if (!!this->reduction_fields)
+      {
+        exclusive_fields -= this->reduction_fields;
+        single_redop_fields = this->reduction_fields;
+        redop_modes = parent->redop_modes;
+        if (is_logical_owner())
+        {
+          single_reduction_copies[local_space] = this->reduction_fields;
+          LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+            exclusive_copies.find(local_space);
+#ifdef DEBUG_LEGION
+          assert(finder != exclusive_copies.end());
+#endif
+          finder->second -= this->reduction_fields;
+          if (!finder->second)
+            exclusive_copies.erase(finder);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -4134,8 +4154,8 @@ namespace Legion {
               if (!(request_mask * single_redop_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = exclusive_copies.find(logical_owner_space);
-                if (finder != exclusive_copies.end())
+                  finder = single_reduction_copies.find(logical_owner_space);
+                if (finder != single_reduction_copies.end())
                 {
                   const FieldMask redop_overlap = request_mask & finder->second;
                   if (!!redop_overlap)
@@ -7042,9 +7062,10 @@ namespace Legion {
         // reflect that we now have all the valid data
         if (first)
         {
-          // We now hold all the fields in exclusive mode
-          // since the request to invalidate the subsets will also 
-          // send back any meta-data for these remote copies
+          // We now hold all the fields in exclusive mode or 
+          // single redop mode since the request to invalidate 
+          // the subsets will also send back any meta-data for 
+          // these remote copies
           if (!exclusive_copies.empty())
             exclusive_copies.clear();
           if (!!shared_fields)
@@ -7053,21 +7074,19 @@ namespace Legion {
             shared_fields.clear();
             shared_copies.clear();
           }
-          if (!!single_redop_fields)
-          {
-            exclusive_fields |= single_redop_fields;
-            single_redop_fields.clear();
+          if (!single_reduction_copies.empty())
             single_reduction_copies.clear();
-          }
           if (!!multi_redop_fields)
           {
-            exclusive_fields |= multi_redop_fields;
+            single_redop_fields |= multi_redop_fields;
             multi_redop_fields.clear();
             multi_reduction_copies.clear();
           }
-          redop_modes.clear();
           // We now have all the fields in exclusive mode
-          exclusive_copies[logical_owner_space] = exclusive_fields;
+          if (!!exclusive_fields)
+            exclusive_copies[logical_owner_space] = exclusive_fields;
+          if (!!single_redop_fields)
+            single_reduction_copies[logical_owner_space] = single_redop_fields;
           first = false;
         }
         if (!to_add.empty())
@@ -7306,8 +7325,75 @@ namespace Legion {
         else
           rez.serialize(IndexSpace::NO_SPACE);
         rez.serialize(version_lock);
+        if (target == logical_owner_space)
+          pack_initial_reduction_state(rez);
       }
       runtime->send_equivalence_set_response(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::pack_initial_reduction_state(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock,1,false/*exclusive*/);
+#ifdef DEBUG_LEGION
+      assert(!multi_redop_fields);
+#endif
+      if (!redop_modes.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(!!single_redop_fields);
+#endif
+        rez.serialize<size_t>(redop_modes.size());
+        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it =
+              redop_modes.begin(); it != redop_modes.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(!single_redop_fields);
+#endif
+        rez.serialize<size_t>(0);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::unpack_initial_reduction_state(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+      assert(!is_owner());
+      assert(redop_modes.empty());
+#endif
+      // No need for the lock yet since no one knows we exist yet
+      size_t num_redop_modes;
+      derez.deserialize(num_redop_modes);
+      if (num_redop_modes > 0)
+      {
+        for (unsigned idx = 0; idx < num_redop_modes; idx++)
+        {
+          ReductionOpID redop;
+          derez.deserialize(redop);
+          FieldMask &mask = redop_modes[redop];
+          derez.deserialize(mask);
+          single_redop_fields |= mask;
+        }
+        exclusive_fields -= single_redop_fields;
+        single_reduction_copies[owner_space] = single_redop_fields;
+        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
+          exclusive_copies.find(owner_space);
+#ifdef DEBUG_LEGION
+        assert(finder != exclusive_copies.end());
+#endif
+        finder->second -= single_redop_fields;
+        if (!finder->second)
+          exclusive_copies.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7628,6 +7714,8 @@ namespace Legion {
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
                                expr, node, version_lock, false/*register now*/);
+      if (logical_owner == runtime->address_space)
+        set->unpack_initial_reduction_state(derez);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
