@@ -110,7 +110,8 @@ namespace Legion {
                                     const FieldMask &acquire_mask,
                                     std::set<Reservation> &needed_reservations);
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
-                      std::set<RtEvent> &ready_events);
+                      std::set<RtEvent> &ready_events,
+                      const bool runtime_relaxed = false);
       void finalize_mapping(std::set<RtEvent> &map_applied_events, 
                             bool block = false);
     protected:
@@ -831,15 +832,17 @@ namespace Legion {
       // Pending requests for updates
       struct PendingRequest : public LegionHeapify<PendingRequest> {
       public:
-        PendingRequest(Operation *o, RtUserEvent ready, 
-                       RtUserEvent applied, const RegionUsage &u) 
+        PendingRequest(Operation *o, RtUserEvent ready, RtUserEvent applied,
+                       const RegionUsage &u, const bool relaxed) 
           : op(o), ready_event(ready), applied_event(applied), usage(u),
-            remaining_updates(0), remaining_invalidates(0) { }
+            runtime_relaxed(relaxed), remaining_updates(0), 
+            remaining_invalidates(0) { }
       public:
         Operation *const op;
         const RtUserEvent ready_event;
         const RtUserEvent applied_event;
         const RegionUsage usage;
+        const bool runtime_relaxed;
         std::set<RtEvent> applied_events;
         FieldMask exclusive_mask;
         FieldMask single_redop_mask;
@@ -919,6 +922,10 @@ namespace Legion {
                               std::set<RtEvent> &ready_events, 
                               std::set<RtEvent> &applied_events,
                               AddressSpaceID request_space,
+                              // Parameter for the runtime to allow
+                              // relaxed replication under safe circumstances
+                              // such as dynamic control replication
+                              const bool runtime_relaxed,
                               PendingRequest *pending_request = NULL);
       void record_subset(EquivalenceSet *set);
     public:
@@ -1038,6 +1045,8 @@ namespace Legion {
                                  const FieldMask &request_mask);
       void record_shared_copy(AddressSpaceID request_space,
                               const FieldMask &request_mask);
+      void record_relaxed_copy(AddressSpaceID request_space,
+                               const FieldMask &request_mask);
       void record_single_reduce(AddressSpaceID request_space,
                                 const FieldMask &request_mask,
                                 ReductionOpID redop);
@@ -1169,8 +1178,10 @@ namespace Legion {
       FieldMask shared_fields;
       // Track which fields we hold in single reduction mode
       FieldMask single_redop_fields;
-      // Track the which fields we hold in multiple reduction mode
+      // Track which fields we hold in multiple reduction mode
       FieldMask multi_redop_fields;
+      // Track which fields we hold in a relaxed mode
+      FieldMask relaxed_fields;
       // Track the reduction modes for fields
       LegionMap<ReductionOpID,FieldMask>::aligned redop_modes;
       // These members are only valid on the owner node

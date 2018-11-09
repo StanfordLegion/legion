@@ -3693,6 +3693,10 @@ namespace Legion {
           // Finalize the mapping output
           shard->finalize_map_task_output(input,output.task_mappings[shard_idx],
                                           must_epoch_owner, valid_instances);
+          // All shards can just record themselves as being done their 
+          // mapping now, their mapping effects will actually come back
+          // through the shard manager
+          shard->complete_mapping();
           // Now record the instances that we need locally
           const std::deque<InstanceSet> &shard_instances = 
             shard->get_physical_instances();
@@ -6457,6 +6461,24 @@ namespace Legion {
         execution_context->send_back_created_state(target);
     } 
 
+    //--------------------------------------------------------------------------
+    void PointTask::replay_analysis(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef LEGION_SPY
+      LegionSpy::log_replay_operation(unique_op_id);
+#endif
+      tpl->register_operation(this);
+      complete_mapping();
+    }
+
+    //--------------------------------------------------------------------------
+    TraceLocalID PointTask::get_trace_local_id() const
+    //--------------------------------------------------------------------------
+    {
+      return TraceLocalID(trace_local_id, get_domain_point());
+    }
+
     /////////////////////////////////////////////////////////////
     // Shard Task 
     /////////////////////////////////////////////////////////////
@@ -6759,8 +6781,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       shard_manager->handle_post_mapped(true/*local*/, mapped_precondition);
-      // Now we can complete this shard task
-      complete_mapping(mapped_precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -6813,10 +6833,7 @@ namespace Legion {
       // that it has no virtual instances because it is a 
       // replicated task
       if (is_leaf())
-      {
         shard_manager->handle_post_mapped(true/*local*/, RtEvent::NO_RT_EVENT);
-        complete_mapping();
-      }
       // Speculation can always be resolved here
       resolve_speculation();
       // Then launch the task for execution
@@ -6933,25 +6950,7 @@ namespace Legion {
         static_cast<ReplicateContext*>(execution_context);
 #endif
       return repl_ctx->create_replicate_instance_top_view(manager, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::replay_analysis(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef LEGION_SPY
-      LegionSpy::log_replay_operation(unique_op_id);
-#endif
-      tpl->register_operation(this);
-      complete_mapping();
-    }
-
-    //--------------------------------------------------------------------------
-    TraceLocalID PointTask::get_trace_local_id() const
-    //--------------------------------------------------------------------------
-    {
-      return TraceLocalID(trace_local_id, get_domain_point());
-    }
+    } 
 
     /////////////////////////////////////////////////////////////
     // Index Task 

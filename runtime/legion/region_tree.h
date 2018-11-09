@@ -327,8 +327,9 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events,
-                                       bool defer_make_ready = false,
-                                       FieldMask *defer_mask = NULL);
+                                       const bool defer_make_ready = false,
+                                       FieldMask *defer_mask = NULL,
+                                       const bool runtime_relaxed = false);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:

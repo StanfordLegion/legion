@@ -1611,7 +1611,8 @@ namespace Legion {
     void RegionTreeForest::perform_versioning_analysis(Operation *op,
                      unsigned idx, const RegionRequirement &req,
                      VersionInfo &version_info, std::set<RtEvent> &ready_events,
-                     bool defer_make_ready/*=false*/, FieldMask *defer_mask)
+                     const bool defer_make_ready/*=false*/, 
+                     FieldMask *defer_mask,const bool runtime_relaxed/*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_VERSIONING_ANALYSIS_CALL);
@@ -1654,7 +1655,8 @@ namespace Legion {
             ready.wait();
           // Do the make ready request
           std::set<RtEvent> local_ready_events;
-          version_info.make_ready(req, user_mask, local_ready_events);
+          version_info.make_ready(req, user_mask, 
+                                  local_ready_events, runtime_relaxed);
           // Release the reservations once the requests are ready
           if (!local_ready_events.empty())
           {
@@ -1675,7 +1677,7 @@ namespace Legion {
         }
         else
           // If there are no reservations we can just do this
-          version_info.make_ready(req, user_mask, ready_events);
+          version_info.make_ready(req, user_mask, ready_events,runtime_relaxed);
       }
       else
       {
@@ -12869,15 +12871,6 @@ namespace Legion {
         ReductionOpID redop;
         derez.deserialize(redop);
         derez.deserialize(state.outstanding_reductions[redop]);
-      }
-      size_t num_projection_epochs;
-      derez.deserialize(num_projection_epochs);
-      for (unsigned idx1 = 0; idx1 < num_projection_epochs; idx1++)
-      {
-        ProjectionEpochID epoch_id;
-        derez.deserialize(epoch_id);
-        FieldMask valid_fields;
-        derez.deserialize(valid_fields);
       }
       size_t num_field_states;
       derez.deserialize(num_field_states);

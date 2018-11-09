@@ -3426,6 +3426,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReplMapOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      // Compute the version numbers for this mapping operation
+      std::set<RtEvent> preconditions;
+      // This is one of the few kinds of control replicated operations
+      // that supports relaxed coherence of equivalence sets
+      // because we know that this operation is running on all copies
+      // of the sharded parent task
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement, 
+                                                   version_info,
+                                                   preconditions,
+                                                   false/*defer make ready*/,
+                                                   NULL/*defer mask*/,
+                                                   true/*runtime relaxed*/);
+      if (!preconditions.empty())
+        enqueue_ready_operation(Runtime::merge_events(preconditions));
+      else
+        enqueue_ready_operation();
+    }
+
+    //--------------------------------------------------------------------------
     void ReplMapOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {

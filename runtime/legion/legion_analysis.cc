@@ -296,7 +296,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void VersionInfo::make_ready(const RegionRequirement &req, 
                                  const FieldMask &ready_mask,
-                                 std::set<RtEvent> &ready_events)
+                                 std::set<RtEvent> &ready_events,
+                                 const bool runtime_relaxed /*= false*/)
     //--------------------------------------------------------------------------
     {
       // We only need an exclusive mode for this operation if we're 
@@ -305,7 +306,7 @@ namespace Legion {
             equivalence_sets.begin(); it != equivalence_sets.end(); it++)
         (*it)->request_valid_copy(op, ready_mask, RegionUsage(req), 
                                   ready_events, applied_events,
-                                  (*it)->local_space);
+                                  (*it)->local_space, runtime_relaxed);
     }
 
     //--------------------------------------------------------------------------
@@ -4258,6 +4259,7 @@ namespace Legion {
                                             std::set<RtEvent> &ready_events, 
                                             std::set<RtEvent> &applied_events,
                                             AddressSpaceID request_space,
+                                            const bool runtime_relaxed,
                                             PendingRequest *pending_request)
     //--------------------------------------------------------------------------
     {
@@ -4361,23 +4363,12 @@ namespace Legion {
             }
           }
         }
-        else if (IS_RELAXED(usage))
+        else if (runtime_relaxed)
         {
-          // for relaxed read-write we can be in any of three modes
-          const FieldMask valid_mask = request_mask &
-            (exclusive_fields | single_redop_fields | relaxed_fields);
+          // for relaxed read-write we need to be in 
+          const FieldMask valid_mask = request_mask & relaxed_fields;
           if (!!valid_mask)
-          {
             request_mask -= valid_mask;
-            // If we overlap on single reduce record that we mutated this
-            // already to prevent it from being invalidated underneath us
-            if (!!single_redop_fields)
-            {
-              const FieldMask redop_overlap = valid_mask & single_redop_fields;
-              if (!!redop_overlap)
-                record_mutated_guard(op, redop_overlap);
-            }
-          }
         }
         else
         {
@@ -4425,7 +4416,7 @@ namespace Legion {
             RtUserEvent ready = Runtime::create_rt_user_event();
             RtUserEvent applied = Runtime::create_rt_user_event(); 
             PendingRequest *request = 
-              new PendingRequest(op, ready, applied, usage);
+              new PendingRequest(op, ready, applied, usage, runtime_relaxed);
             Serializer rez;
             {
               RezCheck z(rez);
@@ -4433,6 +4424,7 @@ namespace Legion {
               rez.serialize(request_mask);
               rez.serialize(usage);
               rez.serialize(request);
+              rez.serialize<bool>(runtime_relaxed);
             }
             runtime->send_equivalence_set_valid_request(logical_owner_space,
                                                         rez);
@@ -4524,7 +4516,9 @@ namespace Legion {
                 }
               }
               // Read-only can also be in shared mode
-              if (IS_READ_ONLY(usage) && !(request_mask * shared_fields))
+              // Relaxed can also be in relaxed mode
+              if ((IS_READ_ONLY(usage) && !(request_mask * shared_fields)) ||
+                  (runtime_relaxed && !(request_mask * relaxed_fields)))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
                   finder = shared_copies.find(logical_owner_space);
@@ -4540,7 +4534,7 @@ namespace Legion {
               RtUserEvent ready = Runtime::create_rt_user_event();
               RtUserEvent applied = Runtime::create_rt_user_event(); 
               pending_request = 
-                new PendingRequest(op, ready, applied, usage);
+                new PendingRequest(op, ready, applied, usage, runtime_relaxed);
               outstanding_requests.insert(pending_request, request_mask); 
               ready_events.insert(ready);
               applied_events.insert(applied);
@@ -4597,6 +4591,11 @@ namespace Legion {
                                   request_space, pending_request, 
                                   pending_updates, pending_invalidates,
                                   true/*needs updates*/,
+                                  true/*updates from all*/);
+              filter_multi_copies(filter_mask, relaxed_fields, shared_copies,
+                                  request_space, pending_request,
+                                  pending_updates, pending_invalidates,
+                                  true/*needs udpates*/,
                                   true/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
@@ -4688,6 +4687,18 @@ namespace Legion {
                 // Should not have read-only discard
                 assert(needs_updates);
 #endif
+                // Any fields in relaxed mode can just immediately
+                // jump to shared mode since we know they are equivalent
+                if (!!relaxed_fields)
+                {
+                  const FieldMask relaxed_mask = relaxed_fields & request_mask;
+                  if (!!relaxed_mask)
+                  {
+                    shared_fields |= relaxed_mask;
+                    relaxed_fields -= relaxed_mask;
+                    request_mask -= relaxed_mask;
+                  }
+                }
                 // Upgrade exclusive to shared
                 upgrade_single_to_multi(request_mask, request_space,
                       pending_request, pending_updates, 0/*redop*/,
@@ -4696,6 +4707,21 @@ namespace Legion {
                 // If we still have fields we can record a new shared user
                 if (!!request_mask)
                   record_shared_copy(request_space, request_mask);
+              }
+              else if (runtime_relaxed)
+              {
+                // Invalidate any shared
+                filter_multi_copies(request_mask, shared_fields, shared_copies,
+                                    request_space, pending_request,
+                                    pending_updates, pending_invalidates,
+                                    needs_updates, false/*updates from all*/);
+                // Invalidate any exclusive
+                filter_single_copies(request_mask, exclusive_fields,
+                                     exclusive_copies, request_space,
+                                     pending_request, pending_updates,
+                                     pending_invalidates, needs_updates);
+                if (!!request_mask)
+                  record_relaxed_copy(request_space, request_mask);
               }
               else
               {
@@ -4957,6 +4983,15 @@ namespace Legion {
     {
       shared_copies[request_space] |= request_mask;
       shared_fields |= request_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::record_relaxed_copy(AddressSpaceID request_space,
+                                             const FieldMask &request_mask)
+    //--------------------------------------------------------------------------
+    {
+      shared_copies[request_space] |= request_mask;
+      relaxed_fields |= request_mask;
     }
 
     //--------------------------------------------------------------------------
@@ -6067,7 +6102,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(exclusive_fields * pending_request->exclusive_mask);
 #endif
-            exclusive_fields |= pending_request->exclusive_mask;
+            // If we asked for these in a relaxed mode then we go into
+            // the relaxed mode instead of the exclusive mode
+            if (pending_request->runtime_relaxed)
+              relaxed_fields |= pending_request->exclusive_mask;
+            else
+              exclusive_fields |= pending_request->exclusive_mask;
             update_mask -= pending_request->exclusive_mask;
           }
           if (!!update_mask)
@@ -6113,9 +6153,13 @@ namespace Legion {
       assert(exclusive_fields * shared_fields);
       assert(exclusive_fields * single_redop_fields);
       assert(exclusive_fields * multi_redop_fields);
+      assert(exclusive_fields * relaxed_fields);
       assert(shared_fields * single_redop_fields);
       assert(shared_fields * multi_redop_fields);
+      assert(shared_fields * relaxed_fields);
       assert(single_redop_fields * multi_redop_fields);
+      assert(single_redop_fields * relaxed_fields);
+      assert(multi_redop_fields * relaxed_fields);
       // Reduction modes should all be present
       if (!!single_redop_fields || !! multi_redop_fields)
       {
@@ -6151,7 +6195,7 @@ namespace Legion {
         }
         else
           assert(exclusive_copies.empty());
-        if (!!shared_fields)
+        if (!!shared_fields || !!relaxed_fields)
         {
           FieldMask summary;
           for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
@@ -6160,7 +6204,7 @@ namespace Legion {
             assert(!!it->second);
             summary |= it->second;
           }
-          assert(summary == shared_fields);
+          assert(summary == (shared_fields | relaxed_fields));
         }
         else
           assert(shared_copies.empty());
@@ -8196,12 +8240,14 @@ namespace Legion {
       derez.deserialize(usage);
       PendingRequest *pending_request;
       derez.deserialize(pending_request);
+      bool runtime_relaxed;
+      derez.deserialize(runtime_relaxed);
 
       std::set<RtEvent> fake_ready, fake_applied;
       if (ready_event.exists() && !ready_event.has_triggered())
         ready_event.wait();
       set->request_valid_copy(NULL/*dummy op*/, request_mask, usage, fake_ready,
-                              fake_applied, source, pending_request);
+                        fake_applied, source, runtime_relaxed, pending_request);
 #ifdef DEBUG_LEGION
       assert(fake_ready.empty());
       assert(fake_applied.empty());
