@@ -458,31 +458,36 @@ namespace Realm {
 
   void Logger::log_msg(LoggingLevel level, const std::string& msg)
   {
+    log_msg(level, msg.c_str(), msg.length());
+  }
+
+  void Logger::log_msg(LoggingLevel level, const char *msgdata, size_t msglen)
+  {
     // no logging of empty messages
-    if(msg.length() == 0)
+    if(msglen == 0)
       return;
 
     // build message string, including prefix
     static const int MAXLEN = 4096;
     char buffer[MAXLEN];
-    int len = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
-		       my_node_id, (unsigned long)pthread_self(),
-		       level, name.c_str());
-    int amt = msg.length();
-    // Unusual case, but handle it
-    if((len + amt) >= MAXLEN)
+    int pfxlen = snprintf(buffer, MAXLEN - 2, "[%d - %lx] {%d}{%s}: ",
+			  my_node_id, (unsigned long)pthread_self(),
+			  level, name.c_str());
+
+    // would simply concatenating this message overflow the buffer?
+    if((pfxlen + msglen) >= MAXLEN)
     {
-      // If this is an error or a warning, print out the 
+      // if this is an error or a warning, print out the 
       // whole message no matter what
       if ((level == LEVEL_FATAL) || 
           (level == LEVEL_ERROR) || (level == LEVEL_WARNING))
       {
-        const size_t full_len = len + amt + 2;
+        const size_t full_len = pfxlen + msglen + 1;
         char *full_buffer = (char*)malloc(full_len);
-        memcpy(full_buffer, buffer, len); 
-        memcpy(full_buffer + len, msg.data(), amt);
-        full_buffer[len+amt] = '\n';
-        full_buffer[len+amt+1] = 0;
+        memcpy(full_buffer, buffer, pfxlen); 
+        memcpy(full_buffer + pfxlen, msgdata, msglen);
+        full_buffer[pfxlen + msglen] = '\n';
+
         // go through all the streams
         for(std::vector<LogStream>::iterator it = streams.begin();
             it != streams.end();
@@ -497,13 +502,14 @@ namespace Realm {
         }
         free(full_buffer);
         return;
+      } else {
+	// less critical messages are truncated
+	msglen = MAXLEN - pfxlen - 1;
       }
-      amt = MAXLEN - 2 - len;
     }
-    memcpy(buffer + len, msg.data(), amt);
-    len += amt;
-    buffer[len++] = '\n';
-    buffer[len] = 0;
+    memcpy(buffer + pfxlen, msgdata, msglen);
+    buffer[pfxlen + msglen] = '\n';
+    size_t total_len = pfxlen + msglen + 1;
 
     // go through all the streams
     for(std::vector<LogStream>::iterator it = streams.begin();
@@ -512,7 +518,7 @@ namespace Realm {
       if(level < it->min_level)
 	continue;
 
-      it->s->write(buffer, len);
+      it->s->write(buffer, total_len);
 
       if(it->flush_each_write)
 	it->s->flush();
@@ -563,10 +569,10 @@ namespace Realm {
             sprintf(full_msg, "[%d] ", messageID);
             vsnprintf(full_msg + strlen(full_msg), full+1, fmt, args);
          }
-        (*oss) << full_msg;
+	 get_stream() << full_msg;
         free(full_msg);
       } else {
-        (*oss) << msg;
+        get_stream() << msg;
       }
     }
     return *this;

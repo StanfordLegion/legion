@@ -19,6 +19,7 @@
 #define REALM_LOGGING_H
 
 #include "realm/realm_config.h"
+#include "realm/utils.h"
 
 #include <stdarg.h>
 #include <vector>
@@ -108,6 +109,7 @@ namespace Realm {
     friend class LoggerMessage;
     
     void log_msg(LoggingLevel level, const std::string& msg);
+    void log_msg(LoggingLevel level, const char *msgdata, size_t msglen);
     
     friend class LoggerConfig;
     
@@ -157,7 +159,11 @@ namespace Realm {
     Logger *logger;
     bool active;
     Logger::LoggingLevel level;
-    std::ostringstream *oss;
+    // contain messages shorter than 160 characters entirely inline
+    shortstringbuf<160, 256> buffer;
+    // in-place allocation of a std::ostream
+    std::ostream *stream;
+    char stream_storage[sizeof(std::ostream)] __attribute((aligned(__alignof__(std::ostream))));
   };
   
 }; // namespace Realm

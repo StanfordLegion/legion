@@ -19,14 +19,20 @@ from __future__ import print_function
 import tempfile
 import legion_spy
 import argparse
-import sys, os, shutil
-import string, re, json, heapq, time, itertools
-from collections import defaultdict
-from math import sqrt, log
-from cgi import escape
-from operator import itemgetter
-from os.path import dirname, exists, basename
+import sys
+import os
+import shutil
+import math
+import collections
+import string
+import re
+import json
+import heapq
+import time
+import itertools
 from legion_serializer import LegionProfASCIIDeserializer, LegionProfBinaryDeserializer, GetFileTypeInfo
+
+root_dir = os.path.dirname(os.path.realpath(__file__))
 
 # Make sure this is up to date with lowlevel.h
 processor_kinds = {
@@ -701,11 +707,11 @@ class TaskKind(object):
 
 class StatObject(object):
     def __init__(self):
-        self.total_calls = defaultdict(int)
-        self.total_execution_time = defaultdict(int)
-        self.all_calls = defaultdict(list)
-        self.max_call = defaultdict(int)
-        self.min_call = defaultdict(lambda: sys.maxsize)
+        self.total_calls = collections.defaultdict(int)
+        self.total_execution_time = collections.defaultdict(int)
+        self.all_calls = collections.defaultdict(list)
+        self.max_call = collections.defaultdict(int)
+        self.min_call = collections.defaultdict(lambda: sys.maxsize)
 
     def get_total_execution_time(self):
         total_execution_time = 0
@@ -750,9 +756,9 @@ class StatObject(object):
         for proc_calls in self.all_calls.values():
             for call in proc_calls:
                 diff = float(call) - avg
-                stddev += sqrt(diff * diff)
+                stddev += math.sqrt(diff * diff)
         stddev /= float(total_calls)
-        stddev = sqrt(stddev)
+        stddev = math.sqrt(stddev)
         max_dev = (float(max_call) - avg) / stddev if stddev != 0.0 else 0.0
         min_dev = (float(min_call) - avg) / stddev if stddev != 0.0 else 0.0
 
@@ -768,9 +774,9 @@ class StatObject(object):
                 stddev = 0
                 for call in self.all_calls[proc]:
                     diff = float(call) - avg
-                    stddev += sqrt(diff * diff)
+                    stddev += math.sqrt(diff * diff)
                 stddev /= float(self.total_calls[proc])
-                stddev = sqrt(stddev)
+                stddev = math.sqrt(stddev)
                 max_dev = (float(self.max_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
                 min_dev = (float(self.min_call[proc]) - avg) / stddev if stddev != 0.0 else 0.0
 
@@ -1560,7 +1566,7 @@ class LFSR(object):
     def __init__(self, size):
         self.register = ''
         # Initialize the register with all zeros
-        needed_bits = int(log(size,2))+1
+        needed_bits = int(math.log(size,2))+1
         self.max_value = pow(2,needed_bits)
         # We'll use a deterministic seed here so that
         # our results are repeatable
@@ -2130,8 +2136,7 @@ class State(object):
                 kind.assign_color(color_helper(lsfr.get_next(), num_colors))
 
     def show_copy_matrix(self, output_prefix):
-        template_file_name = os.path.join(dirname(sys.argv[0]),
-                "legion_prof_copy.html.template")
+        template_file_name = os.path.join(root_dir, "legion_prof_copy.html.template")
         tsv_file_name = output_prefix + ".tsv"
         html_file_name = output_prefix + ".html"
         print('Generating copy visualization files %s and %s' % (tsv_file_name,html_file_name))
@@ -2173,14 +2178,14 @@ class State(object):
         html_file.close()
 
     def find_unique_dirname(self, dirname):
-        if (not exists(dirname)):
+        if (not os.path.exists(dirname)):
             return dirname
         # if the dirname exists, loop through dirname.i until we
         # find one that doesn't exist
         i = 1
         while (True):
             potential_dir = dirname + "." + str(i)
-            if (not exists(potential_dir)):
+            if (not os.path.exists(potential_dir)):
                 return potential_dir
             i += 1
 
@@ -2668,14 +2673,14 @@ class State(object):
         self.assign_colors()
         # the output directory will either be overwritten, or we will find
         # a new unique name to create new logs
-        if force and exists(output_dirname):
+        if force and os.path.exists(output_dirname):
             print("forcing removal of " + output_dirname)
             shutil.rmtree(output_dirname)
         else:
             output_dirname = self.find_unique_dirname(output_dirname)
 
         print('Generating interactive visualization files in directory ' + output_dirname)
-        src_directory = os.path.join(dirname(sys.argv[0]), "legion_prof_files")
+        src_directory = os.path.join(root_dir, "legion_prof_files")
 
         shutil.copytree(src_directory, output_dirname)
 
@@ -2705,7 +2710,7 @@ class State(object):
         tsv_dir = os.path.join(output_dirname, "tsv")
         json_dir = os.path.join(output_dirname, "json")
         os.mkdir(tsv_dir)
-        if not exists(json_dir):
+        if not os.path.exists(json_dir):
             os.mkdir(json_dir)
         
         op_dependencies, transitive_map = None, None
