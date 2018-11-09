@@ -10039,6 +10039,8 @@ namespace Legion {
       fill_op->initialize(this, launcher, runtime->check_privileges);
       log_run.debug("Registering a fill operation in task %s (ID %lld)",
                      get_task_name(), get_unique_id());
+      fill_op->set_sharding_collective(new ShardingGatherCollective(this, 
+                                       0/*owner shard*/, COLLECTIVE_LOC_51));
 #else
       fill_op->initialize(this, launcher, false/*check privileges*/);
 #endif
