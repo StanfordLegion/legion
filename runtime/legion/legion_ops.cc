@@ -11979,6 +11979,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                        FillOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // Fill Ops should never actually need this, but this method might
+      // be called in the process of doing a mapper call
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void FillOp::log_fill_requirement(void) const
     //--------------------------------------------------------------------------
     {
