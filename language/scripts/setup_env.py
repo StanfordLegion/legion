@@ -470,11 +470,11 @@ if __name__ == '__main__':
         help='Select LLVM version.')
     parser.add_argument(
         '--terra-url', dest='terra_url', required=False,
-        default='https://github.com/elliottslaughter/terra.git',
+        default='https://github.com/StanfordLegion/terra.git',
         help='URL of Terra repository to clone from.')
     parser.add_argument(
         '--terra-branch', dest='terra_branch', required=False,
-        default='compiler-snapshot',
+        default='luajit2.1',
         help='Branch of Terra repository to checkout.')
     args = parser.parse_args()
     driver(**vars(args))
