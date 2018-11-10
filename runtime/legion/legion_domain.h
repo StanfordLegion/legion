@@ -358,11 +358,14 @@ namespace Legion {
     class DomainPointIterator {
     public:
       DomainPointIterator(const Domain& d);
+      DomainPointIterator(const DomainPointIterator &rhs);
 
       bool step(void);
 
       operator bool(void) const;
-      DomainPointIterator& operator++(int /*i am postfix*/);
+      DomainPointIterator& operator=(const DomainPointIterator &rhs);
+      DomainPointIterator& operator++(void);
+      DomainPointIterator operator++(int /*i am postfix*/);
     public:
       DomainPoint p;
       // Some buffers that we will do in-place new statements to in
@@ -395,7 +398,7 @@ namespace Legion {
     inline COORD_T operator[](unsigned index) const;
     inline const Point<DIM,COORD_T>* operator->(void) const;
     inline PointInRectIterator<DIM,COORD_T>& operator++(void);
-    inline PointInRectIterator<DIM,COORD_T>& operator++(int/*postfix*/);
+    inline PointInRectIterator<DIM,COORD_T> operator++(int/*postfix*/);
   protected:
     Realm::PointInRectIterator<DIM,COORD_T> itr;
     mutable Point<DIM,COORD_T> current;
@@ -414,7 +417,7 @@ namespace Legion {
     inline const Rect<DIM,COORD_T>& operator*(void) const;
     inline const Rect<DIM,COORD_T>* operator->(void) const;
     inline RectInDomainIterator<DIM,COORD_T>& operator++(void);
-    inline RectInDomainIterator<DIM,COORD_T>& operator++(int/*postfix*/);
+    inline RectInDomainIterator<DIM,COORD_T> operator++(int/*postfix*/);
   protected:
     Realm::IndexSpaceIterator<DIM,COORD_T> itr;
     mutable Rect<DIM,COORD_T> current;
@@ -435,7 +438,7 @@ namespace Legion {
     inline COORD_T operator[](unsigned index) const; 
     inline const Point<DIM,COORD_T>* operator->(void) const;
     inline PointInDomainIterator& operator++(void);
-    inline PointInDomainIterator& operator++(int /*postfix*/);
+    inline PointInDomainIterator operator++(int /*postfix*/);
   protected:
     RectInDomainIterator<DIM,COORD_T> rect_itr;
     PointInRectIterator<DIM,COORD_T> point_itr;
