@@ -4712,16 +4712,24 @@ namespace Legion {
                   {
                     shared_fields |= relaxed_mask;
                     relaxed_fields -= relaxed_mask;
+                    // If it's already valid then we can remove it
+                    LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                      finder = shared_copies.find(request_space);
+                    if (finder != shared_copies.end())
+                      request_mask -= (finder->second & relaxed_mask);
                   }
                 }
                 // Upgrade exclusive to shared
-                upgrade_single_to_multi(request_mask, request_space,
-                      pending_request, pending_updates, 0/*redop*/,
-                      exclusive_fields, exclusive_copies,
-                      shared_fields, shared_copies);
-                // If we still have fields we can record a new shared user
                 if (!!request_mask)
-                  record_shared_copy(request_space, request_mask);
+                {
+                  upgrade_single_to_multi(request_mask, request_space,
+                        pending_request, pending_updates, 0/*redop*/,
+                        exclusive_fields, exclusive_copies,
+                        shared_fields, shared_copies);
+                  // If we still have fields we can record a new shared user
+                  if (!!request_mask)
+                    record_shared_copy(request_space, request_mask);
+                }
               }
               else if (runtime_relaxed)
               {
@@ -4814,23 +4822,31 @@ namespace Legion {
               rez.serialize(pending_updates);
               rez.serialize(pending_invalidates);
               // Pack any exclusive fields
-              LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                finder = exclusive_copies.find(request_space);
-              if (finder != exclusive_copies.end())
+              FieldMask excl_mask;
+              if (!!exclusive_fields)
               {
-                const FieldMask excl_mask = finder->second & orig_mask;
-                if (!!excl_mask)
-                {
-                  rez.serialize<bool>(true);
-                  rez.serialize(excl_mask);
-                }
-                else
-                  rez.serialize<bool>(false);
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = exclusive_copies.find(request_space);
+                if (finder != exclusive_copies.end())
+                  excl_mask = finder->second & orig_mask;
+              }
+              if (!!relaxed_fields)
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = shared_copies.find(request_space);
+                if (finder != shared_copies.end())
+                  excl_mask |= finder->second & orig_mask & relaxed_fields;
+              }
+              if (!!excl_mask)
+              {
+                rez.serialize<bool>(true);
+                rez.serialize(excl_mask);
               }
               else
                 rez.serialize<bool>(false);
               // Pack any exclusive redop fields
-              finder = single_reduction_copies.find(request_space);
+              LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                finder = single_reduction_copies.find(request_space);
               if (finder != single_reduction_copies.end())
               {
                 const FieldMask redop_mask = finder->second & orig_mask;
@@ -6176,6 +6192,9 @@ namespace Legion {
             assert(shared_fields * update_mask);
 #endif
             shared_fields |= update_mask;
+            // Relaxed fields can silently update to shared
+            if (!!relaxed_fields)
+              relaxed_fields -= update_mask;
           }
         }
       }

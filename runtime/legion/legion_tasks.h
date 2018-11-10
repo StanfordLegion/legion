@@ -489,6 +489,8 @@ namespace Legion {
       virtual bool distribute_task(void) = 0; 
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       bool first_invocation = true) = 0;
+      // For tasks that are sharded off by control replication
+      virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const = 0;
       virtual bool can_early_complete(ApUserEvent &chain_event) = 0; 
     public:
@@ -793,6 +795,7 @@ namespace Legion {
       virtual bool distribute_task(void);
       virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
                                       bool first_invocation = true);
+      virtual void shard_off(RtEvent mapped_precondition);
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);

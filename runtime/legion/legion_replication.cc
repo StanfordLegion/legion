@@ -2789,11 +2789,7 @@ namespace Legion {
           // to exchange versioning information, but no such 
           // work is necessary for point tasks
           SingleTask *task = single_tasks[idx];
-          // Do the stuff to record that this is mapped and executed
-          task->complete_mapping(mapped_events[task->index_point]);
-          task->complete_execution();
-          task->trigger_children_complete();
-          task->trigger_children_committed();
+          task->shard_off(mapped_events[task->index_point]);
           continue;
         }
         // Figure out our preconditions

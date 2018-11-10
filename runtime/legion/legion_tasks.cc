@@ -2540,6 +2540,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::shard_off(RtEvent mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      // Do the stuff to record that this is mapped and executed
+      complete_mapping(mapped_precondition);
+      complete_execution();
+      trigger_children_complete();
+      trigger_children_committed();
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
@@ -3587,6 +3598,8 @@ namespace Legion {
       // case then there is no replication
       else if (output.task_mappings.size() == 1)
       {
+        // Set replicate back to false since this is no longer replicated
+        replicate = false;
         finalize_map_task_output(input, output.task_mappings[0], 
                                  must_epoch_owner, valid_instances);
         return;
@@ -6142,6 +6155,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PointTask::shard_off(RtEvent mapped_precondition)
+    //--------------------------------------------------------------------------
+    {
+      slice_owner->record_child_mapped(mapped_precondition, 
+                                       ApEvent::NO_AP_EVENT);
+      SingleTask::shard_off(mapped_precondition);
+    }
+
+    //--------------------------------------------------------------------------
     bool PointTask::is_stealable(void) const
     //--------------------------------------------------------------------------
     {
@@ -6216,23 +6238,28 @@ namespace Legion {
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
       // Pass back our created and deleted operations 
-      slice_owner->return_privileges(execution_context);
-      slice_owner->record_child_complete();
-      // Since this point is now complete we know
-      // that we can trigger it. Note we don't need to do
-      // this if we're a leaf task with no virtual mappings
-      // because we would have performed the leaf task
-      // early complete chaining operation.
-      if (!is_leaf() || has_virtual_instances())
+      if (execution_context != NULL)
+      {
+        slice_owner->return_privileges(execution_context);
+        if (runtime->legion_spy_enabled)
+          execution_context->log_created_requirements();
+        // Invalidate any context that we had so that the child
+        // operations can begin committing
+        execution_context->invalidate_region_tree_contexts();
+        // Since this point is now complete we know
+        // that we can trigger it. Note we don't need to do
+        // this if we're a leaf task with no virtual mappings
+        // because we would have performed the leaf task
+        // early complete chaining operation.
+        if (!is_leaf() || has_virtual_instances())
+          Runtime::trigger_event(point_termination);
+      }
+      else
         Runtime::trigger_event(point_termination);
-
-      if (runtime->legion_spy_enabled)
-        execution_context->log_created_requirements();
-      // Invalidate any context that we had so that the child
-      // operations can begin committing
-      execution_context->invalidate_region_tree_contexts(); 
+      slice_owner->record_child_complete();
       // See if we need to trigger that our children are complete
-      const bool need_commit = execution_context->attempt_children_commit();
+      const bool need_commit = (execution_context != NULL) ? 
+        execution_context->attempt_children_commit() : false;
       // Mark that this operation is now complete
       complete_operation();
       if (need_commit)
