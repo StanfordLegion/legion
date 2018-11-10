@@ -109,6 +109,11 @@ namespace Legion {
       void acquire_equivalence_sets(const RegionRequirement &req,
                                     const FieldMask &acquire_mask,
                                     std::set<Reservation> &needed_reservations);
+      // There are very strict requirements for calling this with
+      // runtime_relaxed=true. You have to be concurrently mapping actual
+      // physical instances (to guarantee reduction applications in parallel)
+      // As far as I know this is currently only safe from control replication
+      // contexts with things like ReplMapOp and ReplAttachOp
       void make_ready(const RegionRequirement &req, const FieldMask &mask,
                       std::set<RtEvent> &ready_events,
                       const bool runtime_relaxed = false);

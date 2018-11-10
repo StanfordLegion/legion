@@ -4640,38 +4640,65 @@ namespace Legion {
             {
               if (needs_updates)
               {
-                // TODO: Reduction applications have to be applied by
-                // only one operation, but runtime_relaxed requires
-                // that there be multiple operations mapping concurrently
-                // For now we'll at least hit this assertion so we 
-                // don't end up hanging
                 if (runtime_relaxed)
-                  assert(false);
-                // If we have reductions, then we need to go to 
-                // single reduce mode until someone actually goes
-                // ahead and applies the reductions
-                FieldMask multi_overlap = request_mask & multi_redop_fields;
-                if (!!multi_overlap)
                 {
-                  record_single_reduce(request_space, multi_overlap, 
-                                       0/*redop already recorded*/); 
-                  request_mask -= multi_overlap;
-                  filter_multi_copies(multi_overlap, multi_redop_fields,
-                                      multi_reduction_copies, request_space,
-                                      pending_request, pending_updates,
-                                      pending_invalidates,true/*needs updates*/,
-                                      true/*updates from all*/);
+                  // The runtime relaxed case here is a little scary
+                  // We are going to relay on all copies of this applying
+                  // reductions to different instances in parallel
+                  filter_redop_modes(redop_overlap);
+                  FieldMask multi_overlap = request_mask & multi_redop_fields;
+                  if (!!multi_overlap)
+                  {
+                    record_relaxed_copy(request_space, multi_overlap);
+                    request_mask -= multi_overlap;
+                    filter_multi_copies(multi_overlap, multi_redop_fields,
+                                        multi_reduction_copies, request_space,
+                                        pending_request, pending_updates,
+                                        pending_invalidates,
+                                        true/*needs updates*/,
+                                        true/*updates from all*/);
+                  }
+                  FieldMask single_overlap = request_mask & single_redop_fields;
+                  if (!!single_overlap)
+                  {
+                    request_mask -= single_overlap;
+                    record_relaxed_copy(request_space, single_overlap);
+                    filter_single_copies(single_overlap, single_redop_fields,
+                                         single_reduction_copies, request_space,
+                                         pending_request, pending_updates,
+                                         pending_invalidates,
+                                         true/*needs updates*/);
+                  }
                 }
-                FieldMask single_overlap = request_mask & single_redop_fields;
-                if (!!single_overlap)
+                else
                 {
-                  request_mask -= single_overlap;
-                  update_single_copies(single_overlap, request_space,
-                                       pending_request, pending_updates,
-                                       pending_invalidates,
-                                       true/*needs updates*/,
-                                       single_redop_fields,
-                                       single_reduction_copies);
+                  // If we have reductions, then we need to go to 
+                  // single reduce mode until someone actually goes
+                  // ahead and applies the reductions
+                  FieldMask multi_overlap = request_mask & multi_redop_fields;
+                  if (!!multi_overlap)
+                  {
+                    record_single_reduce(request_space, multi_overlap, 
+                                         0/*redop already recorded*/); 
+                    request_mask -= multi_overlap;
+                    filter_multi_copies(multi_overlap, multi_redop_fields,
+                                        multi_reduction_copies, request_space,
+                                        pending_request, pending_updates,
+                                        pending_invalidates,
+                                        true/*needs updates*/,
+                                        true/*updates from all*/);
+                  }
+                  FieldMask single_overlap = request_mask & single_redop_fields;
+                  if (!!single_overlap)
+                  {
+                    request_mask -= single_overlap;
+                    update_single_copies(single_overlap, request_space,
+                                         pending_request, pending_updates,
+                                         pending_invalidates,
+                                         true/*needs updates*/,
+                                         single_redop_fields,
+                                         single_reduction_copies);
+                  }
                 }
               }
               else
@@ -4679,7 +4706,10 @@ namespace Legion {
                 // If we're discarding then we can just filter these
                 // things out and go to exclusive mode
                 filter_redop_modes(redop_overlap);
-                record_exclusive_copy(request_space, redop_overlap);
+                if (runtime_relaxed)
+                  record_relaxed_copy(request_space, redop_overlap);
+                else
+                  record_exclusive_copy(request_space, redop_overlap);
                 request_mask -= redop_overlap;
                 // These next two methods will remove fields from the 
                 // 'redop_overlap' mask so we do them last
@@ -5381,15 +5411,28 @@ namespace Legion {
         AutoLock eq(eq_lock);
         return record_reduction_application(reduced_mask, false/*needs lock*/);
       }
-#ifdef DEBUG_LEGION
-      // We should be in single redop mode for all these fields
-      // if we're applying the reduction for it
-      assert(!(reduced_mask - single_redop_fields));
-#endif
       // All of these fields are going from single reduce mode to exclusive mode
-      single_redop_fields -= reduced_mask;
-      filter_redop_modes(reduced_mask);
-      exclusive_fields |= reduced_mask;
+      // (unless they are in relaxed mode in which case we stay in relaxed mode) 
+      if (relaxed_fields * reduced_mask)
+      {
+#ifdef DEBUG_LEGION
+        // We should be in single redop mode for all these fields
+        // if we're applying the reduction for it
+        assert(!(reduced_mask - single_redop_fields));
+#endif
+        single_redop_fields -= reduced_mask;
+        filter_redop_modes(reduced_mask);
+        exclusive_fields |= reduced_mask;
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        // Should all be in relaxed mode
+        assert(!(reduced_mask - relaxed_fields));
+#endif
+        // No need to tell anyone about applied reductions from relaxed mode
+        return RtEvent::NO_RT_EVENT;
+      }
       if (is_logical_owner())
       {
         // Move the fields to the exclusive mode and record that 
