@@ -9977,6 +9977,9 @@ namespace Legion {
                                                  false/*check privileges*/);
 #endif
       map_op->initialize_replication(this, inline_mapping_barrier);
+      // Advance this barrier twice since we know that the inline mapping
+      // operations are going to use two different generations
+      Runtime::advance_barrier(inline_mapping_barrier);
       Runtime::advance_barrier(inline_mapping_barrier);
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
@@ -10022,6 +10025,9 @@ namespace Legion {
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
       map_op->initialize_replication(this, inline_mapping_barrier);
+      // Advance this barrier twice since we know that the inline mapping
+      // operations are going to use two different generations
+      Runtime::advance_barrier(inline_mapping_barrier);
       Runtime::advance_barrier(inline_mapping_barrier);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_completion_event();

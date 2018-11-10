@@ -2161,12 +2161,12 @@ namespace Legion {
         if (!local_applied.empty())
         {
           RtEvent wait_on = Runtime::merge_events(local_applied);
-          Runtime::phase_barrier_arrive(*sync_add_users, 0/*count*/, wait_on);
+          Runtime::phase_barrier_arrive(*sync_add_users, 1/*count*/, wait_on);
           // We can clear this since we're about to wait on it implicitly
           local_applied.clear();
         }
         else
-          Runtime::phase_barrier_arrive(*sync_add_users, 0/*count*/);
+          Runtime::phase_barrier_arrive(*sync_add_users, 1/*count*/);
         // Wait for everyone else to finish their registration too
         sync_add_users->wait();
       }

@@ -690,8 +690,6 @@ namespace Legion {
     public:
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_ready(void);
-      virtual RtEvent perform_mapping(MustEpochOp *owner = NULL,
-                                      bool first_invocation = true);
     public:
       // Override these so we can broadcast the future result
       virtual void handle_future(const void *res, size_t res_size, bool owned);

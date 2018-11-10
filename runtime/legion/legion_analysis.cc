@@ -4488,6 +4488,16 @@ namespace Legion {
                   request_mask -= (redop_finder->second & redop_mask);
               }
             }
+            else if (runtime_relaxed && !IS_READ_ONLY(usage))
+            {
+              if (!(request_mask * relaxed_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                  finder = shared_copies.find(logical_owner_space);
+                if (finder != shared_copies.end())
+                  request_mask -= finder->second & relaxed_fields;
+              }
+            }
             else 
             {
               // Check to see if we have it in exclusive mode
@@ -4517,13 +4527,12 @@ namespace Legion {
               }
               // Read-only can also be in shared mode
               // Relaxed can also be in relaxed mode
-              if ((IS_READ_ONLY(usage) && !(request_mask * shared_fields)) ||
-                  (runtime_relaxed && !(request_mask * relaxed_fields)))
+              if (IS_READ_ONLY(usage) && !(request_mask * shared_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
                   finder = shared_copies.find(logical_owner_space);
                 if (finder != shared_copies.end())
-                  request_mask -= finder->second;
+                  request_mask -= finder->second & shared_fields;
               }
             }
             if (!!request_mask)
@@ -4631,6 +4640,13 @@ namespace Legion {
             {
               if (needs_updates)
               {
+                // TODO: Reduction applications have to be applied by
+                // only one operation, but runtime_relaxed requires
+                // that there be multiple operations mapping concurrently
+                // For now we'll at least hit this assertion so we 
+                // don't end up hanging
+                if (runtime_relaxed)
+                  assert(false);
                 // If we have reductions, then we need to go to 
                 // single reduce mode until someone actually goes
                 // ahead and applies the reductions
@@ -4696,7 +4712,6 @@ namespace Legion {
                   {
                     shared_fields |= relaxed_mask;
                     relaxed_fields -= relaxed_mask;
-                    request_mask -= relaxed_mask;
                   }
                 }
                 // Upgrade exclusive to shared
@@ -4710,18 +4725,52 @@ namespace Legion {
               }
               else if (runtime_relaxed)
               {
+                // Make a copy of this before doing the invalidations
+                // we can't record it yet because we need to clean out
+                // the shared_copies data structure first
+                const FieldMask relaxed_mask = request_mask;
                 // Invalidate any shared
                 filter_multi_copies(request_mask, shared_fields, shared_copies,
                                     request_space, pending_request,
                                     pending_updates, pending_invalidates,
                                     needs_updates, false/*updates from all*/);
-                // Invalidate any exclusive
+                // Invalidate any exclusive copies
                 filter_single_copies(request_mask, exclusive_fields,
                                      exclusive_copies, request_space,
                                      pending_request, pending_updates,
                                      pending_invalidates, needs_updates);
+                // If we still have fields that need updates then we need to
+                // request that update now from the set of shared copies
                 if (!!request_mask)
-                  record_relaxed_copy(request_space, request_mask);
+                {
+#ifdef DEBUG_LEGION
+                  assert(!(request_mask - relaxed_fields));
+#endif
+                  LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
+                    finder = shared_copies.find(request_space);
+                  if (finder != shared_copies.end())
+                    request_mask -= finder->second;
+                  if (!!request_mask)
+                  {
+                    for (LegionMap<AddressSpaceID,FieldMask>::aligned::
+                          const_iterator it = shared_copies.begin(); it !=
+                          shared_copies.end(); it++)
+                    {
+                      const FieldMask overlap = it->second & request_mask;
+                      if (!overlap)
+                        continue;
+                      request_update(it->first, request_space, overlap,
+                                     pending_request, pending_updates,
+                                     false/*invalidate*/);
+                      request_mask -= overlap;
+                      if (!request_mask)
+                        break;
+                    }
+                  }
+                }
+                // Now we can record ourselves as a relaxed copy
+                if (!!relaxed_mask)
+                  record_relaxed_copy(request_space, relaxed_mask);
               }
               else
               {
@@ -4734,6 +4783,15 @@ namespace Legion {
                                     pending_updates, pending_invalidates,
                                     needs_updates, true/*updates from all*/);
                   record_exclusive_copy(request_space, shared_overlap);
+                }
+                const FieldMask relaxed_overlap = relaxed_fields & request_mask;
+                if (!!relaxed_overlap)
+                {
+                  filter_multi_copies(request_mask,relaxed_fields,shared_copies,
+                                    request_space, pending_request, 
+                                    pending_updates, pending_invalidates,
+                                    needs_updates, false/*updates from all*/);
+                  record_exclusive_copy(request_space, relaxed_overlap);
                 }
                 if (!!request_mask)
                   update_single_copies(request_mask, request_space,
@@ -5251,6 +5309,7 @@ namespace Legion {
           {
             exclusive_fields -= update_mask;
             shared_fields -= update_mask;
+            relaxed_fields -= update_mask;
             if (!!single_redop_fields || !!multi_redop_fields)
             {
               const FieldMask redop_overlap = update_mask &
@@ -5913,6 +5972,7 @@ namespace Legion {
         {
           exclusive_fields -= invalidate_mask;
           shared_fields -= invalidate_mask;
+          relaxed_fields -= invalidate_mask;
           if (!!single_redop_fields || !!multi_redop_fields)
           {
             const FieldMask redop_overlap = invalidate_mask &

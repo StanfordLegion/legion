@@ -366,42 +366,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent ReplIndividualTask::perform_mapping(
-                                         MustEpochOp *must_epoch_owner/*=NULL*/,
-                                         bool first_invocation)
-    //--------------------------------------------------------------------------
-    {
-      // If we're part of a must epoch operation see if we're the owner
-      // and if not then just do the normal broadcast receive
-      if (must_epoch_owner != NULL)
-      {
-#ifdef DEBUG_LEGION
-        assert(sharding_function != NULL);
-        ReplicateContext *repl_ctx = 
-          dynamic_cast<ReplicateContext*>(parent_ctx);
-        assert(repl_ctx != NULL);
-        ReplMustEpochOp *repl_epoch_owner = 
-          dynamic_cast<ReplMustEpochOp*>(must_epoch_owner);
-        assert(repl_epoch_owner != NULL);
-#else
-        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
-        ReplMustEpochOp *repl_epoch_owner = 
-          static_cast<ReplMustEpochOp*>(must_epoch_owner);
-#endif
-        owner_shard = sharding_function->find_owner(index_point, 
-                            repl_epoch_owner->get_shard_domain());
-        if (owner_shard != repl_ctx->owner_shard->shard_id)
-        {
-          complete_mapping();
-          complete_execution();
-          return RtEvent::NO_RT_EVENT;
-        }
-      }
-      // Then we can do the same thing that the base tasks do
-      return IndividualTask::perform_mapping(must_epoch_owner,first_invocation);
-    }
-
-    //--------------------------------------------------------------------------
     void ReplIndividualTask::handle_future(const void *res, 
                                            size_t res_size, bool owned)
     //--------------------------------------------------------------------------
@@ -2816,7 +2780,6 @@ namespace Legion {
       // computed on the individual tasks while we are mapping them
       for (unsigned idx = 0; idx < single_tasks.size(); idx++)
       {
-        bool own_point = true;
         // Check to see if it is one of the ones that we own
         if (shard_single_tasks.find(single_tasks[idx]) == 
             shard_single_tasks.end())
@@ -2826,17 +2789,12 @@ namespace Legion {
           // to exchange versioning information, but no such 
           // work is necessary for point tasks
           SingleTask *task = single_tasks[idx];
-          if (dynamic_cast<ReplIndividualTask*>(single_tasks[idx]) == NULL)
-          {
-            // Do the stuff to record that this is mapped and executed
-            task->complete_mapping(mapped_events[task->index_point]);
-            task->complete_execution();
-            task->trigger_children_complete();
-            task->trigger_children_committed();
-            continue;
-          }
-          else // We're going to fall through, but we don't own this point
-            own_point = false;
+          // Do the stuff to record that this is mapped and executed
+          task->complete_mapping(mapped_events[task->index_point]);
+          task->complete_execution();
+          task->trigger_children_complete();
+          task->trigger_children_committed();
+          continue;
         }
         // Figure out our preconditions
         std::set<RtEvent> preconditions;
@@ -2861,12 +2819,9 @@ namespace Legion {
           done = runtime->issue_runtime_meta_task(args, 
                       LG_THROUGHPUT_DEFERRED_PRIORITY);
         local_mapped_events.insert(done);
-        if (own_point)
-        {
-          // We can trigger our completion event once the task is done
-          RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
-          Runtime::trigger_event(mapped, done);
-        }
+        // We can trigger our completion event once the task is done
+        RtUserEvent mapped = mapped_events[single_tasks[idx]->index_point];
+        Runtime::trigger_event(mapped, done);
       }
       // Now we have to wait for all our mapping operations to be done
       if (!local_mapped_events.empty())
@@ -3429,6 +3384,9 @@ namespace Legion {
     void ReplMapOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(inline_barrier.exists());
+#endif
       // Compute the version numbers for this mapping operation
       std::set<RtEvent> preconditions;
       // This is one of the few kinds of control replicated operations
@@ -3442,10 +3400,16 @@ namespace Legion {
                                                    false/*defer make ready*/,
                                                    NULL/*defer mask*/,
                                                    true/*runtime relaxed*/);
+      // Make sure everyone has a copy of their equivalence set before
+      // we continue any farther, this is the first use of the inline barrier
       if (!preconditions.empty())
-        enqueue_ready_operation(Runtime::merge_events(preconditions));
+        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,
+                                      Runtime::merge_events(preconditions));
       else
-        enqueue_ready_operation();
+        Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
+      const RtEvent ready = inline_barrier;
+      Runtime::advance_barrier(inline_barrier);
+      enqueue_ready_operation(ready);
     }
 
     //--------------------------------------------------------------------------

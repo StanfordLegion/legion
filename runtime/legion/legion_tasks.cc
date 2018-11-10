@@ -6287,6 +6287,10 @@ namespace Legion {
       DerezCheck z(derez);
       unpack_single_task(derez, ready_events);
       derez.deserialize(point_termination);
+#ifdef DEBUG_LEGION
+      assert(!deferred_effects.exists());
+#endif
+      derez.deserialize(deferred_effects);
       set_current_proc(current);
       // Get the context information from our slice owner
       parent_ctx = slice_owner->get_context();
