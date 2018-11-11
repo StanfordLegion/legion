@@ -13829,6 +13829,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DetachOp::select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: invoke the mapper
+    }
+
+    //--------------------------------------------------------------------------
     void DetachOp::compute_parent_index(void)
     //--------------------------------------------------------------------------
     {

@@ -2765,6 +2765,9 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_complete(void);
       virtual void trigger_commit(void);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     protected:
       void compute_parent_index(void);
     public:
