@@ -2623,7 +2623,8 @@ namespace Legion {
                                           unsigned index,
                                           VersionInfo &version_info,
                                           const InstanceRef &ext_instance,
-                                          const PhysicalTraceInfo &trace_info)
+                                          const PhysicalTraceInfo &trace_info,
+                                          const bool register_user /*=true*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -2648,10 +2649,12 @@ namespace Legion {
       const ApEvent term_event = detach_op->get_completion_event();
       std::set<RtEvent> &applied_events = version_info.get_applied_events();
       const RegionUsage usage(req);
-      ApEvent done = external_views[0]->register_user(usage, ext_mask, expr,
-                                                      op_id, index, term_event,
-                                                      applied_events, 
-                                                      trace_info);
+      ApEvent done;
+      if (register_user)
+        done = external_views[0]->register_user(usage, ext_mask, expr,
+                                                op_id, index, term_event,
+                                                applied_events, 
+                                                trace_info);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->filter_set(detach_op, external_views[0], ext_mask, 

@@ -417,7 +417,8 @@ namespace Legion {
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               const InstanceRef &ref,
-                              const PhysicalTraceInfo &trace_info); 
+                              const PhysicalTraceInfo &trace_info,
+                              const bool register_user = true); 
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,

@@ -3884,6 +3884,24 @@ namespace Legion {
         managers[man] = ready;
       }
       std::set<ApEvent> detach_events;
+      if (flush)
+      {
+        requirement.privilege = READ_ONLY;
+        ApEvent effects_done = 
+          runtime->forest->physical_register_only(requirement, version_info,
+                                                  this, 0/*idx*/, 
+                                                  ApEvent::NO_AP_EVENT, 
+                                                  ApEvent::NO_AP_EVENT,
+                                                  references, trace_info,
+#ifdef DEBUG_LEGION
+                                                  get_logging_name(),
+                                                  unique_op_id,
+#endif
+                                                  false/*check initialized*/);
+        if (effects_done.exists())
+          detach_events.insert(effects_done);
+        requirement.privilege = READ_WRITE;
+      }
       const FieldMask &valid_fields = reference.get_valid_fields();
       for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
             managers.begin(); it != managers.end(); it++)
@@ -3891,9 +3909,11 @@ namespace Legion {
         if (it->second.exists() && !it->second.has_triggered())
           it->second.wait();
         const InstanceRef ref(it->first, valid_fields);
+        // We only need to register our user if it is our manager
         const ApEvent detach_event = 
           runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                                           version_info, ref, trace_info);
+                                           version_info, ref, trace_info,
+                                           (it->first == manager));
         if (detach_event.exists())
           detach_events.insert(detach_event);
       }
