@@ -32,6 +32,7 @@ local parallel_task_context = {}
 local parallel_param = {}
 local caller_context = {}
 local global_context = {}
+local synthesis_context = {}
 
 local check_parallelizable = {}
 local normalize_accesses = {}
@@ -732,7 +733,7 @@ end
 
 parallel_task_context.__index = parallel_task_context
 
-function parallel_task_context.new_task_scope(params)
+function parallel_task_context.new()
   --local region_params = {}
   --local region_param_map = {}
   --local region_param_indices = terralib.newlist()
@@ -778,6 +779,40 @@ function parallel_task_context.new_task_scope(params)
   --cx.ghost_symbols = {}
   --cx.use_primary = {}
   return setmetatable(cx, parallel_task_context)
+end
+
+function parallel_task_context:print_constraints(range, pad)
+  local constraints = self.image_constraints[range]
+  if not constraints then return end
+
+  for field_path, dummy_symbol in constraints:items() do
+    print(pad .. tostring(range) .. "." .. field_path:mkstring("", ".", "") .. " = " .. tostring(dummy_symbol))
+  end
+
+  for field_path, dummy_symbol in constraints:items() do
+    if self.image_region_map[dummy_symbol] then
+      for region, image in self.image_region_map[dummy_symbol]:items() do
+        print(pad .. tostring(dummy_symbol) .. " <= " .. tostring(region) .. ".ispace")
+      end
+    end
+  end
+
+  for field_path, dummy_symbol in constraints:items() do
+    if self.image_region_map[dummy_symbol] then
+      for region, image in self.image_region_map[dummy_symbol]:items() do
+        self:print_constraints(image, pad .. "    ")
+      end
+    end
+  end
+end
+
+function parallel_task_context:print_all_constraints()
+  print("================")
+  for region, _ in pairs(self.image_constraints) do
+    print("= constraints of " .. region:getname() .. ":")
+    self:print_constraints(region, "")
+  end
+  print("================")
 end
 
 function parallel_task_context:add_field_access(region_symbol, field_path, privilege)
@@ -1329,6 +1364,15 @@ local function check_normalized_stat_assignment(node, continuation)
   if std.is_index_type(std.as_read(node.lhs.expr_type)) then
     node.lhs:printpretty(true)
     assert(false, "Normalization error: an index variable is redefined")
+  elseif std.is_ref(node.lhs.expr_type) then
+    local value = node.lhs
+    while value:is(ast.typed.expr.FieldAccess) do
+      value = value.value
+    end
+    if not value:is(ast.typed.expr.IndexAccess) then
+      node:printpretty(true)
+      assert(false, "Normalization error: an index access is expected")
+    end
   end
   continuation(node.rhs, true)
 end
@@ -2355,72 +2399,282 @@ local function transform_task_launches(parallelizable, caller_cx, call_stats)
   end
 end
 
+synthesis_context.__index = synthesis_context
+
+function synthesis_context.new()
+  local cx = {
+    global_independent_regions = terralib.newlist(),
+    global_independent_region_set = {},
+    global_context = parallel_task_context.new(),
+    local_image_to_global_image = {},
+
+    global_partitions = terralib.newlist(),
+    global_region_symbol_to_partition = {},
+  }
+  return setmetatable(cx, synthesis_context)
+end
+
+function synthesis_context:join_field_accesses(task_cx, param, arg)
+  if task_cx.field_accesses[param] then
+    for field_path, privilege in task_cx.field_accesses[param]:items() do
+      self.global_context:add_field_access(arg, field_path, privilege)
+    end
+  end
+end
+
+function synthesis_context:add_independent_region(region)
+  if not self.global_independent_region_set[region] then
+    self.global_independent_region_set[region] = true
+    self.global_independent_regions:insert(region)
+  end
+end
+
+function synthesis_context:join_image_constraints(task_cx, param_to_arg, param, arg)
+  if task_cx.image_constraints[param] then
+    local constraints = task_cx.image_constraints[param]
+    for field_path, dummy_symbol in constraints:items() do
+      local global_dummy_symbol =
+        self.global_context:reserve_image_symbol(arg, field_path)
+
+      local image_regions = task_cx.image_region_map[dummy_symbol]
+      for orig_region, image_region in image_regions:items() do
+        local orig_region_caller = param_to_arg[orig_region]
+        local global_image_region =
+          self.global_context:create_image_region(orig_region_caller, global_dummy_symbol)
+        self.local_image_to_global_image[image_region] = global_image_region
+        self:join_field_accesses(task_cx, image_region, global_image_region)
+        self:join_image_constraints(task_cx, param_to_arg, image_region, global_image_region)
+      end
+    end
+  end
+end
+
+function synthesis_context:print_all_constraints()
+  print("================")
+  self.global_independent_regions:map(function(region)
+    print("= constraints of " .. region:getname() .. ":")
+    self.global_context:print_constraints(region, "")
+  end)
+  print("================")
+end
+
+function synthesis_context:add_global_partition(region, partition)
+  self.global_partitions:insert(partition)
+  self.global_region_symbol_to_partition[region] = partition
+end
+
+function synthesis_context:synthesize_image_partitions(
+    base_region, base_partition, color_space_expr, stats)
+  -- base_region is a placeholder for looking up constraints.
+  -- We cannot use it in the actual partitioning call.
+  local constraints = self.global_context.image_constraints[base_region]
+  if not constraints then return end
+
+  local parent_region = base_partition:gettype().parent_region_symbol
+  local parent_region_expr =
+    ast_util.mk_expr_id(parent_region, std.rawref(&parent_region:gettype()))
+  local base_partition_expr =
+    ast_util.mk_expr_id(base_partition, std.rawref(&base_partition:gettype()))
+  for field_path, dummy_symbol in constraints:items() do
+    local image_regions = self.global_context.image_region_map[dummy_symbol]
+    if image_regions then
+      for orig_region, image_region in image_regions:items() do
+        local partition_type =
+          std.partition(std.aliased, orig_region, color_space_expr.value)
+        local partition_symbol =
+          get_new_tmp_var(partition_type, "img_" .. image_region:getname())
+
+        stats:insert(ast_util.mk_stat_var(partition_symbol, nil,
+          ast.typed.expr.Image {
+            expr_type = partition_type,
+            parent = ast_util.mk_expr_id(orig_region, std.rawref(&orig_region:gettype())),
+            partition = base_partition_expr,
+            region = ast.typed.expr.RegionRoot {
+              expr_type = parent_region:gettype(),
+              region = parent_region_expr,
+              fields = terralib.newlist {field_path},
+              span = color_space_expr.span,
+              annotations = ast.default_annotations(),
+            },
+            span = color_space_expr.span,
+            annotations = ast.default_annotations(),
+          }))
+
+        self:synthesize_image_partitions(
+                 image_region, partition_symbol, color_space_expr, stats)
+      end
+    end
+  end
+end
+
+function synthesis_context:synthesize_all_partitions(color_space_expr, stats)
+  self.global_independent_regions:map(function(region)
+    local partition_type = std.partition(std.disjoint, region, color_space_expr.value)
+    local partition_symbol = get_new_tmp_var(partition_type, "equal_" .. region:getname())
+    stats:insert(ast_util.mk_stat_var(
+      partition_symbol, nil,
+      ast_util.mk_expr_partition_equal(partition_type, color_space_expr)))
+    self:add_global_partition(region, partition_symbol)
+    self:synthesize_image_partitions(region, partition_symbol, color_space_expr, stats)
+  end)
+end
+
+function parallelize_task_calls.stat_parallelize_with(global_cx, node)
+  local block = node.block
+
+  -- We require the scope to be annotated with at least one color space
+  -- TODO: We must do this check during type checking
+  local color_space_expr = nil
+  for idx = 1, #node.hints do
+    local hint = node.hints[idx]
+    if hint:is(ast.typed.expr.ID) and std.is_ispace(std.as_read(hint.expr_type)) then
+      color_space_expr = hint
+    end
+  end
+  assert(color_space_expr ~= nil)
+
+  -- TODO: Task calls nested in expressions will be ignored for now.
+  --       We need a compiler-wide normalization pass for simplifying
+  --       case analyses in optimization passes.
+  local synthesis_cx = synthesis_context.new()
+
+  ast.map_node_continuation(
+    function(node, continuation)
+      if node:is(ast.typed.stat.Expr) and node.expr:is(ast.typed.expr.Call) and
+         global_cx[node.expr.fn.value]
+      then
+        local function is_region_symbol(symbol)
+          return std.is_region(symbol:gettype())
+        end
+        local callee_task = node.expr.fn.value
+        local param_symbols = callee_task:get_param_symbols()
+        local region_param_symbols = data.filter(is_region_symbol, param_symbols)
+        local region_param_symbol_i = data.filteri(is_region_symbol, param_symbols)
+        local region_arg_symbols = region_param_symbol_i:map(function(i)
+          assert(node.expr.args[i]:is(ast.typed.expr.ID) and
+                 std.is_region(std.as_read(node.expr.args[i].expr_type)))
+          return node.expr.args[i].value
+        end)
+
+        local task_cx = global_cx[callee_task].cx
+        local param_to_arg = {}
+        for idx = 1, #region_param_symbol_i do
+          param_to_arg[region_param_symbols[idx]] = region_arg_symbols[idx]
+        end
+
+        region_param_symbols:map(function(region_param)
+          local region_arg = param_to_arg[region_param]
+          synthesis_cx:join_field_accesses(task_cx, region_param, region_arg)
+          synthesis_cx:add_independent_region(region_arg)
+          synthesis_cx:join_image_constraints(task_cx, param_to_arg, region_param, region_arg)
+        end)
+
+        --local parallel_task = global_cx[callee_task].task
+        --parallel_task:get_param_symbols():map(function(image)
+        --  if synthesis_cx.local_image_to_global_image[image] then
+        --    print(tostring(image) .. " ---> " .. tostring(synthesis_cx.local_image_to_global_image[image]))
+        --  end
+        --end)
+
+        return node
+      else
+        return continuation(node, true)
+      end
+    end, block)
+
+  local stats = terralib.newlist()
+  synthesis_cx:synthesize_all_partitions(color_space_expr, stats)
+  stats:insert(ast.typed.stat.Block {
+    block = block,
+    span = node.span,
+    annotations = node.annotations,
+  })
+
+  return ast.typed.stat.Block {
+    block = ast.typed.Block {
+      stats = stats,
+      span = node.span,
+    },
+    span = node.span,
+    annotations = node.annotations,
+  }
+end
+
 function parallelize_task_calls.top_task(global_cx, node)
-  local function parallelizable(node)
-    if not node then return false
-    elseif not node:is(ast.typed.expr.Call) then return false end
-    local fn = node.fn.value
-    return not node.annotations.parallel:is(ast.annotation.Forbid) and
-           std.is_task(fn) and global_cx[fn]
-  end
+  return ast.map_node_continuation(
+    function(node, continuation)
+      if node:is(ast.typed.stat.ParallelizeWith) then
+        return parallelize_task_calls.stat_parallelize_with(global_cx, node)
+      else
+        return continuation(node, true)
+      end
+    end, node)
 
-  -- Return if there is no parallelizable task call
-  local found_calls = false
-  local found_hints = false
-  ast.traverse_node_continuation(function(node, continuation)
-    if parallelizable(node) then
-      found_calls = true
-    elseif node:is(ast.typed.stat.ParallelizeWith) then
-      found_hints = true
-    end
-    continuation(node, true)
-  end, node)
-  if not found_calls then
-    if not found_hints then return node
-    else
-      return ast.map_node_continuation(function(node, continuation)
-        if node:is(ast.typed.stat.ParallelizeWith) then
-          return ast.typed.stat.Block {
-            block = node.block,
-            span = node.span,
-            annotations = node.annotations,
-          }
-        else return continuation(node, true) end
-      end, node)
-    end
-  end
+  --local function parallelizable(node)
+  --  if not node then return false
+  --  elseif not node:is(ast.typed.expr.Call) then return false end
+  --  local fn = node.fn.value
+  --  return not node.annotations.parallel:is(ast.annotation.Forbid) and
+  --         std.is_task(fn) and global_cx[fn]
+  --end
 
-  -- Add declartions for the variables that contain region metadata (e.g. bounds)
-  local caller_cx = caller_context.new(node.prototype:get_constraints())
-  local body =
-    ast.flatmap_node_continuation(
-      add_metadata_declarations(caller_cx), node.body)
+  ---- Return if there is no parallelizable task call
+  --local found_calls = false
+  --local found_hints = false
+  --ast.traverse_node_continuation(function(node, continuation)
+  --  if parallelizable(node) then
+  --    found_calls = true
+  --  elseif node:is(ast.typed.stat.ParallelizeWith) then
+  --    found_hints = true
+  --  end
+  --  continuation(node, true)
+  --end, node)
+  --if not found_calls then
+  --  if not found_hints then return node
+  --  else
+  --    return ast.map_node_continuation(function(node, continuation)
+  --      if node:is(ast.typed.stat.ParallelizeWith) then
+  --        return ast.typed.stat.Block {
+  --          block = node.block,
+  --          span = node.span,
+  --          annotations = node.annotations,
+  --        }
+  --      else return continuation(node, true) end
+  --    end, node)
+  --  end
+  --end
 
-  -- First, normalize all task calls so that task calls are either
-  -- their own statements or single variable declarations.
-  local call_stats = {}
-  local normalized =
-    ast.flatmap_node_continuation(
-      normalize_calls(parallelizable, call_stats), body)
+  ---- Add declartions for the variables that contain region metadata (e.g. bounds)
+  --local caller_cx = caller_context.new(node.prototype:get_constraints())
+  --local body =
+  --  ast.flatmap_node_continuation(
+  --    add_metadata_declarations(caller_cx), node.body)
 
-  -- Second, group task calls by reaching region declarations
-  ast.traverse_node_continuation(
-    collect_calls(caller_cx, parallelizable),
-    normalized)
+  ---- First, normalize all task calls so that task calls are either
+  ---- their own statements or single variable declarations.
+  --local call_stats = {}
+  --local normalized =
+  --  ast.flatmap_node_continuation(
+  --    normalize_calls(parallelizable, call_stats), body)
 
-  -- Third, insert partition creation code when necessary
-  local partition_created =
-    ast.flatmap_node_continuation(
-      insert_partition_creation(parallelizable, caller_cx, call_stats),
-      normalized)
+  ---- Second, group task calls by reaching region declarations
+  --ast.traverse_node_continuation(
+  --  collect_calls(caller_cx, parallelizable),
+  --  normalized)
 
-  -- Finally, replace single task launches into indexspace launches
-  local parallelized =
-    ast.flatmap_node_continuation(
-      transform_task_launches(parallelizable, caller_cx, call_stats),
-      partition_created)
+  ---- Third, insert partition creation code when necessary
+  --local partition_created =
+  --  ast.flatmap_node_continuation(
+  --    insert_partition_creation(parallelizable, caller_cx, call_stats),
+  --    normalized)
 
-  return node { body = parallelized }
+  ---- Finally, replace single task launches into indexspace launches
+  --local parallelized =
+  --  ast.flatmap_node_continuation(
+  --    transform_task_launches(parallelizable, caller_cx, call_stats),
+  --    partition_created)
+
+  --return node { body = parallelized }
 end
 
 -- #####################################
@@ -3489,8 +3743,10 @@ end
 
 function parallelize_tasks.top_task(global_cx, node)
   -- Analyze loops in the task
-  local task_cx = parallel_task_context.new_task_scope(node.params)
+  local task_cx = parallel_task_context.new()
   local body = infer_constraints.top_task_body(task_cx, node.body)
+
+  --task_cx:print_all_constraints()
 
   local task_name = node.name .. data.newtuple("parallelized")
   local task = std.new_task(task_name)
@@ -3596,16 +3852,7 @@ function parallelize_tasks.entry(node)
       global_context[node.prototype] = info
       return node
     else
-      --return parallelize_task_calls.top_task(global_context, node)
-      return ast.map_node_continuation(function(node, continuation)
-        if node:is(ast.typed.stat.ParallelizeWith) then
-          return ast.typed.stat.Block {
-            block = node.block,
-            span = node.span,
-            annotations = node.annotations,
-          }
-        else return continuation(node, true) end
-      end, node)
+      return parallelize_task_calls.top_task(global_context, node)
     end
   else
     return node
