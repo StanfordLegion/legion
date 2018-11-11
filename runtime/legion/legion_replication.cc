@@ -3793,7 +3793,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(resource_bar.exists());
-      assert(value_exchange = NULL);
+      assert(value_exchange == NULL);
 #endif
       resource_barrier = resource_bar;
       value_exchange = new ValueExchange<DistributedID>(COLLECTIVE_LOC_75, ctx);
