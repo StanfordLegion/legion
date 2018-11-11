@@ -145,35 +145,35 @@ void top_level_task(const Task *task,
   read_launcher.add_region_requirement(
       RegionRequirement(input_lr, READ_ONLY, EXCLUSIVE, input_lr));
   read_launcher.add_field(0/*idx*/, FID_X);
-  Future fx = runtime->execute_task(ctx, read_launcher);
+  runtime->execute_task(ctx, read_launcher);
   
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_Y);
-  Future fy = runtime->execute_task(ctx, read_launcher);
+  runtime->execute_task(ctx, read_launcher);
   
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_A);
-  Future fa = runtime->execute_task(ctx, read_launcher);
+  runtime->execute_task(ctx, read_launcher);
 
   read_launcher.region_requirements[0].privilege_fields.clear();
   read_launcher.region_requirements[0].instance_fields.clear();
   read_launcher.add_field(0/*idx*/, FID_B);
-  Future fb = runtime->execute_task(ctx, read_launcher);
+  runtime->execute_task(ctx, read_launcher);
   
+  Future fx = runtime->detach_external_resource(ctx, pr_x);
+  Future fy = runtime->detach_external_resource(ctx, pr_y);
+  Future fa = runtime->detach_external_resource(ctx, pr_a);
+  Future fb = runtime->detach_external_resource(ctx, pr_b);
+  runtime->destroy_logical_region(ctx, input_lr);
+  runtime->destroy_field_space(ctx, input_fs);
+  runtime->destroy_index_space(ctx, is);
+  // Wait for the futures to be ready before we can free the memory
   fx.wait();
   fy.wait();
   fa.wait();
   fb.wait();
-
-  runtime->detach_external_resource(ctx, pr_x);
-  runtime->detach_external_resource(ctx, pr_y);
-  runtime->detach_external_resource(ctx, pr_a);
-  runtime->detach_external_resource(ctx, pr_b);
-  runtime->destroy_logical_region(ctx, input_lr);
-  runtime->destroy_field_space(ctx, input_fs);
-  runtime->destroy_index_space(ctx, is);
   free(xy_ptr);
   free(a_ptr);
   free(b_ptr);
