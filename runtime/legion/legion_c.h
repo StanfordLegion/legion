@@ -3093,8 +3093,8 @@ extern "C" {
    * @see Legion::Runtime::AttachLauncher::AttachLauncher()
    */
   void
-  legion_attach_launcher_restricted(legion_attach_launcher_t handle,
-                                    bool restricted);
+  legion_attach_launcher_set_restricted(legion_attach_launcher_t handle,
+                                        bool restricted);
 
   /**
    * @param handle Caller must have ownership of parameter `handle`.
