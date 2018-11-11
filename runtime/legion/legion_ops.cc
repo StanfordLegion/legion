@@ -13679,6 +13679,8 @@ namespace Legion {
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
           Runtime::merge_events(&trace_info, detach_event, effects_done);
+      else if (effects_done.exists())
+        detach_event = effects_done;
       version_info.finalize_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
@@ -13689,7 +13691,6 @@ namespace Legion {
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
-
       request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
