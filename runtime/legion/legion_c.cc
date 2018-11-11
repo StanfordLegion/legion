@@ -3670,8 +3670,8 @@ legion_attach_launcher_create(legion_logical_region_t logical_region_,
 }
 
 void 
-legion_attach_launcher_restricted(legion_attach_launcher_t handle_,
-                                  bool restricted)
+legion_attach_launcher_set_restricted(legion_attach_launcher_t handle_,
+                                      bool restricted)
 {
   AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
 
