@@ -3946,13 +3946,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Pick any instances other than external ones
+      std::vector<unsigned> remote_ranking;
       for (unsigned idx = 0; idx < sources.size(); idx++)
       {
         const InstanceRef &ref = sources[idx];
-        if (ref.get_manager()->is_external_instance())
+        PhysicalManager *manager = ref.get_manager();
+        if (manager->is_external_instance())
           continue;
-        ranking.push_back(idx);
+        if (manager->owner_space == runtime->address_space)
+          ranking.push_back(idx);
+        else
+          remote_ranking.push_back(idx);
       }
+      if (!remote_ranking.empty())
+        ranking.insert(ranking.end(), 
+                       remote_ranking.begin(), remote_ranking.end());
     }
 
     /////////////////////////////////////////////////////////////
