@@ -3090,6 +3090,13 @@ extern "C" {
     legion_external_resource_t resource);
 
   /**
+   * @see Legion::Runtime::AttachLauncher::AttachLauncher()
+   */
+  void
+  legion_attach_launcher_restricted(legion_attach_launcher_t handle,
+                                    bool restricted);
+
+  /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
    * @see Legion::AttachLauncher::~AttachLauncher()
@@ -3125,6 +3132,17 @@ extern "C" {
   legion_detach_external_resource(legion_runtime_t runtime,
                                   legion_context_t ctx,
                                   legion_physical_region_t handle);
+
+  /**
+   * @return Caller takes ownership of return value
+   *
+   * @see Legion::Runtime::detach_external_resource()
+   */
+  legion_future_t
+  legion_flush_detach_external_resource(legion_runtime_t runtime,
+                                        legion_context_t ctx,
+                                        legion_physical_region_t handle,
+                                        bool flush);
 
   // -----------------------------------------------------------------------
   // Must Epoch Operations
