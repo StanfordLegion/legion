@@ -733,100 +733,159 @@ end
 parallel_task_context.__index = parallel_task_context
 
 function parallel_task_context.new_task_scope(params)
-  local region_params = {}
-  local region_param_map = {}
-  local region_param_indices = terralib.newlist()
-  for idx = 1, #params do
-    if std.is_region(params[idx].param_type) then
-      local symbol = params[idx].symbol
-      local region_type = symbol:gettype()
-      local name = symbol:getname()
-      local bounds_symbol = false
-      if not region_type:is_opaque() then
-        bounds_symbol = std.newsymbol(
-          std.rect_type(region_type:ispace().index_type),
-          "__" .. name .. "_bounds")
-      end
-      region_params[idx] = {
-        region = symbol,
-        bounds = bounds_symbol,
-      }
-      region_param_map[symbol] = region_params[idx]
-      region_param_indices:insert(idx)
-    end
-  end
+  --local region_params = {}
+  --local region_param_map = {}
+  --local region_param_indices = terralib.newlist()
+  --for idx = 1, #params do
+  --  if std.is_region(params[idx].param_type) then
+  --    local symbol = params[idx].symbol
+  --    local region_type = symbol:gettype()
+  --    local name = symbol:getname()
+  --    local bounds_symbol = false
+  --    if not region_type:is_opaque() then
+  --      bounds_symbol = std.newsymbol(
+  --        std.rect_type(region_type:ispace().index_type),
+  --        "__" .. name .. "_bounds")
+  --    end
+  --    region_params[idx] = {
+  --      region = symbol,
+  --      bounds = bounds_symbol,
+  --    }
+  --    region_param_map[symbol] = region_params[idx]
+  --    region_param_indices:insert(idx)
+  --  end
+  --end
 
   local cx = {}
-  cx.region_params = region_params
-  cx.region_param_map = region_param_map
-  cx.region_param_indices = region_param_indices
-  cx.task_point_symbol = get_new_tmp_var(c.legion_domain_point_t, "__point")
-  cx.field_accesses = data.newmap()
-  cx.field_access_stats = {}
-  cx.stencils = terralib.newlist()
-  cx.ghost_symbols = {}
-  cx.use_primary = {}
+  -- List of region symbols for image subregions
+  cx.image_regions = terralib.newlist()
+  -- Map from region symbols to dummy symbols
+  cx.image_constraints = {}
+  -- Map from region symbols to field access maps
+  cx.field_accesses = {}
+  -- Map from index variables to dummy symbols
+  cx.ranges = symbol_table.new_global_scope({})
+  -- Map from dummy symbols to image region symbols
+  cx.image_region_map = {}
+
+  --cx.region_params = region_params
+  --cx.region_param_map = region_param_map
+  --cx.region_param_indices = region_param_indices
+  --cx.task_point_symbol = get_new_tmp_var(c.legion_domain_point_t, "__point")
+  --cx.field_accesses = data.newmap()
+  --cx.field_access_stats = {}
+  --cx.stencils = terralib.newlist()
+  --cx.ghost_symbols = {}
+  --cx.use_primary = {}
   return setmetatable(cx, parallel_task_context)
 end
 
-function parallel_task_context:is_region_param(idx)
-  return self.region_params[idx] ~= nil
-end
-
-function parallel_task_context:get_task_point_symbol()
-  return self.task_point_symbol
-end
-
-function parallel_task_context:find_metadata_parameters(region_symbol)
-  return self.region_param_map[region_symbol]
-end
-
-function parallel_task_context:insert_metadata_parameters(params)
-  for idx = 1, #self.region_param_indices do
-    local region_param =
-      self.region_params[self.region_param_indices[idx]]
-    if region_param.bounds then
-      params:insert(ast_util.mk_task_param(region_param.bounds))
-    end
+function parallel_task_context:add_field_access(region_symbol, field_path, privilege)
+  if not self.field_accesses[region_symbol] then
+    self.field_accesses[region_symbol] = data.newmap()
   end
-  params:insert(ast_util.mk_task_param(self:get_task_point_symbol()))
+  self.field_accesses[region_symbol][field_path] = std.meet_privilege(
+    self.field_accesses[region_symbol][field_path],
+    privilege)
 end
 
-function parallel_task_context:make_param_arg_mapping(caller_cx, args)
-  local mapping = {}
-  for idx = 1, #args do
-    if self:is_region_param(idx) then
-      assert(args[idx]:is(ast.typed.expr.ID))
-      local orig_param = self.region_params[idx]
-      mapping[orig_param.region] = args[idx].value
-      -- TODO: Handle other metadata symbols
-      mapping[orig_param.bounds] =
-        caller_cx:find_bounds_symbol(args[idx].value)
-      assert(mapping[orig_param.bounds] or orig_param.region:gettype():is_opaque())
-    end
+function parallel_task_context:reserve_image_symbol(region_symbol, field_path)
+  if not self.image_constraints[region_symbol] then
+    self.image_constraints[region_symbol] = data.newmap()
   end
-  return mapping
+  local images = self.image_constraints[region_symbol]
+  if not images[field_path] then
+    local dummy_symbol_name = "img_" .. field_path:mkstring("", "_", "") ..
+      (region_symbol:hasname() and ("_" .. region_symbol:getname()))
+    local dummy_symbol = std.newsymbol(dummy_symbol_name)
+    images[field_path] = dummy_symbol
+    return dummy_symbol
+  else
+    return images[field_path]
+  end
 end
 
-function parallel_task_context:access_requires_stencil_analysis(access)
-  return self.field_accesses[access] ~= nil
+function parallel_task_context:create_image_region(region_symbol, dummy_symbol)
+  if not self.image_region_map[dummy_symbol] then
+    self.image_region_map[dummy_symbol] = data.newmap()
+  end
+  if not self.image_region_map[dummy_symbol][region_symbol] then
+    local new_region_symbol =
+      copy_region_symbol(region_symbol, region_symbol:hasname() .. "_" .. dummy_symbol:hasname())
+    self.image_region_map[dummy_symbol][region_symbol] = new_region_symbol
+    self.image_regions:insert(new_region_symbol)
+    return new_region_symbol
+  else
+    return self.image_region_map[dummy_symbol][region_symbol]
+  end
 end
 
-function parallel_task_context:record_stat_requires_case_split(stat)
-  self.field_access_stats[stat] = true
+function parallel_task_context:set_range(symbol, region_symbol)
+  self.ranges:insert(nil, symbol, region_symbol)
 end
 
-function parallel_task_context:stat_requires_case_split(stat)
-  return self.field_access_stats[stat]
+function parallel_task_context:get_range(symbol)
+  return self.ranges:safe_lookup(symbol)
 end
 
-function parallel_task_context:add_access(access, stencil)
-  self.field_accesses[access] = {
-    stencil = stencil,
-    ghost_indices = terralib.newlist(),
-    exploded_stencils = terralib.newlist(),
-  }
-end
+--function parallel_task_context:is_region_param(idx)
+--  return self.region_params[idx] ~= nil
+--end
+--
+--function parallel_task_context:get_task_point_symbol()
+--  return self.task_point_symbol
+--end
+--
+--function parallel_task_context:find_metadata_parameters(region_symbol)
+--  return self.region_param_map[region_symbol]
+--end
+--
+--function parallel_task_context:insert_metadata_parameters(params)
+--  for idx = 1, #self.region_param_indices do
+--    local region_param =
+--      self.region_params[self.region_param_indices[idx]]
+--    if region_param.bounds then
+--      params:insert(ast_util.mk_task_param(region_param.bounds))
+--    end
+--  end
+--  params:insert(ast_util.mk_task_param(self:get_task_point_symbol()))
+--end
+--
+--function parallel_task_context:make_param_arg_mapping(caller_cx, args)
+--  local mapping = {}
+--  for idx = 1, #args do
+--    if self:is_region_param(idx) then
+--      assert(args[idx]:is(ast.typed.expr.ID))
+--      local orig_param = self.region_params[idx]
+--      mapping[orig_param.region] = args[idx].value
+--      -- TODO: Handle other metadata symbols
+--      mapping[orig_param.bounds] =
+--        caller_cx:find_bounds_symbol(args[idx].value)
+--      assert(mapping[orig_param.bounds] or orig_param.region:gettype():is_opaque())
+--    end
+--  end
+--  return mapping
+--end
+--
+--function parallel_task_context:access_requires_stencil_analysis(access)
+--  return self.field_accesses[access] ~= nil
+--end
+--
+--function parallel_task_context:record_stat_requires_case_split(stat)
+--  self.field_access_stats[stat] = true
+--end
+--
+--function parallel_task_context:stat_requires_case_split(stat)
+--  return self.field_access_stats[stat]
+--end
+--
+--function parallel_task_context:add_access(access, stencil)
+--  self.field_accesses[access] = {
+--    stencil = stencil,
+--    ghost_indices = terralib.newlist(),
+--    exploded_stencils = terralib.newlist(),
+--  }
+--end
 
 parallel_param.__index = parallel_param
 
@@ -1274,35 +1333,35 @@ local function check_normalized_stat_assignment(node, continuation)
   continuation(node.rhs, true)
 end
 
-local function pass_through(node, continuation)
+local function check_normalized_pass_through(node, continuation)
   continuation(node, true)
 end
 
 local check_normalized_stat = {
-  [ast.typed.stat.While]   = pass_through,
-  [ast.typed.stat.ForNum]  = pass_through,
-  [ast.typed.stat.ForList] = pass_through,
-  [ast.typed.stat.Repeat]  = pass_through,
-  [ast.typed.stat.Block]   = pass_through,
+  [ast.typed.stat.While]   = check_normalized_pass_through,
+  [ast.typed.stat.ForNum]  = check_normalized_pass_through,
+  [ast.typed.stat.ForList] = check_normalized_pass_through,
+  [ast.typed.stat.Repeat]  = check_normalized_pass_through,
+  [ast.typed.stat.Block]   = check_normalized_pass_through,
 
-  [ast.typed.stat.If]      = pass_through,
-  [ast.typed.stat.Elseif]  = pass_through,
+  [ast.typed.stat.If]      = check_normalized_pass_through,
+  [ast.typed.stat.Elseif]  = check_normalized_pass_through,
 
   [ast.typed.stat.Var]        = check_normalized_stat_var,
   [ast.typed.stat.Assignment] = check_normalized_stat_assignment,
   [ast.typed.stat.Reduce]     = check_normalized_stat_assignment,
 
-  [ast.typed.stat]              = pass_through,
+  [ast.typed.stat]              = check_normalized_pass_through,
 
   [ast.typed.expr]              = no_region_access_allowed,
 
-  [ast.typed.Block]             = pass_through,
-  [ast.IndexLaunchArgsProvably] = pass_through,
-  [ast.location]                = pass_through,
-  [ast.annotation]              = pass_through,
-  [ast.condition_kind]          = pass_through,
-  [ast.disjointness_kind]       = pass_through,
-  [ast.fence_kind]              = pass_through,
+  [ast.typed.Block]             = check_normalized_pass_through,
+  [ast.IndexLaunchArgsProvably] = check_normalized_pass_through,
+  [ast.location]                = check_normalized_pass_through,
+  [ast.annotation]              = check_normalized_pass_through,
+  [ast.condition_kind]          = check_normalized_pass_through,
+  [ast.disjointness_kind]       = check_normalized_pass_through,
+  [ast.fence_kind]              = check_normalized_pass_through,
 }
 
 local check_normalized = ast.make_single_dispatch(
@@ -3275,145 +3334,247 @@ function parallelize_tasks.top_task_body(task_cx, node)
   return node { stats = stats }
 end
 
-function infer_constraints.top_task_body(task_cx, block)
+-- #####################################
+-- ## Partitioning constraint inference
+-- #################
+
+local function extract_index_expr(expr)
+  if not expr:is(ast.typed.expr.FieldAccess) then
+    local value_type = std.as_read(expr.value.expr_type)
+    local index_type = std.as_read(expr.index.expr_type)
+    if std.is_bounded_type(index_type) then
+      index_type = index_type.index_type
+    end
+
+    assert(expr:is(ast.typed.expr.IndexAccess) and std.is_ref(expr.expr_type) and
+           expr.value:is(ast.typed.expr.ID) and std.is_region(value_type) and
+           expr.index:is(ast.typed.expr.ID) and std.is_index_type(index_type))
+    return expr, function(new_region_symbol)
+      local region = new_region_symbol:gettype()
+      local value = ast_util.mk_expr_id(new_region_symbol, std.rawref(&region))
+      local expr_type = std.ref(index_type(region:fspace(), new_region_symbol))
+      return expr {
+        value = value,
+        expr_type = expr_type,
+      }
+    end
+  else
+    local index, rewrite = extract_index_expr(expr.value)
+    return index,
+      function(new_region_symbol)
+        local value = rewrite(new_region_symbol)
+        local expr_type = std.ref(
+            value.expr_type.pointer_type,
+            unpack(expr.expr_type.field_path))
+        return expr {
+          value = value,
+          expr_type = expr_type,
+        }
+      end
+  end
+end
+
+local function infer_constraints_from_access(task_cx, access, privilege)
+  local field_path = access.expr_type.field_path
+  local index, rewrite = extract_index_expr(access)
+
+  local region_symbol = index.value.value
+  local range = task_cx:get_range(index.index.value)
+
+  -- If the range is different from the region, the access is indirect
+  if region_symbol ~= range then
+    region_symbol = task_cx:create_image_region(region_symbol, range)
+    access = rewrite(region_symbol)
+  end
+  task_cx:add_field_access(region_symbol, field_path, privilege)
+
+  return access, region_symbol
+end
+
+local function infer_constraints_stat_var(task_cx, stat, continuation)
+  -- If the value expression has no region access, no analysis is required
+  if not (stat.value and std.is_ref(stat.value.expr_type)) then
+    return stat
+  end
+
+  local field_path = stat.value.expr_type.field_path
+  local value, region_symbol =
+    infer_constraints_from_access(task_cx, stat.value, std.reads)
+
+  if std.is_index_type(stat.type) then
+    local dummy_symbol =
+      task_cx:reserve_image_symbol(region_symbol, field_path)
+    task_cx:set_range(stat.symbol, dummy_symbol, field_path)
+  end
+
+  return stat { value = value }
+end
+
+local function infer_constraints_stat_assignment(task_cx, stat, continuation)
+  if not std.is_ref(stat.lhs.expr_type) then return stat end
+  local lhs = infer_constraints_from_access(task_cx, stat.lhs, std.writes)
+  return stat { lhs = lhs }
+end
+
+local function infer_constraints_stat_reduce(task_cx, stat, continuation)
+  if not std.is_ref(stat.lhs.expr_type) then return stat end
+  local lhs = infer_constraints_from_access(task_cx, stat.lhs, std.reduces(stat.op))
+  return stat { lhs = lhs }
+end
+
+local function infer_constraints_pass_through(task_cx, node, continuation)
+  return continuation(node, true)
+end
+
+local infer_constraints_stat = {
+  [ast.typed.stat.While]   = infer_constraints_pass_through,
+  [ast.typed.stat.ForNum]  = infer_constraints_pass_through,
+  [ast.typed.stat.ForList] = infer_constraints_pass_through,
+  [ast.typed.stat.Repeat]  = infer_constraints_pass_through,
+  [ast.typed.stat.Block]   = infer_constraints_pass_through,
+
+  [ast.typed.stat.If]      = infer_constraints_pass_through,
+  [ast.typed.stat.Elseif]  = infer_constraints_pass_through,
+
+  [ast.typed.stat.Var]        = infer_constraints_stat_var,
+  [ast.typed.stat.Assignment] = infer_constraints_stat_assignment,
+  [ast.typed.stat.Reduce]     = infer_constraints_stat_reduce,
+
+  [ast.typed.stat]              = infer_constraints_pass_through,
+  [ast.typed.expr]              = infer_constraints_pass_through,
+  [ast.typed.Block]             = infer_constraints_pass_through,
+  [ast.location]                = infer_constraints_pass_through,
+  [ast.annotation]              = infer_constraints_pass_through,
+  [ast.condition_kind]          = infer_constraints_pass_through,
+  [ast.disjointness_kind]       = infer_constraints_pass_through,
+  [ast.fence_kind]              = infer_constraints_pass_through,
+}
+
+local infer_constraints_dispatch = ast.make_single_dispatch(
+  infer_constraints_stat,
+  {ast.typed.stat})
+
+function infer_constraints.stat_for_list(task_cx, stat)
+  -- We first add the loop variable to the range map
+  assert(stat.value:is(ast.typed.expr.ID) and
+         std.is_region(std.as_read(stat.value.expr_type)))
+  task_cx:set_range(stat.symbol, stat.value.value)
+
+  local block = ast.flatmap_node_continuation(
+    infer_constraints_dispatch(task_cx),
+    stat.block)
+
+  return stat { block = block }
+end
+
+-- The infer_constraints pass performs two operations. First, it adds an image
+-- partitioning constraint to the context whenever the index is derived
+-- from a region access. Second, it replaces the original region in an indirect
+-- access with a new region that will later be bound to a subregion of
+-- an image partition.
+function infer_constraints.top_task_body(task_cx, body)
+  local stats = data.flatmap(
+    function(stat)
+      if stat:is(ast.typed.stat.ForList) then
+        return infer_constraints.stat_for_list(task_cx, stat)
+      else
+        return stat
+      end
+    end, body.stats)
+
+  return body { stats = stats }
 end
 
 function parallelize_tasks.top_task(global_cx, node)
   -- Analyze loops in the task
   local task_cx = parallel_task_context.new_task_scope(node.params)
-  infer_constraints.top_task_body(task_cx, node.body)
+  local body = infer_constraints.top_task_body(task_cx, node.body)
 
-  --local normalized = normalize_accesses.top_task_body(task_cx, node.body)
-  --reduction_analysis.top_task(task_cx, node)
-  --stencil_analysis.top(task_cx)
+  local task_name = node.name .. data.newtuple("parallelized")
+  local task = std.new_task(task_name)
+  local variant = task:make_variant("primary")
 
-  ---- Now make a new task AST node
-  --local task_name = node.name .. data.newtuple("parallelized")
-  --local task = std.new_task(task_name)
-  --local variant = task:make_variant("primary")
-  --task:set_primary_variant(variant)
-  --node.prototype:set_parallel_task(task)
+  local params = terralib.newlist()
+  local privileges = terralib.newlist()
+  local region_universe = node.prototype:get_region_universe():copy()
+  local coherence_modes = node.prototype:get_coherence_modes():copy()
 
-  --local params = terralib.newlist()
-  ---- Existing region-typed parameters will now refer to the subregions
-  ---- passed by indexspace launch. this will avoid rewriting types in AST nodes
-  --params:insertall(node.params)
-  ---- each stencil corresponds to one ghost region
-  --local orig_privileges = node.prototype:get_privileges()
-  --local function has_interfering_update(stencil)
-  --  local region = stencil:region()
-  --  local fields = stencil:fields()
-  --  for i = 1, #fields do
-  --    for j = 1, #orig_privileges do
-  --      for k = 1, #orig_privileges[j] do
-  --        local pv = orig_privileges[j][k]
-  --        if pv.privilege == std.writes and
-  --           pv.region == region and
-  --           pv.field_path == fields[i] then
-  --           return true
-  --        end
-  --      end
-  --    end
-  --  end
-  --  return false
-  --end
+  params:insertall(node.params)
+  params:map(function(param)
+    if std.is_region(param.param_type) then
+      local accesses = task_cx.field_accesses[param.symbol]
+      if accesses then
+        local primary_privileges = terralib.newlist()
+        for field, privilege in accesses:items() do
+          primary_privileges:insert(
+            std.privilege(privilege, param.symbol, field))
+        end
+        privileges:insert(primary_privileges)
+      end
+    end
+  end)
 
-  --for idx = 1, #task_cx.stencils do
-  --  local stencil = task_cx.stencils[idx]
-  --  local check = has_interfering_update(stencil)
-  --  if check then
-  --    -- FIXME: Ghost accesses can be out of bounds because we force them to use
-  --    --        primary partition here. Task is in general not parallelizable
-  --    --        if it has stencils that conflict with its update set. We assume
-  --    --        that the programmer specified right hints to make it parallelizable.
-  --    task_cx.ghost_symbols[stencil] = stencil:region()
-  --    task_cx.use_primary[stencil] = true
-  --  else
-  --    local ghost_symbol =
-  --      copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
-  --    task_cx.ghost_symbols[stencil] = ghost_symbol
-  --    task_cx.use_primary[stencil] = false
-  --    params:insert(ast_util.mk_task_param(task_cx.ghost_symbols[stencil]))
-  --  end
-  --end
-  ---- Append parameters reserved for the metadata of original region parameters
-  --task_cx:insert_metadata_parameters(params)
+  task_cx.image_regions:map(function(region_symbol)
+    local accesses = task_cx.field_accesses[region_symbol]
+    if accesses then
+      params:insert(ast_util.mk_task_param(region_symbol))
+      local image_privileges = terralib.newlist()
+      for field, privilege in accesses:items() do
+        image_privileges:insert(
+          std.privilege(privilege, region_symbol, field))
+      end
+      privileges:insert(image_privileges)
+      region_universe[region_symbol:gettype()] = true
+    end
+  end)
 
-  --local task_type = terralib.types.functype(
-  --  params:map(function(param) return param.param_type end), node.return_type, false)
-  --task:set_type(task_type)
-  --task:set_param_symbols(
-  --  params:map(function(param) return param.symbol end))
-  --local region_universe = node.prototype:get_region_universe():copy()
-  --local privileges = terralib.newlist()
-  --local coherence_modes = data.new_recursive_map(1)
-  ----node.prototype:get_coherence_modes():map_list(function(region, map)
-  ----    print(region)
-  ----  map:map_list(function(field_path, v)
-  ----    coherence_modes[region][field_path] = true
-  ----  end)
-  ----end)
-  --privileges:insertall(orig_privileges)
-  ---- FIXME: Workaround for the current limitation in SPMD transformation
-  --local field_set = {}
-  --for idx = 1, #task_cx.stencils do
-  --              task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
-  --end
-  --local fields = terralib.newlist()
-  --for field, _ in pairs(field_set) do fields:insert(field) end
+  task:set_type(terralib.types.functype(
+      params:map(function(param) return param.param_type end),
+      node.return_type,
+      false))
+  task:set_param_symbols(params:map(function(param) return param.symbol end))
 
-  --for idx = 1, #task_cx.stencils do
-  --  local stencil = task_cx.stencils[idx]
-  --  if not task_cx.use_primary[stencil] then
-  --                local region = task_cx.ghost_symbols[stencil]
-  --                --local fields = task_cx.stencils[idx]:fields()
-  --    -- TODO: handle reductions on ghost regions
-  --    privileges:insert(fields:map(function(field)
-  --      return std.privilege(std.reads, region, field)
-  --    end))
-  --    --coherence_modes[region][field_path] = std.exclusive
-  --    region_universe[region:gettype()] = true
-  --  end
-  --end
-  --task:set_privileges(privileges)
-  --task:set_coherence_modes(coherence_modes)
-  --task:set_flags(node.flags)
-  --task:set_conditions(node.conditions)
-  --task:set_param_constraints(node.prototype:get_param_constraints())
-  --task:set_constraints(node.prototype:get_constraints())
-  --task:set_region_universe(region_universe)
+  task:set_primary_variant(variant)
+  task:set_privileges(privileges)
+  task:set_coherence_modes(coherence_modes)
+  task:set_flags(node.flags)
+  task:set_conditions(node.conditions)
+  task:set_param_constraints(node.prototype:get_param_constraints())
+  task:set_constraints(node.prototype:get_constraints())
+  task:set_region_universe(region_universe)
 
-  --local parallelized = parallelize_tasks.top_task_body(task_cx, normalized)
-  --local task_ast = ast.typed.top.Task {
-  --  name = task_name,
-  --  params = params,
-  --  return_type = node.return_type,
-  --  privileges = privileges,
-  --  coherence_modes = coherence_modes,
-  --  flags = node.flags,
-  --  conditions = node.conditions,
-  --  constraints = node.constraints,
-  --  body = parallelized,
-  --  config_options = ast.TaskConfigOptions {
-  --    leaf = false,
-  --    inner = false,
-  --    idempotent = false,
-  --    replicable = false,
-  --  },
-  --  region_divergence = false,
-  --  prototype = task,
-  --  annotations = node.annotations {
-  --    parallel = ast.annotation.Forbid { value = false },
-  --  },
-  --  span = node.span,
-  --}
+  node.prototype:set_parallel_task(task)
 
-  ---- Hack: prevents parallelized verions from going through parallelizer again
-  --global_cx[task] = {}
-  --local task_ast_optimized = passes.optimize(task_ast)
-  --local task_code = passes.codegen(task_ast_optimized, true)
+  local task_ast = ast.typed.top.Task {
+    name = task_name,
+    params = params,
+    return_type = node.return_type,
+    privileges = privileges,
+    coherence_modes = coherence_modes,
+    flags = node.flags,
+    conditions = node.conditions,
+    constraints = node.constraints,
+    body = body,
+    config_options = ast.TaskConfigOptions {
+      leaf = false,
+      inner = false,
+      idempotent = false,
+      replicable = false,
+    },
+    region_divergence = false,
+    prototype = task,
+    annotations = node.annotations {
+      parallel = ast.annotation.Forbid { value = false },
+    },
+    span = node.span,
+  }
 
-  --return task_code, task_cx
+  -- Hack: prevents parallelized verions from going through parallelizer again
+  global_cx[task] = {}
+  local task_ast_optimized = passes.optimize(task_ast)
+  task = passes.codegen(task_ast_optimized, true)
+
+  return task, task_cx
 end
 
 function parallelize_tasks.entry(node)
@@ -3425,12 +3586,12 @@ function parallelize_tasks.entry(node)
       check_parallelizable.top_task(node)
 
       local task_name = node.name
-      local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
-      --local info = {
-      --  task = new_task_code,
-      --  cx = cx,
-      --}
-      --global_context[node.prototype] = info
+      local new_task, cx = parallelize_tasks.top_task(global_context, node)
+      local info = {
+        task = new_task,
+        cx = cx,
+      }
+      global_context[node.prototype] = info
       return node
     else
       --return parallelize_task_calls.top_task(global_context, node)
