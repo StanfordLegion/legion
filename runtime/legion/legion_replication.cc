@@ -3450,6 +3450,7 @@ namespace Legion {
                                                get_logging_name(),
                                                unique_op_id,
 #endif
+                                               true/*check initialized*/,
                                                &inline_barrier);
       }
       else
@@ -3475,6 +3476,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
+                                                true/*check initialized*/,
                                                 &inline_barrier);
       } 
       // We're also done with our mapper so tell it that
@@ -3709,6 +3711,9 @@ namespace Legion {
     {
       if (resource == EXTERNAL_INSTANCE)
       {
+#ifdef DEBUG_LEGION
+        assert(!restricted);
+#endif
         // Once we're ready to map we can tell the memory manager that
         // this instance can be safely acquired for use
         InstanceManager *external_manager = 
@@ -3720,7 +3725,8 @@ namespace Legion {
                                                           requirement,
                                                           external_instance,
                                                           version_info,
-                                                          trace_info);
+                                                          trace_info,
+                                                          restricted);
 #ifdef DEBUG_LEGION
         assert(external_instance.has_ref());
 #endif

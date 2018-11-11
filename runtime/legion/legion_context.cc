@@ -4267,12 +4267,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::detach_resource(PhysicalRegion region)
+    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       DetachOp *detach_op = runtime->get_available_detach_op();
-      Future result = detach_op->initialize_detach(this, region);
+      Future result = detach_op->initialize_detach(this, region, flush);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
@@ -10262,6 +10262,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      if (launcher.restricted)
+        REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
+            "Attach operations in control replication context %s (UID %lld) "
+            "requested a restriction. Restrictions are only permitted for "
+            "attach operations in non-control-replicated contexts currently.",
+            get_task_name(), get_unique_id());
       ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
 #ifdef DEBUG_LEGION
       PhysicalRegion result = 
@@ -10310,12 +10316,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future ReplicateContext::detach_resource(PhysicalRegion region)
+    Future ReplicateContext::detach_resource(PhysicalRegion region, 
+                                             const bool flush)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       ReplDetachOp *detach_op = runtime->get_available_repl_detach_op();
-      Future result = detach_op->initialize_detach(this, region);
+      Future result = detach_op->initialize_detach(this, region, flush);
       detach_op->initialize_replication(this, external_resource_barrier);
       // Each operation will use two generations of this barrier
       // so we need to advance it twice
@@ -12397,7 +12404,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    Future LeafContext::detach_resource(PhysicalRegion region)
+    Future LeafContext::detach_resource(PhysicalRegion region, const bool flush)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -13669,10 +13676,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InlineContext::detach_resource(PhysicalRegion region)
+    Future InlineContext::detach_resource(PhysicalRegion region, 
+                                          const bool flush)
     //--------------------------------------------------------------------------
     {
-      return enclosing->detach_resource(region);
+      return enclosing->detach_resource(region, flush);
     }
 
     //--------------------------------------------------------------------------

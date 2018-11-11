@@ -2728,6 +2728,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       InstanceRef external_instance;
       LayoutConstraintSet layout_constraint_set;
+      bool restricted;
     };
 
     /**
@@ -2744,7 +2745,8 @@ namespace Legion {
     public:
       DetachOp& operator=(const DetachOp &rhs);
     public:
-      Future initialize_detach(TaskContext *ctx, PhysicalRegion region);
+      Future initialize_detach(TaskContext *ctx, 
+                               PhysicalRegion region, const bool flush);
     public:
       void activate_detach_op(void);
       void deactivate_detach_op(void);
@@ -2773,6 +2775,7 @@ namespace Legion {
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
       Future result;
+      bool flush;
     };
 
     /**

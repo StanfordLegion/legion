@@ -13001,6 +13001,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 1/*regions*/, 
                            launcher.static_dependences);
       resource = launcher.resource;
+      restricted = launcher.restricted;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -13093,6 +13094,7 @@ namespace Legion {
     {
       activate_operation();
       file_name = NULL;
+      restricted = true;
     }
 
     //--------------------------------------------------------------------------
@@ -13242,7 +13244,8 @@ namespace Legion {
                                                         requirement,
                                                         external_instance,
                                                         version_info,
-                                                        trace_info);
+                                                        trace_info,
+                                                        restricted);
 #ifdef DEBUG_LEGION
       assert(external_instance.has_ref());
 #endif
@@ -13579,10 +13582,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future DetachOp::initialize_detach(TaskContext *ctx, PhysicalRegion region)
+    Future DetachOp::initialize_detach(TaskContext *ctx, PhysicalRegion region,
+                                       const bool flsh)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
+      flush = flsh;
       requirement = region.impl->get_requirement();
       // Make sure that the privileges are read-write so that we wait for
       // all prior users of this particular region
@@ -13632,6 +13637,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       activate_operation();
+      flush = true;
     }
 
     //--------------------------------------------------------------------------
@@ -13752,9 +13758,35 @@ namespace Legion {
       assert(!manager->is_reduction_manager()); 
 #endif
       const PhysicalTraceInfo trace_info(this);
+      std::set<ApEvent> detach_events;
+      // If we need to flush then register this operation to bring the
+      // data that it has up to date, use READ-ONLY privileges since we're
+      // not going to invalidate the existing data. Don't register ourselves
+      // either since we'll get all the preconditions for detaching it
+      // as part of the detach_external call
+      ApEvent effects_done;
+      if (flush)
+      {
+        requirement.privilege = READ_ONLY;
+        effects_done = 
+          runtime->forest->physical_register_only(requirement, version_info,
+                                                  this, 0/*idx*/, 
+                                                  ApEvent::NO_AP_EVENT, 
+                                                  ApEvent::NO_AP_EVENT,
+                                                  references, trace_info,
+#ifdef DEBUG_LEGION
+                                                  get_logging_name(),
+                                                  unique_op_id,
+#endif
+                                                  false/*check initialized*/);
+        requirement.privilege = READ_WRITE;
+      }
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/, 
                                          version_info, reference, trace_info);
+      if (detach_event.exists() && effects_done.exists())
+        detach_event = 
+          Runtime::merge_events(&trace_info, detach_event, effects_done);
       version_info.finalize_mapping(map_applied_conditions);
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped

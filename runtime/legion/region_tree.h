@@ -364,6 +364,7 @@ namespace Legion {
                                      const char *log_name,
                                      UniqueID uid,
 #endif
+                                     const bool check_initialized = true,
                                      RtBarrier *sync_add_users = NULL);
       void acquire_restrictions(const RegionRequirement &req,
                                 VersionInfo &version_info,
@@ -411,7 +412,8 @@ namespace Legion {
                               const RegionRequirement &req,
                               const InstanceRef &ext_instance,
                               VersionInfo &version_info,
-                              const PhysicalTraceInfo &trace_info);
+                              const PhysicalTraceInfo &trace_info,
+                              const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               const InstanceRef &ref,

@@ -1857,7 +1857,8 @@ namespace Legion {
     struct AttachLauncher {
     public:
       AttachLauncher(ExternalResource resource, 
-                     LogicalRegion handle, LogicalRegion parent);
+                     LogicalRegion handle, LogicalRegion parent,
+                     const bool restricted = true);
     public:
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
@@ -1877,6 +1878,8 @@ namespace Legion {
       ExternalResource                              resource;
       LogicalRegion                                 handle;
       LogicalRegion                                 parent;
+      // Whether this instance will be restricted when attached
+      bool                                          restricted;
     public:
       // Data for files
       const char                                    *file_name;
@@ -5348,10 +5351,12 @@ namespace Legion {
       /**
        * Detach an external resource from a logical region
        * @param ctx enclosing task context
-       * @param the physical region for the external resource
+       * @param region the physical region for the external resource
+       * @param flush copy out data to the physical region before detaching
        * @return an empty future indicating when the resource is detached
        */
-      Future detach_external_resource(Context ctx, PhysicalRegion region);
+      Future detach_external_resource(Context ctx, PhysicalRegion region,
+                                      const bool flush = true);
 
       /**
        * @deprecated

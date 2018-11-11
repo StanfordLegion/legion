@@ -2082,6 +2082,7 @@ namespace Legion {
                                            const char *log_name,
                                            UniqueID uid,
 #endif
+                                           const bool check_initialized,
                                            RtBarrier *sync_add_users/*=NULL*/)
     //--------------------------------------------------------------------------
     {
@@ -2126,7 +2127,7 @@ namespace Legion {
       // and things that are not simultaneous (simultaneous can appear 
       // uninitialized since it might be reading, but then use internal
       // synchronization to wait for something running concurrently to write)
-      if (!IS_DISCARD(usage) && !IS_SIMULT(req))
+      if (!IS_DISCARD(usage) && !IS_SIMULT(req) && check_initialized)
       {
         FieldMask initialized = user_mask;
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -2566,7 +2567,8 @@ namespace Legion {
                                             const RegionRequirement &req,
                                             const InstanceRef &ext_instance, 
                                             VersionInfo &version_info,
-                                            const PhysicalTraceInfo &trace_info)
+                                            const PhysicalTraceInfo &trace_info,
+                                            const bool restricted)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_ATTACH_EXTERNAL_CALL);
@@ -2600,7 +2602,7 @@ namespace Legion {
             eq_sets.begin(); it != eq_sets.end(); it++)
         (*it)->overwrite_set(attach_op, external_views[0], ext_mask, 
                              output_aggregator, applied_events, 
-                             PredEvent::NO_PRED_EVENT, true/*add restriction*/);
+                             PredEvent::NO_PRED_EVENT, restricted);
 #ifdef DEBUG_LEGION
       assert(!output_aggregator.has_updates());
 #endif
