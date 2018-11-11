@@ -249,7 +249,9 @@ namespace Legion {
         if (need_tight_result)
         {
           // Wait for the index space to be tight
-          tight_index_space_ready.wait();
+          if (tight_index_space_ready.exists() && 
+              !tight_index_space_ready.has_triggered())
+            tight_index_space_ready.wait();
           space = tight_index_space;
           return ApEvent::NO_AP_EVENT;
         }
