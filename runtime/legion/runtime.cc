@@ -10135,6 +10135,20 @@ namespace Legion {
         delete (*it);
       }
       available_repl_map_ops.clear();
+      for (std::deque<ReplAttachOp*>::const_iterator it = 
+            available_repl_attach_ops.begin(); it !=
+            available_repl_attach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_attach_ops.clear();
+      for (std::deque<ReplDetachOp*>::const_iterator it = 
+            available_repl_detach_ops.begin(); it !=
+            available_repl_detach_ops.end(); it++)
+      {
+        delete (*it);
+      }
+      available_repl_detach_ops.clear();
       for (std::map<TaskID,TaskImpl*>::const_iterator it = 
             task_table.begin(); it != task_table.end(); it++)
       {
@@ -18405,6 +18419,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReplAttachOp* Runtime::get_available_repl_attach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(attach_op_lock, available_repl_attach_ops);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDetachOp* Runtime::get_available_repl_detach_op(void)
+    //--------------------------------------------------------------------------
+    {
+      return get_available(detach_op_lock, available_repl_detach_ops);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::free_individual_task(IndividualTask *task)
     //--------------------------------------------------------------------------
     {
@@ -18822,6 +18850,22 @@ namespace Legion {
     {
       AutoLock m_lock(map_op_lock);
       release_operation<false>(available_repl_map_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_attach_op(ReplAttachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock a_lock(attach_op_lock);
+      release_operation<false>(available_repl_attach_ops, op);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::free_repl_detach_op(ReplDetachOp *op)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock d_lock(detach_op_lock);
+      release_operation<false>(available_repl_detach_ops, op);
     }
 
     //--------------------------------------------------------------------------

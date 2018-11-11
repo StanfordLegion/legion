@@ -4605,7 +4605,7 @@ namespace Legion {
                                   request_space, pending_request,
                                   pending_updates, pending_invalidates,
                                   true/*needs udpates*/,
-                                  true/*updates from all*/);
+                                  false/*updates from all*/);
               const FieldMask redop_overlap = filter_mask & 
                                   (single_redop_fields | multi_redop_fields);
               if (!!redop_overlap)

@@ -270,6 +270,49 @@ namespace Legion {
     };
 
     /**
+     * \class ValueExchange
+     * This class will exchange a value of any type that can be
+     * trivially serialized to all the shards
+     */
+    template<typename T>
+    class ValueExchange : public AllGatherCollective { 
+    public:
+      ValueExchange(CollectiveIndexLocation loc, ReplicateContext *ctx)
+        : AllGatherCollective(loc, ctx) { }
+      ValueExchange(ReplicateContext *ctx, CollectiveID id)
+        : AllGatherCollective(ctx, id) { }
+      virtual ~ValueExchange(void) { }
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const
+      {
+        rez.serialize<size_t>(values.size());
+        for (typename std::set<T>::const_iterator it = values.begin();
+              it != values.end(); it++)
+          rez.serialize(*it);
+      }
+      virtual void unpack_collective_stage(Deserializer &derez, int stage)
+      {
+        size_t num_values;
+        derez.deserialize(num_values);
+        for (unsigned idx = 0; idx < num_values; idx++)
+        {
+          T value;
+          derez.deserialize(value);
+          values.insert(value);
+        }
+      }
+    public:
+      const std::set<T>& exchange_values(T value)
+      {
+        values.insert(value);
+        perform_collective_sync();
+        return values;
+      }
+    protected:
+      std::set<T> values;
+    };
+
+    /**
      * \class ShardSyncTree
      * A synchronization tree allows one shard to be notified when
      * all the other shards have reached a certain point in the 
@@ -1250,6 +1293,53 @@ namespace Legion {
     };
 
     /**
+     * \class ReplAttachOp
+     * An attach operation that is aware that it is being
+     * executed in a control replicated context.
+     */
+    class ReplAttachOp : public AttachOp {
+    public:
+      ReplAttachOp(Runtime *rt);
+      ReplAttachOp(const ReplAttachOp &rhs);
+      virtual ~ReplAttachOp(void);
+    public:
+      ReplAttachOp& operator=(const ReplAttachOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *ctx,RtBarrier resource_bar);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    protected:
+      RtBarrier resource_barrier;
+    };
+
+    /**
+     * \class ReplDetachOp
+     * An detach operation that is aware that it is being
+     * executed in a control replicated context.
+     */
+    class ReplDetachOp : public DetachOp {
+    public:
+      ReplDetachOp(Runtime *rt);
+      ReplDetachOp(const ReplDetachOp &rhs);
+      virtual ~ReplDetachOp(void);
+    public:
+      ReplDetachOp& operator=(const ReplDetachOp &rhs);
+    public:
+      void initialize_replication(ReplicateContext *ctx,RtBarrier resource_bar);
+    public:
+      virtual void activate(void);
+      virtual void deactivate(void);
+      virtual void trigger_ready(void);
+      virtual void trigger_mapping(void);
+    public:
+      RtBarrier resource_barrier;
+      ValueExchange<DistributedID> *value_exchange;
+    };
+
+    /**
      * \class ShardMapping
      * A mapping from the shard IDs to their address spaces
      */
@@ -1321,6 +1411,8 @@ namespace Legion {
         { return deletion_barrier; }
       inline RtBarrier get_inline_mapping_barrier(void) const
         { return inline_mapping_barrier; }
+      inline RtBarrier get_external_resource_barrier(void) const
+        { return external_resource_barrier; }
       inline RtBarrier get_mapping_fence_barrier(void) const
         { return mapping_fence_barrier; }
       inline ApBarrier get_execution_fence_barrier(void) const
@@ -1425,6 +1517,7 @@ namespace Legion {
       RtBarrier creation_barrier;
       RtBarrier deletion_barrier;
       RtBarrier inline_mapping_barrier;
+      RtBarrier external_resource_barrier;
       RtBarrier mapping_fence_barrier;
       ApBarrier execution_fence_barrier;
 #ifdef DEBUG_LEGION_COLLECTIVES

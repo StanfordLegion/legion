@@ -7160,6 +7160,7 @@ namespace Legion {
       creation_barrier = manager->get_creation_barrier();
       deletion_barrier = manager->get_deletion_barrier();
       inline_mapping_barrier = manager->get_inline_mapping_barrier();
+      external_resource_barrier = manager->get_external_resource_barrier();
       mapping_fence_barrier = manager->get_mapping_fence_barrier();
       execution_fence_barrier = manager->get_execution_fence_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -10260,24 +10261,74 @@ namespace Legion {
                                                  const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Attach operations are not currently supported in control "
-                    "replication contexts for task %s (UID %lld). It may be "
-                    "supported in the future.",
-                    get_task_name(), get_unique_id())
-      return PhysicalRegion();
+      AutoRuntimeCall call(this);
+      ReplAttachOp *attach_op = runtime->get_available_repl_attach_op();
+#ifdef DEBUG_LEGION
+      PhysicalRegion result = 
+        attach_op->initialize(this, launcher, runtime->check_privileges);
+#else
+      PhysicalRegion result = 
+        attach_op->initialize(this, launcher, false/*check privileges*/);
+#endif
+      attach_op->initialize_replication(this, external_resource_barrier);
+      // Each operation will use two generations of this barrier
+      // so we need to advance it twice
+      Runtime::advance_barrier(external_resource_barrier);
+      Runtime::advance_barrier(external_resource_barrier);
+      bool parent_conflict = false, inline_conflict = false;
+      int index = has_conflicting_regions(attach_op, 
+                                          parent_conflict, inline_conflict);
+      if (parent_conflict)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
+          "Attempted an attach hdf5 file operation on region "
+                      "(%x,%x,%x) that conflicts with mapped region " 
+                      "(%x,%x,%x) at index %d of parent task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      launcher.handle.index_space.id, 
+                      launcher.handle.field_space.id, 
+                      launcher.handle.tree_id, 
+                      regions[index].region.index_space.id,
+                      regions[index].region.field_space.id,
+                      regions[index].region.tree_id, index, 
+                      get_task_name(), get_unique_id(), launcher.file_name)
+      if (inline_conflict)
+        REPORT_LEGION_ERROR(ERROR_ATTEMPTED_ATTACH_HDF5,
+          "Attempted an attach hdf5 file operation on region "
+                      "(%x,%x,%x) that conflicts with previous inline "
+                      "mapping in task %s (ID %lld) "
+                      "that would ultimately result in deadlock. Instead you "
+                      "receive this error message. Try unmapping the region "
+                      "before invoking attach_hdf5 on file %s",
+                      launcher.handle.index_space.id, 
+                      launcher.handle.field_space.id, 
+                      launcher.handle.tree_id, get_task_name(), 
+                      get_unique_id(), launcher.file_name)
+      runtime->add_to_dependence_queue(this, executing_processor, attach_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::detach_resource(PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_REPLICATE_TASK_VIOLATION,
-                    "Detach operations are not currently supported in control "
-                    "replication contexts for task %s (UID %lld). It may be "
-                    "supported in the future.",
-                    get_task_name(), get_unique_id())
-      return Future();
+      AutoRuntimeCall call(this);
+      ReplDetachOp *detach_op = runtime->get_available_repl_detach_op();
+      Future result = detach_op->initialize_detach(this, region);
+      detach_op->initialize_replication(this, external_resource_barrier);
+      // Each operation will use two generations of this barrier
+      // so we need to advance it twice
+      Runtime::advance_barrier(external_resource_barrier);
+      Runtime::advance_barrier(external_resource_barrier);
+      // If the region is still mapped, then unmap it
+      if (region.is_mapped())
+      {
+        unregister_inline_mapped_region(region);
+        region.impl->unmap_region();
+      }
+      runtime->add_to_dependence_queue(this, executing_processor, detach_op);
+      return result;
     }
 
     //--------------------------------------------------------------------------

@@ -3614,6 +3614,306 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Repl Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplAttachOp::ReplAttachOp(Runtime *rt)
+      : AttachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAttachOp::ReplAttachOp(const ReplAttachOp &rhs)
+      : AttachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAttachOp::~ReplAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplAttachOp& ReplAttachOp::operator=(const ReplAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
+                                              RtBarrier resource_bar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(resource_bar.exists());
+#endif
+      resource_barrier = resource_bar;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_attach_op();
+      resource_barrier = RtBarrier::NO_RT_BARRIER;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_attach_op();
+      runtime->free_repl_attach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+      // This is one of the few kinds of control replicated operations
+      // that supports relaxed coherence of equivalence sets
+      // because we know that this operation is running on all copies
+      // of the sharded parent task
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions,
+                                                   false/*defer make ready*/,
+                                                   NULL/*defer mask*/,
+                                                   true/*runtime relaxed*/);
+      // Make sure everyone has a copy of their equivalence set before
+      // we continue any farther, this is the first use of the inline barrier
+      if (!preconditions.empty())
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                                      Runtime::merge_events(preconditions));
+      else
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+      const RtEvent ready = resource_barrier;
+      Runtime::advance_barrier(resource_barrier);
+      enqueue_ready_operation(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplAttachOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      if (resource == EXTERNAL_INSTANCE)
+      {
+        // Once we're ready to map we can tell the memory manager that
+        // this instance can be safely acquired for use
+        InstanceManager *external_manager = 
+          external_instance.get_manager()->as_instance_manager();
+        MemoryManager *memory_manager = external_manager->memory_manager;
+        memory_manager->attach_external_instance(external_manager);
+        const PhysicalTraceInfo trace_info(this);
+        ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
+                                                          requirement,
+                                                          external_instance,
+                                                          version_info,
+                                                          trace_info);
+#ifdef DEBUG_LEGION
+        assert(external_instance.has_ref());
+#endif
+        version_info.finalize_mapping(map_applied_conditions);
+        // This operation is ready once the file is attached
+        region.impl->set_reference(external_instance);
+        // Make sure that all the attach operations are done mapping
+        // before we consider this attach operation done
+        if (!map_applied_conditions.empty())
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                        Runtime::merge_events(map_applied_conditions));
+        else
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+        complete_mapping(resource_barrier);
+        request_early_complete(attach_event);
+        complete_execution(Runtime::protect_event(attach_event));
+      }
+      // TODO: With external files we know the filesystem means that they
+      // are probably the same everywhere, so we really only want one
+      // instance in that particular case for that file to avoid aliasing
+      else
+        assert(false);
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Repl Detach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ReplDetachOp::ReplDetachOp(Runtime *rt)
+      : DetachOp(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDetachOp::ReplDetachOp(const ReplDetachOp &rhs)
+      : DetachOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDetachOp::~ReplDetachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    ReplDetachOp& ReplDetachOp::operator=(const ReplDetachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
+                                              RtBarrier resource_bar)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(resource_bar.exists());
+      assert(value_exchange = NULL);
+#endif
+      resource_barrier = resource_bar;
+      value_exchange = new ValueExchange<DistributedID>(COLLECTIVE_LOC_75, ctx);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_detach_op();
+      resource_barrier = RtBarrier::NO_RT_BARRIER;
+      value_exchange = NULL;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_detach_op();
+      if (value_exchange != NULL)
+        delete value_exchange;
+      runtime->free_repl_detach_op(this);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      std::set<RtEvent> preconditions;  
+      // This is one of the few kinds of control replicated operations
+      // that supports relaxed coherence of equivalence sets
+      // because we know that this operation is running on all copies
+      // of the sharded parent task
+      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                   requirement,
+                                                   version_info,
+                                                   preconditions,
+                                                   false/*defer make ready*/,
+                                                   NULL/*defer mask*/,
+                                                   true/*runtime relaxed*/);
+      // Make sure everyone has a copy of their equivalence set before
+      // we continue any farther, this is the first use of the inline barrier
+      if (!preconditions.empty())
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                                      Runtime::merge_events(preconditions));
+      else
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+      const RtEvent ready = resource_barrier;
+      Runtime::advance_barrier(resource_barrier);
+      enqueue_ready_operation(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::trigger_mapping(void)
+    //--------------------------------------------------------------------------
+    {
+      // We have to detach our instance as well as all the other instances
+      // TODO; Update this to only our local copy if this external instance
+      // is actually a file instance and not a physical instance
+#ifdef DEBUG_LEGION
+      assert(value_exchange != NULL);
+#endif
+      // Actual unmap of an inline mapped region was deferred to here
+      if (region.impl->is_mapped())
+        region.impl->unmap_region();
+      // Now we can get the reference we need for the detach operation
+      InstanceSet references;
+      region.impl->get_references(references);
+#ifdef DEBUG_LEGION
+      assert(references.size() == 1);
+#endif
+      InstanceRef reference = references[0];
+      // Check that this is actually a file
+      PhysicalManager *manager = reference.get_manager();
+#ifdef DEBUG_LEGION
+      assert(!manager->is_reduction_manager()); 
+#endif
+      const PhysicalTraceInfo trace_info(this);
+      const std::set<DistributedID> &dids = 
+        value_exchange->exchange_values(manager->did);
+      std::map<PhysicalManager*,RtEvent> managers;
+      for (std::set<DistributedID>::const_iterator it = 
+            dids.begin(); it != dids.end(); it++)
+      {
+        RtEvent ready;
+        PhysicalManager *man = 
+          runtime->find_or_request_physical_manager(*it, ready);
+        managers[man] = ready;
+      }
+      std::set<ApEvent> detach_events;
+      const FieldMask &valid_fields = reference.get_valid_fields();
+      for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
+            managers.begin(); it != managers.end(); it++)
+      {
+        if (it->second.exists() && !it->second.has_triggered())
+          it->second.wait();
+        const InstanceRef ref(it->first, valid_fields);
+        const ApEvent detach_event = 
+          runtime->forest->detach_external(requirement, this, 0/*idx*/, 
+                                           version_info, ref, trace_info);
+        if (detach_event.exists())
+          detach_events.insert(detach_event);
+      }
+      version_info.finalize_mapping(map_applied_conditions);
+      // Also tell the runtime to detach the external instance from memory
+      // This has to be done before we can consider this mapped
+      RtEvent detached_event = manager->detach_external_instance();
+      if (detached_event.exists())
+        map_applied_conditions.insert(detached_event);
+      // Make sure that all the detach operations are done before 
+      // we count any of them as being mapped
+      if (!map_applied_conditions.empty())
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                      Runtime::merge_events(map_applied_conditions));
+      else
+        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+      complete_mapping(resource_barrier);
+
+      ApEvent detach_event;
+      if (!detach_events.empty())
+        detach_event = Runtime::merge_events(&trace_info, detach_events); 
+      request_early_complete(detach_event);
+      complete_execution(Runtime::protect_event(detach_event));
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////
 
@@ -3741,6 +4041,9 @@ namespace Legion {
         // across all the shards
         inline_mapping_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
+        // External resource barrier for synchronizing attach/detach ops
+        external_resource_barrier = 
+          RtBarrier(Realm::Barrier::create_barrier(total_shards));
         // Fence barriers need arrivals from everyone
         mapping_fence_barrier = 
           RtBarrier(Realm::Barrier::create_barrier(total_shards));
@@ -3797,6 +4100,7 @@ namespace Legion {
           creation_barrier.destroy_barrier();
           deletion_barrier.destroy_barrier();
           inline_mapping_barrier.destroy_barrier();
+          external_resource_barrier.destroy_barrier();
           mapping_fence_barrier.destroy_barrier();
           execution_fence_barrier.destroy_barrier();
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -3943,6 +4247,7 @@ namespace Legion {
           assert(creation_barrier.exists());
           assert(deletion_barrier.exists());
           assert(inline_mapping_barrier.exists());
+          assert(external_resource_barrier.exists());
           assert(mapping_fence_barrier.exists());
           assert(execution_fence_barrier.exists());
           assert(shard_mapping.size() == total_shards);
@@ -3952,6 +4257,7 @@ namespace Legion {
           rez.serialize(creation_barrier);
           rez.serialize(deletion_barrier);
           rez.serialize(inline_mapping_barrier);
+          rez.serialize(external_resource_barrier);
           rez.serialize(mapping_fence_barrier);
           rez.serialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES
@@ -3995,6 +4301,7 @@ namespace Legion {
         derez.deserialize(creation_barrier);
         derez.deserialize(deletion_barrier);
         derez.deserialize(inline_mapping_barrier);
+        derez.deserialize(external_resource_barrier);
         derez.deserialize(mapping_fence_barrier);
         derez.deserialize(execution_fence_barrier);
 #ifdef DEBUG_LEGION_COLLECTIVES

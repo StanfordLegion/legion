@@ -1270,6 +1270,7 @@ namespace Legion {
       COLLECTIVE_LOC_72 = 72,
       COLLECTIVE_LOC_73 = 73,
       COLLECTIVE_LOC_74 = 74,
+      COLLECTIVE_LOC_75 = 75,
     };
 
     // legion_types.h
@@ -1576,6 +1577,8 @@ namespace Legion {
     class ReplTimingOp;
     class ReplFenceOp;
     class ReplMapOp;
+    class ReplAttachOp;
+    class ReplDetachOp;
     class ShardMapping;
     class ShardManager;
     class ShardCollective;
@@ -1652,6 +1655,8 @@ namespace Legion {
     friend class Internal::ReplMapOp;                       \
     friend class Internal::ReplTimingOp;                    \
     friend class Internal::ReplFenceOp;                     \
+    friend class Internal::ReplAttachOp;                    \
+    friend class Internal::ReplDetachOp;                    \
     friend class Internal::RegionTreeForest;                \
     friend class Internal::IndexSpaceNode;                  \
     friend class Internal::IndexPartNode;                   \

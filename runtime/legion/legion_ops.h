@@ -2688,6 +2688,9 @@ namespace Legion {
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
+      void activate_attach_op(void);
+      void deactivate_attach_op(void);
+    public:
       virtual void activate(void);
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const;
@@ -2742,6 +2745,9 @@ namespace Legion {
       DetachOp& operator=(const DetachOp &rhs);
     public:
       Future initialize_detach(TaskContext *ctx, PhysicalRegion region);
+    public:
+      void activate_detach_op(void);
+      void deactivate_detach_op(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);

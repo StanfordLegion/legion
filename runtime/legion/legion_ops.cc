@@ -13088,7 +13088,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::activate(void)
+    void AttachOp::activate_attach_op(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
@@ -13096,7 +13096,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AttachOp::deactivate(void)
+    void AttachOp::deactivate_attach_op(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -13116,6 +13116,20 @@ namespace Legion {
       privilege_path.clear();
       map_applied_conditions.clear();
       external_instance = InstanceRef();
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_attach_op(); 
+    }
+
+    //--------------------------------------------------------------------------
+    void AttachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_attach_op(); 
       runtime->free_attach_op(this);
     }
 
@@ -13614,14 +13628,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::activate(void)
+    void DetachOp::activate_detach_op(void)
     //--------------------------------------------------------------------------
     {
       activate_operation();
     }
 
     //--------------------------------------------------------------------------
-    void DetachOp::deactivate(void)
+    void DetachOp::deactivate_detach_op(void)
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
@@ -13629,6 +13643,20 @@ namespace Legion {
       privilege_path.clear();
       map_applied_conditions.clear();
       result = Future(); // clear any references on the future
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      activate_detach_op();
+    }
+
+    //--------------------------------------------------------------------------
+    void DetachOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      deactivate_detach_op(); 
       runtime->free_detach_op(this);
     }
 
