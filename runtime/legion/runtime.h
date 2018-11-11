@@ -1924,7 +1924,8 @@ namespace Legion {
       void fill_fields(Context ctx, const IndexFillLauncher &launcher);
       PhysicalRegion attach_external_resource(Context ctx,
                                               const AttachLauncher &launcher);
-      Future detach_external_resource(Context ctx, PhysicalRegion region);
+      Future detach_external_resource(Context ctx, PhysicalRegion region, 
+                                      const bool flush);
       void issue_copy_operation(Context ctx, const CopyLauncher &launcher);
       void issue_copy_operation(Context ctx, const IndexCopyLauncher &launcher);
     public:

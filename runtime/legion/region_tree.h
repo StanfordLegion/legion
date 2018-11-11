@@ -331,12 +331,12 @@ namespace Legion {
                                      Operation *op, unsigned index,
                                      ApEvent precondition, ApEvent term_event,
                                      InstanceSet &targets,
-                                     const PhysicalTraceInfo &trace_info
+                                     const PhysicalTraceInfo &trace_info,
 #ifdef DEBUG_LEGION
-                                     , const char *log_name
-                                     , UniqueID uid
+                                     const char *log_name,
+                                     UniqueID uid,
 #endif
-                                     );
+                                     const bool check_initialized = true);
       void acquire_restrictions(const RegionRequirement &req,
                                 VersionInfo &version_info,
                                 Operation *op, unsigned index,
@@ -383,7 +383,8 @@ namespace Legion {
                               const RegionRequirement &req,
                               const InstanceRef &ext_instance,
                               VersionInfo &version_info,
-                              const PhysicalTraceInfo &trace_info);
+                              const PhysicalTraceInfo &trace_info,
+                              const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               const InstanceRef &ref,

@@ -11357,13 +11357,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
+                                             const bool flush)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context detach external resource!");
-      return ctx->detach_resource(region);
+      return ctx->detach_resource(region, flush);
     }
 
     //--------------------------------------------------------------------------

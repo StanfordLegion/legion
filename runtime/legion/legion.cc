@@ -2016,8 +2016,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     AttachLauncher::AttachLauncher(ExternalResource r, 
-                                   LogicalRegion h, LogicalRegion p)
-      : resource(r), handle(h), parent(p), 
+                                   LogicalRegion h, LogicalRegion p,
+                                   const bool restr/*= true*/)
+      : resource(r), handle(h), parent(p), restricted(restr),
         file_name(NULL), mode(LEGION_FILE_READ_ONLY), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
@@ -6127,10 +6128,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region)
+    Future Runtime::detach_external_resource(Context ctx, PhysicalRegion region,
+                                             const bool flush /*= true*/)
     //--------------------------------------------------------------------------
     {
-      return runtime->detach_external_resource(ctx, region);
+      return runtime->detach_external_resource(ctx, region, flush);
     }
 
     //--------------------------------------------------------------------------
@@ -6151,7 +6153,7 @@ namespace Legion {
     void Runtime::detach_hdf5(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region);
+      runtime->detach_external_resource(ctx, region, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -6172,7 +6174,7 @@ namespace Legion {
     void Runtime::detach_file(Context ctx, PhysicalRegion region)
     //--------------------------------------------------------------------------
     {
-      runtime->detach_external_resource(ctx, region);
+      runtime->detach_external_resource(ctx, region, true/*flush*/);
     }
     
     //--------------------------------------------------------------------------

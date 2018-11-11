@@ -4217,12 +4217,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InnerContext::detach_resource(PhysicalRegion region)
+    Future InnerContext::detach_resource(PhysicalRegion region,const bool flush)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
       DetachOp *detach_op = runtime->get_available_detach_op();
-      Future result = detach_op->initialize_detach(this, region);
+      Future result = detach_op->initialize_detach(this, region, flush);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
@@ -8239,7 +8239,7 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    Future LeafContext::detach_resource(PhysicalRegion region)
+    Future LeafContext::detach_resource(PhysicalRegion region, const bool flush)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_DETACH_RESOURCE_OPERATION,
@@ -9412,10 +9412,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future InlineContext::detach_resource(PhysicalRegion region)
+    Future InlineContext::detach_resource(PhysicalRegion region, 
+                                          const bool flush)
     //--------------------------------------------------------------------------
     {
-      return enclosing->detach_resource(region);
+      return enclosing->detach_resource(region, flush);
     }
 
     //--------------------------------------------------------------------------
