@@ -1242,7 +1242,63 @@ end
 -- ## Task parallelizability checker
 -- #################
 
+local function no_region_access_allowed(node, continuation)
+  if std.is_ref(node.expr_type) then
+    node:printpretty(true)
+    assert(false, "AST is not properly normalized")
+  end
+end
+
+local function check_normalized_stat_var(node, continuation)
+  if node.value then
+    if not node.value:is(ast.typed.expr.FieldAccess) then
+      continuation(node.value, true)
+    end
+  end
+end
+
+local function check_normalized_stat_assignment(node, continuation)
+  continuation(node.rhs, true)
+end
+
+local function pass_through(node, continuation)
+  continuation(node, true)
+end
+
+local check_normalized_stat = {
+  [ast.typed.stat.While]   = pass_through,
+  [ast.typed.stat.ForNum]  = pass_through,
+  [ast.typed.stat.ForList] = pass_through,
+  [ast.typed.stat.Repeat]  = pass_through,
+  [ast.typed.stat.Block]   = pass_through,
+
+  [ast.typed.stat.If]      = pass_through,
+  [ast.typed.stat.Elseif]  = pass_through,
+
+  [ast.typed.stat.Var]        = check_normalized_stat_var,
+  [ast.typed.stat.Assignment] = check_normalized_stat_assignment,
+  [ast.typed.stat.Reduce]     = check_normalized_stat_assignment,
+
+  [ast.typed.stat]              = pass_through,
+
+  [ast.typed.expr]              = no_region_access_allowed,
+
+  [ast.typed.Block]             = pass_through,
+  [ast.IndexLaunchArgsProvably] = pass_through,
+  [ast.location]                = pass_through,
+  [ast.annotation]              = pass_through,
+  [ast.condition_kind]          = pass_through,
+  [ast.disjointness_kind]       = pass_through,
+  [ast.fence_kind]              = pass_through,
+}
+
+local check_normalized = ast.make_single_dispatch(
+  check_normalized_stat,
+  {ast.typed.stat})
+
 function check_parallelizable.top_task(node)
+  ast.traverse_node_continuation(check_normalized(), node.body)
+
   -- TODO: raise an error if a task has unsupported syntax
 
   -- conditions of parallelizable tasks
@@ -3351,16 +3407,25 @@ function parallelize_tasks.entry(node)
     if node.annotations.parallel:is(ast.annotation.Demand) then
       assert(node.metadata)
       check_parallelizable.top_task(node)
-      local task_name = node.name
-      local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
-      local info = {
-        task = new_task_code,
-        cx = cx,
-      }
-      global_context[node.prototype] = info
+      --local task_name = node.name
+      --local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
+      --local info = {
+      --  task = new_task_code,
+      --  cx = cx,
+      --}
+      --global_context[node.prototype] = info
       return node
     else
-      return parallelize_task_calls.top_task(global_context, node)
+      --return parallelize_task_calls.top_task(global_context, node)
+      return ast.map_node_continuation(function(node, continuation)
+        if node:is(ast.typed.stat.ParallelizeWith) then
+          return ast.typed.stat.Block {
+            block = node.block,
+            span = node.span,
+            annotations = node.annotations,
+          }
+        else return continuation(node, true) end
+      end, node)
     end
   else
     return node
