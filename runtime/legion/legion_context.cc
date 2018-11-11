@@ -403,7 +403,9 @@ namespace Legion {
     {
       AutoLock priv_lock(privilege_lock);
 #ifdef DEBUG_LEGION
-      assert(created_index_spaces.find(space) == created_index_spaces.end());
+      // This assertion is not valid anymore because of aliased sharded
+      // index spaces in control replication contexts
+      //assert(created_index_spaces.find(space) == created_index_spaces.end());
 #endif
       created_index_spaces.insert(space);
     }
@@ -7470,8 +7472,8 @@ namespace Legion {
                             runtime->get_unique_index_tree_id(), type_tag);
         const DistributedID did = runtime->get_available_distributed_id();
         // Have to register this before broadcasting it
-        forest->create_index_space(handle, realm_is, did,
-                                   shard_manager->get_mapping());
+        IndexSpaceNode *node = forest->create_index_space(handle, realm_is, did,
+                                                        false/*notify remote*/);
         // Do our arrival on this generation, should be the last one
         ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_3);
         collective_space.broadcast(ISBroadcast(handle, did));
@@ -7483,6 +7485,8 @@ namespace Legion {
           LegionSpy::log_top_index_space(handle.id);
         // Wait for the creation to finish
         creation_barrier.wait();
+        // Now we can update the creation set
+        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
@@ -7495,7 +7499,7 @@ namespace Legion {
         assert(handle.exists());
 #endif
         forest->create_index_space(handle, realm_is, value.did,
-                                   shard_manager->get_mapping());
+                                   false/*notify remote*/);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7520,12 +7524,13 @@ namespace Legion {
       {
         // We're the owner, so make it locally and then broadcast it
         handle = forest->find_or_create_union_space(this, spaces,
-                                  shard_manager->get_mapping());
+                                                    false/*notify remote*/);
         IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_4);
         collective_space.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
+        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
@@ -7542,8 +7547,8 @@ namespace Legion {
         // Check to see if they are the same, if not find or make one
         // with the right name here and the local computation result
         if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, local, 
-                                value.did, shard_manager->get_mapping());
+          forest->find_or_create_sharded_index_space(this, handle, 
+                                                     local, value.did);
         // Signal we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7570,12 +7575,13 @@ namespace Legion {
       {
         // We're the owner, so make it locally and then broadcast it
         handle = forest->find_or_create_intersection_space(this, spaces,
-                                          shard_manager->get_mapping());
+                                                 false/*notify remote*/);
         IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_5);
         space_collective.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
+        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
@@ -7593,8 +7599,8 @@ namespace Legion {
         // Check to see if they are the same, if not find or make one
         // with the right name here and the local computation result
         if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, local, 
-                                value.did, shard_manager->get_mapping());
+          forest->find_or_create_sharded_index_space(this, handle, 
+                                                     local, value.did); 
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -7617,12 +7623,13 @@ namespace Legion {
       {
         // We're the owner, so make it locally and then broadcast it
         handle = forest->find_or_create_difference_space(this, left, right,
-                                              shard_manager->get_mapping());
-       IndexSpaceNode *node = forest->get_node(handle); 
+                                                   false/*notify remote*/);
+        IndexSpaceNode *node = forest->get_node(handle); 
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_6);
         space_collective.broadcast(ISBroadcast(handle, node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
+        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
@@ -7640,8 +7647,8 @@ namespace Legion {
         // Check to see if they are the same, if not find or make one
         // with the right name here and the local computation result
         if (local != handle)
-          forest->find_or_create_sharded_index_space(this, handle, local, 
-                                value.did, shard_manager->get_mapping());
+          forest->find_or_create_sharded_index_space(this, handle, 
+                                                     local, value.did);
         // Signal that we're done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
@@ -9419,7 +9426,12 @@ namespace Legion {
         space = FieldSpace(runtime->get_unique_field_space_id());
         const DistributedID did = runtime->get_available_distributed_id();
         // Need to register this before broadcasting
-        forest->create_field_space(space, did, shard_manager->get_mapping());
+        FieldSpaceNode *node = forest->create_field_space(space, did, 
+                                                      false/*notify remote*/);
+        // A little strange but in this case we have to put this here in 
+        // order to avoid trying to do field allocations before the set
+        // of remote instances has been updated
+        node->update_creation_set(shard_manager->get_mapping());
         ValueBroadcast<FSBroadcast> space_collective(this, COLLECTIVE_LOC_31);
         space_collective.broadcast(FSBroadcast(space, did));
 #ifdef DEBUG_LEGION
@@ -9441,15 +9453,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(space.exists());
 #endif
-        forest->create_field_space(space, value.did, 
-                                   shard_manager->get_mapping());
+        forest->create_field_space(space, value.did, false/*notify remote*/);  
         // Signal that we are done with our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
         // Also have to wait for creation to be done here to avoid 
         // races with field allocations
         creation_barrier.wait();
       }
-      Runtime::advance_barrier(creation_barrier);
+      Runtime::advance_barrier(creation_barrier); 
       // Register the field space creation
       register_field_space_creation(space);
       // Update the allocator
@@ -9515,7 +9526,7 @@ namespace Legion {
                                   field_allocator_shard, COLLECTIVE_LOC_33);
         fid = field_collective.get_value();
         // No need to do the allocation since it was already done
-      }
+      } 
       register_field_creation(space, fid, local);
       // Update the allocator
       field_allocator_shard++;
@@ -9580,7 +9591,9 @@ namespace Legion {
         // We're the owner so make it locally and then broadcast it
         handle.tree_id = runtime->get_unique_region_tree_id();
         // Have to register this before doing the broadcast
-        forest->create_logical_region(handle, shard_manager->get_mapping());
+        RegionNode *node = forest->create_logical_region(handle, 
+                                                      false/*notify remote*/);
+        
         ValueBroadcast<RegionTreeID> tree_collective(this, COLLECTIVE_LOC_34);
         tree_collective.broadcast(handle.tree_id);
 #ifdef DEBUG_LEGION
@@ -9594,6 +9607,7 @@ namespace Legion {
                                     handle.tree_id);
         // Wait for the creation to be done
         creation_barrier.wait();
+        node->update_creation_set(shard_manager->get_mapping());
       }
       else
       {
@@ -9604,11 +9618,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(handle.exists());
 #endif
-        forest->create_logical_region(handle, shard_manager->get_mapping());
+        forest->create_logical_region(handle, false/*notify remote*/);
         // Signal that we are done our creation
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
-      Runtime::advance_barrier(creation_barrier);
+      Runtime::advance_barrier(creation_barrier); 
       // Register the creation of a top-level region with the context
       register_region_creation(handle, task_local);
       // Update the allocator shard

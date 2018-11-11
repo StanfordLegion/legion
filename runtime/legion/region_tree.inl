@@ -334,7 +334,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                       InnerContext *ctx, ShardMapping *mapping)
+                                    InnerContext *ctx, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -355,13 +355,13 @@ namespace Legion {
 #endif
         
         if (is_index_space_tight)
-          node = context->create_node(handle, &tight_index_space,
-                                      NULL/*parent*/, 0/*color*/, did,
-                                      realm_index_space_ready, expr_id,mapping);
+          node = context->create_node(handle, &tight_index_space, 
+                              NULL/*parent*/, 0/*color*/, did,
+                              realm_index_space_ready, expr_id, notify_remote);
         else
           node = context->create_node(handle, &realm_index_space,
-                                      NULL/*parent*/, 0/*color*/, did,
-                                      realm_index_space_ready, expr_id,mapping);
+                              NULL/*parent*/, 0/*color*/, did,
+                              realm_index_space_ready, expr_id, notify_remote);
       }
       if (ctx != NULL)
         ctx->register_index_space_creation(node->handle);
@@ -883,7 +883,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* RemoteExpression<DIM,T>::find_or_create_node(
-                                       InnerContext *ctx, ShardMapping *mapping)
+                                    InnerContext *ctx, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)
@@ -905,8 +905,8 @@ namespace Legion {
 #endif
         
         node = context->create_node(handle, &realm_index_space,
-                                    NULL/*parent*/, 0/*color*/, did,
-                                    realm_index_space_ready, expr_id, mapping);
+                            NULL/*parent*/, 0/*color*/, did,
+                            realm_index_space_ready, expr_id, notify_remote);
       }
       if (ctx != NULL)
         ctx->register_index_space_creation(node->handle);
@@ -1241,14 +1241,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::create_sharded_alias(IndexSpace alias,
-                                 DistributedID alias_did, ShardMapping *mapping)
+                                                      DistributedID alias_did)
     //--------------------------------------------------------------------------
     {
       // Have to wait at least until we get our index space set
       if (!realm_index_space_set.has_triggered())
         realm_index_space_set.wait();
       context->create_node(alias, &realm_index_space_set, NULL/*parent*/,
-         0/*color*/, alias_did, index_space_ready, expr_id/*alis*/, mapping);
+                           0/*color*/, alias_did, index_space_ready, 
+                           expr_id/*alis*/, false/*notify remote*/);
     }
 
     //--------------------------------------------------------------------------

@@ -155,21 +155,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_index_space(IndexSpace handle,
-                 const void *realm_is, DistributedID did, ShardMapping *mapping)
+    IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
+              const void *realm_is, DistributedID did, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did, 
-                    ApEvent::NO_AP_EVENT, 0/*expr id*/, mapping);
+                    ApEvent::NO_AP_EVENT, 0/*expr id*/, notify_remote);
       if (runtime->legion_spy_enabled)
         node->log_index_space_points();
+      return node;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_union_space(InnerContext *ctx,
                                          const std::vector<IndexSpace> &sources,
-                                         ShardMapping *shard_mapping/*=NULL*/)
+                                         const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -189,14 +190,14 @@ namespace Legion {
       if (exprs.empty())
         return IndexSpace::NO_SPACE;
       IndexSpaceExpression *expr = union_index_spaces(exprs);
-      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, notify_remote);
       return node->handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_intersection_space(
                       InnerContext *ctx, const std::vector<IndexSpace> &sources,
-                      ShardMapping *shard_mapping/*=NULL*/)
+                      const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -216,14 +217,14 @@ namespace Legion {
       if (exprs.empty())
         return IndexSpace::NO_SPACE;
       IndexSpaceExpression *expr = intersect_index_spaces(exprs);
-      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, notify_remote);
       return node->handle;
     }
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_difference_space(
                            InnerContext *ctx, IndexSpace left, IndexSpace right,
-                           ShardMapping *shard_mapping/*=NULL*/)
+                           const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (!left.exists())
@@ -233,14 +234,14 @@ namespace Legion {
       IndexSpaceNode *lhs = get_node(left);
       IndexSpaceNode *rhs = get_node(right);
       IndexSpaceExpression *expr = subtract_index_spaces(lhs, rhs);
-      IndexSpaceNode *node = expr->find_or_create_node(ctx, shard_mapping);
+      IndexSpaceNode *node = expr->find_or_create_node(ctx, notify_remote);
       return node->handle;
     }
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::find_or_create_sharded_index_space(InnerContext *ctx,
                                        IndexSpace handle, IndexSpace local,
-                                       DistributedID did, ShardMapping *mapping)
+                                       DistributedID did)
     //--------------------------------------------------------------------------
     {
       // Quick unsafe test to see if we already have it
@@ -248,7 +249,7 @@ namespace Legion {
       if (has_node(handle))
         return;
       IndexSpaceNode *local_node = get_node(local); 
-      local_node->create_sharded_alias(handle, did, mapping);
+      local_node->create_sharded_alias(handle, did);
       if (ctx != NULL)
         ctx->register_index_space_creation(handle);
       if (runtime->legion_spy_enabled)
@@ -465,7 +466,7 @@ namespace Legion {
                                               DistributedID did,
                                               ValueBroadcast<bool> *part_result,
                                               ApEvent partition_ready,
-                                              ShardMapping *mapping,
+                                              ShardMapping &mapping,
                                               RtEvent creation_ready,
                                               ApBarrier partial_pending)
     //--------------------------------------------------------------------------
@@ -533,7 +534,7 @@ namespace Legion {
                                ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
-            disjoint, complete, did, partition_ready, partial_pending, mapping);
+            disjoint, complete, did, partition_ready, partial_pending,&mapping);
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
@@ -546,9 +547,9 @@ namespace Legion {
                                (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
-                                  partition_ready, partial_pending, mapping);
+                                  partition_ready, partial_pending,&mapping);
         }
-        part_node->update_creation_set(*mapping);
+        part_node->update_creation_set(mapping);
         return parent_notified;
       }
       else
@@ -590,7 +591,7 @@ namespace Legion {
                                ((part_kind == DISJOINT_INCOMPLETE_KIND) ||
                                 (part_kind == ALIASED_INCOMPLETE_KIND)) ? 0 :-1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
-            disjoint, complete, did, partition_ready, partial_pending, mapping);
+            disjoint, complete, did, partition_ready, partial_pending,&mapping);
         }
         else
         {
@@ -600,9 +601,9 @@ namespace Legion {
                                (part_kind == COMPUTE_INCOMPLETE_KIND) ? 0 : -1;
           part_node = create_node(pid, parent_node, color_node, partition_color,
                                   disjointness_event, complete, did,
-                                  partition_ready, partial_pending, mapping);
+                                  partition_ready, partial_pending,&mapping);
         }
-        part_node->update_creation_set(*mapping);
+        part_node->update_creation_set(mapping);
         // We know the parent is notified or we wouldn't even have
         // been given our pid
         return RtEvent::NO_RT_EVENT;
@@ -1119,12 +1120,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_field_space(FieldSpace handle,
-                                              DistributedID did,
-                                              ShardMapping *mapping)
+    FieldSpaceNode* RegionTreeForest::create_field_space(FieldSpace handle,
+                                                       DistributedID did,
+                                                       const bool notify_remote)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, did, mapping);
+      return create_node(handle, did, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -1259,11 +1260,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::create_logical_region(LogicalRegion handle,
-                                                 ShardMapping *mapping)
+    RegionNode* RegionTreeForest::create_logical_region(LogicalRegion handle,
+                                                       const bool notify_remote)
     //--------------------------------------------------------------------------
     {
-      create_node(handle, NULL/*parent*/, mapping);
+      return create_node(handle, NULL/*parent*/, notify_remote);
     }
 
     //--------------------------------------------------------------------------
@@ -2974,7 +2975,7 @@ namespace Legion {
                                                   DistributedID did,
                                                   ApEvent is_ready,
                                                   IndexSpaceExprID expr_id,
-                                                  ShardMapping *mapping)
+                                                  const bool notify_remote)
     //--------------------------------------------------------------------------
     { 
       IndexSpaceCreator creator(this, sp, realm_is, parent, 
@@ -3013,14 +3014,7 @@ namespace Legion {
         result->add_base_valid_ref(APPLICATION_REF, &mutator);
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      if (mapping != NULL)
-      {
-        result->register_with_runtime(&mutator, true/*notify remote*/);
-        if (result->is_owner())
-          result->update_creation_set(*mapping);
-      }
-      else
-        result->register_with_runtime(&mutator);
+      result->register_with_runtime(&mutator, notify_remote);
       if (parent != NULL)
         parent->add_child(result);
       // If we had a realm index space issue the tighten now since
@@ -3041,7 +3035,7 @@ namespace Legion {
                                                   LegionColor color,
                                                   DistributedID did,
                                                   ApUserEvent is_ready,
-                                                  ShardMapping *mapping)
+                                                  const bool notify_remote)
     //--------------------------------------------------------------------------
     { 
       IndexSpaceCreator creator(this, sp, realm_is, parent, 
@@ -3082,14 +3076,7 @@ namespace Legion {
         result->add_base_valid_ref(APPLICATION_REF, &mutator);
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      if (mapping != NULL)
-      {
-        result->register_with_runtime(&mutator, false/*notify remote*/);
-        if (result->is_owner())
-          result->update_creation_set(*mapping);
-      }
-      else
-        result->register_with_runtime(&mutator);
+      result->register_with_runtime(&mutator, notify_remote);
       if (parent != NULL)
         parent->add_child(result);
       // If we had a realm index space issue the tighten now since
@@ -3164,11 +3151,7 @@ namespace Legion {
         color_space->add_nested_resource_ref(did);
       }
       if (shard_mapping != NULL)
-      {
         result->register_with_runtime(&mutator, false/*notify remote*/);
-        if (result->is_owner())
-          result->update_creation_set(*shard_mapping);
-      }
       else
         result->register_with_runtime(&mutator);
       if (parent != NULL)
@@ -3237,11 +3220,7 @@ namespace Legion {
         color_space->add_nested_resource_ref(did);
       }
       if (shard_mapping != NULL)
-      {
         result->register_with_runtime(&mutator, false/*notify remote*/);
-        if (result->is_owner())
-          result->update_creation_set(*shard_mapping);
-      }
       else
         result->register_with_runtime(&mutator);
       if (parent != NULL)
@@ -3254,7 +3233,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     FieldSpaceNode* RegionTreeForest::create_node(FieldSpace space,
                                                   DistributedID did,
-                                                  ShardMapping *mapping)
+                                                  const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       FieldSpaceNode *result = new FieldSpaceNode(space, this, did);
@@ -3289,14 +3268,7 @@ namespace Legion {
         result->add_base_valid_ref(APPLICATION_REF, &mutator);
       else
         result->add_base_gc_ref(REMOTE_DID_REF, &mutator);
-      if (mapping != NULL)
-      {
-        result->register_with_runtime(&mutator, false/*notify remote*/);
-        if (result->is_owner())
-          result->update_creation_set(*mapping);
-      }
-      else
-        result->register_with_runtime(&mutator);
+      result->register_with_runtime(&mutator, notify_remote);
       // Now we can remove our resource reference
       result->remove_base_resource_ref(REGION_TREE_REF);
       return result;
@@ -3349,7 +3321,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     RegionNode* RegionTreeForest::create_node(LogicalRegion r, 
                                               PartitionNode *parent,
-                                              ShardMapping *mapping)
+                                              const bool notify_remote)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3400,9 +3372,8 @@ namespace Legion {
           region_tree_requests.erase(r.tree_id);
         }
       }
-      if ((mapping != NULL) && 
-          (result->get_owner_space() == runtime->address_space))
-        result->update_creation_set(*mapping);
+      // At some point in the future we might actually want to 
+      // register these things with the runtime here
       result->record_registered();
 
       return result;
@@ -3448,6 +3419,8 @@ namespace Legion {
         // Add a reference that will be moved when we're destroyed
         result->add_base_gc_ref(APPLICATION_REF);
       }
+      // At some point in the future we might actually want to 
+      // register these things with the runtime here
       result->record_registered();
       
       return result;
@@ -5416,7 +5389,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* PendingIndexSpaceExpression::find_or_create_node(
-                                       InnerContext *ctx, ShardMapping *mapping)
+                                    InnerContext *ctx, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
@@ -5424,7 +5397,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      return result->find_or_create_node(ctx, mapping);
+      return result->find_or_create_node(ctx, notify_remote);
     }
 
     //--------------------------------------------------------------------------

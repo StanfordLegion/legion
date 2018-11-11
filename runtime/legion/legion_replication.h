@@ -1332,8 +1332,8 @@ namespace Legion {
         { return close_check_barrier; }
 #endif
     public:
-      inline ShardMapping* get_mapping(void) const
-        { return address_spaces; }
+      inline ShardMapping& get_mapping(void) const
+        { return *address_spaces; }
       inline AddressSpaceID get_shard_space(ShardID sid) const
         { return (*address_spaces)[sid]; }    
     public:

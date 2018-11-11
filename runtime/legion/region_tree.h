@@ -71,20 +71,22 @@ namespace Legion {
     public:
       void prepare_for_shutdown(void);
     public:
-      void create_index_space(IndexSpace handle, const void *realm_is,
-                              DistributedID did, ShardMapping *mapping = NULL);
+      IndexSpaceNode* create_index_space(IndexSpace handle, 
+                              const void *realm_is,
+                              DistributedID did, 
+                              const bool notify_remote = true);
       IndexSpace find_or_create_union_space(InnerContext *ctx,
                               const std::vector<IndexSpace> &sources,
-                              ShardMapping *mapping = NULL);
+                              const bool notify_remote = true);
       IndexSpace find_or_create_intersection_space(InnerContext *ctx,
                               const std::vector<IndexSpace> &sources,
-                              ShardMapping *mapping = NULL);
+                              const bool notify_remote = true);
       IndexSpace find_or_create_difference_space(InnerContext *ctx,
                               IndexSpace left, IndexSpace right,
-                              ShardMapping *mapping = NULL);
+                              const bool notify_remote = true);
       void find_or_create_sharded_index_space(InnerContext *ctx,
                               IndexSpace handle, IndexSpace local,
-                              DistributedID did, ShardMapping *mapping);
+                              DistributedID did);
       RtEvent create_pending_partition(IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
@@ -112,7 +114,7 @@ namespace Legion {
                                              DistributedID did,
                                              ValueBroadcast<bool> *part_result,
                                              ApEvent partition_ready,
-                                             ShardMapping *mapping,
+                                             ShardMapping &mapping,
                                              RtEvent creation_ready,
                    ApBarrier partial_pending = ApBarrier::NO_AP_BARRIER);
       void destroy_index_space(IndexSpace handle, AddressSpaceID source);
@@ -231,8 +233,8 @@ namespace Legion {
       bool is_index_partition_complete(IndexPartition p);
       bool has_index_partition(IndexSpace parent, Color color);
     public:
-      void create_field_space(FieldSpace handle, DistributedID did,
-                              ShardMapping *mapping = NULL);
+      FieldSpaceNode* create_field_space(FieldSpace handle, DistributedID did,
+                                         const bool notify_remote = true);
       void destroy_field_space(FieldSpace handle, AddressSpaceID source);
       // Return true if local is set to true and we actually performed the 
       // allocation.  It is an error if the field already existed and the
@@ -268,8 +270,8 @@ namespace Legion {
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
     public:
-      void create_logical_region(LogicalRegion handle,
-                                 ShardMapping *mapping = NULL);
+      RegionNode* create_logical_region(LogicalRegion handle,
+                                        const bool notify_remote = true);
       void destroy_logical_region(LogicalRegion handle, 
                                   AddressSpaceID source);
       void destroy_logical_partition(LogicalPartition handle,
@@ -454,12 +456,12 @@ namespace Legion {
                                   DistributedID did,
                                   ApEvent is_ready = ApEvent::NO_AP_EVENT,
                                   IndexSpaceExprID expr_id = 0,
-                                  ShardMapping *shard_mapping = NULL);
+                                  const bool notify_remote = true);
       IndexSpaceNode* create_node(IndexSpace is, const void *realm_is, 
                                   IndexPartNode *par, LegionColor color,
                                   DistributedID did,
                                   ApUserEvent is_ready,
-                                  ShardMapping *shard_mapping = NULL);
+                                  const bool notify_remote = true);
       // We know the disjointness of the index partition
       IndexPartNode*  create_node(IndexPartition p, IndexSpaceNode *par,
                                   IndexSpaceNode *color_space, 
@@ -475,11 +477,11 @@ namespace Legion {
                                   ApBarrier partial_pending,
                                   ShardMapping *shard_mapping = NULL);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
-                                  ShardMapping *shard_mapping = NULL);
+                                  const bool notify_remote = true);
       FieldSpaceNode* create_node(FieldSpace space, DistributedID did,
                                   Deserializer &derez);
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par,
-                                  ShardMapping *shard_mapping = NULL);
+                                  const bool notify_remote = true);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
       IndexSpaceNode* get_node(IndexSpace space);
@@ -715,7 +717,7 @@ namespace Legion {
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping) = 0;
+                                           const bool notify_remote = true) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -835,7 +837,7 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping) = 0;
+                                          const bool notify_remote = true) = 0;
     public:
       static void handle_expression_invalidation(Deserializer &derez,
                                                  RegionTreeForest *forest);
@@ -874,7 +876,7 @@ namespace Legion {
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping) = 0;
+                                          const bool notify_remote = true) = 0;
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
     public:
@@ -898,7 +900,7 @@ namespace Legion {
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping);
+                                          const bool notify_remote = true);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1065,7 +1067,7 @@ namespace Legion {
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping);
+                                          const bool notify_remote = true);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1173,7 +1175,7 @@ namespace Legion {
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping);
+                                               const bool notify_remote = true);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1478,10 +1480,9 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
-                                                  ShardMapping *mapping)
+                                                const bool notify_remote = true)
         { return this; }
-      virtual void create_sharded_alias(IndexSpace alias, DistributedID did,
-                                        ShardMapping *mapping) = 0;
+      virtual void create_sharded_alias(IndexSpace alias,DistributedID did) = 0;
     public:
       virtual void log_index_space_points(void) = 0;
       virtual ApEvent compute_pending_space(Operation *op,
@@ -1673,8 +1674,7 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void create_sharded_alias(IndexSpace alias, DistributedID did,
-                                        ShardMapping *mapping);
+      virtual void create_sharded_alias(IndexSpace alias, DistributedID did);
     public:
       virtual void log_index_space_points(void);
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
