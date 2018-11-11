@@ -876,7 +876,7 @@ do
 
   for z in rz do
     var init = vec2 {x = 0.0, y = 0.0}
-    z.zx = init
+    rz[z].zx = init
   end
 
   for s in rs do
