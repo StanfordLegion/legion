@@ -40,6 +40,8 @@ local stencil_analysis = {}
 local parallelize_task_calls = {}
 local parallelize_tasks = {}
 
+local infer_constraints = {}
+
 -- #####################################
 -- ## Utilities for point and rect manipulation
 -- #################
@@ -1245,19 +1247,30 @@ end
 local function no_region_access_allowed(node, continuation)
   if std.is_ref(node.expr_type) then
     node:printpretty(true)
-    assert(false, "AST is not properly normalized")
+    assert(false, "Normalization error: a region access appeared in an unexpected place")
   end
+  continuation(node, true)
 end
 
 local function check_normalized_stat_var(node, continuation)
   if node.value then
     if not node.value:is(ast.typed.expr.FieldAccess) then
       continuation(node.value, true)
+    else
+      local value = node.value
+      while value:is(ast.typed.expr.FieldAccess) do
+        value = value.value
+      end
+      continuation(value.index, true)
     end
   end
 end
 
 local function check_normalized_stat_assignment(node, continuation)
+  if std.is_index_type(std.as_read(node.lhs.expr_type)) then
+    node.lhs:printpretty(true)
+    assert(false, "Normalization error: an index variable is redefined")
+  end
   continuation(node.rhs, true)
 end
 
@@ -3264,141 +3277,145 @@ function parallelize_tasks.top_task_body(task_cx, node)
   return node { stats = stats }
 end
 
+function infer_constraints.top_task_body(task_cx, block)
+end
+
 function parallelize_tasks.top_task(global_cx, node)
   -- Analyze loops in the task
   local task_cx = parallel_task_context.new_task_scope(node.params)
-  local normalized = normalize_accesses.top_task_body(task_cx, node.body)
-  reduction_analysis.top_task(task_cx, node)
-  stencil_analysis.top(task_cx)
+  infer_constraints.top_task_body(task_cx, node.body)
 
-  -- Now make a new task AST node
-  local task_name = node.name .. data.newtuple("parallelized")
-  local task = std.new_task(task_name)
-  local variant = task:make_variant("primary")
-  task:set_primary_variant(variant)
-  node.prototype:set_parallel_task(task)
+  --local normalized = normalize_accesses.top_task_body(task_cx, node.body)
+  --reduction_analysis.top_task(task_cx, node)
+  --stencil_analysis.top(task_cx)
 
-  local params = terralib.newlist()
-  -- Existing region-typed parameters will now refer to the subregions
-  -- passed by indexspace launch. this will avoid rewriting types in AST nodes
-  params:insertall(node.params)
-  -- each stencil corresponds to one ghost region
-  local orig_privileges = node.prototype:get_privileges()
-  local function has_interfering_update(stencil)
-    local region = stencil:region()
-    local fields = stencil:fields()
-    for i = 1, #fields do
-      for j = 1, #orig_privileges do
-        for k = 1, #orig_privileges[j] do
-          local pv = orig_privileges[j][k]
-          if pv.privilege == std.writes and
-             pv.region == region and
-             pv.field_path == fields[i] then
-             return true
-          end
-        end
-      end
-    end
-    return false
-  end
+  ---- Now make a new task AST node
+  --local task_name = node.name .. data.newtuple("parallelized")
+  --local task = std.new_task(task_name)
+  --local variant = task:make_variant("primary")
+  --task:set_primary_variant(variant)
+  --node.prototype:set_parallel_task(task)
 
-  for idx = 1, #task_cx.stencils do
-    local stencil = task_cx.stencils[idx]
-    local check = has_interfering_update(stencil)
-    if check then
-      -- FIXME: Ghost accesses can be out of bounds because we force them to use
-      --        primary partition here. Task is in general not parallelizable
-      --        if it has stencils that conflict with its update set. We assume
-      --        that the programmer specified right hints to make it parallelizable.
-      task_cx.ghost_symbols[stencil] = stencil:region()
-      task_cx.use_primary[stencil] = true
-    else
-      local ghost_symbol =
-        copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
-      task_cx.ghost_symbols[stencil] = ghost_symbol
-      task_cx.use_primary[stencil] = false
-      params:insert(ast_util.mk_task_param(task_cx.ghost_symbols[stencil]))
-    end
-  end
-  -- Append parameters reserved for the metadata of original region parameters
-  task_cx:insert_metadata_parameters(params)
+  --local params = terralib.newlist()
+  ---- Existing region-typed parameters will now refer to the subregions
+  ---- passed by indexspace launch. this will avoid rewriting types in AST nodes
+  --params:insertall(node.params)
+  ---- each stencil corresponds to one ghost region
+  --local orig_privileges = node.prototype:get_privileges()
+  --local function has_interfering_update(stencil)
+  --  local region = stencil:region()
+  --  local fields = stencil:fields()
+  --  for i = 1, #fields do
+  --    for j = 1, #orig_privileges do
+  --      for k = 1, #orig_privileges[j] do
+  --        local pv = orig_privileges[j][k]
+  --        if pv.privilege == std.writes and
+  --           pv.region == region and
+  --           pv.field_path == fields[i] then
+  --           return true
+  --        end
+  --      end
+  --    end
+  --  end
+  --  return false
+  --end
 
-  local task_type = terralib.types.functype(
-    params:map(function(param) return param.param_type end), node.return_type, false)
-  task:set_type(task_type)
-  task:set_param_symbols(
-    params:map(function(param) return param.symbol end))
-  local region_universe = node.prototype:get_region_universe():copy()
-  local privileges = terralib.newlist()
-  local coherence_modes = data.new_recursive_map(1)
-  --node.prototype:get_coherence_modes():map_list(function(region, map)
-  --    print(region)
-  --  map:map_list(function(field_path, v)
-  --    coherence_modes[region][field_path] = true
-  --  end)
-  --end)
-  privileges:insertall(orig_privileges)
-  -- FIXME: Workaround for the current limitation in SPMD transformation
-  local field_set = {}
-  for idx = 1, #task_cx.stencils do
-                task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
-  end
-  local fields = terralib.newlist()
-  for field, _ in pairs(field_set) do fields:insert(field) end
+  --for idx = 1, #task_cx.stencils do
+  --  local stencil = task_cx.stencils[idx]
+  --  local check = has_interfering_update(stencil)
+  --  if check then
+  --    -- FIXME: Ghost accesses can be out of bounds because we force them to use
+  --    --        primary partition here. Task is in general not parallelizable
+  --    --        if it has stencils that conflict with its update set. We assume
+  --    --        that the programmer specified right hints to make it parallelizable.
+  --    task_cx.ghost_symbols[stencil] = stencil:region()
+  --    task_cx.use_primary[stencil] = true
+  --  else
+  --    local ghost_symbol =
+  --      copy_region_symbol(stencil:region(), "__ghost" .. tostring(idx))
+  --    task_cx.ghost_symbols[stencil] = ghost_symbol
+  --    task_cx.use_primary[stencil] = false
+  --    params:insert(ast_util.mk_task_param(task_cx.ghost_symbols[stencil]))
+  --  end
+  --end
+  ---- Append parameters reserved for the metadata of original region parameters
+  --task_cx:insert_metadata_parameters(params)
 
-  for idx = 1, #task_cx.stencils do
-    local stencil = task_cx.stencils[idx]
-    if not task_cx.use_primary[stencil] then
-                  local region = task_cx.ghost_symbols[stencil]
-                  --local fields = task_cx.stencils[idx]:fields()
-      -- TODO: handle reductions on ghost regions
-      privileges:insert(fields:map(function(field)
-        return std.privilege(std.reads, region, field)
-      end))
-      --coherence_modes[region][field_path] = std.exclusive
-      region_universe[region:gettype()] = true
-    end
-  end
-  task:set_privileges(privileges)
-  task:set_coherence_modes(coherence_modes)
-  task:set_flags(node.flags)
-  task:set_conditions(node.conditions)
-  task:set_param_constraints(node.prototype:get_param_constraints())
-  task:set_constraints(node.prototype:get_constraints())
-  task:set_region_universe(region_universe)
+  --local task_type = terralib.types.functype(
+  --  params:map(function(param) return param.param_type end), node.return_type, false)
+  --task:set_type(task_type)
+  --task:set_param_symbols(
+  --  params:map(function(param) return param.symbol end))
+  --local region_universe = node.prototype:get_region_universe():copy()
+  --local privileges = terralib.newlist()
+  --local coherence_modes = data.new_recursive_map(1)
+  ----node.prototype:get_coherence_modes():map_list(function(region, map)
+  ----    print(region)
+  ----  map:map_list(function(field_path, v)
+  ----    coherence_modes[region][field_path] = true
+  ----  end)
+  ----end)
+  --privileges:insertall(orig_privileges)
+  ---- FIXME: Workaround for the current limitation in SPMD transformation
+  --local field_set = {}
+  --for idx = 1, #task_cx.stencils do
+  --              task_cx.stencils[idx]:fields():map(function(field) field_set[field] = true end)
+  --end
+  --local fields = terralib.newlist()
+  --for field, _ in pairs(field_set) do fields:insert(field) end
 
-  local parallelized = parallelize_tasks.top_task_body(task_cx, normalized)
-  local task_ast = ast.typed.top.Task {
-    name = task_name,
-    params = params,
-    return_type = node.return_type,
-    privileges = privileges,
-    coherence_modes = coherence_modes,
-    flags = node.flags,
-    conditions = node.conditions,
-    constraints = node.constraints,
-    body = parallelized,
-    config_options = ast.TaskConfigOptions {
-      leaf = false,
-      inner = false,
-      idempotent = false,
-      replicable = false,
-    },
-    region_divergence = false,
-    metadata = false,
-    prototype = task,
-    annotations = node.annotations {
-      parallel = ast.annotation.Forbid { value = false },
-    },
-    span = node.span,
-  }
+  --for idx = 1, #task_cx.stencils do
+  --  local stencil = task_cx.stencils[idx]
+  --  if not task_cx.use_primary[stencil] then
+  --                local region = task_cx.ghost_symbols[stencil]
+  --                --local fields = task_cx.stencils[idx]:fields()
+  --    -- TODO: handle reductions on ghost regions
+  --    privileges:insert(fields:map(function(field)
+  --      return std.privilege(std.reads, region, field)
+  --    end))
+  --    --coherence_modes[region][field_path] = std.exclusive
+  --    region_universe[region:gettype()] = true
+  --  end
+  --end
+  --task:set_privileges(privileges)
+  --task:set_coherence_modes(coherence_modes)
+  --task:set_flags(node.flags)
+  --task:set_conditions(node.conditions)
+  --task:set_param_constraints(node.prototype:get_param_constraints())
+  --task:set_constraints(node.prototype:get_constraints())
+  --task:set_region_universe(region_universe)
 
-  -- Hack: prevents parallelized verions from going through parallelizer again
-  global_cx[task] = {}
-  local task_ast_optimized = passes.optimize(task_ast)
-  local task_code = passes.codegen(task_ast_optimized, true)
+  --local parallelized = parallelize_tasks.top_task_body(task_cx, normalized)
+  --local task_ast = ast.typed.top.Task {
+  --  name = task_name,
+  --  params = params,
+  --  return_type = node.return_type,
+  --  privileges = privileges,
+  --  coherence_modes = coherence_modes,
+  --  flags = node.flags,
+  --  conditions = node.conditions,
+  --  constraints = node.constraints,
+  --  body = parallelized,
+  --  config_options = ast.TaskConfigOptions {
+  --    leaf = false,
+  --    inner = false,
+  --    idempotent = false,
+  --    replicable = false,
+  --  },
+  --  region_divergence = false,
+  --  prototype = task,
+  --  annotations = node.annotations {
+  --    parallel = ast.annotation.Forbid { value = false },
+  --  },
+  --  span = node.span,
+  --}
 
-  return task_code, task_cx
+  ---- Hack: prevents parallelized verions from going through parallelizer again
+  --global_cx[task] = {}
+  --local task_ast_optimized = passes.optimize(task_ast)
+  --local task_code = passes.codegen(task_ast_optimized, true)
+
+  --return task_code, task_cx
 end
 
 function parallelize_tasks.entry(node)
@@ -3406,9 +3423,11 @@ function parallelize_tasks.entry(node)
     if global_context[node.prototype] then return node end
     if node.annotations.parallel:is(ast.annotation.Demand) then
       assert(node.metadata)
+      -- Temporary normalization checker
       check_parallelizable.top_task(node)
-      --local task_name = node.name
-      --local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
+
+      local task_name = node.name
+      local new_task_code, cx = parallelize_tasks.top_task(global_context, node)
       --local info = {
       --  task = new_task_code,
       --  cx = cx,
