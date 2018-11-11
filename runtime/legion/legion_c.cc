@@ -3669,6 +3669,15 @@ legion_attach_launcher_create(legion_logical_region_t logical_region_,
   return CObjectWrapper::wrap(launcher);
 }
 
+void 
+legion_attach_launcher_restricted(legion_attach_launcher_t handle_,
+                                  bool restricted)
+{
+  AttachLauncher *handle = CObjectWrapper::unwrap(handle_);
+
+  handle->restricted = restricted;
+}
+
 void
 legion_attach_launcher_destroy(legion_attach_launcher_t handle_)
 {
@@ -3718,6 +3727,21 @@ legion_detach_external_resource(legion_runtime_t runtime_,
 
   Future *result = new Future(
       runtime->detach_external_resource(ctx, *handle));
+  return CObjectWrapper::wrap(result);
+}
+
+legion_future_t
+legion_flush_detach_external_resource(legion_runtime_t runtime_,
+                                      legion_context_t ctx_,
+                                      legion_physical_region_t handle_,
+                                      bool flush)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  PhysicalRegion *handle = CObjectWrapper::unwrap(handle_);
+
+  Future *result = new Future(
+      runtime->detach_external_resource(ctx, *handle, flush));
   return CObjectWrapper::wrap(result);
 }
 
