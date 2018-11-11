@@ -42,9 +42,11 @@ where
   writes(rz.{zx, zarea, zvol})
 do
   for z in rz do
-    z.zx = vec2 {x = 0.0, y = 0.0}
-    z.zarea = 0.0
-    z.zvol = 0.0
+    var v = vec2 {x = 0.0, y = 0.0}
+    var zero = 0.0
+    rz[z].zx = v
+    rz[z].zarea = zero
+    rz[z].zvol = zero
   end
 end
 
@@ -59,9 +61,12 @@ where
   writes(rs.smf)
 do
   for s in rs do
-    var z = s.mapsz
+    var z = rs[s].mapsz
+    var sarea = rs[s].sarea
+    var zarea = rz[z].zarea
+    var v = sarea / zarea
 
-    rs[s].smf = rs[s].sarea / rz[z].zarea
+    rs[s].smf = v
   end
 end
 
@@ -79,22 +84,29 @@ do
     var ze = einit
 
     var eps = 1e-12
-    if z.zx.x > subregion_x0 - eps and
-      z.zx.x < subregion_x1 + eps and
-      z.zx.y > subregion_y0 - eps and
-      z.zx.y < subregion_y1 + eps
+
+    var zzx_x = rz[z].zx.x
+    var zzx_y = rz[z].zx.y
+
+    if zzx_x > subregion_x0 - eps and
+      zzx_x < subregion_x1 + eps and
+      zzx_y > subregion_y0 - eps and
+      zzx_y < subregion_y1 + eps
     then
       zr = rinitsub
       ze = einitsub
     end
 
-    var zm = zr * z.zvol
+    var zvol = rz[z].zvol
+    var zm = zr * zvol
+    var zero = 0.0
+    var zetot = ze * zm
 
-    z.zr = zr
-    z.ze = ze
-    z.zwrate = 0.0
-    z.zm = zm
-    z.zetot = ze * zm
+    rz[z].zr = zr
+    rz[z].ze = ze
+    rz[z].zwrate = zero
+    rz[z].zm = zm
+    rz[z].zetot = zetot
   end
 end
 
@@ -106,10 +118,13 @@ where
 do
   for p in rp do
     if vel == 0.0 then
-      p.pu = vec2 {x = 0.0, y = 0.0}
+      var init = vec2 {x = 0.0, y = 0.0}
+      rp[p].pu = init
     else
-      var pmag = length(p.px)
-      p.pu = (vel / pmag)*p.px
+      var px = rp[p].px
+      var pmag = length(px)
+      var pu = (vel / pmag) * px
+      rp[p].pu = pu
     end
   end
 end
@@ -129,9 +144,10 @@ do
 
   -- Initialize fields used in reductions.
   for p in rp do
-    p.pmaswt = 0.0
-    p.pf.x = 0.0
-    p.pf.y = 0.0
+    var zero = 0.0
+    rp[p].pmaswt = zero
+    rp[p].pf.x = zero
+    rp[p].pf.y = zero
   end
 end
 
@@ -151,18 +167,20 @@ do
 
   -- Copy state variables from previous time step and update position.
   for p in rp do
-    var px0_x = p.px.x
-    var pu0_x = p.pu.x
-    p.px0.x = px0_x
-    p.pu0.x = pu0_x
-    p.pxp.x = px0_x + dth*pu0_x
+    var px0_x = rp[p].px.x
+    var pu0_x = rp[p].pu.x
+    rp[p].px0.x = px0_x
+    rp[p].pu0.x = pu0_x
+    var pxp_x = px0_x + dth * pu0_x
+    rp[p].pxp.x = pxp_x
   end
   for p in rp do
-    var px0_y = p.px.y
-    var pu0_y = p.pu.y
-    p.px0.y = px0_y
-    p.pu0.y = pu0_y
-    p.pxp.y = px0_y + dth*pu0_y
+    var px0_y = rp[p].px.y
+    var pu0_y = rp[p].pu.y
+    rp[p].px0.y = px0_y
+    rp[p].pu0.y = pu0_y
+    var pxp_y = px0_y + dth * pu0_y
+    rp[p].pxp.y = pxp_y
   end
 end
 
@@ -177,7 +195,8 @@ do
 
   -- Copy state variables from previous time step.
   for z in rz do
-    z.zvol0 = z.zvol
+    var zvol = rz[z].zvol
+    rz[z].zvol0 = zvol
   end
 end
 
@@ -198,18 +217,25 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zxp = vec2 {x = 0.0, y = 0.0}
+    var init = vec2 {x = 0.0, y = 0.0}
+    rz[z].zxp = init
   end
 
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
 
     var p1_pxp = rp[p1].pxp
-    s.exp = 0.5*(p1_pxp + rp[p2].pxp)
+    var p2_pxp = rp[p2].pxp
+    var exp = 0.5 * (p1_pxp + p2_pxp)
 
-    rz[z].zxp += (1/double(rz[z].znump)) * p1_pxp
+    rs[s].exp = exp
+
+    var znump = rz[z].znump
+    var zxp = (1 / double(znump)) * p1_pxp
+
+    rz[z].zxp += zxp
   end
 end
 
@@ -227,26 +253,30 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zareap = 0.0
-    z.zvolp = 0.0
+    var zero = 0.0
+    rz[z].zareap = zero
+    rz[z].zvolp = zero
   end
 
   var num_negative_sv = 0
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
 
     var p1_pxp = rp[p1].pxp
     var p2_pxp = rp[p2].pxp
-    var sa = 0.5 * cross(p2_pxp - p1_pxp, rz[z].zxp - p1_pxp)
-    var sv = sa * (p1_pxp.x + p2_pxp.x + rz[z].zxp.x)
-    s.sareap = sa
+    var zxp = rz[z].zxp
+    var sa = 0.5 * cross(p2_pxp - p1_pxp, zxp - p1_pxp)
+    var sv = sa * (p1_pxp.x + p2_pxp.x + zxp.x)
+    rs[s].sareap = sa
     -- s.svolp = sv
-    s.elen = length(p2_pxp - p1_pxp)
+    var elen = length(p2_pxp - p1_pxp)
+    rs[s].elen = elen
 
     rz[z].zareap += sa
-    rz[z].zvolp += (1.0 / 3.0) * sv
+    var zvolp = (1.0 / 3.0) * sv
+    rz[z].zvolp += zvolp
 
     if sv <= 0.0 then
       num_negative_sv += 1
@@ -267,16 +297,18 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zdl = 1e99
+    var init = [double](1.0e99)
+    rz[z].zdl = init
   end
 
   for s in rs do
-    var z = s.mapsz
+    var z = rs[s].mapsz
 
-    var area = s.sareap
-    var base = s.elen
+    var area = rs[s].sareap
+    var base = rs[s].elen
     var fac = 0.0
-    if rz[z].znump == 3 then
+    var znump = rz[z].znump
+    if znump == 3 then
       fac = 3.0
     else
       fac = 4.0
@@ -301,7 +333,10 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zrp = z.zm / z.zvolp
+    var zm = rz[z].zm
+    var zvolp = rz[z].zvolp
+    var zrp = zm / zvolp
+    rz[z].zrp = zrp
   end
 end
 
@@ -317,11 +352,16 @@ do
   if not enable then return end
 
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var s3 = s.mapss3
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var s3 = rs[s].mapss3
 
-    var m = rz[z].zrp * rz[z].zareap * 0.5 * (s.smf + rs[s3].smf)
+    var zrp = rz[z].zrp
+    var zareap = rz[z].zareap
+    var s_smf = rs[s].smf
+    var s3_smf = rs[s3].smf
+    var m = zrp * zareap * 0.5 * (s_smf + s3_smf)
+
     rp[p1].pmaswt += m
   end
 end
@@ -345,22 +385,33 @@ do
   var dth = 0.5 * dt
 
   for z in rz do
-    var rx = z.zr
-    var ex = max(z.ze, 0.0)
+    var rx = rz[z].zr
+    var ze = rz[z].ze
+    var ex = max(ze, 0.0)
     var px = gm1 * rx * ex
     var prex = gm1 * ex
     var perx = gm1 * rx
     var csqd = max(ss2, prex + perx * px / (rx * rx))
     var z0per = perx
     var zss = sqrt(csqd)
-    z.zss = zss
 
-    var zminv = 1.0 / z.zm
-    var dv = (z.zvolp - z.zvol0) * zminv
-    var bulk = z.zr * zss * zss
+    rz[z].zss = zss
+
+    var zm = rz[z].zm
+    var zminv = 1.0 / zm
+    var zvolp = rz[z].zvolp
+    var zvol0 = rz[z].zvol0
+    var dv = (zvolp - zvol0) * zminv
+    var zr = rx
+    var bulk = zr * zss * zss
     var denom = 1.0 + 0.5 * z0per * dv
-    var src = z.zwrate * dth * zminv
-    z.zp = px + (z0per * src - z.zr * bulk * dv) / denom
+
+    var zwrate = rz[z].zwrate
+
+    var src = zwrate * dth * zminv
+    var zp = px + (z0per * src - zr * bulk * dv) / denom
+
+    rz[z].zp = zp
   end
 end
 
@@ -381,23 +432,40 @@ do
   if not enable then return end
 
   for s in rs do
-    var z = s.mapsz
+    var z = rs[s].mapsz
 
     -- Compute surface vectors of sides.
-    var ssurfp = rotateCCW(s.exp - rz[z].zxp)
+    var exp = rs[s].exp
+    var zxp = rz[z].zxp
+    var ssurfp = rotateCCW(exp - zxp)
 
     -- Compute PolyGas forces.
-    var sfx = (-rz[z].zp)*ssurfp
-    s.sfp = sfx
+    var zp = rz[z].zp
+    var sfx = (-zp) * ssurfp
+    rs[s].sfp = sfx
 
     -- Compute TTS forces.
-    var svfacinv = rz[z].zareap / s.sareap
-    var srho = rz[z].zrp * s.smf * svfacinv
-    var sstmp = max(rz[z].zss, ssmin)
+    var zareap = rz[z].zareap
+    var sareap = rs[s].sareap
+
+    var svfacinv = zareap / sareap
+
+    var zrp = rz[z].zrp
+    var smf = rs[s].smf
+
+    var srho = zrp * smf * svfacinv
+
+    var zss = rz[z].zss
+
+    var sstmp = max(zss, ssmin)
     sstmp = alfa * sstmp * sstmp
-    var sdp = sstmp * (srho - rz[z].zrp)
-    var sqq = (-sdp)*ssurfp
-    s.sft = sfx + sqq
+
+    var sdp = sstmp * (srho - zrp)
+    var sqq = (-sdp) * ssurfp
+
+    var sft = sfx + sqq
+
+    rs[s].sft = sft
   end
 end
 
@@ -412,14 +480,20 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zuc = vec2 { x = 0.0, y = 0.0 }
+    var init = vec2 { x = 0.0, y = 0.0 }
+    rz[z].zuc = init
   end
 
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
+    var z = rs[s].mapsz
+    var p1 = rs[s].mapsp1
 
-    rz[z].zuc += (1.0 / double(rz[z].znump))*rp[p1].pu
+    var znump = rz[z].znump
+    var pu = rp[p1].pu
+
+    var zuc = (1.0 / [double](znump)) * pu
+
+    rz[z].zuc += zuc
   end
 end
 
@@ -435,58 +509,61 @@ do
   if not enable then return end
 
   for s2 in rs do
-    var c = s2
-    var s = s2.mapss3
-    var z = rs[s].mapsz
-    var p = rs[s].mapsp2
-    var p1 = rs[s].mapsp1
-    var p2 = s2.mapsp2
-    var e1 = s
-    var e2 = s2
+    var s  = rs[s2].mapss3
+    var z  = rs[s ].mapsz
+    var p  = rs[s ].mapsp2
+    var p1 = rs[s ].mapsp1
+    var p2 = rs[s2].mapsp2
+
+    -- var e1 = s
+    -- var e2 = s2
 
     -- velocities and positions
     -- point p
     var up0 = rp[p].pu
     var xp0 = rp[p].pxp
     -- edge e2
-    var up1 = 0.5*(rp[p].pu + rp[p2].pu)
-    var xp1 = rs[e2].exp
+    var p_pu = up0
+    var p2_pu = rp[p2].pu
+    var up1 = 0.5 * (p_pu + p2_pu)
+    var xp1 = rs[s2].exp
     -- zone center z
     var up2 = rz[z].zuc
     var xp2 = rz[z].zxp
     -- edge e1
-    var up3 = 0.5*(rp[p1].pu + rp[p].pu)
-    var xp3 = rs[e1].exp
+    var p1_pu = rp[p1].pu
+    var up3 = 0.5 * (p1_pu + up0)
+    var xp3 = rs[s].exp
 
     -- compute 2d cartesian volume of corner
     var cvolume = 0.5 * cross(xp2 - xp0, xp3 - xp1)
-    c.carea = cvolume
+    rs[s2].carea = cvolume
 
     -- compute cosine angle
     var v1 = xp3 - xp0
     var v2 = xp1 - xp0
-    var de1 = rs[e1].elen
-    var de2 = rs[e2].elen
+    var de1 = rs[s].elen
+    var de2 = rs[s2].elen
     var minelen = min(de1, de2)
-    if minelen < 1e-12 then
-      rs[c].ccos = 0.0
-    else
-      rs[c].ccos = 4.0 * dot(v1, v2) / (de1 * de2)
+    var ccos = 0.0
+    if minelen >= 1e-12 then
+      ccos = 4.0 * dot(v1, v2) / (de1 * de2)
     end
+    rs[s2].ccos =ccos
 
     -- compute divergence of corner
     var cdiv = (cross(up2 - up0, xp3 - xp1) -
                 cross(up3 - up1, xp2 - xp0)) / (2.0 * cvolume)
-    c.cdiv = cdiv
+    rs[s2].cdiv = cdiv
 
     -- compute evolution factor
-    var dxx1 = 0.5*(((xp1 + xp2) - xp0) - xp3)
-    var dxx2 = 0.5*(((xp2 + xp3) - xp0) - xp1)
+    var dxx1 = 0.5 * (((xp1 + xp2) - xp0) - xp3)
+    var dxx2 = 0.5 * (((xp2 + xp3) - xp0) - xp1)
     var dx1 = length(dxx1)
     var dx2 = length(dxx2)
 
     -- average corner-centered velocity
-    var duav = 0.25*(((up0 + up1) + up2) + up3)
+    var duav = 0.25 * (((up0 + up1) + up2) + up3)
 
     var test1 = abs(dot(dxx1, duav) * dx2)
     var test2 = abs(dot(dxx2, duav) * dx1)
@@ -507,13 +584,14 @@ do
     var dv2 = length(((up2 + up3) - up0) - up1)
     var du = max(dv1, dv2)
 
+    var cevol = 0.0
+    var cdu = 0.0
     if cdiv < 0.0 then
-      rs[c].cevol = evol
-      rs[c].cdu = du
-    else
-      rs[c].cevol = 0.0
-      rs[c].cdu = 0.0
+      cevol = evol
+      cdu = du
     end
+    rs[s2].cevol = cevol
+    rs[s2].cdu = cdu
   end
 end
 
@@ -532,26 +610,44 @@ do
   var gammap1 = gamma + 1.0
 
   for s4 in rs do
-    var c = s4
-    var z = c.mapsz
+    -- var c = s4
+    var z = rs[s4].mapsz
 
-    var ztmp2 = q2 * 0.25 * gammap1 * rs[c].cdu
-    var ztmp1 = q1 * rz[z].zss
+    var cdu = rs[s4].cdu
+    var ztmp2 = q2 * 0.25 * gammap1 * cdu
+
+    var zss = rz[z].zss
+    var ztmp1 = q1 * zss
+
     var zkur = ztmp2 + sqrt(ztmp2 * ztmp2 + ztmp1 * ztmp1)
-    var rmu = zkur * rz[z].zrp * rs[c].cevol
-    if c.cdiv > 0.0 then
+
+    var zrp = rz[z].zrp
+    var cevol = rs[s4].cevol
+    var rmu = zkur * zrp * cevol
+
+    var cdiv = rs[s4].cdiv
+    if cdiv > 0.0 then
       rmu = 0.0
     end
 
-    var s = rs[c].mapss3
+    var s = rs[s4].mapss3
     var p = rs[s].mapsp2
     var p1 = rs[s].mapsp1
-    var e1 = s
+    -- var e1 = s
     var p2 = rs[s4].mapsp2
-    var e2 = s4
+    -- var e2 = s4
 
-    rs[c].cqe1 = rmu / rs[e1].elen*(rp[p].pu - rp[p1].pu)
-    rs[c].cqe2 = rmu / rs[e2].elen*(rp[p2].pu - rp[p].pu)
+    var e1_elen = rs[s].elen
+    var p_pu = rp[p].pu
+    var p1_pu = rp[p1].pu
+    var cqe1 = rmu / e1_elen * (p_pu - p1_pu)
+
+    var e2_elen = rs[s4].elen
+    var p2_pu = rp[p2].pu
+    var cqe2 = rmu / e2_elen * (p2_pu - p_pu)
+
+    rs[s4].cqe1 = cqe1
+    rs[s4].cqe2 = cqe2
   end
 end
 
@@ -566,29 +662,38 @@ do
   if not enable then return end
 
   for s in rs do
-    var c1 = s
-    var c2 = s.mapss4
-    var e = s
-    var el = e.elen
+    -- var c1 = s
+    var c2 = rs[s].mapss4
+    -- var e = s
+    var el = rs[s].elen
 
-    var c1sin2 = 1.0 - rs[c1].ccos * rs[c1].ccos
+    var c1_ccos = rs[s].ccos
+    var c1sin2 = 1.0 - c1_ccos * c1_ccos
     var c1w = 0.0
     var c1cos = 0.0
     if c1sin2 >= 1e-4 then
-      c1w = rs[c1].carea / c1sin2
-      c1cos = rs[c1].ccos
+      var carea = rs[s].carea
+      c1w = carea / c1sin2
+      c1cos = c1_ccos
     end
 
-    var c2sin2 = 1.0 - rs[c2].ccos * rs[c2].ccos
+    var c2_ccos = rs[c2].ccos
+    var c2sin2 = 1.0 - c2_ccos * c2_ccos
     var c2w = 0.0
     var c2cos = 0.0
     if c2sin2 >= 1e-4 then
-      c2w = rs[c2].carea / c2sin2
-      c2cos = rs[c2].ccos
+      var carea = rs[c2].carea
+      c2w = carea / c2sin2
+      c2cos = c2_ccos
     end
 
-    s.sfq = (1.0 / el)*(c1w*(rs[c1].cqe2 + c1cos*rs[c1].cqe1) +
-                          c2w*(rs[c2].cqe1 + c2cos*rs[c2].cqe2))
+    var c1_cqe2 = rs[s].cqe2
+    var c1_cqe1 = rs[s].cqe1
+    var c2_cqe1 = rs[c2].cqe1
+    var c2_cqe2 = rs[c2].cqe2
+    var sfq = (1.0 / el) * (c1w * (c1_cqe2 + c1cos * c1_cqe1) +
+                            c2w * (c2_cqe1 + c2cos * c2_cqe2))
+    rs[s].sfq = sfq
   end
 end
 
@@ -605,29 +710,37 @@ do
   if not enable then return end
 
   for z in rz do
-    z.z0tmp = 0.0
+    var zero = 0.0
+    rz[z].z0tmp = zero
   end
 
   for s in rs do
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
-    var z = s.mapsz
-    var e = s
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
+    var z  = rs[s].mapsz
+    -- var e = s
 
-    var dx = rp[p2].pxp - rp[p1].pxp
-    var du = rp[p2].pu - rp[p1].pu
-    var lenx = rs[e].elen
-    var dux = dot(du, dx)
+    var p2_pxp = rp[p2].pxp
+    var p1_pxp = rp[p1].pxp
+    var dx = p2_pxp - p1_pxp
+
+    var p2_pu = rp[p2].pu
+    var p1_pu = rp[p1].pu
+    var du = p2_pu - p1_pu
+
+    var lenx = rs[s].elen
+    var dux = 0.0
     if lenx > 0.0 then
-      dux = abs(dux) / lenx
-    else
-      dux = 0.0
+      dux = abs(dot(du, dx)) / lenx
     end
     rz[z].z0tmp max= dux
   end
 
   for z in rz do
-    z.zdu = q1 * z.zss + 2.0 * q2 * z.z0tmp
+    var zss = rz[z].zss
+    var z0tmp = rz[z].z0tmp
+    var zdu = q1 * zss + 2.0 * q2 * z0tmp
+    rz[z].zdu = zdu
   end
 end
 
@@ -643,12 +756,20 @@ do
   if not enable then return end
 
   for s in rs do
-    var p1 = s.mapsp1
-    var s3 = s.mapss3
+    var p1 = rs[s].mapsp1
+    var s3 = rs[s].mapss3
 
-    var f = (rs[s].sfq + rs[s].sft) - (rs[s3].sfq + rs[s3].sft)
-    rp[p1].pf.x += f.x
-    rp[p1].pf.y += f.y
+    var s_sfq = rs[s].sfq
+    var s_sft = rs[s].sft
+    var s3_sfq = rs[s3].sfq
+    var s3_sft = rs[s3].sft
+    var f = (s_sfq + s_sft) - (s3_sfq + s3_sft)
+
+    var f_x = f.x
+    var f_y = f.y
+
+    rp[p1].pf.x += f_x
+    rp[p1].pf.y += f_y
   end
 end
 
@@ -669,12 +790,20 @@ do
   var vfixy = vec2 {x = 0.0, y = 1.0}
   for p in rp do
     if p.has_bcx then
-      p.pu0 = project(p.pu0, vfixx)
-      p.pf = project(p.pf, vfixx)
+      var p_pu0 = rp[p].pu0
+      var p_pf = rp[p].pf
+      var pu0 = project(p_pu0, vfixx)
+      var pf = project(p_pf, vfixx)
+      rp[p].pu0 = pu0
+      rp[p].pf = pf
     end
     if p.has_bcy then
-      p.pu0 = project(p.pu0, vfixy)
-      p.pf = project(p.pf, vfixy)
+      var p_pu0 = rp[p].pu0
+      var p_pf = rp[p].pf
+      var pu0 = project(p_pu0, vfixy)
+      var pf = project(p_pf, vfixy)
+      rp[p].pu0 = pu0
+      rp[p].pf = pf
     end
   end
 end
@@ -701,17 +830,29 @@ do
   var fuzz = 1e-99
   var dth = 0.5 * dt
   for p in rp do
-    var fac = 1.0 / max(p.pmaswt, fuzz)
-    var pap_x = fac*p.pf.x
-    var pap_y = fac*p.pf.y
+    var pmaswt = rp[p].pmaswt
+    var fac = 1.0 / max(pmaswt, fuzz)
+    var pf = rp[p].pf
+    var pap_x = fac * pf.x
+    var pap_y = fac * pf.y
 
-    var pu_x = p.pu0.x + dt*(pap_x)
-    p.pu.x = pu_x
-    p.px.x = p.px0.x + dth*(pu_x + p.pu0.x)
+    var p_pu0_x = rp[p].pu0.x
+    var p_px0_x = rp[p].px0.x
 
-    var pu_y = p.pu0.y + dt*(pap_y)
-    p.pu.y = pu_y
-    p.px.y = p.px0.y + dth*(pu_y + p.pu0.y)
+    var pu_x = p_pu0_x + dt * pap_x
+    rp[p].pu.x = pu_x
+
+    var px_x = p_px0_x + dth * (pu_x + p_pu0_x)
+    rp[p].px.x = px_x
+
+    var p_pu0_y = rp[p].pu0.y
+    var p_px0_y = rp[p].px0.y
+
+    var pu_y = p_pu0_y + dt * pap_y
+    rp[p].pu.y = pu_y
+
+    var px_y = p_px0_y + dth * (pu_y + p_pu0_y)
+    rp[p].px.y = px_y
   end
 end
 
@@ -734,19 +875,24 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zx = vec2 {x = 0.0, y = 0.0}
+    var init = vec2 {x = 0.0, y = 0.0}
+    z.zx = init
   end
 
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
-    var e = s
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
+    -- var e = s
 
     var p1_px = rp[p1].px
-    rs[e].ex = 0.5*(p1_px + rp[p2].px)
+    var p2_px = rp[p2].px
+    var ex = 0.5 * (p1_px + p2_px)
+    rs[s].ex = ex
 
-    rz[z].zx += (1/double(rz[z].znump)) * p1_px
+    var znump = rz[z].znump
+    var zx = (1 / double(znump)) * p1_px
+    rz[z].zx += zx
   end
 end
 
@@ -765,25 +911,29 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zarea = 0.0
-    z.zvol = 0.0
+    var zero = 0.0
+    rz[z].zarea = zero
+    rz[z].zvol = zero
   end
 
   var num_negative_sv = 0
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
 
     var p1_px = rp[p1].px
     var p2_px = rp[p2].px
-    var sa = 0.5 * cross(p2_px - p1_px, rz[z].zx - p1_px)
-    var sv = sa * (p1_px.x + p2_px.x + rz[z].zx.x)
+    var zx = rz[z].zx
+    var sa = 0.5 * cross(p2_px - p1_px, zx - p1_px)
+    var sv = sa * (p1_px.x + p2_px.x + zx.x)
     rs[s].sarea = sa
     -- s.svol = sv
 
     rz[z].zarea += sa
-    rz[z].zvol += (1.0 / 3.0) * sv
+
+    var zvol = (1.0 / 3.0) * sv
+    rz[z].zvol += zvol
 
     if sv <= 0.0 then
       num_negative_sv += 1
@@ -809,18 +959,30 @@ do
   if not enable then return end
 
   for z in rz do
-    z.zw = 0.0
+    var zero = 0.0
+    rz[z].zw = zero
   end
 
   for s in rs do
-    var z = s.mapsz
-    var p1 = s.mapsp1
-    var p2 = s.mapsp2
+    var z  = rs[s].mapsz
+    var p1 = rs[s].mapsp1
+    var p2 = rs[s].mapsp2
 
-    var sftot = s.sfp + s.sfq
-    var sd1 = dot(sftot, rp[p1].pu0 + rp[p1].pu)
-    var sd2 = dot(-1.0*sftot, rp[p2].pu0 + rp[p2].pu)
-    var dwork = -0.5 * dt * (sd1 * rp[p1].pxp.x + sd2 * rp[p2].pxp.x)
+    var sfp = rs[s].sfp
+    var sfq = rs[s].sfq
+    var sftot = sfp + sfq
+
+    var p1_pu0 = rp[p1].pu0
+    var p1_pu = rp[p1].pu
+    var sd1 = dot(sftot, p1_pu0 + p1_pu)
+
+    var p2_pu0 = rp[p2].pu0
+    var p2_pu = rp[p2].pu
+    var sd2 = dot(-1.0 * sftot, p2_pu0 + p2_pu)
+
+    var p1_pxp_x = rp[p1].pxp.x
+    var p2_pxp_x = rp[p2].pxp.x
+    var dwork = -0.5 * dt * (sd1 * p1_pxp_x + sd2 * p2_pxp_x)
 
     rz[z].zetot += dwork
     rz[z].zw += dwork
@@ -845,12 +1007,23 @@ do
   var fuzz = 1e-99
 
   for z in rz do
-    var dvol = z.zvol - z.zvol0
-    z.zwrate = (z.zw + z.zp * dvol) * dtiny
+    var zvol = rz[z].zvol
+    var zvol0 = rz[z].zvol0
+    var dvol = zvol - zvol0
 
-    z.ze = z.zetot / (z.zm + fuzz)
+    var zw = rz[z].zw
+    var zp = rz[z].zp
+    var zwrate = (zw + zp * dvol) * dtiny
+    rz[z].zwrate = zwrate
 
-    z.zr = z.zm / z.zvol
+    var zetot = rz[z].zetot
+    var zm = rz[z].zm
+
+    var ze = zetot / (zm + fuzz)
+    rz[z].ze = ze
+
+    var zr = zm / zvol
+    rz[z].zr = zr
   end
 end
 
@@ -904,31 +1077,32 @@ do
   -- Hack: manually inline calc_dt_courant
   do
     var fuzz = 1e-99
-    var dtnew = dtmax
     for z in rz do
-      var cdu = max(z.zdu, max(z.zss, fuzz))
-      var zdthyd = z.zdl * cfl / cdu
+      var zdu = rz[z].zdu
+      var zss = rz[z].zss
+      var cdu = max(zdu, max(zss, fuzz))
+      var zdl = rz[z].zdl
+      var zdthyd = zdl * cfl / cdu
 
-      dtnew min= zdthyd
+      dthydro min= zdthyd
     end
-
-    dthydro min= dtnew
   end
 
   -- Hack: manually inline calc_dt_volume
   do
-    var dvovmax = 1e-99
     for z in rz do
-      var zdvov = abs((z.zvol - z.zvol0) / z.zvol0)
-      dvovmax max= zdvov
+      var zvol = rz[z].zvol
+      var zvol0 = rz[z].zvol0
+      var zdvov = abs((zvol - zvol0) / zvol0)
+      var zdthyd = dtlast * cflv / zdvov
+      dthydro min= zdthyd
     end
-    dthydro min= dtlast * cflv / dvovmax
   end
 
   return dthydro
 end
 
-__demand(__inline)
+--__demand(__inline)
 task calc_global_dt(dt : double, dtfac : double, dtinit : double,
                     dtmax : double, dthydro : double,
                     time : double, tstop : double, cycle : int64) : double
