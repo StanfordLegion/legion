@@ -3939,6 +3939,22 @@ namespace Legion {
       complete_execution(Runtime::protect_event(detach_event));
     }
 
+    //--------------------------------------------------------------------------
+    void ReplDetachOp::select_sources(const InstanceRef &target,
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // Pick any instances other than external ones
+      for (unsigned idx = 0; idx < sources.size(); idx++)
+      {
+        const InstanceRef &ref = sources[idx];
+        if (ref.get_manager()->is_external_instance())
+          continue;
+        ranking.push_back(idx);
+      }
+    }
+
     /////////////////////////////////////////////////////////////
     // Shard Manager 
     /////////////////////////////////////////////////////////////

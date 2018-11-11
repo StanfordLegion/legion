@@ -1334,6 +1334,9 @@ namespace Legion {
       virtual void deactivate(void);
       virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
     public:
       RtBarrier resource_barrier;
       ValueExchange<DistributedID> *value_exchange;
