@@ -1149,6 +1149,8 @@ namespace Legion {
       virtual void trigger_ready(void);  
     protected:
       ShardingID sharding_functor;
+      CollectiveID mapped_collective_id;
+      ShardEventTree *mapped_collective;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

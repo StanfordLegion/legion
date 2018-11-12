@@ -1800,6 +1800,8 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByFieldThunk(ctx, target, pid);
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1850,6 +1852,8 @@ namespace Legion {
                                    projection.get_index_partition(),
                                    shard, total);
 #endif
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1903,6 +1907,8 @@ namespace Legion {
                                         projection.get_index_partition(),
                                         shard, total_shards);
 #endif
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1939,6 +1945,8 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageThunk(ctx, target_shard, pid, proj);
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1976,6 +1984,8 @@ namespace Legion {
       assert(thunk == NULL);
 #endif
       thunk = new ReplByPreimageRangeThunk(ctx, target_shard, pid, proj);
+      mapped_collective_id = 
+        ctx->get_next_collective_index(COLLECTIVE_LOC_76);
       partition_ready = ready_event;
       if (runtime->legion_spy_enabled)
         perform_logging();
@@ -1987,6 +1997,8 @@ namespace Legion {
     {
       activate_dependent_op();
       sharding_functor = UINT_MAX;
+      mapped_collective_id = UINT_MAX;
+      mapped_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1997,6 +2009,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_dependent_op();
+      if (mapped_collective != NULL)
+        delete mapped_collective;
 #ifdef DEBUG_LEGION
       if (sharding_collective != NULL)
         delete sharding_collective;
@@ -2086,6 +2100,11 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(mapped_collective == NULL);
+#endif
+        mapped_collective = 
+          new ShardEventTree(repl_ctx, 0/*zero owner*/, mapped_collective_id);
         // Inform the thunk that we're eliding collectives since this
         // is a singular operation and not an index operation
         thunk->elide_collectives();
@@ -2095,11 +2114,16 @@ namespace Legion {
         {
           // We don't own it, so we can pretend like we
           // mapped and executed this task already
-          complete_mapping();
+          RtEvent local_done = mapped_collective->get_local_event();
+          complete_mapping(local_done);
           complete_execution();
         }
         else // If we're the shard then we do the base call
+        {
+          // Signal the tree when we are done our mapping
+          mapped_collective->signal_tree(mapped_event);
           DependentPartitionOp::trigger_ready();
+        }
       }
     }
 

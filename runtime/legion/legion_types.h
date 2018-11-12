@@ -1271,6 +1271,7 @@ namespace Legion {
       COLLECTIVE_LOC_73 = 73,
       COLLECTIVE_LOC_74 = 74,
       COLLECTIVE_LOC_75 = 75,
+      COLLECTIVE_LOC_76 = 76,
     };
 
     // legion_types.h
