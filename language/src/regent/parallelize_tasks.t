@@ -3841,8 +3841,15 @@ function parallelize_tasks.top_task(global_cx, node)
       if accesses then
         local primary_privileges = terralib.newlist()
         for field, privilege in accesses:items() do
-          primary_privileges:insert(
-            std.privilege(privilege, param.symbol, field))
+          if privilege == "reads_writes" then
+            primary_privileges:insert(
+              std.privilege(std.reads, param.symbol, field))
+            primary_privileges:insert(
+              std.privilege(std.writes, param.symbol, field))
+          else
+            primary_privileges:insert(
+              std.privilege(privilege, param.symbol, field))
+          end
         end
         privileges:insert(primary_privileges)
       end
