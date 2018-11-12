@@ -3887,6 +3887,8 @@ namespace Legion {
       if (flush)
       {
         requirement.privilege = READ_ONLY;
+        // Use the resource barrier to synchronize to make sure that
+        // all the copies are issued before we go to add our users later
         ApEvent effects_done = 
           runtime->forest->physical_register_only(requirement, version_info,
                                                   this, 0/*idx*/, 
@@ -3897,7 +3899,10 @@ namespace Legion {
                                                   get_logging_name(),
                                                   unique_op_id,
 #endif
-                                                  false/*check initialized*/);
+                                                  false/*check initialized*/,
+                                                  &resource_barrier);
+        // Advance the barrier for the next use
+        Runtime::advance_barrier(resource_barrier);
         if (effects_done.exists())
           detach_events.insert(effects_done);
         requirement.privilege = READ_WRITE;
