@@ -7010,6 +7010,31 @@ namespace Legion {
       }
     }
 
+#ifdef DEBUG_LEGION
+    //--------------------------------------------------------------------------
+    Operation* InnerContext::get_earliest(void) const
+    //--------------------------------------------------------------------------
+    {
+      Operation *result = NULL;
+      unsigned index = 0;
+      for (std::map<Operation*,GenerationID>::const_iterator it = 
+            executing_children.begin(); it != executing_children.end(); it++)
+      {
+        if (result == NULL)
+        {
+          result = it->first;
+          index = result->get_ctx_index();
+        }
+        else if (it->first->get_ctx_index() < index)
+        {
+          result = it->first;
+          index = result->get_ctx_index();
+        }
+      }
+      return result;
+    }
+#endif
+
     /////////////////////////////////////////////////////////////
     // Top Level Context 
     /////////////////////////////////////////////////////////////
