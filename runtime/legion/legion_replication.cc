@@ -3290,9 +3290,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       initialize(ctx, k);
-      if (fence_kind != EXECUTION_FENCE)
-        mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
-      if (fence_kind != MAPPING_FENCE)
+#ifdef DEBUG_LEGION
+      // Execution fences alone can lead to hangs in control replication
+      // contexts because of how the distributed schedulers for each shard
+      // work, so we either need mapping fences or mixed fences
+      assert(fence_kind != EXECUTION_FENCE);
+#endif
+      mapping_fence_barrier = ctx->get_next_mapping_fence_barrier();
+      if (fence_kind == MIXED_FENCE)
         execution_fence_barrier = ctx->get_next_execution_fence_barrier();
     }
 
