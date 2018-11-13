@@ -8841,6 +8841,21 @@ namespace Legion {
       // Initialize our profiling instance
       if (address_space < num_profiling_nodes)
         initialize_legion_prof(config);
+#ifdef TRACE_ALLOCATION
+      allocation_tracing_count = 0;
+      // Instantiate all the kinds of allocations
+      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
+        allocation_manager[((AllocationType)idx)] = AllocationTracker();
+#endif
+#ifdef LEGION_GC
+      {
+        REFERENCE_NAMES_ARRAY(reference_names);
+        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
+        {
+          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
+        }
+      }
+#endif
       // Pull in any static registrations that were done
       register_static_variants();
       register_static_constraints();
@@ -8855,21 +8870,6 @@ namespace Legion {
 	assert(tree_state_logger != NULL);
       } else {
 	tree_state_logger = NULL;
-      }
-#endif
-#ifdef TRACE_ALLOCATION
-      allocation_tracing_count = 0;
-      // Instantiate all the kinds of allocations
-      for (unsigned idx = ARGUMENT_MAP_ALLOC; idx < LAST_ALLOC; idx++)
-        allocation_manager[((AllocationType)idx)] = AllocationTracker();
-#endif
-#ifdef LEGION_GC
-      {
-        REFERENCE_NAMES_ARRAY(reference_names);
-        for (unsigned idx = 0; idx < LAST_SOURCE_REF; idx++)
-        {
-          log_garbage.info("GC Source Kind %d %s", idx, reference_names[idx]);
-        }
       }
 #endif
 #ifdef DEBUG_SHUTDOWN_HANG
