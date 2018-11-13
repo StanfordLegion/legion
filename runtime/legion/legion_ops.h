@@ -2728,6 +2728,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       LayoutConstraintSet layout_constraint_set;
       bool restricted;
+      bool local_files;
     };
 
     /**

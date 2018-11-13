@@ -13002,6 +13002,7 @@ namespace Legion {
                            launcher.static_dependences);
       resource = launcher.resource;
       restricted = launcher.restricted;
+      local_files = launcher.local_files;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -13095,6 +13096,7 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       restricted = true;
+      local_files = false;
     }
 
     //--------------------------------------------------------------------------

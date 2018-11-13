@@ -1862,10 +1862,12 @@ namespace Legion {
     public:
       inline void attach_file(const char *file_name,
                               const std::vector<FieldID> &fields,
-                              LegionFileMode mode);
+                              LegionFileMode mode,
+                              bool local_file = false);
       inline void attach_hdf5(const char *file_name,
                               const std::map<FieldID,const char*> &field_map,
-                              LegionFileMode mode);
+                              LegionFileMode mode,
+                              bool local_files = false);
       // Helper methods for AOS and SOA arrays, but it is totally 
       // acceptable to fill in the layout constraint set manually
       inline void attach_array_aos(void *base, bool column_major,
@@ -1886,6 +1888,7 @@ namespace Legion {
       LegionFileMode                                mode;
       std::vector<FieldID>                          file_fields; // normal files
       std::map<FieldID,/*file name*/const char*>    field_files; // hdf5 files
+      bool                                          local_files;
     public:
       // Data for external instances
       LayoutConstraintSet                           constraints;

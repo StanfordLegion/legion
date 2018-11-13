@@ -3186,7 +3186,7 @@ namespace Legion {
     void ReplTimingOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
- #ifdef DEBUG_LEGION
+#ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
 #else
@@ -3390,13 +3390,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMapOp::initialize_replication(ReplicateContext *ctx, RtBarrier bar)
+    void ReplMapOp::initialize_replication(ReplicateContext *ctx,RtBarrier &bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(exchange == NULL);
 #endif
       inline_barrier = bar;
+      // Advance this barrier twice since we know that the inline mapping
+      // operations are going to use two different generations
+      Runtime::advance_barrier(bar);
+      Runtime::advance_barrier(bar);
       // We only check the results of the mapping if the runtime requests it
       // We can skip the check though if this is a read-only requirement
       const bool perform_checks = 
@@ -3681,13 +3685,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplAttachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier resource_bar)
+                                              RtBarrier &resource_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(resource_bar.exists());
 #endif
       resource_barrier = resource_bar;
+      // We're definitely going to need one generation of this barrier
+      Runtime::advance_barrier(resource_bar);
+      // We only need the second advance if the attach operation is for 
+      // an external instance or for a local file
+      if ((resource == EXTERNAL_INSTANCE) || local_files)
+        Runtime::advance_barrier(resource_bar);
     }
 
     //--------------------------------------------------------------------------
@@ -3710,39 +3720,83 @@ namespace Legion {
     void ReplAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
     {
-      std::set<RtEvent> preconditions;  
       // This is one of the few kinds of control replicated operations
       // that supports relaxed coherence of equivalence sets
       // because we know that this operation is running on all copies
       // of the sharded parent task
-      runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
-                                                   requirement,
-                                                   version_info,
-                                                   preconditions,
-                                                   false/*defer make ready*/,
-                                                   NULL/*defer mask*/,
-                                                   true/*runtime relaxed*/);
-      // Make sure everyone has a copy of their equivalence set before
-      // we continue any farther, this is the first use of the inline barrier
-      if (!preconditions.empty())
-        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
-                                      Runtime::merge_events(preconditions));
+      std::set<RtEvent> preconditions;  
+      if ((resource == EXTERNAL_INSTANCE) || local_files)
+      {
+        runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                     requirement,
+                                                     version_info,
+                                                     preconditions,
+                                                     false/*defer make ready*/,
+                                                     NULL/*defer mask*/,
+                                                     true/*runtime relaxed*/);
+        // Make sure everyone has a copy of their equivalence set before
+        // we continue any farther, this is the first use of the inline barrier
+        if (!preconditions.empty())
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                                        Runtime::merge_events(preconditions));
+        else
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+        const RtEvent ready = resource_barrier;
+        Runtime::advance_barrier(resource_barrier);
+        enqueue_ready_operation(ready);
+      }
       else
-        Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
-      const RtEvent ready = resource_barrier;
-      Runtime::advance_barrier(resource_barrier);
-      enqueue_ready_operation(ready);
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        const bool owner_shard = (repl_ctx->owner_shard->shard_id == 0);
+        // Only need to do this analysis on the owner node
+        if (owner_shard)
+          runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
+                                                       requirement,
+                                                       version_info,
+                                                       preconditions);
+        if (!preconditions.empty())
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+        else
+          enqueue_ready_operation();
+      }
     }
 
     //--------------------------------------------------------------------------
     void ReplAttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      if (resource == EXTERNAL_INSTANCE)
+      if ((resource == EXTERNAL_INSTANCE) || local_files)
       {
 #ifdef DEBUG_LEGION
         assert(!restricted);
 #endif
+        InstanceRef external_instance;
+        switch (resource)
+        {
+          case EXTERNAL_POSIX_FILE:
+          case EXTERNAL_HDF5_FILE:
+            {
+              external_instance = 
+                runtime->forest->create_external_instance(this, requirement, 
+                                                requirement.instance_fields);
+              break;
+            }
+          case EXTERNAL_INSTANCE:
+            {
+              external_instance = 
+                runtime->forest->create_external_instance(this, requirement,
+                          layout_constraint_set.field_constraint.field_set);
+              break;
+            }
+          default:
+            assert(false);
+        }
         // Once we're ready to map we can tell the memory manager that
         // this instance can be safely acquired for use
         InstanceManager *external_manager = 
@@ -3773,11 +3827,70 @@ namespace Legion {
         request_early_complete(attach_event);
         complete_execution(Runtime::protect_event(attach_event));
       }
-      // TODO: With external files we know the filesystem means that they
-      // are probably the same everywhere, so we really only want one
-      // instance in that particular case for that file to avoid aliasing
       else
-        assert(false);
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
+#endif
+        const bool owner_shard = (repl_ctx->owner_shard->shard_id == 0);
+        if (owner_shard)
+        {
+          InstanceRef external_instance;
+          switch (resource)
+          {
+            case EXTERNAL_POSIX_FILE:
+            case EXTERNAL_HDF5_FILE:
+              {
+                external_instance = 
+                  runtime->forest->create_external_instance(this, requirement, 
+                                                  requirement.instance_fields);
+                break;
+              }
+              // No external instances here by definition
+            default:
+              assert(false);
+          }
+          // Once we're ready to map we can tell the memory manager that
+          // this instance can be safely acquired for use
+          InstanceManager *external_manager = 
+            external_instance.get_manager()->as_instance_manager();
+          MemoryManager *memory_manager = external_manager->memory_manager;
+          memory_manager->attach_external_instance(external_manager);
+          const PhysicalTraceInfo trace_info(this);
+          ApEvent attach_event = runtime->forest->attach_external(this,0/*idx*/,
+                                                            requirement,
+                                                            external_instance,
+                                                            version_info,
+                                                            trace_info,
+                                                            restricted);
+#ifdef DEBUG_LEGION
+          assert(external_instance.has_ref());
+#endif
+          version_info.finalize_mapping(map_applied_conditions);
+          // This operation is ready once the file is attached
+          region.impl->set_reference(external_instance);
+          // Make sure that all the attach operations are done mapping
+          // before we consider this attach operation done
+          if (!map_applied_conditions.empty())
+            Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/,
+                          Runtime::merge_events(map_applied_conditions));
+          else
+            Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+          complete_mapping(resource_barrier);
+          request_early_complete(attach_event);
+          complete_execution(Runtime::protect_event(attach_event));
+        }
+        else
+        {
+          // Record that we're mapped once everyone else does
+          Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
+          complete_mapping(resource_barrier);
+          complete_execution();
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -3817,7 +3930,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::initialize_replication(ReplicateContext *ctx,
-                                              RtBarrier resource_bar)
+                                              RtBarrier &resource_bar)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3825,6 +3938,10 @@ namespace Legion {
       assert(value_exchange == NULL);
 #endif
       resource_barrier = resource_bar;
+      // Each detach will use two generations of this barrier
+      // so we need to advance it twice
+      Runtime::advance_barrier(resource_bar);
+      Runtime::advance_barrier(resource_bar);
       value_exchange = new ValueExchange<DistributedID>(COLLECTIVE_LOC_75, ctx);
     }
 

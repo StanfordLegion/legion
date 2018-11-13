@@ -7182,7 +7182,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_file(const char *name,
                                             const std::vector<FieldID> &fields,
-                                            LegionFileMode m)
+                                            LegionFileMode m, bool local_file)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7191,12 +7191,13 @@ namespace Legion {
       file_name = name;
       mode = m;
       file_fields = fields;
+      local_files = local_file;
     }
 
     //--------------------------------------------------------------------------
     inline void AttachLauncher::attach_hdf5(const char *name,
                                 const std::map<FieldID,const char*> &field_map,
-                                LegionFileMode m)
+                                LegionFileMode m, bool local)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -7205,6 +7206,7 @@ namespace Legion {
       file_name = name;
       mode = m;
       field_files = field_map;
+      local_files = local;
     }
 
     //--------------------------------------------------------------------------

@@ -10017,10 +10017,7 @@ namespace Legion {
                                                  false/*check privileges*/);
 #endif
       map_op->initialize_replication(this, inline_mapping_barrier);
-      // Advance this barrier twice since we know that the inline mapping
-      // operations are going to use two different generations
-      Runtime::advance_barrier(inline_mapping_barrier);
-      Runtime::advance_barrier(inline_mapping_barrier);
+   
       bool parent_conflict = false, inline_conflict = false;  
       const int index = 
         has_conflicting_regions(map_op, parent_conflict, inline_conflict);
@@ -10065,10 +10062,6 @@ namespace Legion {
       ReplMapOp *map_op = runtime->get_available_repl_map_op();
       map_op->initialize(this, region);
       map_op->initialize_replication(this, inline_mapping_barrier);
-      // Advance this barrier twice since we know that the inline mapping
-      // operations are going to use two different generations
-      Runtime::advance_barrier(inline_mapping_barrier);
-      Runtime::advance_barrier(inline_mapping_barrier);
       register_inline_mapped_region(region);
       const ApEvent result = map_op->get_completion_event();
       runtime->add_to_dependence_queue(this, executing_processor, map_op);
@@ -10302,10 +10295,7 @@ namespace Legion {
         attach_op->initialize(this, launcher, false/*check privileges*/);
 #endif
       attach_op->initialize_replication(this, external_resource_barrier);
-      // Each operation will use two generations of this barrier
-      // so we need to advance it twice
-      Runtime::advance_barrier(external_resource_barrier);
-      Runtime::advance_barrier(external_resource_barrier);
+
       bool parent_conflict = false, inline_conflict = false;
       int index = has_conflicting_regions(attach_op, 
                                           parent_conflict, inline_conflict);
@@ -10348,11 +10338,7 @@ namespace Legion {
       AutoRuntimeCall call(this);
       ReplDetachOp *detach_op = runtime->get_available_repl_detach_op();
       Future result = detach_op->initialize_detach(this, region, flush);
-      detach_op->initialize_replication(this, external_resource_barrier);
-      // Each operation will use two generations of this barrier
-      // so we need to advance it twice
-      Runtime::advance_barrier(external_resource_barrier);
-      Runtime::advance_barrier(external_resource_barrier);
+      detach_op->initialize_replication(this, external_resource_barrier); 
       // If we're flushing we actually need three generations of the barrier
       if (flush)
         Runtime::advance_barrier(external_resource_barrier);

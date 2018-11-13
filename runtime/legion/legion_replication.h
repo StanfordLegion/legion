@@ -1280,7 +1280,7 @@ namespace Legion {
     public:
       ReplMapOp& operator=(const ReplMapOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx, RtBarrier inline_bar);
+      void initialize_replication(ReplicateContext *ctx, RtBarrier &inline_bar);
       RtEvent complete_inline_mapping(RtEvent mapping_applied,
                                       const InstanceSet &mapped_insts);
     public:
@@ -1307,7 +1307,8 @@ namespace Legion {
     public:
       ReplAttachOp& operator=(const ReplAttachOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx,RtBarrier resource_bar);
+      void initialize_replication(ReplicateContext *ctx,
+                                  RtBarrier &resource_bar);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1330,7 +1331,8 @@ namespace Legion {
     public:
       ReplDetachOp& operator=(const ReplDetachOp &rhs);
     public:
-      void initialize_replication(ReplicateContext *ctx,RtBarrier resource_bar);
+      void initialize_replication(ReplicateContext *ctx,
+                                  RtBarrier &resource_bar);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
