@@ -1519,7 +1519,7 @@ namespace Realm {
       State old_state = __sync_fetch_and_sub(&frs.state, STATE_SLEEPER);
       assert((old_state & STATE_SLEEPER) != 0);
       // double-check that WRITER_WAITING isn't set
-      assert((frs.state & STATE_WRITER_WAITING) == 0);
+      assert((old_state & STATE_WRITER_WAITING) == 0);
       frs.sleeper_count = 0;
       assert(frs.sleeper_event.exists());
       frs.sleeper_event = Event::NO_EVENT;
