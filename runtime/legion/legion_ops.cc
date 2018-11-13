@@ -13117,7 +13117,6 @@ namespace Legion {
       region = PhysicalRegion();
       privilege_path.clear();
       map_applied_conditions.clear();
-      external_instance = InstanceRef();
     }
 
     //--------------------------------------------------------------------------
@@ -13187,31 +13186,7 @@ namespace Legion {
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
                                                    projection_info,
-                                                   privilege_path);
-      switch (resource)
-      {
-        case EXTERNAL_POSIX_FILE:
-        case EXTERNAL_HDF5_FILE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement, 
-                                              requirement.instance_fields);
-            break;
-          }
-        case EXTERNAL_INSTANCE:
-          {
-            external_instance = 
-              runtime->forest->create_external_instance(this, requirement,
-                        layout_constraint_set.field_constraint.field_set);
-            break;
-          }
-        default:
-          assert(false);
-      }
-      InstanceManager *external_manager = 
-        external_instance.get_manager()->as_instance_manager();
-      MemoryManager *memory_manager = external_manager->memory_manager;
-      memory_manager->record_external_instance(external_manager);
+                                                   privilege_path); 
     }
 
     //--------------------------------------------------------------------------
@@ -13233,8 +13208,28 @@ namespace Legion {
     void AttachOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      // Once we're ready to map we can tell the memory manager that
-      // this instance can be safely acquired for use
+      InstanceRef external_instance;
+      switch (resource)
+      {
+        case EXTERNAL_POSIX_FILE:
+        case EXTERNAL_HDF5_FILE:
+          {
+            external_instance = 
+              runtime->forest->create_external_instance(this, requirement, 
+                                              requirement.instance_fields);
+            break;
+          }
+        case EXTERNAL_INSTANCE:
+          {
+            external_instance = 
+              runtime->forest->create_external_instance(this, requirement,
+                        layout_constraint_set.field_constraint.field_set);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // Register this instance with the memory manager
       InstanceManager *external_manager = 
         external_instance.get_manager()->as_instance_manager();
       MemoryManager *memory_manager = external_manager->memory_manager;
