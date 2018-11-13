@@ -7221,10 +7221,6 @@ namespace Legion {
         Realm::Barrier bar = close_mapped_barriers[idx];
         bar.destroy_barrier();
       }
-      // We clear out instance top view here since we know that all
-      // our sibling shards are done at this point too
-      if (!instance_top_views.empty())
-        clear_instance_top_views();
     }
 
     //--------------------------------------------------------------------------

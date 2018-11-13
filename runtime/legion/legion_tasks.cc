@@ -6544,6 +6544,22 @@ namespace Legion {
     {
       // Set our shard manager to NULL since we are not supposed to delete it
       shard_manager = NULL;
+      // We clear out instance top view here since we know that all
+      // our sibling shards are done at this point too, this allows
+      // us to remove any references to the context and hopefully to
+      // delete it
+      if (execution_context != NULL)
+      {
+#ifdef DEBUG_LEGION
+        ReplicateContext *repl_ctx = 
+          dynamic_cast<ReplicateContext*>(execution_context);
+        assert(repl_ctx != NULL);
+#else
+        ReplicateContext *repl_ctx = 
+          static_cast<ReplicateContext*>(execution_context);
+#endif
+        repl_ctx->clear_instance_top_views();
+      }
       deactivate_single();
     }
 
