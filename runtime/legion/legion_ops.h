@@ -2669,7 +2669,6 @@ namespace Legion {
       PhysicalRegion region;
       unsigned parent_req_index;
       std::set<RtEvent> map_applied_conditions;
-      InstanceRef external_instance;
       LayoutConstraintSet layout_constraint_set;
       bool restricted;
     };
