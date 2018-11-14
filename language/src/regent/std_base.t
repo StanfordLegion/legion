@@ -37,7 +37,9 @@ end
 -- ## Legion Bindings
 -- #################
 
-terralib.linklibrary("libregent.so")
+if data.is_luajit() then
+  terralib.linklibrary("libregent.so")
+end
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "regent.h"

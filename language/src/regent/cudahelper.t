@@ -83,16 +83,16 @@ do
     if has_symbol("cuInit") then
       local r = DriverAPI.cuInit(0)
       assert(r == 0)
-      terra cudahelper.check_cuda_available()
-        return [r] == 0;
+      function cudahelper.check_cuda_available()
+        return true
       end
     else
-      terra cudahelper.check_cuda_available()
+      function cudahelper.check_cuda_available()
         return false
       end
     end
   else
-    terra cudahelper.check_cuda_available()
+    function cudahelper.check_cuda_available()
       return true
     end
   end
@@ -178,7 +178,7 @@ local function find_device_library(target)
       libdevice = device_lib_dir .. f
     end
   end
-  assert(libdevice ~= nil, "Failed to find a device library")
+  lua_assert(libdevice ~= nil, "Failed to find a device library")
   return libdevice
 end
 
