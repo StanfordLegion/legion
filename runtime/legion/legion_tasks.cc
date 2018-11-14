@@ -4991,7 +4991,7 @@ namespace Legion {
       // throughout the duration of the computation
       const RtEvent deferred = map_all_regions(get_task_completion(), 
                                   first_invocation, must_epoch_owner);
-      if (deferred.exists() && !deferred.has_triggered())
+      if (deferred.exists())
         return deferred;
       // Release any acquired instances that we have
       if (!acquired_instances.empty())
@@ -5738,7 +5738,7 @@ namespace Legion {
       // the length of the task's execution
       const RtEvent deferred = 
         map_all_regions(point_termination, first_invocation, must_epoch_owner);
-      if (deferred.exists() && !deferred.has_triggered())
+      if (deferred.exists())
         return deferred;
       RtEvent applied_condition;
       ApEvent effects_condition;
