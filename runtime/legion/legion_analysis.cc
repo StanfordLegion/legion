@@ -8030,6 +8030,10 @@ namespace Legion {
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
+      // Add ourselves as a remote location for the subsets
+      remote_subsets.insert(source);
+      // If we have a disjoint refinement happenning then we need
+      // to finish that before checking the unrefined remainder
       if (disjoint_partition_refinement != NULL)
         finalize_disjoint_refinement();
       // First check to see if we need to complete this refinement
@@ -8044,8 +8048,6 @@ namespace Legion {
         // response after it's been done
         return;
       }
-      // Add ourselves as a remote location for the subsets
-      remote_subsets.insert(source);
       // We can only send the response if we're not doing any refinements 
       if ((eq_state != REFINING_STATE) && pending_refinements.empty())
       {
