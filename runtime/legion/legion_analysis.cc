@@ -3137,32 +3137,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet::LocalRefinement::LocalRefinement(IndexSpaceExpression *expr, 
-                                                     IndexSpaceNode *node,
-                                                     EquivalenceSet *owner,
-                                                     AddressSpaceID source) 
-      : RefinementThunk(expr, node, owner, source)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet::RemoteComplete::RemoteComplete(IndexSpaceExpression *expr, 
-                                   EquivalenceSet *owner, AddressSpaceID source)
-      : RefinementThunk(expr, NULL/*node*/, owner, source), target(source)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    EquivalenceSet::RemoteComplete::~RemoteComplete(void)
-    //--------------------------------------------------------------------------
-    {
-      // We already hold the lock from the caller
-      owner->process_subset_request(target, false/*need lock*/);
-    }
-
-    //--------------------------------------------------------------------------
     void EquivalenceSet::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
@@ -3269,8 +3243,8 @@ namespace Legion {
       // Could have lost the race so check again
       if (unrefined_remainder != NULL)
       {
-        LocalRefinement *refinement = 
-          new LocalRefinement(unrefined_remainder, NULL/*node*/,
+        RefinementThunk *refinement = 
+          new RefinementThunk(unrefined_remainder, NULL/*node*/,
                               this, runtime->address_space);
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
@@ -3325,8 +3299,8 @@ namespace Legion {
           // If we have an unrefined remainder then we need to do that now
           if (unrefined_remainder != NULL)
           {
-            LocalRefinement *refinement = 
-              new LocalRefinement(unrefined_remainder, NULL/*node*/,
+            RefinementThunk *refinement = 
+              new RefinementThunk(unrefined_remainder, NULL/*node*/,
                                   this, runtime->address_space);
             // We can clear the unrefined remainder now
             unrefined_remainder = NULL;
@@ -3663,8 +3637,8 @@ namespace Legion {
                   finder = disjoint_partition_refinement->children.find(node);
                 if (finder == disjoint_partition_refinement->children.end())
                 {
-                  LocalRefinement *refinement = 
-                    new LocalRefinement(expr, node, this, source);
+                  RefinementThunk *refinement = 
+                    new RefinementThunk(expr, node, this, source);
                   refinement->add_reference();
                   refinements_to_traverse[refinement] = expr;
                   add_pending_refinement(refinement);
@@ -3783,8 +3757,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(unrefined_remainder != NULL);
 #endif
-              LocalRefinement *refinement = 
-                new LocalRefinement(expr, NULL, this, source);
+              RefinementThunk *refinement = 
+                new RefinementThunk(expr, NULL, this, source);
               refinement->add_reference();
               refinements_to_traverse[refinement] = expr;
               add_pending_refinement(refinement);
@@ -3836,8 +3810,8 @@ namespace Legion {
               {
                 disjoint_partition_refinement = 
                   new DisjointPartitionRefinement(node->parent);
-                LocalRefinement *refinement = 
-                  new LocalRefinement(expr, node, this, source);
+                RefinementThunk *refinement = 
+                  new RefinementThunk(expr, node, this, source);
                 refinement->add_reference();
                 refinements_to_traverse[refinement] = expr;
                 add_pending_refinement(refinement);
@@ -3858,8 +3832,8 @@ namespace Legion {
             if (disjoint_partition_refinement == NULL)
             {
               // Time to refine this since we only need a subset of it
-              LocalRefinement *refinement = 
-                new LocalRefinement(expr, NULL, this, source);
+              RefinementThunk *refinement = 
+                new RefinementThunk(expr, NULL, this, source);
               refinement->add_reference();
               refinements_to_traverse[refinement] = expr;
               add_pending_refinement(refinement);
@@ -7086,6 +7060,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(is_logical_owner());
         assert(eq_state == REFINING_STATE);
+        assert(remote_subsets.empty());
 #endif
         // On the first iteration update our data structures to 
         // reflect that we now have all the valid data
@@ -7179,7 +7154,7 @@ namespace Legion {
           // This is the end of the refinement task so we need to update
           // the state and send out any notifications to anyone that the
           // refinements are done
-          if (!remote_subsets.empty())
+          if (!pending_subset_requests.empty())
           {
             Serializer rez;
             {
@@ -7191,8 +7166,13 @@ namespace Legion {
                 rez.serialize((*it)->did);
             }
             for (std::set<AddressSpaceID>::const_iterator it = 
-                  remote_subsets.begin(); it != remote_subsets.end(); it++)
+                  pending_subset_requests.begin(); it != 
+                  pending_subset_requests.end(); it++)
+            {
               runtime->send_equivalence_set_subset_response(*it, rez);
+              remote_subsets.insert(*it);
+            }
+            pending_subset_requests.clear();
           }
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
@@ -7480,7 +7460,6 @@ namespace Legion {
         }
         runtime->send_equivalence_set_subset_invalidation(*it, rez);
       } 
-      // There are no more remote subsets
       remote_subsets.clear();
       RefinementTaskArgs args(this);      
       if (!refinement_preconditions.empty())
@@ -7507,9 +7486,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
+      assert(pending_subset_requests.find(source) == 
+              pending_subset_requests.end());
 #endif
-      // Add ourselves as a remote location for the subsets
-      remote_subsets.insert(source);
       // If we have a disjoint refinement happenning then we need
       // to finish that before checking the unrefined remainder
       if (disjoint_partition_refinement != NULL)
@@ -7517,14 +7496,11 @@ namespace Legion {
       // First check to see if we need to complete this refinement
       if (unrefined_remainder != NULL)
       {
-        RemoteComplete *refinement = 
-          new RemoteComplete(unrefined_remainder, this, source);
+        RefinementThunk *refinement = 
+          new RefinementThunk(unrefined_remainder, NULL/*node*/, this, source);
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
-        // We can just return since the refinement will send the
-        // response after it's been done
-        return;
       }
       // We can only send the response if we're not doing any refinements 
       if ((eq_state != REFINING_STATE) && pending_refinements.empty())
@@ -7539,7 +7515,10 @@ namespace Legion {
             rez.serialize((*it)->did);
         }
         runtime->send_equivalence_set_subset_response(source, rez);
+        remote_subsets.insert(source);
       }
+      else // Record that this is a pending subset
+        pending_subset_requests.insert(source);
     }
 
     //--------------------------------------------------------------------------

@@ -762,7 +762,7 @@ namespace Legion {
             EquivalenceSet *owner, AddressSpaceID source);
         RefinementThunk(const RefinementThunk &rhs) 
           : owner(NULL), expr(NULL), refinement(NULL) { assert(false); }
-        virtual ~RefinementThunk(void) { }
+        ~RefinementThunk(void) { }
       public:
         EquivalenceSet* perform_refinement(void);
         EquivalenceSet* get_refinement(void);
@@ -772,30 +772,6 @@ namespace Legion {
         EquivalenceSet *const refinement;
       protected:
         RtUserEvent refinement_ready;
-      };
-      class LocalRefinement : public RefinementThunk {
-      public:
-        LocalRefinement(IndexSpaceExpression *expr, IndexSpaceNode *node,
-            EquivalenceSet *owner, AddressSpaceID source);
-      LocalRefinement(const LocalRefinement &rhs) 
-          : RefinementThunk(rhs) { assert(false); }
-        virtual ~LocalRefinement(void) { }
-      public:
-        LocalRefinement& operator=(const LocalRefinement &rhs)
-          { assert(false); return *this; }
-      };
-      class RemoteComplete : public RefinementThunk {
-      public:
-        RemoteComplete(IndexSpaceExpression *expr, 
-            EquivalenceSet *owner, AddressSpaceID source);
-        RemoteComplete(const RemoteComplete &rhs) 
-          : RefinementThunk(rhs), target(0) { assert(false); }
-        virtual ~RemoteComplete(void);
-      public:
-        RemoteComplete& operator=(const RemoteComplete &rhs)
-          { assert(false); return *this; }
-      public:
-        const AddressSpaceID target;
       };
       // Pending requests for updates
       struct PendingRequest : public LegionHeapify<PendingRequest> {
@@ -1125,7 +1101,7 @@ namespace Legion {
       // someone else decides that they need to access it
       std::vector<EquivalenceSet*> subsets;
       // Set on the owner node for tracking the remote subset leases
-      std::set<AddressSpaceID> remote_subsets;
+      std::set<AddressSpaceID> remote_subsets, pending_subset_requests;
       // Index space expression for unrefined remainder of our set_expr
       // This is only valid on the owner node
       IndexSpaceExpression *unrefined_remainder;
