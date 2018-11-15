@@ -3906,6 +3906,35 @@ namespace Legion {
                                                      AddressSpaceID source) 
     //--------------------------------------------------------------------------
     {
+      // Handle a special case to avoid over-decomposing with larger index
+      // spaces unnecessarily. If it does need to be refined later then 
+      // we'll do that as part of an acquire operation. This is only
+      // a performance optimization for getting better BVH shapes and
+      // does not impact the correctness of the code
+      if (handle.exists() && (index_space_node != NULL) &&
+          (index_space_node->handle == handle))
+      {
+        // Just record this as one of the results
+        if (source != runtime->address_space)
+        {
+          // Not local so we need to send a message
+          RtUserEvent recorded_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(target);
+            rez.serialize(recorded_event);
+          }
+          runtime->send_equivalence_set_ray_trace_response(source, rez);
+          return recorded_event;
+        }
+        else // Local so we can update this directly
+        {
+          target->record_equivalence_set(this);
+          return RtEvent::NO_RT_EVENT;
+        }
+      }
       // If this is not the owner node then send the request there
       if (!is_logical_owner())
       {
