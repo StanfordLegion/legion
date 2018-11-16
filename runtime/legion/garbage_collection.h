@@ -250,6 +250,7 @@ namespace Legion {
         PENDING_VALID_STATE,
         PENDING_INVALID_STATE,
         PENDING_ACTIVE_VALID_STATE,
+        PENDING_INACTIVE_INVALID_STATE,
       };
     public:
       class UnregisterFunctor {
@@ -417,6 +418,7 @@ namespace Legion {
       static void handle_did_remove_create(Runtime *runtime, 
                                            Deserializer &derez);
     protected:
+      RtEvent check_for_transition_event(void);
       bool update_state(bool &need_activate, bool &need_validate,
                         bool &need_invalidate, bool &need_deactivate,
                         bool &do_deletion);
@@ -430,6 +432,7 @@ namespace Legion {
       mutable LocalLock gc_lock;
     private: // derived users can't see the state information
       State current_state;
+      RtUserEvent transition_event;
       bool has_gc_references;
       bool has_valid_references;
       bool has_resource_references;

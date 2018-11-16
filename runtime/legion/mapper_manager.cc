@@ -1791,7 +1791,7 @@ namespace Legion {
       }
       std::set<PhysicalManager*> instances; 
       instances.insert(manager);
-      std::vector<bool> results(1,true);
+      std::vector<bool> results;
       RtEvent wait_on = 
         manager->memory_manager->acquire_instances(instances, results);
       if (wait_on.exists())
