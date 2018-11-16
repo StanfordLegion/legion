@@ -6190,7 +6190,11 @@ namespace Legion {
             // the later invalidation comes since this will force
             // it to wait and then move the information about any
             // newly made valid instances
-            record_mutated_guard(pending_request->op, single_redop_mask);
+            // The one case where the "op" can be NULL is if we are
+            // refining and in that case we already know that no one
+            // is going to be recording things out from under us
+            if (pending_request->op != NULL)
+              record_mutated_guard(pending_request->op, single_redop_mask);
             const FieldMask done_reductions = 
               single_redop_mask - reduction_fields; 
             single_redop_mask &= reduction_fields;
@@ -7558,9 +7562,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_refinements(void)
+    void EquivalenceSet::perform_refinements(bool need_remote_updates)
     //--------------------------------------------------------------------------
     {
+      if (need_remote_updates)
+      {
+        std::set<RtEvent> preconditions;
+        const FieldMask request_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+        const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+        request_valid_copy(NULL/*op*/, request_mask, usage,
+                           preconditions, preconditions,runtime->address_space);
+        RefinementTaskArgs args(this);
+        if (!preconditions.empty())
+        {
+          const RtEvent wait_for = Runtime::merge_events(preconditions);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_for);
+        }
+        else
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY);
+        return;
+      }
       RtUserEvent to_trigger;
       std::vector<RefinementThunk*> to_perform;
       bool first = true;
@@ -7968,29 +7991,35 @@ namespace Legion {
       // Send invalidations to all the remote nodes. This will invalidate
       // their mapping privileges and also send back any remote meta data
       // to the local node 
-      std::set<RtEvent> refinement_preconditions;
-      for (std::set<AddressSpaceID>::const_iterator it = 
-            remote_subsets.begin(); it != remote_subsets.end(); it++)
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          RtUserEvent remote_done = Runtime::create_rt_user_event();
-          rez.serialize(remote_done);
-          refinement_preconditions.insert(remote_done);
-        }
-        runtime->send_equivalence_set_subset_invalidation(*it, rez);
-      } 
-      remote_subsets.clear();
       RefinementTaskArgs args(this);      
-      if (!refinement_preconditions.empty())
+      if (!remote_subsets.empty())
       {
-        RtEvent wait_for = Runtime::merge_events(refinement_preconditions);
+        // First we need to send invalidation notifications to all 
+        // the remote subset copies. Once they've all acknowledged 
+        // them then we can do the request for making ourselves valid
+        // for all the fields prior to doing the refinements
+        std::set<RtEvent> refinement_acknowledgements;
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              remote_subsets.begin(); it != remote_subsets.end(); it++)
+        {
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            RtUserEvent remote_done = Runtime::create_rt_user_event();
+            rez.serialize(remote_done);
+            refinement_acknowledgements.insert(remote_done);
+          }
+          runtime->send_equivalence_set_subset_invalidation(*it, rez);
+        } 
+        remote_subsets.clear();
+        RtEvent wait_for = Runtime::merge_events(refinement_acknowledgements);
+        // Record that we still need to do the update request
+        args.needs_updates = true;
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, wait_for);
       }
-      else
+      else // This refinement task is ready now
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
     }
 
@@ -8139,35 +8168,8 @@ namespace Legion {
           if ((*it)->remove_nested_resource_ref(did))
             delete (*it);
         subsets.clear();
-        Runtime::trigger_event(to_trigger);
       }
-      else
-      {
-        // We had a mapping lease so we need to send back any state
-        // to the owner node in order to be considered invalidated
-        // We need to invalidate all our fields
-        const FieldMask pack_mask = exclusive_fields | shared_fields | 
-                                    single_redop_fields | multi_redop_fields;
-        Serializer rez;
-        pack_state(rez, to_trigger, NULL/*pending request*/,
-                   pack_mask, 0/*skip redop*/, true/*invalidte*/);
-        exclusive_fields.clear();
-        shared_fields.clear();
-        single_redop_fields.clear();
-        multi_redop_fields.clear();
-        redop_modes.clear();
-        // If we still have clean-up to do then launch that task now
-        if (to_trigger.exists())
-        {
-          // Add a resource reference to this to prevent it being collected
-          add_base_resource_ref(REMOTE_DID_REF);
-          RemoteRefTaskArgs args(this, to_trigger);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_WORK_PRIORITY, to_trigger);
-        }
-        // Send back the message to the owner node
-        runtime->send_equivalence_set_update_response(logical_owner_space, rez);
-      }
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -8175,7 +8177,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RefinementTaskArgs *rargs = (const RefinementTaskArgs*)args;
-      rargs->target->perform_refinements();
+      rargs->target->perform_refinements(rargs->needs_updates);
     }
 
     //--------------------------------------------------------------------------

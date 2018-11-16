@@ -741,9 +741,11 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_REFINEMENT_TASK_ID;
       public:
         RefinementTaskArgs(EquivalenceSet *t)
-          : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), target(t) { }
+          : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), 
+            target(t), needs_updates(false) { }
       public:
         EquivalenceSet *const target;
+        bool needs_updates;
       };
       struct RemoteRefTaskArgs : public LgTaskArgs<RemoteRefTaskArgs> {
       public:
@@ -986,7 +988,7 @@ namespace Legion {
                           CopyFillAggregator &aggregator) const;
       void advance_version_numbers(FieldMask advance_mask);
     protected:
-      void perform_refinements(void);
+      void perform_refinements(bool need_remote_updates);
       void finalize_disjoint_refinement(void);
       void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
