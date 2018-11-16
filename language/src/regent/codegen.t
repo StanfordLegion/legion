@@ -2095,13 +2095,9 @@ function codegen.expr_field_access(cx, node)
     local is = terralib.newsymbol(c.legion_index_space_t, "colors")
     local actions = quote
       [value.actions]
-      var color_space =
+      var [is] =
         c.legion_index_partition_get_color_space([cx.runtime],
                                                  [value.value].impl.index_partition)
-      var domain = 
-        c.legion_index_space_get_domain([cx.runtime], color_space)
-      var [is] = c.legion_index_space_create_domain([cx.runtime], [cx.context],
-                                                    domain)
     end
     return values.value(
       node,
