@@ -7571,7 +7571,8 @@ namespace Legion {
         const FieldMask request_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
         const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
         request_valid_copy(NULL/*op*/, request_mask, usage,
-                           preconditions, preconditions,runtime->address_space);
+                           preconditions, preconditions,
+                           runtime->address_space, false/*runtime relaxed*/);
         RefinementTaskArgs args(this);
         if (!preconditions.empty())
         {
