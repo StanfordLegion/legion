@@ -1933,7 +1933,7 @@ namespace Legion {
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
-        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF, this))
+        if ((*it)->remove_base_valid_ref(AGGREGATORE_REF))
           delete (*it);
       // Delete all our copy updates
       for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
