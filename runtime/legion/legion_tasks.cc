@@ -6548,7 +6548,7 @@ namespace Legion {
       // our sibling shards are done at this point too, this allows
       // us to remove any references to the context and hopefully to
       // delete it
-      if (execution_context != NULL)
+      if ((execution_context != NULL) && execution_context->is_inner_context())
       {
 #ifdef DEBUG_LEGION
         ReplicateContext *repl_ctx = 
