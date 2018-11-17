@@ -593,6 +593,11 @@ function optimize_config_options.top_task(cx, node)
   local idempotent = analyze_idempotent(cx, node.body) and std.config["idempotent"]
   local replicable = analyze_replicable(cx, node.body) and std.config["replicable"]
 
+  leaf = leaf and not node.annotations.leaf:is(ast.annotation.Forbid)
+  inner = inner and not node.annotations.inner:is(ast.annotation.Forbid)
+  idempotent = idempotent and not node.annotations.idempotent:is(ast.annotation.Forbid)
+  replicable = replicable and not node.annotations.replicable:is(ast.annotation.Forbid)
+
   if std.config["leaf"] and not leaf and
     node.annotations.leaf:is(ast.annotation.Demand)
   then
