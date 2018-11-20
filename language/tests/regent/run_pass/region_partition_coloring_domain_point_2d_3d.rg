@@ -18,13 +18,13 @@ local c = regentlib.c
 
 task f() : int
   var r = region(ispace(int2d, {3, 2}), int)
-  var colors = ispace(int2d, {2, 2})
+  var colors = ispace(int3d, {2, 2, 2})
 
   var rc = c.legion_domain_point_coloring_create()
-  c.legion_domain_point_coloring_color_domain(rc, int2d{0, 0}, rect2d{{0, 0}, {1, 1}})
+  c.legion_domain_point_coloring_color_domain(rc, int3d{0, 0, 0}, rect2d{{0, 0}, {1, 1}})
   var p = partition(disjoint, r, rc, colors)
   c.legion_domain_point_coloring_destroy(rc)
-  var r0 = p[{0, 0}]
+  var r0 = p[{0, 0, 0}]
 
   fill(r, 1)
   fill(r0, 10)
