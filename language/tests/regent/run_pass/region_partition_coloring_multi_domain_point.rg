@@ -16,26 +16,13 @@ import "regent"
 
 local c = regentlib.c
 
-terra to_domain(lo : c.coord_t, hi : c.coord_t)
-  return c.legion_domain_from_rect_1d(
-    c.legion_rect_1d_t {
-      lo = c.legion_point_1d_t { x = arrayof(c.coord_t, lo) },
-      hi = c.legion_point_1d_t { x = arrayof(c.coord_t, hi) },
-    })
-end
-
-terra to_domain_point(x : c.coord_t)
-  return c.legion_domain_point_from_point_1d(
-    c.legion_point_1d_t { x = arrayof(c.coord_t, x) })
-end
-
 task f() : int
   var r = region(ispace(int1d, 5), int)
   var colors = ispace(int1d, 1)
 
   var rc = c.legion_multi_domain_point_coloring_create()
-  c.legion_multi_domain_point_coloring_color_domain(rc, to_domain_point(0), to_domain(0, 1))
-  c.legion_multi_domain_point_coloring_color_domain(rc, to_domain_point(0), to_domain(3, 3))
+  c.legion_multi_domain_point_coloring_color_domain(rc, int1d(0), rect1d{0, 1})
+  c.legion_multi_domain_point_coloring_color_domain(rc, int1d(0), rect1d{3, 3})
   var p = partition(disjoint, r, rc, colors)
   c.legion_multi_domain_point_coloring_destroy(rc)
   var r0 = p[0]
