@@ -4492,13 +4492,38 @@ namespace Legion {
               }
             }
             else if (runtime_relaxed && !IS_READ_ONLY(usage))
-            {
+            { 
+              // If we're already relaxed then that is fine too
               if (!(request_mask * relaxed_fields))
               {
                 LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
                   finder = shared_copies.find(logical_owner_space);
                 if (finder != shared_copies.end())
                   request_mask -= finder->second & relaxed_fields;
+              }
+              // If we are already in exclusive mode then we can 
+              // also just go straight to relaxed mode
+              if (!(request_mask * exclusive_fields))
+              {
+                LegionMap<AddressSpaceID,FieldMask>::aligned::iterator
+                  finder = exclusive_copies.find(logical_owner_space);
+                if (finder != exclusive_copies.end())
+                {
+                  const FieldMask overlap = finder->second & request_mask;
+                  if (!!overlap)
+                  {
+                    // Update all the state to reflext that we're now
+                    // in a relaxed mode for these fields
+                    shared_copies[logical_owner_space] |= overlap;
+                    finder->second -= overlap;
+                    if (!finder->second)
+                      exclusive_copies.erase(finder);
+                    exclusive_fields -= overlap;
+                    relaxed_fields |= overlap;
+                    // These fields have now been handled
+                    request_mask -= overlap;
+                  }
+                }
               }
             }
             else 
