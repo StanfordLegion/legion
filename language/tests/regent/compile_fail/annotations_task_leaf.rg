@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_leaf.rg:25: task is not a valid leaf task
--- task f()
---    ^
+-- annotations_task_leaf.rg:26: task is not a valid leaf task
+--   var r = region(ispace(ptr, 4), int)
+--                ^
 
 import "regent"
 

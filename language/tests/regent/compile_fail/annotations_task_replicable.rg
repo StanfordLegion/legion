@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_replicable.rg:28: task is not a valid replicable task
--- task f()
---    ^
+-- annotations_task_replicable.rg:29: task is not a valid replicable task
+--   unsafe()
+--         ^
 
 import "regent"
 
