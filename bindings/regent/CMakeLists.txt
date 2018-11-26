@@ -24,15 +24,15 @@ endif()
 
 # Regent bindings
 list(APPEND REGENT_SRC
-  legion_terra.h                legion_terra.cc
-  legion_terra_partitions.h     legion_terra_partitions.cc
-  legion_terra_partitions_cxx.h
-  legion_terra_util.h
+  regent.h                regent.cc
+  regent_partitions.h     regent_partitions.cc
+  regent_partitions_cxx.h
+  regent_util.h
 )
 
 if(Legion_USE_CUDA)
   list(APPEND REGENT_SRC
-    legion_terra_cudart_hijack.h legion_terra_cudart_hijack.cc
+    regent_cudart_hijack.h regent_cudart_hijack.cc
   )
 endif()
 

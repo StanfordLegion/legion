@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_TERRA_PARTITIONS_H__
-#define __LEGION_TERRA_PARTITIONS_H__
+#ifndef __REGENT_PARTITIONS_H__
+#define __REGENT_PARTITIONS_H__
 
-// C declarations for legion_terra_partitions.cc
+// C declarations for regent_partitions.cc
 
 // ******************** IMPORTANT **************************
 //
@@ -154,4 +154,4 @@ legion_terra_task_launcher_has_field(
 }
 #endif
 
-#endif // __LEGION_TERRA_PARTITIONS_H__
+#endif // __REGENT_PARTITIONS_H__
