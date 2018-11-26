@@ -1444,8 +1444,6 @@ namespace Legion {
     template<typename T>
     struct LgTaskArgs {
     public:
-      //LgTaskArgs(void)
-      //  : lg_task_id(T::TASK_ID), provenance(implicit_provenance) { }
       LgTaskArgs(::legion_unique_id_t uid)
         : lg_task_id(T::TASK_ID), provenance(uid) { }
     public:
