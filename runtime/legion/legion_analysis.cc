@@ -3762,11 +3762,12 @@ namespace Legion {
         {
           // Clear the summary mask
           mutated_guard_summary.clear();
+          // Issue any deferred requests now so we can get them in
+          // flight before we handle any invalidations
+          if (!deferred_requests.empty())
+            perform_all_deferred_requests();
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
-#ifdef DEBUG_LEGION
-            assert(deferred_requests.empty());
-#endif
             eq_state = REFINED_STATE;
             // Kick off the refinement task now that we're transitioning
             launch_refinement_task();
@@ -3774,18 +3775,11 @@ namespace Legion {
           else if (!is_logical_owner() && (eq_state == PENDING_INVALID_STATE))
           {
 #ifdef DEBUG_LEGION
-            assert(deferred_requests.empty());
             assert(transition_event.exists());
 #endif
             eq_state = INVALID_STATE;
             invalidate_remote_state(transition_event);
             transition_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
-          else if (!deferred_requests.empty())
-          {
-            // We have no more mapping guards so we can just perform
-            // all the deferred requests
-            perform_all_deferred_requests();
           }
         }
         else if (!deferred_requests.empty())
