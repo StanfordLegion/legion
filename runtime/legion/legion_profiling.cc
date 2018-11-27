@@ -227,7 +227,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LegionProfInstance::process_message(
+    void LegionProfInstance::process_message(UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits)
@@ -238,7 +238,7 @@ namespace Legion {
 #endif
       meta_infos.push_back(MetaInfo());
       MetaInfo &info = meta_infos.back();
-      info.op_id = 0;
+      info.op_id = op_id;
       info.lg_id = LG_MESSAGE_ID;
       info.proc_id = usage.proc.id;
       info.create = timeline.create_time;
@@ -975,6 +975,7 @@ namespace Legion {
       // Don't increment here, we'll increment on the remote side since we
       // that is where we know the profiler is going to handle the results
       ProfilingInfo info(NULL, LEGION_PROF_MESSAGE);
+      info.op_id = implicit_provenance;
       Realm::ProfilingRequest &req = requests.add_request(remote_target,
                 LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
       req.add_measurement<
@@ -1291,8 +1292,8 @@ namespace Legion {
             response.get_measurement<
                   Realm::ProfilingMeasurements::OperationEventWaits>(waits);
             if (has_usage)
-              thread_local_profiling_instance->process_message(timeline, 
-                  usage, waits);
+              thread_local_profiling_instance->process_message(info->op_id,
+                  timeline, usage, waits);
             break;
           }
         case LEGION_PROF_COPY:
