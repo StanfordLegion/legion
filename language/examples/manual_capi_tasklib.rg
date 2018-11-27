@@ -23,7 +23,7 @@ terralib.linklibrary("libregent.so")
 
 local c = terralib.includecstring([[
 #include "legion.h"
-#include "legion_terra.h"
+#include "regent.h"
 #include <stdio.h>
 #include <stdlib.h>
 ]])

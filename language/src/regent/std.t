@@ -3911,8 +3911,8 @@ local function incremental_compile_tasks()
   -- expect them to be linked-in later.
   local header = [[
 #include "legion.h"
-#include "legion_terra.h"
-#include "legion_terra_partitions.h"
+#include "regent.h"
+#include "regent_partitions.h"
 ]] ..
   table.concat(
     variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)
@@ -4026,8 +4026,8 @@ local function compile_tasks_in_parallel()
   -- expect them to be linked-in later.
   local header = [[
 #include "legion.h"
-#include "legion_terra.h"
-#include "legion_terra_partitions.h"
+#include "regent.h"
+#include "regent_partitions.h"
 ]] ..
   table.concat(
     variants:map(function(variant) return variant:wrapper_sig() .. '\n' end)

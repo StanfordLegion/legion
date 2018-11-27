@@ -45,7 +45,7 @@ local ef = terralib.externfunction
 local externcall_builtin = terralib.externfunction
 
 local RuntimeAPI = terralib.includec("cuda_runtime.h")
-local HijackAPI = terralib.includec("legion_terra_cudart_hijack.h")
+local HijackAPI = terralib.includec("regent_cudart_hijack.h")
 
 local C = base.c
 

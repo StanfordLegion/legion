@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#include "legion_terra_partitions.h"
-#include "legion_terra_partitions_cxx.h"
+#include "regent_partitions.h"
+#include "regent_partitions_cxx.h"
 
 #include "legion.h"
 #include "legion/legion_c_util.h"

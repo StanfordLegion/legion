@@ -13,10 +13,10 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_TERRA_PARTITIONS_CXX_H__
-#define __LEGION_TERRA_PARTITIONS_CXX_H__
+#ifndef __REGENT_PARTITIONS_CXX_H__
+#define __REGENT_PARTITIONS_CXX_H__
 
-// C++ declarations for legion_terra_partitions.cc
+// C++ declarations for regent_partitions.cc
 
 #include "legion.h"
 
@@ -51,4 +51,4 @@ create_cross_product(Runtime *runtime,
                      const std::set<DomainPoint> *lhs_filter = NULL,
                      const std::set<DomainPoint> *rhs_filter = NULL);
 
-#endif // __LEGION_TERRA_PARTITIONS_CXX_H__
+#endif // __REGENT_PARTITIONS_CXX_H__

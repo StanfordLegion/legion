@@ -12,17 +12,31 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_task_leaf.rg:26: task is not a valid leaf task
---   var r = region(ispace(ptr, 4), int)
---                ^
-
 import "regent"
 
--- This tests the leaf annotation.
+local c = regentlib.c
 
-__demand(__leaf)
-task f()
-  var r = region(ispace(ptr, 4), int)
+task f() : int
+  var r = region(ispace(int2d, {3, 2}), int)
+  var colors = ispace(int3d, {2, 2, 2})
+
+  var rc = c.legion_domain_point_coloring_create()
+  c.legion_domain_point_coloring_color_domain(rc, int3d{0, 0, 0}, rect2d{{0, 0}, {1, 1}})
+  var p = partition(disjoint, r, rc, colors)
+  c.legion_domain_point_coloring_destroy(rc)
+  var r0 = p[{0, 0, 0}]
+
+  fill(r, 1)
+  fill(r0, 10)
+
+  var t = 0
+  for i in r do
+    t += r[i]
+  end
+  return t
 end
-f:compile()
+
+task main()
+  regentlib.assert(f() == 42, "test failed")
+end
+regentlib.start(main)

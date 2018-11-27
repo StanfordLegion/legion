@@ -1013,7 +1013,7 @@ legion_index_partition_create_domain_point_coloring(
   // Ensure all colors exist in coloring.
   for(Domain::DomainPointIterator c(color_space); c; c++) {
     if (!(*coloring).count(c.p)) {
-      switch (c.p.get_dim()) {
+      switch (parent.get_dim()) {
         case 1:
           {
             (*coloring)[c.p] = Domain(Rect1D(0, -1)); 
@@ -1062,7 +1062,7 @@ legion_index_partition_create_multi_domain_point_coloring(
   // Ensure all colors exist in coloring.
   for(Domain::DomainPointIterator c(color_space); c; c++) {
     if ((*coloring)[c.p].empty()) {
-      switch (c.p.get_dim()) {
+      switch (parent.get_dim()) {
         case 1:
           {
             (*coloring)[c.p].insert(Domain(Rect1D(0, -1)));

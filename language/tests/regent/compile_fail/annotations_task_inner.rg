@@ -13,8 +13,8 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_inner.rg:25: task is not a valid inner task
--- task f()
+-- annotations_task_inner.rg:27: task is not a valid inner task
+--   r[0] = 5
 --    ^
 
 import "regent"
