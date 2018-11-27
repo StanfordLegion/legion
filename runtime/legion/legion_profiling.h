@@ -238,7 +238,7 @@ namespace Legion {
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
-      void process_message(
+      void process_message(UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
