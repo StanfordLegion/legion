@@ -66,46 +66,23 @@ where reads(r.c), reads writes(r.b) do
   end
 end
 
-terra to_rect(lo : int2d, hi : int2d) : c.legion_rect_2d_t
-  return c.legion_rect_2d_t {
-    lo = lo:to_point(),
-    hi = hi:to_point(),
-  }
-end
-
 task main()
   var r = region(ispace(int2d, { x = 4, y = 4 }), t)
   var is_part = ispace(int2d, { x = 2, y = 2 }, { x = -1, y = -3 })
 
   var cp = c.legion_domain_point_coloring_create()
-  c.legion_domain_point_coloring_color_domain(
-    cp, (int2d { x=-1, y=-3 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=0, y=0 }, int2d { x=1, y=1 })))
-  c.legion_domain_point_coloring_color_domain(
-    cp, (int2d { x=-1, y=-2 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=0, y=2 }, int2d { x=1, y=3 })))
-  c.legion_domain_point_coloring_color_domain(
-    cp, (int2d { x=0, y=-3 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=2, y=0 }, int2d { x=3, y=1 })))
-  c.legion_domain_point_coloring_color_domain(
-    cp, (int2d { x=0, y=-2 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=2, y=2 }, int2d { x=3, y=3 })))
+  c.legion_domain_point_coloring_color_domain(cp, int2d{-1, -3}, rect2d{{0, 0}, {1, 1}})
+  c.legion_domain_point_coloring_color_domain(cp, int2d{-1, -2}, rect2d{{0, 2}, {1, 3}})
+  c.legion_domain_point_coloring_color_domain(cp, int2d{0, -3}, rect2d{{2, 0}, {3, 1}})
+  c.legion_domain_point_coloring_color_domain(cp, int2d{0, -2}, rect2d{{2, 2}, {3, 3}})
   var p = partition(disjoint, r, cp, is_part)
   c.legion_domain_point_coloring_destroy(cp)
 
   var cq = c.legion_domain_point_coloring_create()
-  c.legion_domain_point_coloring_color_domain(
-    cq, (int2d { x=-1, y=-3 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=0, y=0 }, int2d { x=2, y=3 })))
-  c.legion_domain_point_coloring_color_domain(
-    cq, (int2d { x=-1, y=-2 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=1, y=0 }, int2d { x=3, y=2 })))
-  c.legion_domain_point_coloring_color_domain(
-    cq, (int2d { x=0, y=-3 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=0, y=3 }, int2d { x=3, y=3 })))
-  c.legion_domain_point_coloring_color_domain(
-    cq, (int2d { x=0, y=-2 }):to_domain_point(),
-    c.legion_domain_from_rect_2d(to_rect(int2d { x=3, y=0 }, int2d { x=3, y=3 })))
+  c.legion_domain_point_coloring_color_domain(cq, int2d{-1, -3}, rect2d{{0, 0}, {2, 3}})
+  c.legion_domain_point_coloring_color_domain(cq, int2d{-1, -2}, rect2d{{1, 0}, {3, 2}})
+  c.legion_domain_point_coloring_color_domain(cq, int2d{0, -3}, rect2d{{0, 3}, {3, 3}})
+  c.legion_domain_point_coloring_color_domain(cq, int2d{0, -2}, rect2d{{3, 0}, {3, 3}})
   var q = partition(aliased, r, cq, is_part)
   c.legion_domain_point_coloring_destroy(cq)
 

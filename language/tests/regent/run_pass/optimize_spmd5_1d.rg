@@ -66,13 +66,6 @@ where reads(r.c), reads writes(r.b) do
   end
 end
 
-terra to_rect(lo : int1d, hi : int1d) : c.legion_rect_1d_t
-  return c.legion_rect_1d_t {
-    lo = lo:to_point(),
-    hi = hi:to_point(),
-  }
-end
-
 task main()
   var r = region(ispace(int1d, 4), t)
   var is_part = ispace(int1d, 4)
@@ -80,14 +73,10 @@ task main()
   var p = partition(equal, r, is_part)
 
   var cq = c.legion_domain_point_coloring_create()
-  c.legion_domain_point_coloring_color_domain(
-    cq, int1d(0):to_domain_point(), c.legion_domain_from_rect_1d(to_rect(0, 1)))
-  c.legion_domain_point_coloring_color_domain(
-    cq, int1d(1):to_domain_point(), c.legion_domain_from_rect_1d(to_rect(0, 2)))
-  c.legion_domain_point_coloring_color_domain(
-    cq, int1d(2):to_domain_point(), c.legion_domain_from_rect_1d(to_rect(1, 3)))
-  c.legion_domain_point_coloring_color_domain(
-    cq, int1d(3):to_domain_point(), c.legion_domain_from_rect_1d(to_rect(2, 3)))
+  c.legion_domain_point_coloring_color_domain(cq, int1d(0), rect1d{0, 1})
+  c.legion_domain_point_coloring_color_domain(cq, int1d(1), rect1d{0, 2})
+  c.legion_domain_point_coloring_color_domain(cq, int1d(2), rect1d{1, 3})
+  c.legion_domain_point_coloring_color_domain(cq, int1d(3), rect1d{2, 3})
   var q = partition(aliased, r, cq, is_part)
   c.legion_domain_point_coloring_destroy(cq)
 

@@ -13,12 +13,12 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_TERRA_UTIL_H__
-#define __LEGION_TERRA_UTIL_H__
+#ifndef __REGENT_UTIL_H__
+#define __REGENT_UTIL_H__
 
 #include "legion_c_util.h"
 
-#include "legion_terra_tasks.h"
+#include "regent_tasks.h"
 
 // These complain if not explicitly included in C mode.
 extern "C"
@@ -79,4 +79,4 @@ struct ObjectWrapper
   }
 };
 
-#endif // __LEGION_TERRA_UTIL_H__
+#endif // __REGENT_UTIL_H__

@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#ifndef __LEGION_TERRA_H__
-#define __LEGION_TERRA_H__
+#ifndef __REGENT_H__
+#define __REGENT_H__
 
 #include "legion.h"
 
@@ -133,4 +133,4 @@ DECLARE_C_REDUCTION(safe_reduce_min)
 }
 #endif
 
-#endif // __LEGION_TERRA_H__
+#endif // __REGENT_H__

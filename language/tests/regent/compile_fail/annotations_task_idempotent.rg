@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_task_idempotent.rg:28: task is not a valid idempotent task
--- task f()
---    ^
+-- annotations_task_idempotent.rg:29: task is not a valid idempotent task
+--   unsafe()
+--         ^
 
 import "regent"
 

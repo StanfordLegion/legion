@@ -29,11 +29,11 @@ local report = require("common/report")
 local std = require("regent/std")
 
 local function always_true(node)
-  return true
+  return {true, node}
 end
 
 local function always_false(node)
-  return false
+  return {false, node}
 end
 
 local function unreachable(node)
@@ -59,10 +59,17 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
+local function all_with_provenance(acc, value)
+  if not value[1] then
+    return value
+  end
+  return acc
+end
+
 local node_is_leaf = {
   -- Expressions:
   [ast.typed.expr.Call] = function(node)
-    return not std.is_task(node.fn.value)
+    return {not std.is_task(node.fn.value), node}
   end,
 
   [ast.typed.expr.RawContext]                 = always_false,
@@ -97,7 +104,6 @@ local node_is_leaf = {
   [ast.typed.expr.DetachHDF5]                 = always_false,
   [ast.typed.expr.AllocateScratchFields]      = always_false,
   [ast.typed.expr.WithScratchFields]          = always_false,
-  [ast.typed.expr.RegionRoot]                 = always_false,
   [ast.typed.expr.Condition]                  = always_false,
   [ast.typed.expr.Future]                     = always_false,
   [ast.typed.expr.FutureGetResult]            = always_false,
@@ -126,6 +132,7 @@ local node_is_leaf = {
   [ast.typed.expr.ListRange]       = always_true,
   [ast.typed.expr.ListIspace]      = always_true,
   [ast.typed.expr.ListFromElement] = always_true,
+  [ast.typed.expr.RegionRoot]      = always_true,
   [ast.typed.expr.Unary]           = always_true,
   [ast.typed.expr.Binary]          = always_true,
   [ast.typed.expr.Deref]           = always_true,
@@ -181,17 +188,17 @@ local analyze_leaf_node = ast.make_single_dispatch(
 local function analyze_leaf(cx, node)
   return ast.mapreduce_node_postorder(
     analyze_leaf_node(),
-    data.all,
-    node, true)
+    all_with_provenance,
+    node, {true})
 end
 
 local node_is_inner = {
   -- Expressions:
   [ast.typed.expr.Deref] = function(node)
-    return not std.is_ref(node.expr_type)
+    return {not std.is_ref(node.expr_type), node}
   end,
   [ast.typed.expr.IndexAccess] = function(node)
-    return not std.is_ref(node.expr_type)
+    return {not std.is_ref(node.expr_type), node}
   end,
 
   [ast.typed.expr.RawPhysical] = always_false,
@@ -310,8 +317,8 @@ local analyze_inner_node = ast.make_single_dispatch(
 local function analyze_inner(cx, node)
   return ast.mapreduce_node_postorder(
     analyze_inner_node(),
-    data.all,
-    node, true)
+    all_with_provenance,
+    node, {true})
 end
 
 local node_is_idempotent = {
@@ -321,7 +328,7 @@ local node_is_idempotent = {
   -- do no external call of any kind and also
   -- do not perform any kind of file I/O
   [ast.typed.expr.Call] = function(node)
-    return std.is_task(node.fn.value) or node.replicable
+    return {std.is_task(node.fn.value) or node.replicable, node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -440,8 +447,8 @@ local analyze_idempotent_node = ast.make_single_dispatch(
 local function analyze_idempotent(cx, node)
   return ast.mapreduce_node_postorder(
     analyze_idempotent_node(),
-    data.all,
-    node, true)
+    all_with_provenance,
+    node, {true})
 end
 
 local node_is_replicable = {
@@ -458,7 +465,7 @@ local node_is_replicable = {
   -- General C and Terra calls are not supported because there is no
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
-    return std.is_task(node.fn.value) or node.replicable or std.replicable_whitelist[node.fn.value] or false
+    return {std.is_task(node.fn.value) or node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -577,8 +584,8 @@ local analyze_replicable_node = ast.make_single_dispatch(
 local function analyze_replicable(cx, node)
   return ast.mapreduce_node_postorder(
     analyze_replicable_node(),
-    data.all,
-    node, true)
+    all_with_provenance,
+    node, {true})
 end
 
 local optimize_config_options = {}
@@ -588,38 +595,38 @@ function optimize_config_options.top_task(cx, node)
 
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
-  local leaf = analyze_leaf(cx, node.body) and std.config["leaf"]
-  local inner = analyze_inner(cx, node.body) and std.config["inner"] and not leaf
-  local idempotent = analyze_idempotent(cx, node.body) and std.config["idempotent"]
-  local replicable = analyze_replicable(cx, node.body) and std.config["replicable"]
+  local leaf, leaf_node = unpack(analyze_leaf(cx, node.body))
+  local inner, inner_node = unpack(analyze_inner(cx, node.body))
+  local idempotent, idempotent_node = unpack(analyze_idempotent(cx, node.body))
+  local replicable, replicable_node = unpack(analyze_replicable(cx, node.body))
 
-  leaf = leaf and not node.annotations.leaf:is(ast.annotation.Forbid)
-  inner = inner and not node.annotations.inner:is(ast.annotation.Forbid)
-  idempotent = idempotent and not node.annotations.idempotent:is(ast.annotation.Forbid)
-  replicable = replicable and not node.annotations.replicable:is(ast.annotation.Forbid)
+  leaf = leaf and not node.annotations.leaf:is(ast.annotation.Forbid) and std.config["leaf"]
+  inner = inner and not node.annotations.inner:is(ast.annotation.Forbid) and std.config["inner"] and not leaf
+  idempotent = idempotent and not node.annotations.idempotent:is(ast.annotation.Forbid) and std.config["idempotent"]
+  replicable = replicable and not node.annotations.replicable:is(ast.annotation.Forbid) and std.config["replicable"]
 
   if std.config["leaf"] and not leaf and
     node.annotations.leaf:is(ast.annotation.Demand)
   then
-    report.error(node, "task is not a valid leaf task")
+    report.error(leaf_node, "task is not a valid leaf task")
   end
 
   if std.config["inner"] and not inner and
     node.annotations.inner:is(ast.annotation.Demand)
   then
-    report.error(node, "task is not a valid inner task")
+    report.error(inner_node, "task is not a valid inner task")
   end
 
   if std.config["idempotent"] and not idempotent and
     node.annotations.idempotent:is(ast.annotation.Demand)
   then
-    report.error(node, "task is not a valid idempotent task")
+    report.error(idempotent_node, "task is not a valid idempotent task")
   end
 
   if std.config["replicable"] and not replicable and
     node.annotations.replicable:is(ast.annotation.Demand)
   then
-    report.error(node, "task is not a valid replicable task")
+    report.error(replicable_node, "task is not a valid replicable task")
   end
 
   return node {

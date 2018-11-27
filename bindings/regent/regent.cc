@@ -24,7 +24,7 @@
 #include "legion.h"
 #include "legion/legion_c_util.h"
 
-#include "legion_terra.h"
+#include "regent.h"
 
 using namespace Legion;
 

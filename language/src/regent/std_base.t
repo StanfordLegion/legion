@@ -40,8 +40,8 @@ end
 terralib.linklibrary("libregent.so")
 local c = terralib.includecstring([[
 #include "legion.h"
-#include "legion_terra.h"
-#include "legion_terra_partitions.h"
+#include "regent.h"
+#include "regent_partitions.h"
 #include "murmur_hash3.h"
 #include <math.h>
 #include <stdio.h>
