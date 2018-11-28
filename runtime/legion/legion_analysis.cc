@@ -3308,12 +3308,9 @@ namespace Legion {
           }
           // Wait until all the refinements are done before going on
           // to the next step
-          while ((eq_state == REFINING_STATE) ||
-                  !pending_refinements.empty())
+          while (refinement_event.exists())
           {
-            if (!transition_event.exists())
-              transition_event = Runtime::create_rt_user_event();
-            RtEvent wait_on = transition_event;
+            const RtEvent wait_on = refinement_event;
             eq.release();
             wait_on.wait();
             eq.reacquire();
@@ -3600,18 +3597,19 @@ namespace Legion {
         AutoLock eq(eq_lock);
         // Ray tracing can run as long as we don't have an outstanding
         // refining task that we need to wait for
-        while (eq_state == REFINING_STATE)
+        while (refinement_event.exists())
         {
-          if (!transition_event.exists())
-            transition_event = Runtime::create_rt_user_event();
-          RtEvent wait_on = transition_event;
+          const RtEvent wait_on = refinement_event;
           eq.release();
           wait_on.wait();
           eq.reacquire();
         }
+#ifdef DEBUG_LEGION
+        assert(pending_refinements.empty());
+#endif
         // Two cases here, one where refinement has already begun and
         // one where it is just starting
-        if (!subsets.empty() || !pending_refinements.empty())
+        if (!subsets.empty())
         {
           bool disjoint_refinement = false;
           if (disjoint_partition_refinement != NULL)
@@ -3646,6 +3644,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                     assert((eq_state == PENDING_REFINED_STATE) ||
                            (eq_state == REFINED_STATE));
+                    assert(refinement_event.exists());
 #endif
                     refinement_done = refinement_event;
                   }
@@ -3654,38 +3653,7 @@ namespace Legion {
                     refinement->refinement;
                 }
                 else
-                {
-                  bool is_pending = false;
-                  // See if our set is in the pending refinements in 
-                  // which case we'll need to wait for it
-                  if (!pending_refinements.empty())
-                  {
-                    for (std::vector<RefinementThunk*>::const_iterator it = 
-                          pending_refinements.begin(); it != 
-                          pending_refinements.end(); it++)
-                    {
-                      if ((*it)->owner != finder->second)
-                        continue;
-                      (*it)->add_reference();
-                      refinements_to_traverse[*it] = finder->first;
-                      // If this is a pending refinement then we'll need to
-                      // wait for it before traversing farther
-                      if (!refinement_done.exists())
-                      {
-#ifdef DEBUG_LEGION
-                        assert(eq_state == PENDING_REFINED_STATE);
-#endif
-                        if (!transition_event.exists())
-                          transition_event = Runtime::create_rt_user_event();
-                        refinement_done = transition_event;
-                      }
-                      is_pending = true;
-                      break;
-                    }
-                  }
-                  if (!is_pending)
-                    to_traverse[finder->second] = finder->first;
-                }
+                  to_traverse[finder->second] = finder->first;
                 // We did a disjoint refinement
                 disjoint_refinement = true;
               }
@@ -3717,32 +3685,6 @@ namespace Legion {
                 is_empty = true;
                 break;
               }
-              else if (precise_intersection)
-                precise_intersection = false;
-            }
-            for (std::vector<RefinementThunk*>::const_iterator it = 
-                  pending_refinements.begin(); !is_empty && (it != 
-                  pending_refinements.end()); it++)
-            {
-              IndexSpaceExpression *overlap = 
-                forest->intersect_index_spaces((*it)->expr, expr);
-              if (overlap->is_empty())
-                continue;
-              (*it)->add_reference();
-              refinements_to_traverse[*it] = overlap;
-              // If this is a pending refinement then we'll need to
-              // wait for it before traversing farther
-              if (!refinement_done.exists())
-              {
-#ifdef DEBUG_LEGION
-                assert((eq_state == PENDING_REFINED_STATE) ||
-                       (eq_state == REFINED_STATE));
-#endif
-                refinement_done = refinement_event;
-              }
-              expr = forest->subtract_index_spaces(expr, overlap);
-              if ((expr == NULL) || expr->is_empty())
-                is_empty = true;
               else if (precise_intersection)
                 precise_intersection = false;
             }
@@ -3811,6 +3753,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert((eq_state == PENDING_REFINED_STATE) ||
                        (eq_state == REFINED_STATE));
+                assert(refinement_event.exists());
 #endif
                 refinement_done = refinement_event;
                 // Save this for the future
@@ -3831,6 +3774,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert((eq_state == PENDING_REFINED_STATE) ||
                      (eq_state == REFINED_STATE));
+              assert(refinement_event.exists());
 #endif
               refinement_done = refinement_event;
               // Update the unrefined remainder
@@ -7071,13 +7015,12 @@ namespace Legion {
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
         assert(is_logical_owner());
-        assert((eq_state == REFINED_STATE) || (eq_state == REFINING_STATE) ||
+        assert((eq_state == REFINED_STATE) ||
                (eq_state == PENDING_REFINED_STATE));
         assert(remote_subsets.empty());
         assert(refinement_event.exists());
 #endif
-        // Update the state to the refining state
-        eq_state = REFINING_STATE;
+        eq_state = REFINED_STATE;
         // On the first iteration update our data structures to 
         // reflect that we now have all the valid data
         if (first)
@@ -7230,13 +7173,7 @@ namespace Legion {
             }
             version_numbers.clear();
           }
-          // Go back to the refined state and trigger our done event
-          eq_state = REFINED_STATE;
-          if (transition_event.exists())
-          {
-            to_trigger = transition_event;
-            transition_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
+          to_trigger = refinement_event;
           // Clear out the refinement event since we're done
           refinement_event = RtUserEvent::NO_RT_USER_EVENT;
         }
@@ -7498,15 +7435,13 @@ namespace Legion {
       assert(!pending_refinements.empty());
       assert(!refinement_event.exists());
 #endif
-      RtUserEvent refinement_done = Runtime::create_rt_user_event();
-      refinement_event = refinement_done;
+      refinement_event = Runtime::create_rt_user_event();
       // Send invalidations to all the remote nodes. This will invalidate
       // their mapping privileges and also send back any remote meta data
       // to the local node 
       RefinementTaskArgs args(this, needs_updates);      
-      RtEvent done = refinement_event = runtime->issue_runtime_meta_task(args, 
-                                LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
-      Runtime::trigger_event(refinement_done, done);
+      runtime->issue_runtime_meta_task(args, 
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
     }
 
     //--------------------------------------------------------------------------
@@ -7540,7 +7475,7 @@ namespace Legion {
         add_pending_refinement(refinement);
       }
       // We can only send the response if we're not doing any refinements 
-      if ((eq_state != REFINING_STATE) && pending_refinements.empty())
+      if (!refinement_event.exists())
       {
         Serializer rez;
         {

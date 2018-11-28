@@ -746,8 +746,7 @@ namespace Legion {
         // refinements have been done
         MAPPING_STATE,
         PENDING_REFINED_STATE, // waiting for mappings to drain
-        REFINED_STATE, // subsets is stable and no refinements being performed
-        REFINING_STATE, // running the refinement task
+        REFINED_STATE, // at least one refinement has been initiated
         // Remote copies start in the invalid state, go to pending valid
         // while waiting for a lease on the current subsets, valid once they 
         // get a lease, pending invalid once they get an invalid notification
@@ -1095,7 +1094,7 @@ namespace Legion {
       RtUserEvent transition_event;
       // Keep an event to track when the most recent refinement task
       // is done running
-      RtEvent refinement_event;
+      RtUserEvent refinement_event;
       // Keep an order on all operations that attempt to acquire
       // this equivalence class. Hopefully 64 bits is enough that
       // we never have to reset this
