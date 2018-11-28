@@ -3895,9 +3895,9 @@ local function incremental_compile_tasks()
 
       -- Now attempt to move the object file into place. Note: This is atomic,
       -- so we don't need to worry about races.
-      local ok, err = os.execute("/bin/mv ".. objtmp .. " " .. cache_filename)
-      if ok == nil then
-        assert(false, err)
+      local ok = os.execute("/bin/mv ".. objtmp .. " " .. cache_filename)
+      if ok ~= 0 then
+        assert(false, "failed to move cache file")
       end
     else
       -- Otherwise do nothing (will automatically reuse the cached object file).
