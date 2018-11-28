@@ -740,12 +740,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REFINEMENT_TASK_ID;
       public:
-        RefinementTaskArgs(EquivalenceSet *t)
+        RefinementTaskArgs(EquivalenceSet *t, bool update)
           : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), 
-            target(t), needs_updates(false) { }
+            target(t), needs_updates(update) { }
       public:
         EquivalenceSet *const target;
-        bool needs_updates;
+        const bool needs_updates;
       };
       struct RemoteRefTaskArgs : public LgTaskArgs<RemoteRefTaskArgs> {
       public:
@@ -783,8 +783,7 @@ namespace Legion {
         // refinements have been done
         MAPPING_STATE,
         PENDING_REFINED_STATE, // waiting for mappings to drain
-        REFINED_STATE, // subsets is stable and no refinements being performed
-        REFINING_STATE, // running the refinement task
+        REFINED_STATE, // at least one refinement has been initiated
         // Remote copies start in the invalid state, go to pending valid
         // while waiting for a lease on the current subsets, valid once they 
         // get a lease, pending invalid once they get an invalid notification
@@ -995,7 +994,8 @@ namespace Legion {
       void pack_initial_reduction_state(Serializer &rez) const;
       void unpack_initial_reduction_state(Deserializer &derez);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
-      void launch_refinement_task(void); // call with lock
+      void launch_refinement_task(RtEvent precondition = RtEvent::NO_RT_EVENT,
+                        const bool needs_updates = false); // call with lock
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
@@ -1135,8 +1135,11 @@ namespace Legion {
       FieldMask mutated_guard_summary;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
-      // Keep an event to track when the refinements are ready
+      // Keep an event to track when the state transitions are performed
       RtUserEvent transition_event;
+      // Keep an event to track when the most recent refinement task
+      // is done running
+      RtUserEvent refinement_event;
       // Keep an order on all operations that attempt to acquire
       // this equivalence class. Hopefully 64 bits is enough that
       // we never have to reset this

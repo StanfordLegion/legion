@@ -113,7 +113,7 @@ void top_level_task(const Task *task,
 			   ArgumentMap());
     launcher.add_region_requirement(RegionRequirement(lp,
 						      0, // identity projection
-						      READ_WRITE,
+						      WRITE_DISCARD,
 						      EXCLUSIVE,
 						      lr,
 						      DefaultMapper::VIRTUAL_MAP)
@@ -207,7 +207,7 @@ void make_data_task(const Task *task,
   // tell the default mapper that we want exactly this region to be mapped
   // otherwise, its heuristics may cause it to try to map the (huge) parent
   InlineLauncher launcher(RegionRequirement(alloc_lr,
-					    READ_WRITE,
+					    WRITE_DISCARD,
 					    EXCLUSIVE,
 					    my_lr,
 					    DefaultMapper::EXACT_REGION)
@@ -220,7 +220,7 @@ void make_data_task(const Task *task,
   pr.wait_until_valid();
 
   {
-    const FieldAccessor<READ_WRITE,int,1,coord_t,
+    const FieldAccessor<WRITE_DISCARD,int,1,coord_t,
             Realm::AffineAccessor<int,1,coord_t> > ra(pr, FID_DATA);
 
     for(coord_t i = 0; i < output_size; i++)

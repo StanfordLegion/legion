@@ -532,7 +532,7 @@ def test_driver(argv):
                         help='skip tests matching pattern',
                         dest='skip_patterns')
     parser.add_argument('--limit',
-                        default=600, # 10 minutes
+                        default=900, # 15 minutes
                         type=int,
                         help='max run time for each test (in seconds)',
                         dest='timelimit')
