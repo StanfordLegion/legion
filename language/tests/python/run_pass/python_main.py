@@ -40,8 +40,7 @@ def main():
     print('Python got result from Regent task: %s' % x.get())
 
     print('creating a field space with two fields')
-    # Note: Need to use an OrderedDict here so that the field ordering
-    # matches Regent.
+    # Note: Need to use OrderedDict so that the field ordering matches Regent.
     fs = legion.Fspace.create(OrderedDict([('x', legion.float64), ('y', legion.float64)]))
 
     print('creating a region with 12 elements')
