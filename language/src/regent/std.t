@@ -2609,6 +2609,13 @@ do
   terra st.metamethods.__mul(a : st, b : st)
     return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
   end
+
+  st.metamethods.__cast = function(from, to, expr)
+    if to == st and std.validate_implicit_cast(from, double) then
+      return `(complex { real = [double](expr), imag = 0.0 })
+    end
+    assert(false)
+  end
 end
 
 

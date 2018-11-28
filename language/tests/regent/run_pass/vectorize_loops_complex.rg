@@ -15,25 +15,20 @@
 import "regent"
 
 task main()
-  var x = complex { 1.0, 2.0 }
-  regentlib.assert(x.real == 1.0, "test failed")
-  regentlib.assert(x.imag == 2.0, "test failed")
+  var r = region(ispace(int1d, 32), complex)
 
-  var y = complex { 3.0, 4.0 }
-  var z = x + y
-  regentlib.assert(z.real == 4.0, "test failed")
-  regentlib.assert(z.imag == 6.0, "test failed")
+  fill(r.real, 1.0)
+  fill(r.imag, 2.0)
 
-  var w = x - y
-  regentlib.assert(w.real == -2.0, "test failed")
-  regentlib.assert(w.imag == -2.0, "test failed")
+  -- __demand(__vectorize)
+  for x in r do
+    var y = @x + 1
+    @x = @x * y - 4
+  end
 
-  var v = x * y
-  regentlib.assert(v.real == -5.0, "test failed")
-  regentlib.assert(v.imag == 10.0, "test failed")
-
-  var u = x + 2
-  regentlib.assert(u.real == 3.0, "test failed")
-  regentlib.assert(u.imag == 2.0, "test failed")
+  for x in r do
+    regentlib.assert(x.real == -6.0, "test failed")
+    regentlib.assert(x.imag ==  6.0, "test failed")
+  end
 end
 regentlib.start(main)
