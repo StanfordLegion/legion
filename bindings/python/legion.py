@@ -415,8 +415,8 @@ class Fspace(object):
         handle = c.legion_field_space_create(_my.ctx.runtime, _my.ctx.context)
         alloc = c.legion_field_allocator_create(
             _my.ctx.runtime, _my.ctx.context, handle)
-        field_ids = {}
-        field_types = {}
+        field_ids = collections.OrderedDict()
+        field_types = collections.OrderedDict()
         for field_name, field_entry in fields.items():
             try:
                 field_type, field_id = field_entry
@@ -445,6 +445,11 @@ def _Region_unpickle(tree_id, ispace, fspace):
 class Region(object):
     __slots__ = ['handle', 'ispace', 'fspace',
                  'instances', 'privileges', 'instance_wrappers']
+
+    # Make this speak the Type interface
+    numpy_type = None
+    cffi_type = 'legion_logical_region_t'
+    size = ffi.sizeof(cffi_type)
 
     def __init__(self, handle, ispace, fspace):
         # Important: Copy handle. Do NOT assume ownership.
@@ -599,7 +604,7 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
-def define_regent_argument_struct(task_id, argument_types, privileges, return_type):
+def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments):
     if argument_types is None:
         raise Exception('Arguments must be typed in extern Regent tasks')
 
@@ -607,23 +612,24 @@ def define_regent_argument_struct(task_id, argument_types, privileges, return_ty
 
     n_fields = int(math.ceil(len(argument_types)/64.))
 
-    fields = [
-        'uint64_t %s[%s];' % ('__map', n_fields),
-    ]
-
+    fields = ['uint64_t %s[%s];' % ('__map', n_fields)]
     for i, arg_type in enumerate(argument_types):
-        arg_name = '__%s' % i
+        arg_name = '__arg_%s' % i
         fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
+    for i, arg in enumerate(arguments):
+        if isinstance(arg, Region):
+            for j, field_type in enumerate(arg.fspace.field_types.values()):
+                arg_name = '__arg_%s_field_%s' % (i, j)
+                fields.append('legion_field_id_t %s;' % arg_name)
 
     struct = 'typedef struct %s { %s } %s;' % (struct_name, ' '.join(fields), struct_name)
-
     ffi.cdef(struct)
 
     return struct_name
 
 class ExternTask(object):
     __slots__ = ['argument_types', 'privileges', 'return_type',
-                 'calling_convention', 'task_id', 'argument_struct']
+                 'calling_convention', 'task_id', '_argument_struct']
 
     def __init__(self, task_id, argument_types=None, privileges=None,
                  return_type=void, calling_convention=None):
@@ -635,10 +641,13 @@ class ExternTask(object):
         self.calling_convention = calling_convention
         assert isinstance(task_id, int)
         self.task_id = task_id
-        self.argument_struct = None
-        if self.calling_convention == 'regent':
-            self.argument_struct = define_regent_argument_struct(
-                task_id, argument_types, privileges, return_type)
+        self._argument_struct = None
+
+    def argument_struct(self, args):
+        if self.calling_convention == 'regent' and self._argument_struct is None:
+            self._argument_struct = define_regent_argument_struct(
+                self.task_id, self.argument_types, self.privileges, self.return_type, args)
+        return self._argument_struct
 
     def __call__(self, *args):
         return self.spawn_task(*args)
@@ -863,16 +872,10 @@ def task(body=None, **kwargs):
     return Task(body, **kwargs)
 
 class _TaskLauncher(object):
-    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention',
-                 'argument_struct']
+    __slots__ = ['task']
 
-    def __init__(self, task_id, privileges, return_type, calling_convention,
-                 argument_struct):
-        self.task_id = task_id
-        self.privileges = privileges
-        self.return_type = return_type
-        self.calling_convention = calling_convention
-        self.argument_struct = argument_struct
+    def __init__(self, task):
+        self.task = task
 
     def preprocess_args(self, args):
         return [
@@ -893,20 +896,29 @@ class _TaskLauncher(object):
     def encode_args(self, args):
         task_args = ffi.new('legion_task_argument_t *')
         task_args_buffer = None
-        if self.calling_convention == 'python':
+        if self.task.calling_convention == 'python':
             arg_str = pickle.dumps(args, protocol=_pickle_version)
             task_args_buffer = ffi.new('char[]', arg_str)
             task_args[0].args = task_args_buffer
             task_args[0].arglen = len(arg_str)
-        elif self.calling_convention == 'regent':
-            task_args_buffer = ffi.new('%s*' % self.argument_struct)
+        elif self.task.calling_convention == 'regent':
+            arg_struct = self.task.argument_struct(args)
+            task_args_buffer = ffi.new('%s*' % arg_struct)
             # FIXME: Correct for > 64 arguments.
             getattr(task_args_buffer, '__map')[0] = 0 # Currently we never pass futures.
             for i, arg in enumerate(args):
-                arg_name = '__%s' % i
-                setattr(task_args_buffer, arg_name, arg)
+                arg_name = '__arg_%s' % i
+                arg_value = arg
+                if hasattr(arg, 'handle'):
+                    arg_value = arg.handle[0]
+                setattr(task_args_buffer, arg_name, arg_value)
+            for i, arg in enumerate(args):
+                if isinstance(arg, Region):
+                    for j, field_id in enumerate(arg.fspace.field_ids.values()):
+                        arg_name = '__arg_%s_field_%s' % (i, j)
+                        setattr(task_args_buffer, arg_name, field_id)
             task_args[0].args = task_args_buffer
-            task_args[0].arglen = ffi.sizeof(self.argument_struct)
+            task_args[0].arglen = ffi.sizeof(arg_struct)
         else:
             # FIXME: External tasks need a dedicated calling
             # convention to permit the passing of task arguments.
@@ -924,11 +936,11 @@ class _TaskLauncher(object):
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
-            self.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+            self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
-                assert i < len(self.privileges)
-                priv = self.privileges[i]
+                assert i < len(self.task.privileges)
+                priv = self.task.privileges[i]
                 req = c.legion_task_launcher_add_region_requirement_logical_region(
                     launcher, arg.handle[0],
                     priv._legion_privilege(),
@@ -942,7 +954,7 @@ class _TaskLauncher(object):
                             launcher, req, fid, True)
             elif isinstance(arg, Future):
                 c.legion_task_launcher_add_future(launcher, arg.handle)
-            elif self.calling_convention is None:
+            elif self.task.calling_convention is None:
                 # FIXME: Task arguments aren't being encoded AT ALL;
                 # at least throw an exception so that the user knows
                 raise Exception('External tasks do not support non-region arguments')
@@ -953,19 +965,15 @@ class _TaskLauncher(object):
         c.legion_task_launcher_destroy(launcher)
 
         # Build future of result.
-        future = Future.from_cdata(result, value_type=self.return_type)
+        future = Future.from_cdata(result, value_type=self.task.return_type)
         c.legion_future_destroy(result)
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task_id', 'privileges', 'return_type',
-                 'calling_convention', 'argument_struct',
-                 'domain', 'local_args', 'future_args', 'future_map']
+    __slots__ = ['task', 'domain', 'local_args', 'future_args', 'future_map']
 
-    def __init__(self, task_id, privileges, return_type, calling_convention,
-                 argument_struct, domain):
-        super(_IndexLauncher, self).__init__(
-            task_id, privileges, return_type, calling_convention, argument_struct)
+    def __init__(self, task, domain):
+        super(_IndexLauncher, self).__init__(task)
         self.domain = domain
         self.local_args = c.legion_argument_map_create()
         self.future_args = []
@@ -994,7 +1002,7 @@ class _IndexLauncher(_TaskLauncher):
 
         # Construct the task launcher.
         launcher = c.legion_index_launcher_create(
-            self.task_id, self.domain.raw_value(),
+            self.task.task_id, self.domain.raw_value(),
             global_args[0], self.local_args,
             c.legion_predicate_true(), False, 0, 0)
 
@@ -1013,12 +1021,7 @@ class _IndexLauncher(_TaskLauncher):
 class TaskLaunch(object):
     __slots__ = []
     def spawn_task(self, task, *args):
-        launcher = _TaskLauncher(
-            task_id=task.task_id,
-            privileges=task.privileges,
-            return_type=task.return_type,
-            calling_convention=task.calling_convention,
-            argument_struct=task.argument_struct)
+        launcher = _TaskLauncher(task=task)
         return launcher.spawn_task(*args)
 
 class _IndexValue(object):
@@ -1078,13 +1081,7 @@ class IndexLaunch(object):
 
     def ensure_launcher(self, task):
         if self.launcher is None:
-            self.launcher = _IndexLauncher(
-                task_id=task.task_id,
-                privileges=task.privileges,
-                return_type=task.return_type,
-                calling_convention=task.calling_convention,
-                argument_struct=task.argument_struct,
-                domain=self.domain)
+            self.launcher = _IndexLauncher(task=task, domain=self.domain)
 
     def check_compatibility(self, task, *args):
         # The tasks in a launch must conform to the following constraints:
