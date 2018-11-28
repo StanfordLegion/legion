@@ -23,14 +23,14 @@ import legion
 # FIXME: Need a better way to determine task IDs.
 hello = legion.extern_task(
     task_id=10000,
-    argument_types=(legion.int64, legion.float64),
+    argument_types=[legion.int64, legion.float64],
     return_type=legion.int64,
     calling_convention='regent')
 
 saxpy = legion.extern_task(
     task_id=10001,
-    argument_types=(legion.Region, legion.float64),
-    privileges=(legion.RW,),
+    argument_types=[legion.Region, legion.float64],
+    privileges=[legion.RW],
     calling_convention='regent')
 
 @legion.task(task_id=2)
