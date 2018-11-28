@@ -24,6 +24,7 @@ except ImportError:
     import pickle
 import collections
 import itertools
+import math
 import numpy
 import os
 import re
@@ -598,17 +599,46 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
-class ExternTask(object):
-    __slots__ = ['privileges', 'return_type', 'calling_convention', 'task_id']
+def define_regent_argument_struct(task_id, arguments, privileges, return_type):
+    if arguments is None:
+        raise Exception('Arguments are mandatory in Regent tasks')
 
-    def __init__(self, task_id, privileges=None, return_type=void):
+    struct_name = 'task_args_%s' % task_id
+
+    n_fields = int(math.ceil(len(arguments)/64.))
+
+    fields = [
+        'uint64_t %s[%s];' % ('__map', n_fields),
+    ]
+
+    for i, arg_type in enumerate(arguments):
+        arg_name = '__%s' % i
+        fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
+
+    struct = 'typedef struct %s { %s } %s;' % (struct_name, ' '.join(fields), struct_name)
+
+    ffi.cdef(struct)
+
+    return struct_name
+
+class ExternTask(object):
+    __slots__ = ['arguments', 'privileges', 'return_type',
+                 'calling_convention', 'task_id', 'argument_struct']
+
+    def __init__(self, task_id, arguments=None, privileges=None,
+                 return_type=void, calling_convention=None):
+        self.arguments = arguments
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
         self.return_type = return_type
-        self.calling_convention = None
+        self.calling_convention = calling_convention
         assert isinstance(task_id, int)
         self.task_id = task_id
+        self.argument_struct = None
+        if self.calling_convention == 'regent':
+            self.argument_struct = define_regent_argument_struct(
+                task_id, arguments, privileges, return_type)
 
     def __call__(self, *args):
         return self.spawn_task(*args)
@@ -647,7 +677,10 @@ def get_qualname(fn):
     return [fn.__name__]
 
 class Task (object):
-    __slots__ = ['body', 'privileges', 'return_type', 'leaf', 'inner', 'idempotent', 'replicable', 'calling_convention', 'task_id', 'registered']
+    __slots__ = ['body', 'privileges', 'return_type',
+                 'leaf', 'inner', 'idempotent', 'replicable',
+                 'calling_convention', 'argument_struct',
+                 'task_id', 'registered']
 
     def __init__(self, body, privileges=None, return_type=None,
                  leaf=False, inner=False, idempotent=False, replicable=False,
@@ -662,6 +695,7 @@ class Task (object):
         self.idempotent = bool(idempotent)
         self.replicable = bool(replicable)
         self.calling_convention = 'python'
+        self.argument_struct = None
         self.task_id = None
         if register:
             self.register(task_id, top_level)
@@ -829,13 +863,16 @@ def task(body=None, **kwargs):
     return Task(body, **kwargs)
 
 class _TaskLauncher(object):
-    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention']
+    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention',
+                 'argument_struct']
 
-    def __init__(self, task_id, privileges, return_type, calling_convention):
+    def __init__(self, task_id, privileges, return_type, calling_convention,
+                 argument_struct):
         self.task_id = task_id
         self.privileges = privileges
         self.return_type = return_type
         self.calling_convention = calling_convention
+        self.argument_struct = argument_struct
 
     def preprocess_args(self, args):
         return [
@@ -861,6 +898,15 @@ class _TaskLauncher(object):
             task_args_buffer = ffi.new('char[]', arg_str)
             task_args[0].args = task_args_buffer
             task_args[0].arglen = len(arg_str)
+        elif self.calling_convention == 'regent':
+            task_args_buffer = ffi.new('%s*' % self.argument_struct)
+            # FIXME: Correct for > 64 arguments.
+            getattr(task_args_buffer, '__map')[0] = 0 # Currently we never pass futures.
+            for i, arg in enumerate(args):
+                arg_name = '__%s' % i
+                setattr(task_args_buffer, arg_name, arg)
+            task_args[0].args = task_args_buffer
+            task_args[0].arglen = ffi.sizeof(self.argument_struct)
         else:
             # FIXME: External tasks need a dedicated calling
             # convention to permit the passing of task arguments.
@@ -969,7 +1015,8 @@ class TaskLaunch(object):
             task_id=task.task_id,
             privileges=task.privileges,
             return_type=task.return_type,
-            calling_convention=task.calling_convention)
+            calling_convention=task.calling_convention,
+            argument_struct=task.argument_struct)
         return launcher.spawn_task(*args)
 
 class _IndexValue(object):

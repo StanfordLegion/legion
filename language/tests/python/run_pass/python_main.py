@@ -19,9 +19,13 @@ from __future__ import print_function
 
 import legion
 
-hello = legion.extern_task(task_id=10000)
+# FIXME: Need a better way to determine task IDs.
+hello = legion.extern_task(
+    task_id=10000,
+    arguments=(legion.int64, legion.float64),
+    calling_convention='regent')
 
 @legion.task(task_id=2)
 def main():
     print('hello from Python')
-    hello()
+    hello(1234, 3.14)
