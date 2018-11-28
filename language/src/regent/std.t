@@ -3895,7 +3895,7 @@ local function incremental_compile_tasks()
 
       -- Now attempt to move the object file into place. Note: This is atomic,
       -- so we don't need to worry about races.
-      local ok, err = os.rename(objtmp, cache_filename)
+      local ok, err = os.execute("/bin/mv ".. objtmp .. " " .. cache_filename)
       if ok == nil then
         assert(false, err)
       end
