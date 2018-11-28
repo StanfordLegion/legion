@@ -958,12 +958,14 @@ class _TaskLauncher(object):
         return future
 
 class _IndexLauncher(_TaskLauncher):
-    __slots__ = ['task_id', 'privileges', 'return_type', 'calling_convention',
+    __slots__ = ['task_id', 'privileges', 'return_type',
+                 'calling_convention', 'argument_struct',
                  'domain', 'local_args', 'future_args', 'future_map']
 
-    def __init__(self, task_id, privileges, return_type, calling_convention, domain):
+    def __init__(self, task_id, privileges, return_type, calling_convention,
+                 argument_struct, domain):
         super(_IndexLauncher, self).__init__(
-            task_id, privileges, return_type, calling_convention)
+            task_id, privileges, return_type, calling_convention, argument_struct)
         self.domain = domain
         self.local_args = c.legion_argument_map_create()
         self.future_args = []
@@ -1081,6 +1083,7 @@ class IndexLaunch(object):
                 privileges=task.privileges,
                 return_type=task.return_type,
                 calling_convention=task.calling_convention,
+                argument_struct=task.argument_struct,
                 domain=self.domain)
 
     def check_compatibility(self, task, *args):
