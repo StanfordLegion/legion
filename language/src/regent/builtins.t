@@ -23,6 +23,7 @@ local builtins = {}
 -- via std).
 
 builtins.aliased = std.aliased
+builtins.complex = std.complex
 builtins.cross_product = std.cross_product
 builtins.disjoint = std.disjoint
 builtins.dynamic_collective = std.dynamic_collective

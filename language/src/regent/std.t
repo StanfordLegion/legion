@@ -2592,6 +2592,26 @@ function std.cross_product(...)
 end
 end
 
+do
+  local st = terralib.types.newstruct("complex")
+  st.entries = terralib.newlist({
+      { "real", double },
+      { "imag", double },
+  })
+  std.complex = st
+
+  terra st.metamethods.__add(a : st, b : st)
+    return st { real = a.real + b.real, imag = a.imag + b.imag }
+  end
+  terra st.metamethods.__sub(a : st, b : st)
+    return st { real = a.real - b.real, imag = a.imag - b.imag }
+  end
+  terra st.metamethods.__mul(a : st, b : st)
+    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
+  end
+end
+
+
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
   local bounds = data.newtuple(...)
 
