@@ -17,8 +17,9 @@
 
 import "regent"
 
-task hello(x : int64, y : double)
+task hello(x : int64, y : double) : int64
   regentlib.c.printf("hello from Regent (got values from Python: %lld %f)\n", x, y)
+  return 5678
 end
 
 extern task py_main()

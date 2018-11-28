@@ -599,19 +599,19 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
-def define_regent_argument_struct(task_id, arguments, privileges, return_type):
-    if arguments is None:
-        raise Exception('Arguments are mandatory in Regent tasks')
+def define_regent_argument_struct(task_id, argument_types, privileges, return_type):
+    if argument_types is None:
+        raise Exception('Arguments must be typed in extern Regent tasks')
 
     struct_name = 'task_args_%s' % task_id
 
-    n_fields = int(math.ceil(len(arguments)/64.))
+    n_fields = int(math.ceil(len(argument_types)/64.))
 
     fields = [
         'uint64_t %s[%s];' % ('__map', n_fields),
     ]
 
-    for i, arg_type in enumerate(arguments):
+    for i, arg_type in enumerate(argument_types):
         arg_name = '__%s' % i
         fields.append('%s %s;' % (arg_type.cffi_type, arg_name))
 
@@ -622,12 +622,12 @@ def define_regent_argument_struct(task_id, arguments, privileges, return_type):
     return struct_name
 
 class ExternTask(object):
-    __slots__ = ['arguments', 'privileges', 'return_type',
+    __slots__ = ['argument_types', 'privileges', 'return_type',
                  'calling_convention', 'task_id', 'argument_struct']
 
-    def __init__(self, task_id, arguments=None, privileges=None,
+    def __init__(self, task_id, argument_types=None, privileges=None,
                  return_type=void, calling_convention=None):
-        self.arguments = arguments
+        self.argument_types = argument_types
         if privileges is not None:
             privileges = [(x if x is not None else N) for x in privileges]
         self.privileges = privileges
@@ -638,7 +638,7 @@ class ExternTask(object):
         self.argument_struct = None
         if self.calling_convention == 'regent':
             self.argument_struct = define_regent_argument_struct(
-                task_id, arguments, privileges, return_type)
+                task_id, argument_types, privileges, return_type)
 
     def __call__(self, *args):
         return self.spawn_task(*args)

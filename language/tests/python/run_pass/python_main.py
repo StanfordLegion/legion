@@ -22,10 +22,12 @@ import legion
 # FIXME: Need a better way to determine task IDs.
 hello = legion.extern_task(
     task_id=10000,
-    arguments=(legion.int64, legion.float64),
+    argument_types=(legion.int64, legion.float64),
+    return_type=legion.int64,
     calling_convention='regent')
 
 @legion.task(task_id=2)
 def main():
     print('hello from Python')
-    hello(1234, 3.14)
+    x = hello(1234, 3.14)
+    print('Python got result from Regent task: %s' % x.get())
