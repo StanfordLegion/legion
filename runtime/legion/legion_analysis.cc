@@ -8046,33 +8046,42 @@ namespace Legion {
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
-      // If we have a disjoint refinement happenning then we need
-      // to finish that before checking the unrefined remainder
-      if (disjoint_partition_refinement != NULL)
-        finalize_disjoint_refinement();
-      // First check to see if we need to complete this refinement
-      if (unrefined_remainder != NULL)
+      // If we haven't actually done any refinements yet, then we
+      // still need to be able to allow acquires to bypass the
+      // pending refinements
+      if (!subsets.empty() || (eq_state == REFINING_STATE))
       {
-        RefinementThunk *refinement = 
-          new RefinementThunk(unrefined_remainder, NULL/*node*/, this, source);
-        // We can clear the unrefined remainder now
-        unrefined_remainder = NULL;
-        add_pending_refinement(refinement);
-      }
-      // If we have subsets and there are pending refinements then 
-      // wait until all the refinements are done before sending the
-      // subsets to the remote nodes, this handles the case where
-      // we are partially refined and we need to wait for any
-      // unrefined remainders to finish being made
-      if (!subsets.empty() && !pending_refinements.empty())
-      {
+        // If we have a disjoint refinement happenning then we need
+        // to finish that before checking the unrefined remainder
+        if (disjoint_partition_refinement != NULL)
+          finalize_disjoint_refinement();
+        // First check to see if we need to complete this refinement
+        if (unrefined_remainder != NULL)
+        {
 #ifdef DEBUG_LEGION
-        assert(refinement_event.exists());
+          assert(remote_subsets.empty()); // should not have any remote subsets
 #endif
-        DeferSubsetRequestArgs args(this, source);       
-        runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
-        return;
+          RefinementThunk *refinement = 
+            new RefinementThunk(unrefined_remainder, NULL/*node*/, this,source);
+          // We can clear the unrefined remainder now
+          unrefined_remainder = NULL;
+          add_pending_refinement(refinement);
+        }
+        // If we have subsets and there are pending refinements then 
+        // wait until all the refinements are done before sending the
+        // subsets to the remote nodes, this handles the case where
+        // we are partially refined and we need to wait for any
+        // unrefined remainders to finish being made
+        if (!pending_refinements.empty() && (eq_state != REFINING_STATE))
+        {
+#ifdef DEBUG_LEGION
+          assert(refinement_event.exists());
+#endif
+          DeferSubsetRequestArgs args(this, source);       
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
+          return;
+        }
       }
       // We can only send the response if we're not doing any refinements 
       if (eq_state != REFINING_STATE)
