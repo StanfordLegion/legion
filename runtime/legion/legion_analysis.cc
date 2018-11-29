@@ -3306,14 +3306,14 @@ namespace Legion {
             unrefined_remainder = NULL;
             add_pending_refinement(refinement);
           }
-          // Wait until all the refinements are done before going on
-          // to the next step
-          while ((eq_state == REFINING_STATE) ||
-                  !pending_refinements.empty())
+          // Wait until the refinement task is done running before 
+          // we can go on to the next step
+          while (eq_state == REFINING_STATE)
           {
-            if (!transition_event.exists())
-              transition_event = Runtime::create_rt_user_event();
-            RtEvent wait_on = transition_event;
+#ifdef DEBUG_LEGION
+            assert(refinement_event.exists());
+#endif
+            const RtEvent wait_on = refinement_event;
             eq.release();
             wait_on.wait();
             eq.reacquire();
@@ -3374,7 +3374,24 @@ namespace Legion {
           mapping_guards[op] = MappingGuard(guard_mask);
         }
         else // Our set of subsets are now what we need
+        {
+          // Wait until all the refinements are done
+          while ((eq_state == PENDING_REFINED_STATE) ||
+                  (eq_state == REFINING_STATE))
+          {
+#ifdef DEBUG_LEGION
+            assert(refinement_event.exists());
+#endif
+            const RtEvent wait_on = refinement_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
+          }
+#ifdef DEBUG_LEGION
+          assert(pending_refinements.empty());
+#endif
           to_recurse = subsets;
+        }
       }
       // If we have subsets then continue the traversal
       if (!to_recurse.empty())
@@ -3429,9 +3446,13 @@ namespace Legion {
             perform_all_deferred_requests();
           if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
           {
-            eq_state = REFINED_STATE;
-            // Kick off the refinement task now that we're transitioning
-            launch_refinement_task();
+            // Check to see if we have a transition event to trigger to 
+            // indicate to the refinement task that it can try to run again
+            if (transition_event.exists())
+            {
+              Runtime::trigger_event(transition_event);
+              transition_event = RtUserEvent::NO_RT_USER_EVENT;
+            }
           }
           else if (!is_logical_owner() && (eq_state == PENDING_INVALID_STATE))
           {
@@ -3599,9 +3620,10 @@ namespace Legion {
         // refining task that we need to wait for
         while (eq_state == REFINING_STATE)
         {
-          if (!transition_event.exists())
-            transition_event = Runtime::create_rt_user_event();
-          RtEvent wait_on = transition_event;
+#ifdef DEBUG_LEGION
+          assert(refinement_event.exists());
+#endif
+          const RtEvent wait_on = refinement_event;
           eq.release();
           wait_on.wait();
           eq.reacquire();
@@ -3643,10 +3665,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                     assert((eq_state == PENDING_REFINED_STATE) ||
                            (eq_state == REFINING_STATE));
+                    assert(refinement_event.exists());
 #endif
-                    if (!transition_event.exists())
-                      transition_event = Runtime::create_rt_user_event();
-                    refinement_done = transition_event;
+                    refinement_done = refinement_event;
                   }
                   // Record this child for the future
                   disjoint_partition_refinement->children[node] = 
@@ -3673,10 +3694,9 @@ namespace Legion {
                       {
 #ifdef DEBUG_LEGION
                         assert(eq_state == PENDING_REFINED_STATE);
+                        assert(refinement_event.exists());
 #endif
-                        if (!transition_event.exists())
-                          transition_event = Runtime::create_rt_user_event();
-                        refinement_done = transition_event;
+                        refinement_done = refinement_event;
                       }
                       is_pending = true;
                       break;
@@ -3735,10 +3755,9 @@ namespace Legion {
               {
 #ifdef DEBUG_LEGION
                 assert(eq_state == PENDING_REFINED_STATE);
+                assert(refinement_event.exists());
 #endif
-                if (!transition_event.exists())
-                  transition_event = Runtime::create_rt_user_event();
-                refinement_done = transition_event;
+                refinement_done = refinement_event;
               }
               expr = forest->subtract_index_spaces(expr, overlap);
               if ((expr == NULL) || expr->is_empty())
@@ -3763,10 +3782,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert((eq_state == PENDING_REFINED_STATE) ||
                        (eq_state == REFINING_STATE));
+                assert(refinement_event.exists());
 #endif
-                if (!transition_event.exists())
-                  transition_event = Runtime::create_rt_user_event();
-                refinement_done = transition_event;
+                refinement_done = refinement_event;
               }
               unrefined_remainder = 
                 forest->subtract_index_spaces(unrefined_remainder, expr);
@@ -3812,10 +3830,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                 assert((eq_state == PENDING_REFINED_STATE) ||
                        (eq_state == REFINING_STATE));
+                assert(refinement_event.exists());
 #endif
-                if (!transition_event.exists())
-                  transition_event = Runtime::create_rt_user_event();
-                refinement_done = transition_event;
+                refinement_done = refinement_event;
                 // Save this for the future
                 disjoint_partition_refinement->children[node] = 
                   refinement->refinement;
@@ -3834,10 +3851,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert((eq_state == PENDING_REFINED_STATE) ||
                      (eq_state == REFINING_STATE));
+              assert(refinement_event.exists());
 #endif
-              if (!transition_event.exists())
-                transition_event = Runtime::create_rt_user_event();
-              refinement_done = transition_event;
+              refinement_done = refinement_event;
               // Update the unrefined remainder
               unrefined_remainder = diff;
             }
@@ -7034,28 +7050,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_refinements(bool need_remote_updates)
+    void EquivalenceSet::perform_refinements(void)
     //--------------------------------------------------------------------------
     {
-      if (need_remote_updates)
-      {
-        std::set<RtEvent> preconditions;
-        const FieldMask request_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-        request_valid_copy(NULL/*op*/, request_mask, usage,
-                           preconditions, preconditions,runtime->address_space);
-        RefinementTaskArgs args(this);
-        if (!preconditions.empty())
-        {
-          const RtEvent wait_for = Runtime::merge_events(preconditions);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_for);
-        }
-        else
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_DEFERRED_PRIORITY);
-        return;
-      }
       RtUserEvent to_trigger;
       std::vector<RefinementThunk*> to_perform;
       bool first = true;
@@ -7076,40 +7073,113 @@ namespace Legion {
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
         assert(is_logical_owner());
-        assert(eq_state == REFINING_STATE);
-        assert(remote_subsets.empty());
+        assert(refinement_event.exists());
 #endif
         // On the first iteration update our data structures to 
         // reflect that we now have all the valid data
         if (first)
         {
-          // We now hold all the fields in exclusive mode or 
-          // single redop mode since the request to invalidate 
-          // the subsets will also send back any meta-data for 
-          // these remote copies
-          if (!exclusive_copies.empty())
-            exclusive_copies.clear();
-          if (!!shared_fields)
+#ifdef DEBUG_LEGION
+          assert(eq_state == PENDING_REFINED_STATE);
+#endif
+          // Record whether we have any remote copies that we'll
+          // need to ask for updates from before we can perform
+          // the refinements
+          const bool remote_copies = !remote_subsets.empty();
+          // First we need to spin until we know that there are
+          // no more acquires done for this equivalence set
+          while (!mapping_guards.empty() || !remote_subsets.empty())
           {
-            exclusive_fields |= shared_fields;
-            shared_fields.clear();
-            shared_copies.clear();
+            // We won't even bother trying to do the remote invalidates 
+            // until all the local mapping guards are gone
+            if (!mapping_guards.empty())
+            {
+              // If there are any mapping guards then defer ourselves
+              // until a later time when there aren't any mapping guards
+#ifdef DEBUG_LEGION
+              assert(!transition_event.exists());
+#endif
+              transition_event = Runtime::create_rt_user_event();
+              const RtEvent wait_on = transition_event;
+              eq.release();
+              wait_on.wait();
+              eq.reacquire();
+            }
+            else
+            {
+              // Send remote invalidations to all the remote subsets
+              std::set<RtEvent> refinement_acknowledgements;
+              for (std::set<AddressSpaceID>::const_iterator it = 
+                    remote_subsets.begin(); it != remote_subsets.end(); it++)
+              {
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  RtUserEvent remote_done = Runtime::create_rt_user_event();
+                  rez.serialize(remote_done);
+                  refinement_acknowledgements.insert(remote_done);
+                }
+                runtime->send_equivalence_set_subset_invalidation(*it, rez);
+              } 
+              remote_subsets.clear();
+              eq.release();
+              const RtEvent wait_on = 
+                Runtime::merge_events(refinement_acknowledgements);
+              wait_on.wait();
+              eq.reacquire();
+            }
           }
-          if (!single_reduction_copies.empty())
-            single_reduction_copies.clear();
-          if (!!multi_redop_fields)
+          // Once we get here we can mark that we're doing a refinement
+          eq_state = REFINING_STATE;
+          // If we had remote copies we need to do a valid request in
+          // order to bring them up to date here
+          if (remote_copies)
           {
-            single_redop_fields |= multi_redop_fields;
-            multi_redop_fields.clear();
-            multi_reduction_copies.clear();
+            // Release the lock, we're protected by the change of state above
+            eq.release();
+            std::set<RtEvent> preconditions;
+            const FieldMask request_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+            const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
+            request_valid_copy(NULL/*op*/, request_mask, usage,
+                      preconditions, preconditions,runtime->address_space);
+            const RtEvent wait_on = Runtime::merge_events(preconditions);
+            if (wait_on.exists())
+              wait_on.wait();
+            // Reacquire the lock
+            eq.reacquire();
+            // We now hold all the fields in exclusive mode or 
+            // single redop mode since the request to invalidate 
+            // the subsets will also send back any meta-data for 
+            // these remote copies
+            if (!exclusive_copies.empty())
+              exclusive_copies.clear();
+            if (!!shared_fields)
+            {
+              exclusive_fields |= shared_fields;
+              shared_fields.clear();
+              shared_copies.clear();
+            }
+            if (!single_reduction_copies.empty())
+              single_reduction_copies.clear();
+            if (!!multi_redop_fields)
+            {
+              single_redop_fields |= multi_redop_fields;
+              multi_redop_fields.clear();
+              multi_reduction_copies.clear();
+            }
+            // We now have all the fields in exclusive mode
+            if (!!exclusive_fields)
+              exclusive_copies[logical_owner_space] = exclusive_fields;
+            if (!!single_redop_fields)
+              single_reduction_copies[logical_owner_space] =
+                single_redop_fields;
           }
-          // We now have all the fields in exclusive mode
-          if (!!exclusive_fields)
-            exclusive_copies[logical_owner_space] = exclusive_fields;
-          if (!!single_redop_fields)
-            single_reduction_copies[logical_owner_space] = single_redop_fields;
           first = false;
         }
+#ifdef DEBUG_LEGION
+        assert(eq_state == REFINING_STATE);
+#endif
         if (!to_add.empty())
           subsets.insert(subsets.end(), to_add.begin(), to_add.end());
         // Add these refinements to our subsets and delete the thunks
@@ -7171,7 +7241,7 @@ namespace Legion {
           // This is the end of the refinement task so we need to update
           // the state and send out any notifications to anyone that the
           // refinements are done
-          if (!pending_subset_requests.empty())
+          if (!remote_subsets.empty())
           {
             Serializer rez;
             {
@@ -7183,13 +7253,8 @@ namespace Legion {
                 rez.serialize((*it)->did);
             }
             for (std::set<AddressSpaceID>::const_iterator it = 
-                  pending_subset_requests.begin(); it != 
-                  pending_subset_requests.end(); it++)
-            {
+                  remote_subsets.begin(); it != remote_subsets.end(); it++)
               runtime->send_equivalence_set_subset_response(*it, rez);
-              remote_subsets.insert(*it);
-            }
-            pending_subset_requests.clear();
           }
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
@@ -7233,17 +7298,16 @@ namespace Legion {
           }
           // Go back to the refined state and trigger our done event
           eq_state = REFINED_STATE;
-          if (transition_event.exists())
-          {
-            to_trigger = transition_event;
-            transition_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
+          to_trigger = refinement_event;
+          refinement_event = RtUserEvent::NO_RT_USER_EVENT;
         }
         else // there are more refinements to do so we go around again
           to_perform.swap(pending_refinements);
       } while (!to_perform.empty());
-      if (to_trigger.exists())
-        Runtime::trigger_event(to_trigger);
+#ifdef DEBUG_LEGION
+      assert(to_trigger.exists());
+#endif
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -7431,68 +7495,18 @@ namespace Legion {
 #endif
       thunk->add_reference();
       pending_refinements.push_back(thunk);
-      if (eq_state == MAPPING_STATE)
+      if ((eq_state == MAPPING_STATE) || (eq_state == REFINED_STATE))
       {
-        // Check to see if we can transition right now
-        if (mapping_guards.empty())
-        {
-          // Transition straight to refinement
-          eq_state = REFINED_STATE;
-          launch_refinement_task();
-        }
-        else // go to the pending state
-          eq_state = PENDING_REFINED_STATE;
-      }
-      // Otherwise if we don't have an outstanding refinement task
-      // then we need to launch one now to handle this
-      else if (eq_state == REFINED_STATE)
-        launch_refinement_task();
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::launch_refinement_task(void)
-    //--------------------------------------------------------------------------
-    {
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-      assert(eq_state == REFINED_STATE);
-      assert(!pending_refinements.empty());
+        assert(!refinement_event.exists());
 #endif
-      // Mark that we're about to start refining
-      eq_state = REFINING_STATE;
-      // Send invalidations to all the remote nodes. This will invalidate
-      // their mapping privileges and also send back any remote meta data
-      // to the local node 
-      RefinementTaskArgs args(this);      
-      if (!remote_subsets.empty())
-      {
-        // First we need to send invalidation notifications to all 
-        // the remote subset copies. Once they've all acknowledged 
-        // them then we can do the request for making ourselves valid
-        // for all the fields prior to doing the refinements
-        std::set<RtEvent> refinement_acknowledgements;
-        for (std::set<AddressSpaceID>::const_iterator it = 
-              remote_subsets.begin(); it != remote_subsets.end(); it++)
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            RtUserEvent remote_done = Runtime::create_rt_user_event();
-            rez.serialize(remote_done);
-            refinement_acknowledgements.insert(remote_done);
-          }
-          runtime->send_equivalence_set_subset_invalidation(*it, rez);
-        } 
-        remote_subsets.clear();
-        RtEvent wait_for = Runtime::merge_events(refinement_acknowledgements);
-        // Record that we still need to do the update request
-        args.needs_updates = true;
-        runtime->issue_runtime_meta_task(args, 
-            LG_THROUGHPUT_DEFERRED_PRIORITY, wait_for);
-      }
-      else // This refinement task is ready now
+        refinement_event = Runtime::create_rt_user_event();
+        eq_state = PENDING_REFINED_STATE;
+        // Just launch the refinement task, it will do its own checks to 
+        // see if it is safe to perform the refinements
+        RefinementTaskArgs args(this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -7509,8 +7523,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
-      assert(pending_subset_requests.find(source) == 
-              pending_subset_requests.end());
 #endif
       // If we have a disjoint refinement happenning then we need
       // to finish that before checking the unrefined remainder
@@ -7526,7 +7538,7 @@ namespace Legion {
         add_pending_refinement(refinement);
       }
       // We can only send the response if we're not doing any refinements 
-      if ((eq_state != REFINING_STATE) && pending_refinements.empty())
+      if (eq_state != REFINING_STATE)
       {
         Serializer rez;
         {
@@ -7538,10 +7550,11 @@ namespace Legion {
             rez.serialize((*it)->did);
         }
         runtime->send_equivalence_set_subset_response(source, rez);
-        remote_subsets.insert(source);
       }
-      else // Record that this is a pending subset
-        pending_subset_requests.insert(source);
+      // No matter what we record this as a remote subset
+      // If we're refining when doing this then we'll send
+      // the result out when we're done with the refinements
+      remote_subsets.insert(source);
     }
 
     //--------------------------------------------------------------------------
@@ -7649,7 +7662,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RefinementTaskArgs *rargs = (const RefinementTaskArgs*)args;
-      rargs->target->perform_refinements(rargs->needs_updates);
+      rargs->target->perform_refinements();
     }
 
     //--------------------------------------------------------------------------

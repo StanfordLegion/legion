@@ -705,10 +705,9 @@ namespace Legion {
       public:
         RefinementTaskArgs(EquivalenceSet *t)
           : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), 
-            target(t), needs_updates(false) { }
+            target(t) { }
       public:
         EquivalenceSet *const target;
-        bool needs_updates;
       };
       struct RemoteRefTaskArgs : public LgTaskArgs<RemoteRefTaskArgs> {
       public:
@@ -945,14 +944,13 @@ namespace Legion {
                           CopyFillAggregator &aggregator) const;
       void advance_version_numbers(FieldMask advance_mask);
     protected:
-      void perform_refinements(bool need_remote_updates);
+      void perform_refinements(void);
       void finalize_disjoint_refinement(void);
       void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
       void pack_initial_reduction_state(Serializer &rez) const;
       void unpack_initial_reduction_state(Deserializer &derez);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
-      void launch_refinement_task(void); // call with lock
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
@@ -1092,6 +1090,8 @@ namespace Legion {
       std::vector<RefinementThunk*> pending_refinements;
       // Keep an event to track when the refinements are ready
       RtUserEvent transition_event;
+      // An event to track when the refinement task is done
+      RtUserEvent refinement_event;
       // Keep an order on all operations that attempt to acquire
       // this equivalence class. Hopefully 64 bits is enough that
       // we never have to reset this
@@ -1103,7 +1103,7 @@ namespace Legion {
       // someone else decides that they need to access it
       std::vector<EquivalenceSet*> subsets;
       // Set on the owner node for tracking the remote subset leases
-      std::set<AddressSpaceID> remote_subsets, pending_subset_requests;
+      std::set<AddressSpaceID> remote_subsets;
       // Index space expression for unrefined remainder of our set_expr
       // This is only valid on the owner node
       IndexSpaceExpression *unrefined_remainder;
