@@ -737,6 +737,18 @@ namespace Legion {
         const AddressSpaceID origin;
         const RtUserEvent done;
       };
+      struct DeferSubsetRequestArgs : 
+        public LgTaskArgs<DeferSubsetRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_SUBSET_REQUEST_TASK_ID;
+      public:
+        DeferSubsetRequestArgs(EquivalenceSet *s, AddressSpaceID src)
+          : LgTaskArgs<DeferSubsetRequestArgs>(implicit_provenance),
+            set(s), source(src) { }
+      public:
+        EquivalenceSet *const set;
+        const AddressSpaceID source;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -1040,6 +1052,7 @@ namespace Legion {
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
       static void handle_ray_trace(const void *args);
+      static void handle_subset_request(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,

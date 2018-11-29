@@ -324,6 +324,7 @@ namespace Legion {
       LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
       LG_DEFER_RAY_TRACE_TASK_ID,
+      LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
       LG_DEFER_VERSION_FINALIZE_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
@@ -399,6 +400,7 @@ namespace Legion {
         "Refinement",                                             \
         "Remove Remote References",                               \
         "Defer Ray Trace",                                        \
+        "Defer Subset Request",                                   \
         "Defer Remote Decrement",                                 \
         "Defer Version Info Finalize",                            \
         "Remote Message",                                         \

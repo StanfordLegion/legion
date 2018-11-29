@@ -7510,6 +7510,18 @@ namespace Legion {
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
+        // If the refinement task isn't already running, then we're going
+        // to need to defer this in order to avoid blocking the virtual channel
+        if (eq_state == PENDING_REFINED_STATE)
+        {
+#ifdef DEBUG_LEGION
+          assert(refinement_event.exists());
+#endif
+          DeferSubsetRequestArgs args(this, source);       
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
+          return;
+        }
       }
       // We can only send the response if we're not doing any refinements 
       if (eq_state != REFINING_STATE)
@@ -7658,6 +7670,14 @@ namespace Legion {
       const RtEvent traced = dargs->set->ray_trace_equivalence_sets(
                       dargs->target, dargs->expr, dargs->handle, dargs->origin);
       Runtime::trigger_event(dargs->done, traced);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_subset_request(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferSubsetRequestArgs *dargs = (const DeferSubsetRequestArgs*)args;
+      dargs->set->process_subset_request(dargs->source);
     }
 
     //--------------------------------------------------------------------------
