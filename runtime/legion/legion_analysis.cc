@@ -7510,18 +7510,21 @@ namespace Legion {
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
-        // If the refinement task isn't already running, then we're going
-        // to need to defer this in order to avoid blocking the virtual channel
-        if (eq_state == PENDING_REFINED_STATE)
-        {
+      }
+      // If we have subsets and there are pending refinements then 
+      // wait until all the refinements are done before sending the
+      // subsets to the remote nodes, this handles the case where
+      // we are partially refined and we need to wait for any
+      // unrefined remainders to finish being made
+      if (!subsets.empty() && !pending_refinements.empty())
+      {
 #ifdef DEBUG_LEGION
-          assert(refinement_event.exists());
+        assert(refinement_event.exists());
 #endif
-          DeferSubsetRequestArgs args(this, source);       
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
-          return;
-        }
+        DeferSubsetRequestArgs args(this, source);       
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
+        return;
       }
       // We can only send the response if we're not doing any refinements 
       if (eq_state != REFINING_STATE)
