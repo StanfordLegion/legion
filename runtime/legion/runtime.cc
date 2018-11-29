@@ -7062,6 +7062,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_sources_request(Deserializer &derez,
+                                                   AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_remote_sources_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_sources_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_remote_sources_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShutdownManager::handle_shutdown_notification(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
