@@ -7148,32 +7148,6 @@ namespace Legion {
               wait_on.wait();
             // Reacquire the lock
             eq.reacquire();
-            // We now hold all the fields in exclusive mode or 
-            // single redop mode since the request to invalidate 
-            // the subsets will also send back any meta-data for 
-            // these remote copies
-            if (!exclusive_copies.empty())
-              exclusive_copies.clear();
-            if (!!shared_fields)
-            {
-              exclusive_fields |= shared_fields;
-              shared_fields.clear();
-              shared_copies.clear();
-            }
-            if (!single_reduction_copies.empty())
-              single_reduction_copies.clear();
-            if (!!multi_redop_fields)
-            {
-              single_redop_fields |= multi_redop_fields;
-              multi_redop_fields.clear();
-              multi_reduction_copies.clear();
-            }
-            // We now have all the fields in exclusive mode
-            if (!!exclusive_fields)
-              exclusive_copies[logical_owner_space] = exclusive_fields;
-            if (!!single_redop_fields)
-              single_reduction_copies[logical_owner_space] =
-                single_redop_fields;
           }
           first = false;
         }
