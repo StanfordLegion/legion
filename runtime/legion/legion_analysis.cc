@@ -8076,7 +8076,7 @@ namespace Legion {
         // subsets to the remote nodes, this handles the case where
         // we are partially refined and we need to wait for any
         // unrefined remainders to finish being made
-        if (eq_state == PENDING_REFINING_STATE)
+        if (eq_state == PENDING_REFINED_STATE)
         {
 #ifdef DEBUG_LEGION
           assert(!subsets.empty());
