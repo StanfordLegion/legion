@@ -1223,6 +1223,21 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void Operation::pack_remote_operation(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_ctx != NULL);
+#endif
+      rez.serialize(this);
+      rez.serialize(runtime->address_space);
+      rez.serialize(unique_op_id);
+      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize(execution_fence_event);
+      rez.serialize<bool>(tracing);
+    }
+
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void Operation::dump_physical_state(RegionRequirement *req, unsigned idx,
@@ -13914,6 +13929,184 @@ namespace Legion {
     {
       result.impl->complete_future(); 
       complete_operation();
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteOp::RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : Operation(rt), remote_ptr(ptr), source(src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp::RemoteOp(const RemoteOp &rhs)
+      : Operation(rhs), remote_ptr(NULL), source(0)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp::~RemoteOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteOp& RemoteOp::operator=(const RemoteOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::unpack(Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(unique_op_id);
+      UniqueID parent_uid;
+      derez.deserialize(parent_uid);
+      parent_ctx = runtime->find_context(parent_uid);
+      derez.deserialize(execution_fence_event);
+      derez.deserialize<bool>(tracing);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::activate(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::deactivate(void)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[REMOTE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return REMOTE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // Ship this back to the owner node to do the mapper call there for now
+      Serializer rez;
+      // Make a user event that we'll wait on for the result to be ready
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      {
+        RezCheck z(rez);
+        rez.serialize(remote_ptr);
+        target.pack_reference(rez);
+        sources.pack_references(rez);
+        rez.serialize(&ranking);
+        rez.serialize(done_event);
+      }
+      // Send the message and wait for the result to come back to us
+      runtime->send_remote_op_select_sources_request(source, rez);
+      // When we return from this call the ranking is populated
+      done_event.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ RemoteOp* RemoteOp::unpack_remote_operation(Deserializer &derez,
+                                                           Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      Operation *remote_ptr;
+      derez.deserialize(remote_ptr);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      RemoteOp *result = new RemoteOp(runtime, remote_ptr, source);
+      result->unpack(derez, runtime);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_remote_sources_request(Deserializer &derez,
+                                        Runtime *runtime, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      Operation *op;
+      derez.deserialize(op);
+      std::set<RtEvent> ready_events;
+      RtEvent target_ready;
+      InstanceRef target;
+      target.unpack_reference(runtime, derez, target_ready);
+      if (target_ready.exists())
+        ready_events.insert(target_ready);
+      InstanceSet sources;
+      sources.unpack_references(runtime, derez, ready_events);
+      void *remote_ranking; // remote pointer, never dereference
+      derez.deserialize(remote_ranking);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      // Wait for the results to be ready if necessary
+      if (!ready_events.empty())
+      {
+        RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      // Now we can do the actual call
+      std::vector<unsigned> ranking;
+      op->select_sources(target, sources, ranking);
+      if (!ranking.empty())
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(remote_ranking);
+          rez.serialize<size_t>(ranking.size());
+          for (unsigned idx = 0; idx < ranking.size(); idx++)
+            rez.serialize(ranking[idx]);
+          rez.serialize(done_event);
+        }
+        runtime->send_remote_op_select_sources_response(source, rez);
+      }
+      else // optimization: if we have no ranking, just trigger the event
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void RemoteOp::handle_remote_sources_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      std::vector<unsigned> *ranking;
+      derez.deserialize(ranking);
+      size_t num_rankings;
+      derez.deserialize(num_rankings);
+      ranking->resize(num_rankings);
+      for (unsigned idx = 0; idx < num_rankings; idx++)
+        derez.deserialize((*ranking)[idx]);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      Runtime::trigger_event(done_event);
     }
  
   }; // namespace Internal 

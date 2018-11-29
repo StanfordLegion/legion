@@ -688,6 +688,8 @@ namespace Legion {
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
+      SEND_REMOTE_OP_SOURCES_REQUEST,
+      SEND_REMOTE_OP_SOURCES_RESPONSE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -823,6 +825,8 @@ namespace Legion {
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
+        "Remote Op Sources Request",                                  \
+        "Remote Op Sources Response",                                 \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1233,6 +1237,7 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
+    class RemoteOp;
     class TaskOp;
 
     // legion_tasks.h
