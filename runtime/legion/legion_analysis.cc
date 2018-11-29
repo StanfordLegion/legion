@@ -3294,17 +3294,22 @@ namespace Legion {
         // We need to iterate until we get a valid lease while holding the lock
         if (is_logical_owner())
         {
-          if (disjoint_partition_refinement != NULL)
-            finalize_disjoint_refinement();
-          // If we have an unrefined remainder then we need to do that now
-          if (unrefined_remainder != NULL)
+          // We only need to finalize the refinement if we've already
+          // made some refinements or are about to
+          if (!subsets.empty() || (eq_state == REFINING_STATE))
           {
-            RefinementThunk *refinement = 
-              new RefinementThunk(unrefined_remainder, NULL/*node*/,
-                                  this, runtime->address_space);
-            // We can clear the unrefined remainder now
-            unrefined_remainder = NULL;
-            add_pending_refinement(refinement);
+            if (disjoint_partition_refinement != NULL)
+              finalize_disjoint_refinement();
+            // If we have an unrefined remainder then we need to do that now
+            if (unrefined_remainder != NULL)
+            {
+              RefinementThunk *refinement = 
+                new RefinementThunk(unrefined_remainder, NULL/*node*/,
+                                    this, runtime->address_space);
+              // We can clear the unrefined remainder now
+              unrefined_remainder = NULL;
+              add_pending_refinement(refinement);
+            }
           }
           // Wait until the refinement task is done running before 
           // we can go on to the next step
@@ -3367,7 +3372,6 @@ namespace Legion {
           else
             assert((eq_state == VALID_STATE) ||
                     (eq_state == PENDING_INVALID_STATE));
-          assert(unrefined_remainder == NULL); // nor a remainder
           // Should have been handled above
           assert(mapping_guards.find(op) == mapping_guards.end());
 #endif
@@ -7524,10 +7528,12 @@ namespace Legion {
         // subsets to the remote nodes, this handles the case where
         // we are partially refined and we need to wait for any
         // unrefined remainders to finish being made
-        if (!pending_refinements.empty() && (eq_state != REFINING_STATE))
+        if (eq_state == PENDING_REFINING_STATE)
         {
 #ifdef DEBUG_LEGION
+          assert(!subsets.empty());
           assert(refinement_event.exists());
+          assert(!pending_refinements.empty());
 #endif
           DeferSubsetRequestArgs args(this, source);       
           runtime->issue_runtime_meta_task(args,
