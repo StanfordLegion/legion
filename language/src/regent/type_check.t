@@ -547,18 +547,13 @@ function type_check.expr_field_access(cx, node)
   elseif std.is_ispace(std.as_read(unpack_type)) and node.field_name == "volume" then
     -- Volume can be retrieved on any ispace.
     field_type = int64
-  elseif std.is_region(std.as_read(unpack_type)) and (node.field_name == "bounds" or node.field_name == "volume") then
-    -- Index space fields can also be retrieved through a region.
-    return type_check.expr(
-      cx,
-      node {
-        value = ast.specialized.expr.FieldAccess {
-          value = node.value,
-          field_name = "ispace",
-          span = node.value.span,
-          annotations = node.value.annotations,
-        }
-      })
+  elseif std.is_region(std.as_read(unpack_type)) and node.field_name == "bounds" then
+    local index_type = std.as_read(unpack_type):ispace().index_type
+    if index_type:is_opaque() then
+      report.error(node, "no field '" .. node.field_name .. "' in type " ..
+                  tostring(std.as_read(unpack_type)))
+    end
+    field_type = std.rect_type(index_type)
   elseif std.is_partition(std.as_read(unpack_type)) and node.field_name == "colors" then
     field_type = std.as_read(unpack_type):colors()
   elseif std.type_is_opaque_to_field_accesses(std.as_read(unpack_type)) then
