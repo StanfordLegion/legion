@@ -51,6 +51,7 @@
 #include "realm/runtime.h"
 #include "realm/indexspace.h"
 #include "realm/codedesc.h"
+#include "realm/subgraph.h"
 
 #endif // ifndef REALM_H
 #endif // ifdef REALM_ENABLE_CXX_BINDINGS
