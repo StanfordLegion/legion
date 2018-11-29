@@ -740,12 +740,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REFINEMENT_TASK_ID;
       public:
-        RefinementTaskArgs(EquivalenceSet *t, bool update)
+        RefinementTaskArgs(EquivalenceSet *t)
           : LgTaskArgs<RefinementTaskArgs>(implicit_provenance), 
-            target(t), needs_updates(update) { }
+            target(t) { }
       public:
         EquivalenceSet *const target;
-        const bool needs_updates;
       };
       struct RemoteRefTaskArgs : public LgTaskArgs<RemoteRefTaskArgs> {
       public:
@@ -775,6 +774,18 @@ namespace Legion {
         const AddressSpaceID origin;
         const RtUserEvent done;
       };
+      struct DeferSubsetRequestArgs : 
+        public LgTaskArgs<DeferSubsetRequestArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_SUBSET_REQUEST_TASK_ID;
+      public:
+        DeferSubsetRequestArgs(EquivalenceSet *s, AddressSpaceID src)
+          : LgTaskArgs<DeferSubsetRequestArgs>(implicit_provenance),
+            set(s), source(src) { }
+      public:
+        EquivalenceSet *const set;
+        const AddressSpaceID source;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -783,7 +794,8 @@ namespace Legion {
         // refinements have been done
         MAPPING_STATE,
         PENDING_REFINED_STATE, // waiting for mappings to drain
-        REFINED_STATE, // at least one refinement has been initiated
+        REFINED_STATE, // subsets is stable and no refinements being performed
+        REFINING_STATE, // running the refinement task
         // Remote copies start in the invalid state, go to pending valid
         // while waiting for a lease on the current subsets, valid once they 
         // get a lease, pending invalid once they get an invalid notification
@@ -987,15 +999,13 @@ namespace Legion {
                           CopyFillAggregator &aggregator) const;
       void advance_version_numbers(FieldMask advance_mask);
     protected:
-      void perform_refinements(bool need_remote_updates);
+      void perform_refinements(void);
       void finalize_disjoint_refinement(void);
       void remove_remote_references(RtEvent done);
       void send_equivalence_set(AddressSpaceID target);
       void pack_initial_reduction_state(Serializer &rez) const;
       void unpack_initial_reduction_state(Deserializer &derez);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
-      void launch_refinement_task(RtEvent precondition = RtEvent::NO_RT_EVENT,
-                        const bool needs_updates = false); // call with lock
       void process_subset_request(AddressSpaceID source,bool needs_lock = true);
       void process_subset_response(Deserializer &derez);
       void process_subset_invalidation(RtUserEvent to_trigger);
@@ -1087,6 +1097,7 @@ namespace Legion {
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
       static void handle_ray_trace(const void *args);
+      static void handle_subset_request(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
@@ -1135,10 +1146,9 @@ namespace Legion {
       FieldMask mutated_guard_summary;
       // Keep track of the refinements that need to be done
       std::vector<RefinementThunk*> pending_refinements;
-      // Keep an event to track when the state transitions are performed
+      // Keep an event to track when the refinements are ready
       RtUserEvent transition_event;
-      // Keep an event to track when the most recent refinement task
-      // is done running
+      // An event to track when the refinement task is done
       RtUserEvent refinement_event;
       // Keep an order on all operations that attempt to acquire
       // this equivalence class. Hopefully 64 bits is enough that
@@ -1151,7 +1161,7 @@ namespace Legion {
       // someone else decides that they need to access it
       std::vector<EquivalenceSet*> subsets;
       // Set on the owner node for tracking the remote subset leases
-      std::set<AddressSpaceID> remote_subsets, pending_subset_requests;
+      std::set<AddressSpaceID> remote_subsets;
       // Index space expression for unrefined remainder of our set_expr
       // This is only valid on the owner node
       IndexSpaceExpression *unrefined_remainder;

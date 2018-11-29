@@ -21620,6 +21620,11 @@ namespace Legion {
             EquivalenceSet::handle_ray_trace(args);
             break;
           }
+        case LG_DEFER_SUBSET_REQUEST_TASK_ID:
+          {
+            EquivalenceSet::handle_subset_request(args);
+            break;
+          }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_decrement(args);
