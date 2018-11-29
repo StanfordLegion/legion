@@ -866,8 +866,6 @@ namespace Legion {
     {
       mapped_collective_id = 
         ctx->get_next_collective_index(COLLECTIVE_LOC_2);
-      // Initialize our index domain of a single point
-      index_domain = Domain(index_point, index_point);
     }
 
     //--------------------------------------------------------------------------
