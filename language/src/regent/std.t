@@ -2592,6 +2592,33 @@ function std.cross_product(...)
 end
 end
 
+do
+  local st = terralib.types.newstruct("complex")
+  st.entries = terralib.newlist({
+      { "real", double },
+      { "imag", double },
+  })
+  std.complex = st
+
+  terra st.metamethods.__add(a : st, b : st)
+    return st { real = a.real + b.real, imag = a.imag + b.imag }
+  end
+  terra st.metamethods.__sub(a : st, b : st)
+    return st { real = a.real - b.real, imag = a.imag - b.imag }
+  end
+  terra st.metamethods.__mul(a : st, b : st)
+    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
+  end
+
+  st.metamethods.__cast = function(from, to, expr)
+    if to == st and std.validate_implicit_cast(from, double) then
+      return `(complex { real = [double](expr), imag = 0.0 })
+    end
+    assert(false)
+  end
+end
+
+
 std.vptr = terralib.memoize(function(width, points_to_type, ...)
   local bounds = data.newtuple(...)
 
@@ -3895,9 +3922,9 @@ local function incremental_compile_tasks()
 
       -- Now attempt to move the object file into place. Note: This is atomic,
       -- so we don't need to worry about races.
-      local ok, err = os.rename(objtmp, cache_filename)
-      if ok == nil then
-        assert(false, err)
+      local ok = os.execute("/bin/mv ".. objtmp .. " " .. cache_filename)
+      if ok ~= 0 then
+        assert(false, "failed to move cache file")
       end
     else
       -- Otherwise do nothing (will automatically reuse the cached object file).

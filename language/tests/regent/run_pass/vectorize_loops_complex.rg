@@ -12,29 +12,23 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-ll:py", "1", "-ll:pyimport", "python_main"]]
-
 import "regent"
 
-task hello(x : int64, y : double) : int64
-  regentlib.c.printf("hello from Regent (got values from Python: %lld %f)\n", x, y)
-  return 5678
-end
+task main()
+  var r = region(ispace(int1d, 32), complex)
 
-fspace fs {
-  x : double,
-  y : double,
-}
+  fill(r.real, 1.0)
+  fill(r.imag, 2.0)
 
-task saxpy(r : region(ispace(int1d), fs), a : double)
-where reads writes(r) do
-  for i in r do
-    i.x = a*i.x + i.y
+  -- __demand(__vectorize)
+  for x in r do
+    var y = @x + 1
+    @x = @x * y - 4
+  end
+
+  for x in r do
+    regentlib.assert(x.real == -6.0, "test failed")
+    regentlib.assert(x.imag ==  6.0, "test failed")
   end
 end
-
-extern task py_main()
-py_main:set_task_id(2)
-
-regentlib.start(py_main)
+regentlib.start(main)
