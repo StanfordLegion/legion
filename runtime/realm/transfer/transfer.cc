@@ -1049,7 +1049,7 @@ namespace Realm {
       cur_point = iter.rect.lo;
 
       inst_impl = get_runtime()->get_instance_impl(inst);
-      inst_layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+      inst_layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
       fields = _fields;
     }
   }
@@ -1788,18 +1788,18 @@ namespace Realm {
       RegionInstanceImpl *impl = get_runtime()->get_instance_impl(*ii);
       // can't wait for it here - make sure it's valid before calling
       assert(impl->metadata.is_valid());
-      const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(impl->metadata.layout);
+      const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(impl->metadata.layout);
       for(typename std::vector<InstancePieceList<N,T> >::const_iterator it = layout->piece_lists.begin();
 	  it != layout->piece_lists.end();
 	  ++it) {
 	for(typename std::vector<InstanceLayoutPiece<N,T> *>::const_iterator it2 = it->pieces.begin();
 	    it2 != it->pieces.end();
 	    ++it2) {
-	  const AffineLayoutPiece<N,T> *affine = dynamic_cast<const AffineLayoutPiece<N,T> *>(*it2);
-	  if(!affine) {
+	  if((*it2)->layout_type != InstanceLayoutPiece<N,T>::AffineLayoutType) {
 	    force_fortran_order = true;
 	    break;
 	  }
+	  const AffineLayoutPiece<N,T> *affine = checked_cast<const AffineLayoutPiece<N,T> *>(*it2);
 	  int piece_preferred_order[N];
 	  size_t prev_stride = 0;
 	  for(int i = 0; i < N; i++) {
