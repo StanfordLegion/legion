@@ -65,13 +65,13 @@ def download(dest_path, url, sha256, insecure=False):
     dest_file = os.path.basename(dest_path)
     insecure_flag = []
     if insecure:
-        insecure_flag = ['--no-check-certificate']
+        insecure_flag = ['--insecure']
 
     if os.path.exists(dest_path):
         check_sha256(dest_path, sha256)
         return
 
-    subprocess.check_call(['wget'] + insecure_flag + ['-O', dest_path, url])
+    subprocess.check_call(['curl'] + insecure_flag + ['-o', dest_path, url])
     check_sha256(dest_path, sha256)
 
 def extract(dest_dir, archive_path, format):
