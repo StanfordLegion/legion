@@ -24,6 +24,7 @@
 #include <ostream>
 #include <vector>
 #include <map>
+#include <cassert>
 
 namespace Realm {
     
