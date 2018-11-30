@@ -116,6 +116,7 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
              '-DLLVM_ENABLE_ASSERTIONS=OFF'
              '-DLLVM_ENABLE_ZLIB=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
+             '-DLLVM_ENABLE_LIBEDIT=OFF',
              source_dir],
             cwd=build_dir,
             env=env)
@@ -144,13 +145,16 @@ def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
             ('CXX', os.environ['HOST_CXX']),
         ])
 
+    flags = [
+        'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
+        'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
+    ]
+    if platform.system() != 'Darwin':
+        flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')
+    flags.extend(['-j', str(thread_count)])
+
     subprocess.check_call(
-        ['make',
-         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
-         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'REEXPORT_LLVM_COMPONENTS=irreader mcjit x86',
-         '-j', str(thread_count),
-        ],
+        ['make'] + flags,
         cwd=terra_dir,
         env=env)
 
