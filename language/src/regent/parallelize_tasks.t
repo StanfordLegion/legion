@@ -2301,12 +2301,10 @@ local function rewrite_metadata_access(task_cx)
   return function(node, continuation)
     if node:is(ast.typed.expr.FieldAccess) and
        node.field_name == "bounds" and
-       node.value:is(ast.typed.expr.FieldAccess) and 
-       node.value.field_name == "ispace" and
-       std.is_region(std.as_read(node.value.value.expr_type)) then
-      assert(node.value.value:is(ast.typed.expr.ID))
+       std.is_region(std.as_read(node.value.expr_type)) then
+      assert(node.value:is(ast.typed.expr.ID))
       local metadata_params =
-        task_cx:find_metadata_parameters(node.value.value.value)
+        task_cx:find_metadata_parameters(node.value.value)
       if metadata_params then
         return ast_util.mk_expr_id(metadata_params.bounds)
       else
