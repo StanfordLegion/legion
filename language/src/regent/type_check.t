@@ -881,6 +881,8 @@ function type_check.expr_call(cx, node)
       end
     elseif std.is_task(fn.value) then
       fn_type = fn.value:get_type()
+    elseif std.is_math_fn(fn.value) then
+      fn_type = fn.value:get_definition().type
     elseif type(fn.value) == "function" then
       fn_type = untyped_fn
     else

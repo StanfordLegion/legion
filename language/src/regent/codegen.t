@@ -2017,8 +2017,8 @@ end
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
   local value = node.value
-  if cx.variant:is_cuda() then
-    value = cudahelper.replace_with_builtin(value)
+  if std.is_math_fn(value) then
+    value = value:get_definition()
   end
   return values.value(
     node,
@@ -7538,7 +7538,6 @@ function codegen.stat_for_list(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local break_label = terralib.newlabel()
   local cx = cx:new_local_scope(nil, nil, nil, break_label)
-  local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local ispace_type, is, it
   if std.is_ispace(value_type) then
@@ -7550,6 +7549,7 @@ function codegen.stat_for_list(cx, node)
     is = `([value.value].impl.index_space)
     it = cx:ispace(ispace_type).index_iterator
   elseif std.is_list(value_type) then
+    local block = cleanup_after(cx, codegen.block(cx, node.block))
     return quote
       for i = 0, [value.value].__size do
         var [symbol] = [value_type:data(value.value)][i]
@@ -7628,6 +7628,7 @@ function codegen.stat_for_list(cx, node)
   end
 
   if not cuda then
+    local block = cleanup_after(cx, codegen.block(cx, node.block))
     if ispace_type.dim == 0 then
       if not openmp then
         return quote
@@ -7843,19 +7844,31 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    -- Reject the loop if the body has external function calls
-    ast.traverse_node_postorder(function(node)
+    -- Before we do codegen on the body, we replace all math functions with the GPU variants.
+    -- We also check if the body has any task launches or external function calls.
+    local block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
-        local fn = node.fn.value
-        if std.is_task(fn) then
-          report.error(node, "CUDA task cannot launch other tasks in a for loop")
-        elseif cudahelper.replace_with_builtin(fn) == fn and fn ~= array then
-          report.error(node, "CUDA task cannot call external functions in a for loop")
+        local value = node.fn.value
+        if std.is_math_fn(value) then
+          return node { fn = node.fn { value = cudahelper.get_cuda_variant(value) } }
+        elseif value == array then
+          return node
+        else
+          if std.is_task(value) then
+            report.error(node, "CUDA task cannot launch other tasks in a for loop")
+          else
+            report.error(node, "CUDA task cannot call external functions in a for loop")
+          end
         end
+      else
+        return node
       end
     end, node.block)
 
+
     -- Now wrap the body as a terra function
+    block = cleanup_after(cx, codegen.block(cx, block))
+
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
     local upper_bounds = terralib.newlist()

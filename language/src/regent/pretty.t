@@ -282,9 +282,8 @@ function pretty.expr_function(cx, node)
     name = 'vector'
   elseif node.value == _G['tuple'] then
     name = 'tuple'
-  elseif regentlib.is_math_op(node.value) then
-    -- HACK: This information should be exported from std.t
-    name = regentlib.get_math_op_name(node.value, node.expr_type.returntype)
+  elseif regentlib.is_math_fn(node.value) then
+    name = node.value:printpretty()
   else
     name = tostring(node.value)
   end
