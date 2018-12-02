@@ -2047,17 +2047,11 @@ function codegen.expr_field_access(cx, node)
         `([expr_type] { impl = [value.value].impl.index_space }),
         expr_type),
       expr_type)
-  elseif (std.is_ispace(value_type) or std.is_region(value_type)) and
-         field_name == "bounds" then
+  elseif std.is_ispace(value_type) and field_name == "bounds" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
     assert(expr_type.is_rect_type)
-    local bounds
-    if std.is_ispace(value_type) then
-      bounds = cx:ispace(value_type).bounds
-    else
-      bounds = cx:ispace(value_type:ispace()).bounds
-    end
+    local bounds = cx:ispace(value_type).bounds
 
     local actions = quote
       [value.actions]
