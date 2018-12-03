@@ -49,6 +49,7 @@ function context.new_global_scope()
 end
 
 -- Possible polarities of region usage.
+local create = "create"
 local inline = "inline"
 local remote = "remote"
 
@@ -153,6 +154,37 @@ local function usage_apply(...)
   return usage
 end
 
+local function usage_filter_create(in_usage, out_usage)
+  local in_result = data.newmap()
+  local out_result = data.newmap()
+
+  local create_set = data.newmap()
+  if in_usage then
+    for region_type, polarity in in_usage:items() do
+      if polarity == create then
+        create_set[region_type] = true
+      end
+    end
+  end
+
+  if out_usage then
+    for region_type, polarity in out_usage:items() do
+      if not create_set[region_type] then
+        out_result[region_type] = polarity
+      end
+    end
+  end
+  if in_usage then
+    for region_type, polarity in in_usage:items() do
+      if not create_set[region_type] then
+        in_result[region_type] = polarity
+      end
+    end
+  end
+
+  return in_result, out_result
+end
+
 local uses_expr_input = terralib.memoize(function(field_name, polarity)
   return function(cx, node)
     local region_type = std.as_read(node[field_name].expr_type)
@@ -197,7 +229,7 @@ local node_usage = {
   [ast.typed.expr.Release]          = uses_expr_input("region", remote),
   [ast.typed.expr.AttachHDF5]       = uses_expr_input("region", remote),
   [ast.typed.expr.DetachHDF5]       = uses_expr_input("region", remote),
-  [ast.typed.expr.Region]           = uses_expr_result(inline),
+  [ast.typed.expr.Region]           = uses_expr_result(create),
   [ast.typed.expr.PartitionByField] = uses_expr_input("region", remote),
   [ast.typed.expr.Image]            = uses_expr_input("region", remote),
   [ast.typed.expr.Preimage]         = uses_expr_input("region", remote),
@@ -328,6 +360,10 @@ function optimize_mapping.block(cx, node)
     local stat, stat_in_usage, stat_out_usage = unpack(stat_annotated)
     in_usage = usage_apply(in_usage, stat_in_usage)
   end
+
+  -- Don't allow regions created in this block to escape, since it is
+  -- meaningless to remap them outside the block.
+  in_usage, out_usage = usage_filter_create(in_usage, out_usage)
 
   return annotate(
     node { stats = result_stats },
