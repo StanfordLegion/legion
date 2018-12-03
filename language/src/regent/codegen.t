@@ -15,14 +15,17 @@
 -- Regent Code Generation
 
 local ast = require("regent/ast")
+local codegen_hooks = require("regent/codegen_hooks")
+local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
+local log = require("common/log")
+local openmphelper = require("regent/openmphelper")
+local pretty = require("regent/pretty")
 local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
-local codegen_hooks = require("regent/codegen_hooks")
-local cudahelper = require("regent/cudahelper")
-local openmphelper = require("regent/openmphelper")
-local pretty = require("regent/pretty")
+
+local log_codegen = log.make_logger("codegen")
 
 -- Configuration Variables
 
@@ -9664,6 +9667,8 @@ local function setup_regent_calling_convention_metadata(node, task)
 end
 
 function codegen.top_task(cx, node)
+  log_codegen:info("Starting codegen for task " .. tostring(node.name))
+
   local task = node.prototype
   local variant = cx.variant
   assert(variant)
