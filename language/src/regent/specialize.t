@@ -91,7 +91,8 @@ local function convert_lua_value(cx, node, value, allow_lists)
   elseif terralib.isfunction(value) or
     terralib.isoverloadedfunction(value) or
     terralib.ismacro(value) or
-    terralib.types.istype(value) or std.is_task(value)
+    terralib.types.istype(value) or
+    std.is_task(value) or std.is_math_fn(value)
   then
     return ast.specialized.expr.Function {
       value = value,
@@ -587,6 +588,7 @@ function specialize.expr_call(cx, node, allow_lists)
     terralib.isoverloadedfunction(fn.value) or
     terralib.ismacro(fn.value) or
     std.is_task(fn.value) or
+    std.is_math_fn(fn.value) or
     type(fn.value) == "cdata"
   then
     if not std.is_task(fn.value) and #node.conditions > 0 then

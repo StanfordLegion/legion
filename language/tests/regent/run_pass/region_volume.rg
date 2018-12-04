@@ -12,17 +12,22 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- invalid_bounds2.rg:27: no field 'bounds' in type ispace(ptr)
---   var bounds = r.bounds
---                 ^
-
 import "regent"
 
 local c = regentlib.c
 
 task main()
-  var is = ispace(ptr, 10)
+  var is = ispace(int2d, {4, 8})
   var r = region(is, int)
-  var bounds = r.bounds
+  var p = partition(equal, r, ispace(int2d, {2, 2}))
+  var r00 = p[{0, 0}]
+  var r11 = p[{1, 1}]
+  var r_volume = r.volume
+  var r00_volume = r00.volume
+  var r11_volume = r11.volume
+
+  regentlib.assert(r_volume == 32, "test failed")
+  regentlib.assert(r00_volume == 8, "test failed")
+  regentlib.assert(r11_volume == 8, "test failed")
 end
+regentlib.start(main)

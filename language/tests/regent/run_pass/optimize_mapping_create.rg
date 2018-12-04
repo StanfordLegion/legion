@@ -12,16 +12,31 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- annotations_for_list_cuda.rg:25: option __demand(__cuda) is not permitted
---   for i in is do end
---     ^
-
 import "regent"
 
-task f()
-  var is = ispace(int1d, 5)
-  __demand(__cuda)
-  for i in is do end
+-- This tests a bug in mapping optimization where a reigon which is
+-- created locally was unmapped outside of its lexical scope.
+
+task g(r : region(ispace(int1d), int))
+where reads writes(r) do
 end
-f:compile()
+
+task f(r : region(ispace(int1d), int), c : int)
+where reads writes(r) do
+  -- Do something with r to force this task not to be inner, otherwise
+  -- all mapping are ignored.
+  r[0] = 1234
+
+  for i = 0, c do
+    if c > 0 then
+      var s = region(ispace(int1d, 2), int)
+      g(s)
+    end
+  end
+end
+
+task main()
+  var r = region(ispace(int1d, 5), int)
+  f(r, 1)
+end
+regentlib.start(main)

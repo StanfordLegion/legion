@@ -27,9 +27,18 @@ local min = math.min
 
 local bounds_checks = std.config["bounds-checks"]
 
--- vectorizer
+-- Check the vector ISA support of the underlying architecture
+-- TODO: Vector ISA must be configurable via command line argument (as in -fcuda-offline)
 
+local VEC_ARCH = "x86"
 local SIMD_REG_SIZE
+
+if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
+   os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0
+then
+  VEC_ARCH = "power"
+end
+
 if os.execute("bash -c \"[ `uname` == 'Darwin' ]\"") == 0 then
   if os.execute("sysctl -a | grep machdep.cpu.features | grep AVX > /dev/null") == 0 then
     SIMD_REG_SIZE = 32
@@ -53,6 +62,35 @@ end
 -- Force SSE when the LLVM version is less than 3.8
 if terralib.llvmversion < 38 then
   SIMD_REG_SIZE = 16
+end
+
+-- Only the following math functions have corresponding vector intrinsics in LLVM
+local vectorizable_math_ops = {
+  ["ceil"] = true,
+  ["cos"] = true,
+  ["exp"] = true,
+  ["exp2"] = true,
+  ["fabs"] = true,
+  ["floor"] = true,
+  ["log"] = true,
+  ["log2"] = true,
+  ["log10"] = true,
+  ["sin"] = true,
+  ["sqrt"] = true,
+  ["trunc"] = true,
+}
+
+local binary_intrinsic_names = {}
+if VEC_ARCH == "power" then
+  binary_intrinsic_names[vector(float,  4)] = "llvm.ppc.altivec.v%sfp"
+  binary_intrinsic_names[vector(double, 2)] = "llvm.ppc.vsx.xv%sdp"
+elseif VEC_ARCH == "x86" then
+  binary_intrinsic_names[vector(float,  4)] = "llvm.x86.sse.%s.ps"
+  binary_intrinsic_names[vector(double, 2)] = "llvm.x86.sse2.%s.pd"
+  binary_intrinsic_names[vector(float,  8)] = "llvm.x86.avx.%s.ps.256"
+  binary_intrinsic_names[vector(double, 4)] = "llvm.x86.avx.%s.pd.256"
+else
+  assert(false, "Unsupported architecture")
 end
 
 local V = {}
@@ -236,15 +274,19 @@ function flip_types.expr(cx, simd_width, symbol, node)
     else
       expr_type = new_node.rhs.expr_type
     end
+    expr_type = std.as_read(expr_type)
 
-    if (node.op == "min" or node.op == "max") and
-      std.is_minmax_supported(std.as_read(expr_type)) then
+    if (node.op == "min" or node.op == "max") then
+      assert(node.expr_type:isfloat())
       local args = terralib.newlist()
       args:insert(new_node.lhs)
       args:insert(new_node.rhs)
-      local rval_type = std.as_read(expr_type)
-      local fn = std["v" .. node.op](rval_type)
-      local fn_type = ({rval_type, rval_type} -> rval_type).type
+
+      local intrinsic_name = binary_intrinsic_names[expr_type]
+      assert(intrinsic_name ~= nil)
+      local fn = terralib.intrinsic(
+          string.format(intrinsic_name, node.op), {expr_type, expr_type} -> expr_type)
+      local fn_type = ({expr_type, expr_type} -> expr_type).type
       local fn_node = ast.typed.expr.Function {
         expr_type = fn_type,
         value = fn,
@@ -252,18 +294,28 @@ function flip_types.expr(cx, simd_width, symbol, node)
         span = node.span,
       }
       return ast.typed.expr.Call {
-        fn = fn_node,
+        fn = ast.typed.expr.Function {
+          expr_type = fn_type,
+          value = fn,
+          annotations = node.annotations,
+          span = node.span,
+        },
         args = args,
         conditions = terralib.newlist(),
-        replicable = false,
-        expr_type = rval_type,
+        replicable = true,
+        expr_type = expr_type,
         annotations = node.annotations,
         span = node.span,
       }
+    else
+      new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
+      return node:type()(new_node)
     end
 
   elseif node:is(ast.typed.expr.Unary) then
     new_node.rhs = flip_types.expr(cx, simd_width, symbol, new_node.rhs)
+    new_node.expr_type = flip_types.type(simd_width, new_node.expr_type)
+    return node:type()(new_node)
 
   elseif node:is(ast.typed.expr.Ctor) then
     new_node.fields = node.fields:map(
@@ -309,6 +361,20 @@ function flip_types.expr(cx, simd_width, symbol, node)
     end
 
   elseif node:is(ast.typed.expr.Constant) then
+    assert(node.expr_type:isprimitive())
+    local cast = flip_types.type(simd_width, node.expr_type)
+    return ast.typed.expr.Cast {
+      fn = ast.typed.expr.Function {
+        value = cast,
+        expr_type = (node.expr_type -> cast).type,
+        annotations = node.annotations,
+        span = node.span,
+      },
+      arg = node,
+      expr_type = cast,
+      annotations = node.annotations,
+      span = node.span,
+    }
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
@@ -320,11 +386,30 @@ function flip_types.expr(cx, simd_width, symbol, node)
   return node:type()(new_node)
 end
 
+-- Return a vector intrinsic equivalent to the C math function
+local get_vector_definition = terralib.memoize(function(N)
+  return function(self)
+    local variant_name = VEC_ARCH .. tostring(N)
+    if self:has_variant(variant_name) then
+      return self:get_variant(variant_name)
+    else
+      local intrinsic_name =
+        "llvm." .. self:get_name() .. ".v" .. tostring(N) ..
+        "f" .. tostring(sizeof(self:get_arg_type()) * 8)
+      local vector_type = vector(self:get_arg_type(), N)
+      -- TODO: I'm sure some intrinsics take more than one vector...
+      local d = terralib.intrinsic(intrinsic_name, vector_type -> vector_type)
+      self:set_variant(variant_name, d)
+      return d
+    end
+  end
+end)
+
 function flip_types.expr_function(simd_width, node)
   local elmt_type = node.expr_type.returntype
   local vector_type = vector(elmt_type, simd_width)
 
-  local value = std.convert_math_op(node.value, vector_type)
+  local value = node.value:override(get_vector_definition(simd_width))
   local expr_type = flip_types.type(simd_width, node.expr_type)
 
   return node {
@@ -353,7 +438,7 @@ function flip_types.type(simd_width, ty)
   elseif ty:isfunction() then
     local params = ty.parameters:map(
       function(ty)
-        flip_types.type(simd_width, ty)
+        return flip_types.type(simd_width, ty)
       end)
     local returntype = flip_types.type(simd_width, ty.returntype)
     return (params -> returntype).type
@@ -1020,13 +1105,11 @@ function check_vectorizability.expr(cx, node)
   end
 end
 
-local predefined_functions = {}
-
 function check_vectorizability.expr_call(cx, node)
   assert(node:is(ast.typed.expr.Call))
 
-  if std.is_math_op(node.fn.value) then
-    local fact = S
+  if std.is_math_fn(node.fn.value) and vectorizable_math_ops[node.fn.value:get_name()] then
+    local fact = V
     for _, arg in pairs(node.args) do
       if not check_vectorizability.expr(cx, arg) then return false end
       fact = join(fact, cx:lookup_expr_type(arg))

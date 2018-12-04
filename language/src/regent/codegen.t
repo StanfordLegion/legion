@@ -15,14 +15,17 @@
 -- Regent Code Generation
 
 local ast = require("regent/ast")
+local codegen_hooks = require("regent/codegen_hooks")
+local cudahelper = require("regent/cudahelper")
 local data = require("common/data")
+local log = require("common/log")
+local openmphelper = require("regent/openmphelper")
+local pretty = require("regent/pretty")
 local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
-local codegen_hooks = require("regent/codegen_hooks")
-local cudahelper = require("regent/cudahelper")
-local openmphelper = require("regent/openmphelper")
-local pretty = require("regent/pretty")
+
+local log_codegen = log.make_logger("codegen")
 
 -- Configuration Variables
 
@@ -638,14 +641,15 @@ local function physical_region_get_base_pointer(cx, region_type, index_type, fie
   end
 end
 
-local function index_space_bounds(cx, is, index_type)
-  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+local function index_space_bounds(cx, is, is_type)
+  local index_type = is_type.index_type
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain_" .. tostring(is_type))
   local bounds = false
   local actions = quote
     var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
   end
   if not index_type:is_opaque() then
-    bounds = terralib.newsymbol(std.rect_type(index_type), "bounds")
+    bounds = terralib.newsymbol(std.rect_type(index_type), "bounds_" .. tostring(is_type))
     local bounds_actions = nil
     if index_type.dim == 1 then
       bounds_actions = quote
@@ -787,7 +791,7 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   end
 
   local bounds_actions, domain, bounds =
-    index_space_bounds(cx, is, region_type:ispace().index_type)
+    index_space_bounds(cx, is, region_type:ispace())
   actions = quote [actions]; [bounds_actions] end
 
   cx:add_ispace_subispace(region_type:ispace(), is, it,
@@ -2017,8 +2021,8 @@ end
 function codegen.expr_function(cx, node)
   local value_type = std.as_read(node.expr_type)
   local value = node.value
-  if cx.variant:is_cuda() then
-    value = cudahelper.replace_with_builtin(value)
+  if std.is_math_fn(value) then
+    value = value:get_definition()
   end
   return values.value(
     node,
@@ -2047,21 +2051,32 @@ function codegen.expr_field_access(cx, node)
         `([expr_type] { impl = [value.value].impl.index_space }),
         expr_type),
       expr_type)
-  elseif (std.is_ispace(value_type) or std.is_region(value_type)) and
-         field_name == "bounds" then
+  elseif std.is_ispace(value_type) and field_name == "bounds" then
     local value = codegen.expr(cx, node.value):read(cx)
     local expr_type = std.as_read(node.expr_type)
-    assert(expr_type.is_rect_type)
-    local bounds
-    if std.is_ispace(value_type) then
-      bounds = cx:ispace(value_type).bounds
-    else
-      bounds = cx:ispace(value_type:ispace()).bounds
-    end
+    assert(std.is_rect_type(expr_type))
+    -- XXX: This line must run after the code generation for 'node.value' is done,
+    --      because the index space is not yet registered to the context until then.
+    local bounds = cx:ispace(value_type).bounds
 
-    local actions = quote
-      [value.actions]
-      [emit_debuginfo(node)]
+    local actions
+    -- If the expression has the form 'region_name.ispace.bounds',
+    -- we skip the code generation for the first field access.
+    if node.value:is(ast.typed.expr.FieldAccess) and
+       node.value.field_name == "ispace" and
+       node.value.value:is(ast.typed.expr.ID)
+    then
+      actions = quote
+        [emit_debuginfo(node)]
+      end
+    -- Otherwise, we fall back to the general case. For example,
+    -- if the expression is 'partition_name[color].ispace.bounds',
+    -- we must go through the normal generation for the first field access.
+    else
+      actions = quote
+        [value.actions]
+        [emit_debuginfo(node)]
+      end
     end
     return values.value(
       node,
@@ -2162,7 +2177,7 @@ function codegen.expr_index_access(cx, node)
     end
 
     local bounds_actions, domain, bounds =
-      index_space_bounds(cx, is, expr_type:ispace().index_type)
+      index_space_bounds(cx, is, expr_type:ispace())
     actions = quote [actions]; [bounds_actions] end
 
     cx:add_ispace_subispace(expr_type:ispace(), is, it,
@@ -2213,7 +2228,7 @@ function codegen.expr_index_access(cx, node)
       end
 
       local bounds_actions, domain, bounds =
-        index_space_bounds(cx, is, region_type:ispace().index_type)
+        index_space_bounds(cx, is, region_type:ispace())
       actions = quote [actions]; [bounds_actions] end
 
       cx:add_ispace_subispace(region_type:ispace(), is, it,
@@ -2277,7 +2292,7 @@ function codegen.expr_index_access(cx, node)
           -- unmapped.
           local bounds_actions, domain, bounds =
             index_space_bounds(cx, `([region.value].impl.index_space),
-                               region_type:ispace().index_type)
+                               region_type:ispace())
           region.actions = quote [region.actions]; [bounds_actions] end
           cx:add_ispace_root(
             region_type:ispace(),
@@ -3868,7 +3883,7 @@ function codegen.expr_ispace(cx, node)
     it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
   end
 
-  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type.index_type)
+  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
   cx:add_ispace_root(ispace_type, is, it, domain, bounds)
 
   if ispace_type.dim == 0 then
@@ -7538,7 +7553,6 @@ function codegen.stat_for_list(cx, node)
   local value_type = std.as_read(node.value.expr_type)
   local break_label = terralib.newlabel()
   local cx = cx:new_local_scope(nil, nil, nil, break_label)
-  local block = cleanup_after(cx, codegen.block(cx, node.block))
 
   local ispace_type, is, it
   if std.is_ispace(value_type) then
@@ -7550,6 +7564,7 @@ function codegen.stat_for_list(cx, node)
     is = `([value.value].impl.index_space)
     it = cx:ispace(ispace_type).index_iterator
   elseif std.is_list(value_type) then
+    local block = cleanup_after(cx, codegen.block(cx, node.block))
     return quote
       for i = 0, [value.value].__size do
         var [symbol] = [value_type:data(value.value)][i]
@@ -7616,7 +7631,7 @@ function codegen.stat_for_list(cx, node)
     end
   end
 
-  local cuda = cx.variant:is_cuda()
+  local cuda = cx.variant:is_cuda() and not node.annotations.cuda:is(ast.annotation.Forbid)
   local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
   if node.annotations.openmp:is(ast.annotation.Demand) and
@@ -7628,6 +7643,7 @@ function codegen.stat_for_list(cx, node)
   end
 
   if not cuda then
+    local block = cleanup_after(cx, codegen.block(cx, node.block))
     if ispace_type.dim == 0 then
       if not openmp then
         return quote
@@ -7843,19 +7859,33 @@ function codegen.stat_for_list(cx, node)
       end
     end
   else
-    -- Reject the loop if the body has external function calls
-    ast.traverse_node_postorder(function(node)
+    -- Before we do codegen on the body, we replace all math functions with the GPU variants.
+    -- We also check if the body has any task launches or external function calls.
+    local block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
-        local fn = node.fn.value
-        if std.is_task(fn) then
-          report.error(node, "CUDA task cannot launch other tasks in a for loop")
-        elseif cudahelper.replace_with_builtin(fn) == fn and fn ~= array then
-          report.error(node, "CUDA task cannot call external functions in a for loop")
+        local value = node.fn.value
+        if std.is_math_fn(value) then
+          return node { fn = node.fn { value = cudahelper.get_cuda_variant(value) } }
+        elseif value == array then
+          return node
+        else
+          if std.is_task(value) then
+            report.error(node, "CUDA task cannot launch other tasks in a for loop")
+          else
+            report.error(node, "CUDA task cannot call external functions in a for loop")
+          end
         end
+      elseif node:is(ast.typed.expr.IndexAccess) and std.is_region(node.expr_type) then
+        report.error(node, "CUDA task cannot access partitions in a for loop")
+      else
+        return node
       end
     end, node.block)
 
+
     -- Now wrap the body as a terra function
+    block = cleanup_after(cx, codegen.block(cx, block))
+
     local indices = terralib.newlist()
     local lower_bounds = terralib.newlist()
     local upper_bounds = terralib.newlist()
@@ -9637,6 +9667,8 @@ local function setup_regent_calling_convention_metadata(node, task)
 end
 
 function codegen.top_task(cx, node)
+  log_codegen:info("Starting codegen for task " .. tostring(node.name))
+
   local task = node.prototype
   local variant = cx.variant
   assert(variant)
@@ -9791,7 +9823,7 @@ function codegen.top_task(cx, node)
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
         local bounds_actions, domain, bounds =
-          index_space_bounds(cx, `([param_symbol].impl), param_type.index_type)
+          index_space_bounds(cx, `([param_symbol].impl), param_type)
         actions = quote [actions]; [bounds_actions] end
         cx:add_ispace_root(param_type, `([param_symbol].impl), false, domain, bounds)
       end
@@ -9935,7 +9967,7 @@ function codegen.top_task(cx, node)
 
     if not cx:has_ispace(region_type:ispace()) then
       local bounds_actions, domain, bounds =
-        index_space_bounds(cx, `([r].impl.index_space), region_type:ispace().index_type)
+        index_space_bounds(cx, `([r].impl.index_space), region_type:ispace())
       task_setup:insert(bounds_actions)
       cx:add_ispace_root(region_type:ispace(), is, it, domain, bounds)
     end

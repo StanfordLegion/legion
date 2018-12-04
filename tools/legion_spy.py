@@ -6470,6 +6470,9 @@ class Operation(object):
             if self.realm_fills:
                 for fill in self.realm_fills:
                     elevate[fill] = fill.get_context()
+            if self.realm_depparts:
+                for deppart in self.realm_depparts:
+                    elevate[deppart] = deppart.get_context()
             return
         # If this is a single task, recurse and generate our subgraph first
         if self.kind is SINGLE_TASK_KIND:

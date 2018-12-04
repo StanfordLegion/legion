@@ -51,7 +51,9 @@ def discover_conduit():
         raise Exception('Please set CONDUIT in your environment')
 
 def gasnet_enabled():
-    return 'USE_GASNET' not in os.environ or os.environ['USE_GASNET'] == '1'
+    if 'USE_GASNET' in os.environ:
+        return os.environ['USE_GASNET'] == '1'
+    return platform.system() != 'Darwin'
 
 def hdf_enabled():
     return 'USE_HDF' in os.environ and os.environ['USE_HDF'] == '1'
@@ -65,13 +67,13 @@ def download(dest_path, url, sha256, insecure=False):
     dest_file = os.path.basename(dest_path)
     insecure_flag = []
     if insecure:
-        insecure_flag = ['--no-check-certificate']
+        insecure_flag = ['--insecure']
 
     if os.path.exists(dest_path):
         check_sha256(dest_path, sha256)
         return
 
-    subprocess.check_call(['wget'] + insecure_flag + ['-O', dest_path, url])
+    subprocess.check_call(['curl'] + insecure_flag + ['-o', dest_path, url])
     check_sha256(dest_path, sha256)
 
 def extract(dest_dir, archive_path, format):
@@ -114,6 +116,7 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
              '-DLLVM_ENABLE_ASSERTIONS=OFF'
              '-DLLVM_ENABLE_ZLIB=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
+             '-DLLVM_ENABLE_LIBEDIT=OFF',
              source_dir],
             cwd=build_dir,
             env=env)
@@ -142,13 +145,16 @@ def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
             ('CXX', os.environ['HOST_CXX']),
         ])
 
+    flags = [
+        'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
+        'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
+    ]
+    if platform.system() != 'Darwin':
+        flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')
+    flags.extend(['-j', str(thread_count)])
+
     subprocess.check_call(
-        ['make',
-         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
-         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-         'REEXPORT_LLVM_COMPONENTS=irreader mcjit x86',
-         '-j', str(thread_count),
-        ],
+        ['make'] + flags,
         cwd=terra_dir,
         env=env)
 

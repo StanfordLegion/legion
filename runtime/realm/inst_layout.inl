@@ -549,7 +549,7 @@ namespace Realm {
     this->inst = inst;
 
     // find the right piece list for our field
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
 
@@ -568,7 +568,7 @@ namespace Realm {
     this->inst = inst;
 
     // find the right piece list for our field
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
 
@@ -681,7 +681,7 @@ namespace Realm {
 						FieldID field_id,
 						size_t subfield_offset /*= 0*/)
   {
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
@@ -715,7 +715,7 @@ namespace Realm {
 					 FieldID field_id, const Rect<N,T>& subrect,
 					 size_t subfield_offset /*= 0*/)
   {
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N,T>& ipl = layout->piece_lists[it->second.list_idx];
@@ -754,7 +754,7 @@ namespace Realm {
 						size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
-    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
@@ -805,7 +805,7 @@ namespace Realm {
 						size_t subfield_offset /*= 0*/)
   {
     // instance's dimensionality should be <N2,T2>
-    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     assert(it != layout->fields.end());
     const InstancePieceList<N2,T2>& ipl = layout->piece_lists[it->second.list_idx];
@@ -866,7 +866,7 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, FieldID field_id)
   {
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
@@ -889,7 +889,7 @@ namespace Realm {
   template <typename FT, int N, typename T>
   inline /*static*/ bool AffineAccessor<FT,N,T>::is_compatible(RegionInstance inst, FieldID field_id, const Rect<N,T>& subrect)
   {
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(inst.get_layout());
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
@@ -923,7 +923,7 @@ namespace Realm {
 							       FieldID field_id)
   {
     // instance's dimensionality should be <N2,T2>
-    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
@@ -951,7 +951,7 @@ namespace Realm {
 							       FieldID field_id, const Rect<N,T>& subrect)
   {
     // instance's dimensionality should be <N2,T2>
-    const InstanceLayout<N2,T2> *layout = dynamic_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
+    const InstanceLayout<N2,T2> *layout = checked_cast<const InstanceLayout<N2,T2> *>(inst.get_layout());
     std::map<FieldID, InstanceLayoutGeneric::FieldLayout>::const_iterator it = layout->fields.find(field_id);
     if(it == layout->fields.end())
       return false;
