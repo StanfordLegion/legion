@@ -22,6 +22,7 @@ local data = require("common/data")
 local ffi = require("ffi")
 local header_helper = require("regent/header_helper")
 local log = require("common/log")
+local regent_math = require("regent/math")
 local pretty = require("regent/pretty")
 local profile = require("regent/profile")
 local report = require("common/report")
@@ -49,6 +50,14 @@ std.assert = base.assert
 std.domain_from_bounds_1d = base.domain_from_bounds_1d
 std.domain_from_bounds_2d = base.domain_from_bounds_2d
 std.domain_from_bounds_3d = base.domain_from_bounds_3d
+
+-- #####################################
+-- ## Math functions
+-- #################
+
+for k, v in pairs(regent_math) do
+  std[k] = v
+end
 
 -- #####################################
 -- ## Kinds
@@ -4313,79 +4322,6 @@ end
 -- ## Vector Operators
 -- #################
 do
-  local to_math_op_name = {}
-  local function math_op_factory(fname)
-    return terralib.memoize(function(arg_type)
-      local intrinsic_name = "llvm." .. fname .. "."
-      local elmt_type = arg_type
-      if arg_type:isvector() then
-        intrinsic_name = intrinsic_name .. "v" .. arg_type.N
-        elmt_type = elmt_type.type
-      end
-      assert(elmt_type == float or elmt_type == double)
-      intrinsic_name = intrinsic_name .. "f" .. (sizeof(elmt_type) * 8)
-      local op = terralib.intrinsic(intrinsic_name, arg_type -> arg_type)
-      to_math_op_name[op] = fname
-
-      std.replicable_whitelist[op] = true -- Math ops are pure.
-
-      return op
-    end)
-  end
-
-  local supported_math_ops = { -- math operators supported by ISA
-    "ceil",
-    "cos",
-    "exp",
-    "exp2",
-    "fabs",
-    "floor",
-    "log",
-    "log2",
-    "log10",
-    "sin",
-    "sqrt",
-    "trunc"
-  }
-
-  local cmath_ops = { -- math operators backed by standard library
-    "acos",
-    "asin",
-    "atan",
-    "cbrt",
-    "tan",
-    "pow",
-    "fmod",
-  }
-
-  for _, fname in pairs(supported_math_ops) do
-    std[fname] = math_op_factory(fname)
-    if std.config["cuda"] and cudahelper.check_cuda_available() then
-      cudahelper.register_builtin(fname, std[fname](double))
-    end
-  end
-
-  for _, fname in pairs(cmath_ops) do
-    std[fname] = function(arg_type) return c[fname] end
-    if std.config["cuda"] and cudahelper.check_cuda_available() then
-      cudahelper.register_builtin(fname, std[fname](double))
-    end
-  end
-
-  function std.is_math_op(op)
-    return to_math_op_name[op] ~= nil
-  end
-
-  function std.convert_math_op(op, arg_type)
-    return std[to_math_op_name[op]](arg_type)
-  end
-
-  function std.get_math_op_name(op, arg_type)
-    return '[regentlib.' .. to_math_op_name[op] .. '(' .. tostring(arg_type) .. ')]'
-  end
-end
-
-do
   local intrinsic_names = {}
   if os.execute("bash -c \"[ `uname` == 'Linux' ]\"") == 0 and
     os.execute("grep altivec /proc/cpuinfo > /dev/null") == 0
@@ -4414,18 +4350,6 @@ do
   local supported_math_binary_ops = { "min", "max", }
   for _, fname in pairs(supported_math_binary_ops) do
     std["v" .. fname] = math_binary_op_factory(fname)
-  end
-
-  function std.is_minmax_supported(arg_type)
-    assert(not (std.is_ref(arg_type) or std.is_rawref(arg_type)))
-    if not arg_type:isvector() then return false end
-    if not ((arg_type.type == float and
-             4 <= arg_type.N and arg_type.N <= 8) or
-            (arg_type.type == double and
-             2 <= arg_type.N and arg_type.N <= 4)) then
-      return false
-    end
-    return true
   end
 end
 

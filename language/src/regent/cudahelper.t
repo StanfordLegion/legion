@@ -1046,14 +1046,45 @@ local builtin_gpu_fns = {
   tan   = externcall_builtin("__nv_tan"   , double -> double),
 }
 
-local cpu_fn_to_gpu_fn = {}
+local function get_nv_fn_name(name, type)
+  lua_assert(type:isfloat())
+  local nv_name = "__nv_" .. name
 
-function cudahelper.register_builtin(name, cpu_fn)
-  cpu_fn_to_gpu_fn[cpu_fn] = builtin_gpu_fns[name]
+  -- Okay. a little divergence from the C standard...
+  if name == "isnan" or name == "isinf" then
+    if type == double then
+      nv_name = nv_name .. "d"
+    else
+      nv_name = nv_name .. "f"
+    end
+  -- Seriously?
+  elseif name == "finite" then
+    if type == double then
+      nv_name = "__nv_isfinited"
+    else
+      nv_name = "__nv_finitef"
+    end
+  elseif type == float then
+    nv_name = nv_name .. "f"
+  end
+  return nv_name
 end
 
-function cudahelper.replace_with_builtin(fn)
-  return cpu_fn_to_gpu_fn[fn] or fn
+local function get_cuda_definition(self)
+  if self:has_variant("cuda") then
+    return self:get_variant("cuda")
+  else
+    local fn_type = self.super:get_definition().type
+    local fn_name = get_nv_fn_name(self:get_name(), self:get_arg_type())
+    lua_assert(fn_name ~= nil)
+    local fn = externcall_builtin(fn_name, fn_type)
+    self:set_variant("cuda", fn)
+    return fn
+  end
+end
+
+function cudahelper.get_cuda_variant(math_fn)
+  return math_fn:override(get_cuda_definition)
 end
 
 return cudahelper

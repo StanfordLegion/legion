@@ -328,7 +328,7 @@ local node_is_idempotent = {
   -- do no external call of any kind and also
   -- do not perform any kind of file I/O
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or node.replicable, node}
+    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or node.replicable, node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,
@@ -465,7 +465,8 @@ local node_is_replicable = {
   -- General C and Terra calls are not supported because there is no
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
+    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or
+            node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
   end,
 
   [ast.typed.expr.MethodCall] = always_false,

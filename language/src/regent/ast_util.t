@@ -57,7 +57,8 @@ function ast_util.mk_expr_bounds_access(value)
   local expr_type = std.as_read(value.expr_type)
   local index_type
   if std.is_region(expr_type) then
-    index_type = expr_type:ispace().index_type
+    return ast_util.mk_expr_bounds_access(
+      ast_util.mk_expr_field_access(value, "ispace", expr_type:ispace()))
   elseif std.is_ispace(expr_type) then
     index_type = expr_type.index_type
   else

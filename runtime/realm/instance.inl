@@ -63,11 +63,7 @@ namespace Realm {
   template <int N, typename T>
   inline IndexSpace<N,T> RegionInstance::get_indexspace(void) const
   {
-    const InstanceLayout<N,T> *layout = dynamic_cast<const InstanceLayout<N,T> *>(this->get_layout());
-    if(!layout) {
-      log_inst.fatal() << "dimensionality mismatch between instance and index space!";
-      assert(0);
-    }
+    const InstanceLayout<N,T> *layout = checked_cast<const InstanceLayout<N,T> *>(this->get_layout());
     return layout->space;
   }
 		
