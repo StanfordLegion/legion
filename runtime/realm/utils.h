@@ -24,6 +24,7 @@
 #include <ostream>
 #include <vector>
 #include <map>
+#include <cassert>
 
 namespace Realm {
     
@@ -88,6 +89,21 @@ namespace Realm {
     shortstringbuf<32, 64> strbuf;
     std::ostream os;
   };
+
+
+  // behaves like static_cast, but uses dynamic_cast+assert when DEBUG_REALM
+  //  is defined
+  template <typename T, typename T2>
+  inline T checked_cast(T2 *ptr)
+  {
+#ifdef DEBUG_REALM
+    T result = dynamic_cast<T>(ptr);
+    assert(result != 0);
+    return result;
+#else
+    return static_cast<T>(ptr);
+#endif
+  }
 
 
 }; // namespace Realm

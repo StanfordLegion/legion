@@ -157,7 +157,7 @@ struct ActiveMsgHandlerStats {
   ActiveMsgHandlerStats(void)
   : count(0), sum(0), sum2(0), minval(0), maxval(0) {}
 
-  void record(struct timespec& ts_start, struct timespec& ts_end)
+  void record(const struct timespec& ts_start, const struct timespec& ts_end)
   {
     size_t val = 1000000000LL * (ts_end.tv_sec - ts_start.tv_sec) + ts_end.tv_nsec - ts_start.tv_nsec;
     if(!count || (val < minval)) minval = val;
@@ -208,10 +208,6 @@ void record_am_handler(int handler_id, const char *description, bool reply)
   log_amsg_trace.info("AM Handler: %d %s %s", handler_id, description,
 		      (reply ? "Reply" : "Request"));
 }
-#endif
-
-#ifdef REALM_PROFILE_AM_HANDLERS
-/*extern*/ ActiveMsgHandlerStats handler_stats[256];
 #endif
 
 static const int DEFERRED_FREE_COUNT = 128;
