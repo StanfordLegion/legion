@@ -2504,11 +2504,17 @@ namespace Legion {
         assert(field_set.size() > 0);
         assert(field_sizes.size() > 0);
 #endif
-        size_t gcd = field_sizes[0];
+        // Start with an initial upper bound on alignment of 32
+        size_t gcd = 32;
         for (unsigned idx = 0; idx < field_set.size(); idx++)
         {
-          while (field_sizes[idx] % gcd != 0)
-            gcd >>= 1;
+          size_t next = field_sizes[idx];
+          while (next != 0)
+          {
+            size_t mod = gcd % next;
+            gcd = next;
+            next = mod;
+          }
         }
 #ifdef DEBUG_LEGION
         assert(gcd != 0);
@@ -2519,9 +2525,10 @@ namespace Legion {
       else if (ord.ordering.back() == DIM_F)
       {
         // SOA - each field is its own group
-        // Use natural alignment by default
+        // Use a GCD(sizeof(T),32)
         for (unsigned idx = 0; idx < field_set.size(); idx++)
-          field_alignments[field_set[idx]] = field_sizes[idx];
+          field_alignments[field_set[idx]] = 
+            (field_sizes[idx] | 32) & ~((field_sizes[idx] | 32) - 1);
       }
       else // Have to be AOS or SOA for now
         assert(false);
