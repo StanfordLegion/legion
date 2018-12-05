@@ -106,6 +106,33 @@ namespace Realm {
   }
 
 
+  // a wrapper class that defers construction of the underlying object until
+  //  explicitly requested
+  template <typename T>
+  class DeferredConstructor {
+  public:
+    DeferredConstructor();
+    ~DeferredConstructor();
+
+    // zero and one argument constructors for now
+    T *construct();
+
+    template <typename T1>
+    T *construct(T1 arg1);
+
+    // object must have already been explicitly constructed to dereference
+    T& operator*();
+    T *operator->();
+
+    const T& operator*() const;
+    const T *operator->() const;
+
+  protected:
+    T *ptr;  // needed to avoid type-punning complaints
+    char raw_storage[sizeof(T)] __attribute((aligned(__alignof__(T))));
+  };
+
+
 }; // namespace Realm
 
 #include "utils.inl"
