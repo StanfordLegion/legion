@@ -3159,7 +3159,6 @@ namespace Legion {
       // Now that we have our physical instances we can validate the variant
       if (!runtime->unsafe_mapper)
         validate_variant_selection(mapper, variant_impl, "map_task");
-      early_mapped_regions.clear(); 
       // Record anything else that needs to be recorded 
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
