@@ -288,6 +288,21 @@ namespace Realm {
         return cudaErrorMemoryAllocation;
       }
 
+#if CUDART_VERSION >= 8000
+      // Managed memory is only supported for cuda version >=8.0
+      cudaError_t cudaMallocManaged(void **ptr, size_t size,
+                                    unsigned flags = cudaMemAttachGlobal)
+      {
+        get_gpu_or_die("cudaMallocManaged");
+        // We don't support cudaMemAttachHost right now
+        assert(flags == cudaMemAttachGlobal);
+        CUresult ret = cuMemAllocManaged((CUdeviceptr*)ptr, size, CU_MEM_ATTACH_GLOBAL);
+        if (ret == CUDA_SUCCESS) return cudaSuccess;
+        assert(ret == CUDA_ERROR_OUT_OF_MEMORY);
+        return cudaErrorMemoryAllocation;
+      }
+#endif
+
       cudaError_t cudaFree(void *ptr)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaFree");
