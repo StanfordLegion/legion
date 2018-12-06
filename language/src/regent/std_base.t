@@ -854,6 +854,7 @@ do
       kernel = kernel,
     }
     global_kernel_id = global_kernel_id + 1
+    kernel:setname(kernel_name)
     return kernel_id
   end
 end
