@@ -113,7 +113,7 @@ local terra assert(x : bool, message : rawstring)
   end
 end
 
-local terra get_cuda_version() : uint64
+local terra get_cuda_version_terra() : uint64
   var cx : &CUctx_st
   var cx_created = false
   var r = DriverAPI.cuCtxGetCurrent(&cx)
@@ -206,17 +206,28 @@ local function parse_cuda_arch(arch)
   return sm
 end
 
+local get_cuda_version
+do
+  local cached_cuda_version = nil
+  get_cuda_version = function()
+    if cached_cuda_version ~= nil then
+      return cached_cuda_version
+    end
+    if not config["cuda-offline"] then
+      cached_cuda_version = get_cuda_version_terra()
+    else
+      cached_cuda_version = parse_cuda_arch(config["cuda-arch"])
+    end
+    return cached_cuda_version
+  end
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
   for k, v in pairs(kernels) do
     module[v.name] = v.kernel
   end
-  local version
-  if not config["cuda-offline"] then
-    version = get_cuda_version()
-  else
-    version = parse_cuda_arch(config["cuda-arch"])
-  end
+  local version = get_cuda_version()
   local libdevice = find_device_library(tonumber(version))
   local llvmbc = terralib.linkllvm(libdevice)
   externcall_builtin = function(name, ftype)
