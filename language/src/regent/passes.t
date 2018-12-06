@@ -48,6 +48,7 @@ function passes.compile(node, allow_pretty)
   local function ctor(environment_function)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
+    if std.is_rquote(node) then return node end
     node = profile("normalize_after_specialize", node, normalize.entry)(node)
     if std.config["inline"] then
       node = profile("inline_tasks", node, inline_tasks.entry)(node)

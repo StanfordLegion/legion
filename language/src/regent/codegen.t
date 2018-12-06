@@ -10206,12 +10206,6 @@ function codegen.top(cx, node)
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)
 
-  elseif node:is(ast.specialized.top.QuoteExpr) then
-    return codegen.top_quote_expr(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteStat) then
-    return codegen.top_quote_stat(cx, node)
-
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
   end
