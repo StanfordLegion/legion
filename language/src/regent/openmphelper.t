@@ -16,8 +16,8 @@ local std = require("regent/std")
 
 local omp = {}
 
-local has_openmp = false
-do
+local has_openmp = std.config["openmp"] and std.config["openmp-offline"]
+if not std.config["openmp-offline"] then
   local dlfcn = terralib.includec("dlfcn.h")
   local terra find_openmp_symbols()
     var lib = dlfcn.dlopen([&int8](0), dlfcn.RTLD_LAZY)
