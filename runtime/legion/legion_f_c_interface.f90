@@ -76,12 +76,12 @@ module legion_fortran_c_interface
         end function
     
         ! Legion::Runtime::start()
-        function legion_runtime_start_f(argc, argv, background) &
+        function legion_runtime_start_c(argc, argv, background) &
                      bind(C, name="legion_runtime_start")
             use iso_c_binding
             implicit none
         
-            integer(c_int)                      :: legion_runtime_start_f
+            integer(c_int)                      :: legion_runtime_start_c
             integer(c_int), value, intent(in)   :: argc
             type(c_ptr), value, intent(in)      :: argv
             logical(c_bool), value, intent(in)  :: background

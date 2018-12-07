@@ -4,11 +4,15 @@ module legion_fortran_types
     
     ! legion_privilege_mode_t
     integer(c_int), parameter :: NO_ACCESS = Z'00000000'
+    integer(c_int), parameter :: READ_PRIV = Z'00000001'
     integer(c_int), parameter :: READ_ONLY = Z'00000001'
-    integer(c_int), parameter :: READ_WRITE = Z'00000007'
-    integer(c_int), parameter :: WRITE_ONLY = Z'00000002'
-    integer(c_int), parameter :: WRITE_DISCARD = Z'00000002'
+    integer(c_int), parameter :: WRITE_PRIV = Z'00000002'
+    integer(c_int), parameter :: REDUCE_PRIV = Z'00000004'
     integer(c_int), parameter :: REDUCE = Z'00000004'
+    integer(c_int), parameter :: READ_WRITE = Z'00000007'
+    integer(c_int), parameter :: DISCARD_MASK = Z'10000000'
+    integer(c_int), parameter :: WRITE_ONLY = Z'10000002'
+    integer(c_int), parameter :: WRITE_DISCARD = Z'10000007'
     
     ! legion_coherence_property_t
     integer(c_int), parameter :: EXCLUSIVE = 0
@@ -20,6 +24,17 @@ module legion_fortran_types
     integer(c_int), parameter :: LEGION_FILE_READ_ONLY = 0
     integer(c_int), parameter :: LEGION_FILE_READ_WRITE = 0
     integer(c_int), parameter :: LEGION_FILE_CREATE = 0
+    
+    !legion_processor_kind_t
+    integer(c_int), parameter :: NO_KIND = 0
+    integer(c_int), parameter :: TOC_PROC = 1
+    integer(c_int), parameter :: LOC_PROC = 2
+    integer(c_int), parameter :: UTIL_PROC = 3
+    integer(c_int), parameter :: IO_PROC = 4
+    integer(c_int), parameter :: PROC_GROUP = 5
+    integer(c_int), parameter :: PROC_SET = 6
+    integer(c_int), parameter :: OMP_PROC = 7
+    integer(c_int), parameter :: PY_PROC = 8
     
     ! C NEW_OPAQUE_TYPE_F
 #define NEW_OPAQUE_TYPE_F(T) type, bind(C) :: T; type(c_ptr) :: impl; end type T

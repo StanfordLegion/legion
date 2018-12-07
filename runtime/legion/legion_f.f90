@@ -1,77 +1,91 @@
 module legion_fortran
-    use, intrinsic :: iso_c_binding
-    use legion_fortran_types
-    use legion_fortran_c_interface
- !   use legion_fortran_object_oriented
-    implicit none
-    
-    interface legion_accessor_array_1d_read_point_f
-        module procedure legion_accessor_array_1d_read_point_ptr_f
-        module procedure legion_accessor_array_1d_read_point_integer2_f
-        module procedure legion_accessor_array_1d_read_point_integer4_f
-        module procedure legion_accessor_array_1d_read_point_integer8_f
-        module procedure legion_accessor_array_1d_read_point_real4_f
-        module procedure legion_accessor_array_1d_read_point_real8_f
-        module procedure legion_accessor_array_1d_read_point_complex4_f
-        module procedure legion_accessor_array_1d_read_point_complex8_f
-    end interface
-    
-    interface legion_accessor_array_2d_read_point_f
-        module procedure legion_accessor_array_2d_read_point_ptr_f
-        module procedure legion_accessor_array_2d_read_point_integer2_f
-        module procedure legion_accessor_array_2d_read_point_integer4_f
-        module procedure legion_accessor_array_2d_read_point_integer8_f
-        module procedure legion_accessor_array_2d_read_point_real4_f
-        module procedure legion_accessor_array_2d_read_point_real8_f
-        module procedure legion_accessor_array_2d_read_point_complex4_f
-        module procedure legion_accessor_array_2d_read_point_complex8_f
-    end interface
-    
-    interface legion_accessor_array_3d_read_point_f
-        module procedure legion_accessor_array_3d_read_point_ptr_f
-        module procedure legion_accessor_array_3d_read_point_integer2_f
-        module procedure legion_accessor_array_3d_read_point_integer4_f
-        module procedure legion_accessor_array_3d_read_point_integer8_f
-        module procedure legion_accessor_array_3d_read_point_real4_f
-        module procedure legion_accessor_array_3d_read_point_real8_f
-        module procedure legion_accessor_array_3d_read_point_complex4_f
-        module procedure legion_accessor_array_3d_read_point_complex8_f
-    end interface
-    
-    interface legion_accessor_array_1d_write_point_f
-        module procedure legion_accessor_array_1d_write_point_ptr_f
-        module procedure legion_accessor_array_1d_write_point_integer2_f
-        module procedure legion_accessor_array_1d_write_point_integer4_f
-        module procedure legion_accessor_array_1d_write_point_integer8_f
-        module procedure legion_accessor_array_1d_write_point_real4_f
-        module procedure legion_accessor_array_1d_write_point_real8_f
-        module procedure legion_accessor_array_1d_write_point_complex4_f
-        module procedure legion_accessor_array_1d_write_point_complex8_f
-    end interface
-    
-    interface legion_accessor_array_2d_write_point_f
-        module procedure legion_accessor_array_2d_write_point_ptr_f
-        module procedure legion_accessor_array_2d_write_point_integer2_f
-        module procedure legion_accessor_array_2d_write_point_integer4_f
-        module procedure legion_accessor_array_2d_write_point_integer8_f
-        module procedure legion_accessor_array_2d_write_point_real4_f
-        module procedure legion_accessor_array_2d_write_point_real8_f
-        module procedure legion_accessor_array_2d_write_point_complex4_f
-        module procedure legion_accessor_array_2d_write_point_complex8_f
-    end interface
-    
-    interface legion_accessor_array_3d_write_point_f
-        module procedure legion_accessor_array_3d_write_point_ptr_f
-        module procedure legion_accessor_array_3d_write_point_integer2_f
-        module procedure legion_accessor_array_3d_write_point_integer4_f
-        module procedure legion_accessor_array_3d_write_point_integer8_f
-        module procedure legion_accessor_array_3d_write_point_real4_f
-        module procedure legion_accessor_array_3d_write_point_real8_f
-        module procedure legion_accessor_array_3d_write_point_complex4_f
-        module procedure legion_accessor_array_3d_write_point_complex8_f
-    end interface
+  use, intrinsic :: iso_c_binding
+  use legion_fortran_types
+  use legion_fortran_c_interface
+!   use legion_fortran_object_oriented
+  implicit none
+  
+  interface legion_accessor_array_1d_read_point_f
+    module procedure legion_accessor_array_1d_read_point_ptr_f
+    module procedure legion_accessor_array_1d_read_point_integer2_f
+    module procedure legion_accessor_array_1d_read_point_integer4_f
+    module procedure legion_accessor_array_1d_read_point_integer8_f
+    module procedure legion_accessor_array_1d_read_point_real4_f
+    module procedure legion_accessor_array_1d_read_point_real8_f
+    module procedure legion_accessor_array_1d_read_point_complex4_f
+    module procedure legion_accessor_array_1d_read_point_complex8_f
+  end interface
+  
+  interface legion_accessor_array_2d_read_point_f
+    module procedure legion_accessor_array_2d_read_point_ptr_f
+    module procedure legion_accessor_array_2d_read_point_integer2_f
+    module procedure legion_accessor_array_2d_read_point_integer4_f
+    module procedure legion_accessor_array_2d_read_point_integer8_f
+    module procedure legion_accessor_array_2d_read_point_real4_f
+    module procedure legion_accessor_array_2d_read_point_real8_f
+    module procedure legion_accessor_array_2d_read_point_complex4_f
+    module procedure legion_accessor_array_2d_read_point_complex8_f
+  end interface
+  
+  interface legion_accessor_array_3d_read_point_f
+    module procedure legion_accessor_array_3d_read_point_ptr_f
+    module procedure legion_accessor_array_3d_read_point_integer2_f
+    module procedure legion_accessor_array_3d_read_point_integer4_f
+    module procedure legion_accessor_array_3d_read_point_integer8_f
+    module procedure legion_accessor_array_3d_read_point_real4_f
+    module procedure legion_accessor_array_3d_read_point_real8_f
+    module procedure legion_accessor_array_3d_read_point_complex4_f
+    module procedure legion_accessor_array_3d_read_point_complex8_f
+  end interface
+  
+  interface legion_accessor_array_1d_write_point_f
+    module procedure legion_accessor_array_1d_write_point_ptr_f
+    module procedure legion_accessor_array_1d_write_point_integer2_f
+    module procedure legion_accessor_array_1d_write_point_integer4_f
+    module procedure legion_accessor_array_1d_write_point_integer8_f
+    module procedure legion_accessor_array_1d_write_point_real4_f
+    module procedure legion_accessor_array_1d_write_point_real8_f
+    module procedure legion_accessor_array_1d_write_point_complex4_f
+    module procedure legion_accessor_array_1d_write_point_complex8_f
+  end interface
+  
+  interface legion_accessor_array_2d_write_point_f
+    module procedure legion_accessor_array_2d_write_point_ptr_f
+    module procedure legion_accessor_array_2d_write_point_integer2_f
+    module procedure legion_accessor_array_2d_write_point_integer4_f
+    module procedure legion_accessor_array_2d_write_point_integer8_f
+    module procedure legion_accessor_array_2d_write_point_real4_f
+    module procedure legion_accessor_array_2d_write_point_real8_f
+    module procedure legion_accessor_array_2d_write_point_complex4_f
+    module procedure legion_accessor_array_2d_write_point_complex8_f
+  end interface
+  
+  interface legion_accessor_array_3d_write_point_f
+    module procedure legion_accessor_array_3d_write_point_ptr_f
+    module procedure legion_accessor_array_3d_write_point_integer2_f
+    module procedure legion_accessor_array_3d_write_point_integer4_f
+    module procedure legion_accessor_array_3d_write_point_integer8_f
+    module procedure legion_accessor_array_3d_write_point_real4_f
+    module procedure legion_accessor_array_3d_write_point_real8_f
+    module procedure legion_accessor_array_3d_write_point_complex4_f
+    module procedure legion_accessor_array_3d_write_point_complex8_f
+  end interface
     
 contains
+  
+  ! Legion::Runtime::start()
+  function legion_runtime_start_f(argc, argv, background)
+      implicit none
+
+      integer(c_int)                      :: legion_runtime_start_f
+      integer(c_int), value, intent(in)   :: argc
+      type(c_ptr), value, intent(in)      :: argv
+      logical, value, intent(in)  :: background
+      
+      logical(c_bool) :: background_c
+      background_c = logical(background, kind=c_bool)
+      legion_runtime_start_f = legion_runtime_start_c(argc, argv, background_c)
+  end function
     
     ! -----------------------------------------------------------------------
     ! Task Launcher
@@ -152,12 +166,12 @@ contains
         type(legion_task_argument_f_t), intent(in)   :: global_arg
         type(legion_argument_map_f_t), intent(in)    :: map
         type(legion_predicate_f_t), intent(in)       :: pred
-        logical(c_bool), intent(in)                  :: must
+        logical, intent(in)                          :: must
         integer(c_int), intent(in)                   :: id
         integer(c_long), intent(in)                  :: tag
         type(legion_index_launcher_f_t), intent(out) :: index_launcher
             
-        index_launcher = legion_index_launcher_create_c(tid, domain, global_arg, map, pred, must, id, tag)
+        index_launcher = legion_index_launcher_create_c(tid, domain, global_arg, map, pred, logical(must, kind=c_bool), id, tag)
     end subroutine legion_index_launcher_create_f
     
     ! @see Legion::IndexTaskLauncher::~IndexTaskLauncher()
@@ -264,9 +278,9 @@ contains
         type(legion_argument_map_f_t), intent(in)  :: map
         type(legion_domain_point_f_t), intent(in)  :: dp 
         type(legion_task_argument_f_t), intent(in) :: arg
-        logical(c_bool), intent(in)                :: replace 
+        logical, intent(in)                        :: replace 
         
-        call legion_argument_map_set_point_c(map, dp, arg, replace)
+        call legion_argument_map_set_point_c(map, dp, arg, logical(replace, kind=c_bool))
     end subroutine legion_argument_map_set_point_f
     
     ! -----------------------------------------------------------------------
