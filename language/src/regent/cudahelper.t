@@ -988,7 +988,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
         var [num_threads] = total - [BLOCK_SIZE]
         [call_postscan_full]
       end
-      RuntimeAPI.cudaDeviceSynchronize()
     end
   end
 
