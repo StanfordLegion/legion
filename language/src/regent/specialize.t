@@ -1951,20 +1951,20 @@ end
 
 function specialize.top_quote_expr(cx, node)
   local cx = cx:new_local_scope(true)
-  return ast.specialized.top.QuoteExpr {
+  return std.newrquote(ast.specialized.top.QuoteExpr {
     expr = specialize.expr(cx, node.expr),
     annotations = node.annotations,
     span = node.span,
-  }
+  })
 end
 
 function specialize.top_quote_stat(cx, node)
   local cx = cx:new_local_scope(true)
-  return ast.specialized.top.QuoteStat {
+  return std.newrquote(ast.specialized.top.QuoteStat {
     block = specialize.block(cx, node.block),
     annotations = node.annotations,
     span = node.span,
-  }
+  })
 end
 
 function specialize.top(cx, node)

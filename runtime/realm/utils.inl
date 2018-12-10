@@ -85,4 +85,77 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class DeferredConstructor<T>
+
+  template <typename T>
+  DeferredConstructor<T>::DeferredConstructor()
+    : ptr(0)
+  {}
+
+  template <typename T>
+  DeferredConstructor<T>::~DeferredConstructor()
+  {
+    if(ptr) ptr->~T();
+  }
+
+  template <typename T>
+  T *DeferredConstructor<T>::construct()
+  {
+#ifdef DEBUG_REALM
+    assert(!ptr);
+#endif
+    ptr = new(raw_storage) T();
+    return ptr;
+  }
+
+  template <typename T>
+  template <typename T1>
+  T *DeferredConstructor<T>::construct(T1 arg1)
+  {
+#ifdef DEBUG_REALM
+    assert(!ptr);
+#endif
+    ptr = new(raw_storage) T(arg1);
+    return ptr;
+  }
+
+  template <typename T>
+  T& DeferredConstructor<T>::operator*()
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return *ptr;
+  }
+
+  template <typename T>
+  T *DeferredConstructor<T>::operator->()
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return ptr;
+  }
+
+  template <typename T>
+  const T& DeferredConstructor<T>::operator*() const
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return *ptr;
+  }
+
+  template <typename T>
+  const T *DeferredConstructor<T>::operator->() const
+  {
+#ifdef DEBUG_REALM
+    assert(ptr != 0);
+#endif
+    return ptr;
+  }
+
+
 }; // namespace Realm

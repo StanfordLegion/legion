@@ -57,6 +57,7 @@ local default_options = {
   ["replicable"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
+  ["openmp-offline"] = false,
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
   ["vectorize"] = true,

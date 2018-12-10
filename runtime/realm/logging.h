@@ -159,10 +159,8 @@ namespace Realm {
     bool active;
     Logger::LoggingLevel level;
     // contain messages shorter than 160 characters entirely inline
-    shortstringbuf<160, 256> buffer;
-    // in-place allocation of a std::ostream
-    std::ostream *stream;
-    char stream_storage[sizeof(std::ostream)] __attribute((aligned(__alignof__(std::ostream))));
+    DeferredConstructor<shortstringbuf<160, 256> > buffer;
+    DeferredConstructor<std::ostream> stream;
   };
   
 }; // namespace Realm

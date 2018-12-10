@@ -425,45 +425,34 @@ namespace Realm {
   
   // default constructor makes an inactive message
   inline LoggerMessage::LoggerMessage(void)
-    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE), stream(0)
+    : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(0), active(false), level(Logger::LEVEL_NONE)
   {}
   
   inline LoggerMessage::LoggerMessage(Logger *_logger, bool _active, Logger::LoggingLevel _level)
     : messageID(RESERVED_LOGGER_MESSAGE_ID), logger(_logger), active(_active), level(_level)
   {
     if(active)
-      stream = new(stream_storage) std::ostream(&buffer);
-    else
-      stream = 0;
+      stream.construct(buffer.construct());
   }
   
   inline LoggerMessage::LoggerMessage(LoggerMessageID messageID, Logger *_logger, bool _active, Logger::LoggingLevel _level)
     : messageID(messageID), logger(_logger), active(_active), level(_level)
   {
     if(active)
-      stream = new(stream_storage) std::ostream(&buffer);
-    else
-      stream = 0;
+      stream.construct(buffer.construct());
   }
   
   inline LoggerMessage::LoggerMessage(const LoggerMessage& to_copy)
     : messageID(to_copy.messageID), logger(to_copy.logger), active(to_copy.active), level(to_copy.level)
   {
     if(active)
-      stream = new(stream_storage) std::ostream(&buffer);
-    else
-      stream = 0;
+      stream.construct(buffer.construct());
   }
   
   inline LoggerMessage::~LoggerMessage(void)
   {
     if(active) {
-      //logger->log_msg(level, buffer.str());
-      logger->log_msg(level, buffer.data(), buffer.size());
-      // clang does not like 'get_stream().std::ostream::~ostream', so import
-      //  std namespace here
-      using namespace std;
-      get_stream().ostream::~ostream();
+      logger->log_msg(level, buffer->data(), buffer->size());
       active = false;
     }
   }
