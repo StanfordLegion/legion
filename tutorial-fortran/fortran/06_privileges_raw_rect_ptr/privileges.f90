@@ -38,7 +38,7 @@ contains
     type(legion_rect_1d_f_t) :: index_rect, subrect
     type(legion_byte_offset_f_t) :: offset
     type(c_ptr) :: raw_ptr
-    real(c_double), pointer :: x(:)
+    real(kind=8), pointer :: x(:)
     integer :: i
 
     call legion_task_preamble_f(tdata, tdatalen, p, &
@@ -101,7 +101,7 @@ contains
     type(legion_rect_1d_f_t) :: index_rect, subrect
     type(legion_byte_offset_f_t) :: offset
     type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
-    real(c_double), pointer :: x(:), y(:), z(:)
+    real(kind=8), pointer :: x(:), y(:), z(:)
     integer :: i
         
     call legion_task_preamble_f(tdata, tdatalen, p, &
@@ -170,7 +170,7 @@ contains
     type(legion_rect_1d_f_t) :: index_rect, subrect
     type(legion_byte_offset_f_t) :: offset
     type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
-    real(c_double), pointer :: x(:), y(:), z(:)
+    real(kind=8), pointer :: x(:), y(:), z(:)
     integer :: i
     logical :: all_passed = .true.
         
@@ -366,7 +366,6 @@ Program daxpy_raw_rect_pointer
     type(legion_execution_constraint_set_f_t) :: execution_constraints
     type(legion_task_layout_constraint_set_f_t) :: layout_constraints
     type(legion_task_config_options_f_t) :: config_options
-    integer(c_int) :: proc_kind = 2
     integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4
     integer(c_size_t) :: userlen = 0
     integer(c_int) :: runtime_start_rv
@@ -375,7 +374,7 @@ Program daxpy_raw_rect_pointer
     Print *, "Hello World from Main!"
     call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
     call legion_execution_constraint_set_create_f(execution_constraints)
-    call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, proc_kind)
+    call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, LOC_PROC)
     call legion_task_layout_constraint_set_create_f(layout_constraints)
     config_options%leaf = .false.
     config_options%inner = .false.
