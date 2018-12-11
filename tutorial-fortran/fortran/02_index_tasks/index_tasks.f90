@@ -104,7 +104,7 @@ contains
       local_task_args(i)%arglen = c_sizeof(input)
       tmp_p%x(0) = i
       call legion_domain_point_from_point_1d_f(tmp_p, dp)
-      call legion_argument_map_set_point_f(arg_map, dp, local_task_args(i), .TRUE.)
+      call legion_argument_map_set_point_f(arg_map, dp, local_task_args(i), .true.)
     end do
     
     ! index launcher
@@ -122,6 +122,7 @@ Program hello_index
     use iso_c_binding
     use hello_world_index
     implicit none
+    
     type(legion_execution_constraint_set_f_t) :: execution_constraints
     type(legion_task_layout_constraint_set_f_t) :: layout_constraints
     type(legion_task_config_options_f_t) :: config_options
@@ -132,16 +133,16 @@ Program hello_index
         
     Print *, "Hello World from Main!"
     call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
-    execution_constraints = legion_execution_constraint_set_create_f()
+    call legion_execution_constraint_set_create_f(execution_constraints)
     call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, LOC_PROC)
-    layout_constraints = legion_task_layout_constraint_set_create_f()
-    config_options%leaf = .FALSE.
-    config_options%inner = .FALSE.
-    config_options%idempotent = .FALSE.
+    call legion_task_layout_constraint_set_create_f(layout_constraints)
+    config_options%leaf = .false.
+    config_options%inner = .false.
+    config_options%idempotent = .false.
     
     c_func_ptr = c_funloc(top_level_task)
     
-    task_id_1 = legion_runtime_preregister_task_variant_fnptr_f( &
+    call legion_runtime_preregister_task_variant_fnptr_f( &
       TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
       c_char_"cpu_variant"//c_null_char, &
       execution_constraints, &
@@ -149,11 +150,11 @@ Program hello_index
       config_options, &
       c_func_ptr, &
       c_null_ptr, &
-      userlen)
+      userlen, task_id_1)
     
     c_func_ptr = c_funloc(hello_world_task)
 
-    task_id_2 = legion_runtime_preregister_task_variant_fnptr_f( &
+    call legion_runtime_preregister_task_variant_fnptr_f( &
       HELLO_WORLD_TASK_ID, c_char_"hello_world_task"//c_null_char, &
       c_char_"cpu_variant"//c_null_char, &
       execution_constraints, &
@@ -161,7 +162,7 @@ Program hello_index
       config_options, &
       c_func_ptr, &
       c_null_ptr, &
-      userlen)
+      userlen, task_id_2)
     
-    runtime_start_rv = legion_runtime_start_f(0, c_null_ptr, .FALSE.)
+    call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
 End Program hello_index

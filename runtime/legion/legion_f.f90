@@ -73,19 +73,121 @@ module legion_fortran
     
 contains
   
+  ! -----------------------------------------------------------------------
+  ! Start-up Operations
+  ! -----------------------------------------------------------------------
+  ! Legion::Runtime::set_top_level_task_id()
+  subroutine legion_runtime_set_top_level_task_id_f(top_id)
+      implicit none
+  
+      integer(c_int), value, intent(in) :: top_id
+      
+      call legion_runtime_set_top_level_task_id_c(top_id)
+  end subroutine legion_runtime_set_top_level_task_id_f
+  
+  ! Legion::ExecutionConstraintSet::ExecutionConstraintSet()
+  subroutine legion_execution_constraint_set_create_f(execution_constraints)
+      implicit none
+  
+      type(legion_execution_constraint_set_f_t), intent(out) :: execution_constraints
+      
+      execution_constraints = legion_execution_constraint_set_create_c()
+  end subroutine legion_execution_constraint_set_create_f
+  
+  ! Legion::ExecutionConstraintSet::add_constraint(Legion::ProcessorConstraint)
+  subroutine legion_execution_constraint_set_add_processor_constraint_f(handle, proc_kind)
+      implicit none
+  
+      type(legion_execution_constraint_set_f_t), value, intent(in)    :: handle
+      integer(c_int), value, intent(in)                               :: proc_kind
+      
+      call legion_execution_constraint_set_add_processor_constraint_c(handle, proc_kind)
+  end subroutine legion_execution_constraint_set_add_processor_constraint_f
+  
+  ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
+  subroutine legion_task_layout_constraint_set_create_f(layout_constraint)
+      implicit none
+  
+      type(legion_task_layout_constraint_set_f_t), intent(out) :: layout_constraint
+      
+      layout_constraint = legion_task_layout_constraint_set_create_c()
+  end subroutine legion_task_layout_constraint_set_create_f
+  
+  ! Legion::Runtime::preregister_task_variant()
+  subroutine legion_runtime_preregister_task_variant_fnptr_f(id, task_name, &
+                                                           variant_name, &
+                                                           execution_constraints, &
+                                                           layout_constraints, &
+                                                           options, &
+                                                           wrapped_task_pointer, &
+                                                           userdata, &
+                                                           userlen, task_id)
+      implicit none
+  
+      character(kind=c_char), intent(in)                              :: task_name(*)
+      character(kind=c_char), intent(in)                              :: variant_name(*)
+      integer(c_int), value, intent(in)                               :: id
+      type(legion_execution_constraint_set_f_t), value, intent(in)    :: execution_constraints
+      type(legion_task_layout_constraint_set_f_t), value, intent(in)  :: layout_constraints
+      type(legion_task_config_options_f_t), value, intent(in)         :: options
+      type(c_funptr), value, intent(in)                               :: wrapped_task_pointer
+      type(c_ptr), value, intent(in)                                  :: userdata
+      integer(c_size_t), value, intent(in)                            :: userlen
+      integer(c_int), intent(out)                                     :: task_id
+      
+      task_id = legion_runtime_preregister_task_variant_fnptr_c(id, task_name, &
+                                                                variant_name, &
+                                                                execution_constraints, &
+                                                                layout_constraints, &
+                                                                options, &
+                                                                wrapped_task_pointer, &
+                                                                userdata, &
+                                                                userlen)
+  end subroutine legion_runtime_preregister_task_variant_fnptr_f
+  
   ! Legion::Runtime::start()
-  function legion_runtime_start_f(argc, argv, background)
+  subroutine legion_runtime_start_f(argc, argv, background, return_value)
       implicit none
 
-      integer(c_int)                      :: legion_runtime_start_f
       integer(c_int), value, intent(in)   :: argc
       type(c_ptr), value, intent(in)      :: argv
       logical, value, intent(in)  :: background
+      integer(c_int), intent(out) :: return_value
       
-      logical(c_bool) :: background_c
-      background_c = logical(background, kind=c_bool)
-      legion_runtime_start_f = legion_runtime_start_c(argc, argv, background_c)
-  end function
+      return_value = legion_runtime_start_c(argc, argv, logical(background, kind=c_bool))
+  end subroutine legion_runtime_start_f
+  
+  ! Legion::LegionTaskWrapper::legion_task_preamble()
+  subroutine legion_task_preamble_f(tdata, tdatalen, proc_id, &
+                                    task, regionptr, num_regions, &
+                                    ctx, runtime)
+      implicit none
+  
+      type(c_ptr), intent(in)                         :: tdata ! pass reference
+      integer(c_size_t), value, intent(in)            :: tdatalen
+      integer(c_long_long), value, intent(in)         :: proc_id
+      type(legion_task_f_t), intent(out)              :: task ! pass reference
+      type(c_ptr), intent(out)                        :: regionptr
+      integer(c_int), intent(out)                     :: num_regions ! pass reference
+      type(legion_context_f_t), intent(out)           :: ctx ! pass reference          
+      type(legion_runtime_f_t), intent(out)           :: runtime ! pass reference
+      
+      call legion_task_preamble_c(tdata, tdatalen, proc_id, &
+                                  task, regionptr, num_regions, &
+                                  ctx, runtime)
+  end subroutine legion_task_preamble_f
+  
+  ! Legion::LegionTaskWrapper::legion_task_postamble()
+  subroutine legion_task_postamble_f(runtime, ctx, retval, retsize)
+      implicit none
+  
+      type(legion_runtime_f_t), value, intent(in) :: runtime
+      type(legion_context_f_t), value, intent(in) :: ctx
+      type(c_ptr), value, intent(in)              :: retval
+      integer(c_size_t), value, intent(in)        :: retsize
+      
+      call legion_task_postamble_c(runtime, ctx, retval, retsize)
+  end subroutine legion_task_postamble_f
     
     ! -----------------------------------------------------------------------
     ! Task Launcher
@@ -136,10 +238,11 @@ contains
         integer(c_int), intent(in)                  :: prop
         type(legion_logical_region_f_t), intent(in) :: parent
         integer(c_long), intent(in)                 :: tag
-        logical(c_bool), intent(in)                 :: verified
+        logical, intent(in)                         :: verified
         integer(c_int), intent(out)                 :: rr_idx
       
-        rr_idx = legion_task_launcher_add_region_requirement_logical_region_c(launcher, handle, priv, prop, parent, tag, verified)
+        rr_idx = legion_task_launcher_add_region_requirement_logical_region_c(launcher, handle, priv, prop, parent, tag, &
+                  logical(verified, kind=c_bool))
     end subroutine legion_task_launcher_add_region_requirement_logical_region_f
     
     ! @see Legion::TaskLaunchxer::add_field()
@@ -149,9 +252,9 @@ contains
         type(legion_task_launcher_f_t), intent(in) :: launcher
         integer(c_int), intent(in)                 :: idx
         integer(c_int), intent(in)                 :: fid
-        logical(c_bool), intent(in)                :: inst
+        logical, intent(in)                        :: inst
 
-        call legion_task_launcher_add_field_c(launcher, idx, fid, inst)
+        call legion_task_launcher_add_field_c(launcher, idx, fid, logical(inst, kind=c_bool))
     end subroutine legion_task_launcher_add_field_f
     
     ! -----------------------------------------------------------------------

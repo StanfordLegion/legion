@@ -8,26 +8,26 @@ module legion_fortran_c_interface
         ! Start-up Operations
         ! -----------------------------------------------------------------------
         ! Legion::Runtime::set_top_level_task_id()
-        subroutine legion_runtime_set_top_level_task_id_f(top_id) &
+        subroutine legion_runtime_set_top_level_task_id_c(top_id) &
                        bind(C, name="legion_runtime_set_top_level_task_id")
             use iso_c_binding
             implicit none
         
             integer(c_int), value, intent(in) :: top_id
-        end subroutine legion_runtime_set_top_level_task_id_f
+        end subroutine legion_runtime_set_top_level_task_id_c
     
         ! Legion::ExecutionConstraintSet::ExecutionConstraintSet()
-        function legion_execution_constraint_set_create_f() &
+        function legion_execution_constraint_set_create_c() &
                      bind(C, name="legion_execution_constraint_set_create")
             use iso_c_binding
             import legion_execution_constraint_set_f_t
             implicit none
         
-            type(legion_execution_constraint_set_f_t) :: legion_execution_constraint_set_create_f
-        end function
+            type(legion_execution_constraint_set_f_t) :: legion_execution_constraint_set_create_c
+        end function legion_execution_constraint_set_create_c
     
         ! Legion::ExecutionConstraintSet::add_constraint(Legion::ProcessorConstraint)
-        subroutine legion_execution_constraint_set_add_processor_constraint_f(handle, proc_kind) &
+        subroutine legion_execution_constraint_set_add_processor_constraint_c(handle, proc_kind) &
                        bind(C, name="legion_execution_constraint_set_add_processor_constraint")
             use iso_c_binding
             import legion_execution_constraint_set_f_t
@@ -35,20 +35,20 @@ module legion_fortran_c_interface
         
             type(legion_execution_constraint_set_f_t), value, intent(in)    :: handle
             integer(c_int), value, intent(in)                               :: proc_kind
-        end subroutine
+        end subroutine legion_execution_constraint_set_add_processor_constraint_c
     
         ! Legion::TaskLayoutConstraintSet::TaskLayoutConstraintSet()
-        function legion_task_layout_constraint_set_create_f() &
+        function legion_task_layout_constraint_set_create_c() &
                      bind(C, name="legion_task_layout_constraint_set_create")
             use iso_c_binding
             import legion_task_layout_constraint_set_f_t
             implicit none
         
-            type(legion_task_layout_constraint_set_f_t) :: legion_task_layout_constraint_set_create_f
-        end function
+            type(legion_task_layout_constraint_set_f_t) :: legion_task_layout_constraint_set_create_c
+        end function legion_task_layout_constraint_set_create_c
     
         ! Legion::Runtime::preregister_task_variant()
-        function legion_runtime_preregister_task_variant_fnptr_f(id, task_name, &
+        function legion_runtime_preregister_task_variant_fnptr_c(id, task_name, &
                                                                  variant_name, &
                                                                  execution_constraints, &
                                                                  layout_constraints, &
@@ -63,7 +63,7 @@ module legion_fortran_c_interface
             import legion_task_config_options_f_t
             implicit none
         
-            integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_f
+            integer(c_int)                                                  :: legion_runtime_preregister_task_variant_fnptr_c
             character(kind=c_char), intent(in)                              :: task_name(*)
             character(kind=c_char), intent(in)                              :: variant_name(*)
             integer(c_int), value, intent(in)                               :: id
@@ -73,7 +73,7 @@ module legion_fortran_c_interface
             type(c_funptr), value, intent(in)                               :: wrapped_task_pointer
             type(c_ptr), value, intent(in)                                  :: userdata
             integer(c_size_t), value, intent(in)                            :: userlen
-        end function
+        end function legion_runtime_preregister_task_variant_fnptr_c
     
         ! Legion::Runtime::start()
         function legion_runtime_start_c(argc, argv, background) &
@@ -85,10 +85,10 @@ module legion_fortran_c_interface
             integer(c_int), value, intent(in)   :: argc
             type(c_ptr), value, intent(in)      :: argv
             logical(c_bool), value, intent(in)  :: background
-        end function
+        end function legion_runtime_start_c
     
         ! Legion::LegionTaskWrapper::legion_task_preamble()
-        subroutine legion_task_preamble_f(tdata, tdatalen, proc_id, &
+        subroutine legion_task_preamble_c(tdata, tdatalen, proc_id, &
                                           task, regionptr, num_regions, &
                                           ctx, runtime) &
                        bind(C, name="legion_task_preamble")
@@ -107,10 +107,10 @@ module legion_fortran_c_interface
             integer(c_int), intent(out)                     :: num_regions ! pass reference
             type(legion_context_f_t), intent(out)           :: ctx ! pass reference          
             type(legion_runtime_f_t), intent(out)           :: runtime ! pass reference
-        end subroutine
+        end subroutine legion_task_preamble_c
     
         ! Legion::LegionTaskWrapper::legion_task_postamble()
-        subroutine legion_task_postamble_f(runtime, ctx, retval, retsize) &
+        subroutine legion_task_postamble_c(runtime, ctx, retval, retsize) &
                        bind(C, name="legion_task_postamble")
             use iso_c_binding
             import legion_runtime_f_t
@@ -121,7 +121,7 @@ module legion_fortran_c_interface
             type(legion_context_f_t), value, intent(in) :: ctx
             type(c_ptr), value, intent(in)              :: retval
             integer(c_size_t), value, intent(in)        :: retsize
-        end subroutine
+        end subroutine legion_task_postamble_c
     
         ! -----------------------------------------------------------------------
         ! Task Launcher

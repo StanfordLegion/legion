@@ -1,9 +1,18 @@
-function init_task(tdata, tdatalen, userdata, userlen, p)
+module daxpy
+  use iso_c_binding
+  implicit none
+  
+  integer(c_int), parameter :: TOP_LEVEL_TASK_ID = 0
+  integer(c_int), parameter :: INIT_TASK_ID=1
+  integer(c_int), parameter :: DAXPY_TASK_ID=2
+  integer(c_int), parameter :: CHECK_TASK_ID=3
+  
+contains
+  subroutine init_task(tdata, tdatalen, userdata, userlen, p)
     use legion_fortran
     use iso_c_binding
     implicit none
     
-    integer(c_int) ::init_task
     type(c_ptr), intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
     type(c_ptr), intent(in) ::userdata
@@ -56,19 +65,17 @@ function init_task(tdata, tdatalen, userdata, userlen, p)
     
     ! fortran array starts from 1
     do i = 1, index_size
-        x(i) = 1.1 * (fid+1)
+      x(i) = 1.1 * (fid+1)
     end do
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
-    init_task = 0
-end function
+  end subroutine init_task
 
-function daxpy_task(tdata, tdatalen, userdata, userlen, p)
+  subroutine daxpy_task(tdata, tdatalen, userdata, userlen, p)
     use legion_fortran
     use iso_c_binding
     implicit none
     
-    integer(c_int) ::daxpy_task
     type(c_ptr), intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
     type(c_ptr), intent(in) ::userdata
@@ -127,19 +134,17 @@ function daxpy_task(tdata, tdatalen, userdata, userlen, p)
     call c_f_pointer(raw_ptr_z, z, [index_size-1])
     
     do i = 1, index_size
-        z(i) = x(i) + y(i)
+      z(i) = x(i) + y(i)
     end do
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
-    daxpy_task = 0
-end function
+  end subroutine daxpy_task
 
-function check_task(tdata, tdatalen, userdata, userlen, p)
+  subroutine check_task(tdata, tdatalen, userdata, userlen, p)
     use legion_fortran
     use iso_c_binding
     implicit none
     
-    integer(c_int) ::check_task
     type(c_ptr), intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
     type(c_ptr), intent(in) ::userdata
@@ -199,29 +204,27 @@ function check_task(tdata, tdatalen, userdata, userlen, p)
     call c_f_pointer(raw_ptr_z, z, [index_size-1])
     
     do i = 1, index_size
-        if (x(i) + y(i) == z(i)) then
-        else
-            print *, "wrong", x(i), y(i), z(i)
-            all_passed = .false.
-        end if
+      if (x(i) + y(i) == z(i)) then
+      else
+        print *, "wrong", x(i), y(i), z(i)
+        all_passed = .false.
+      end if
     end do
     
     if (all_passed .eqv. .true.) then
-        print *, "Pass"
+      print *, "Pass"
     else
-        print *, "Failed"
+      print *, "Failed"
     end if
     
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
-    check_task = 0
-end function
+  end subroutine check_task
 
-function top_level_task(tdata, tdatalen, userdata, userlen, p)
+  subroutine top_level_task(tdata, tdatalen, userdata, userlen, p)
     use legion_fortran
     use iso_c_binding
     implicit none
     
-    integer(c_int) ::top_level_task
     type(c_ptr), intent(in) :: tdata
     integer(c_size_t), value, intent(in) :: tdatalen
     type(c_ptr), intent(in) ::userdata
@@ -248,18 +251,12 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     type(legion_predicate_f_t) :: pred
     type(legion_task_argument_f_t) :: task_args
     integer(c_int) :: rr_ix, rr_iy, rr_cxy, rr_cz
-    logical(c_bool) :: verified = .FALSE.
-    logical(c_bool) :: inst = .TRUE.
     type(legion_task_launcher_f_t) :: init_launcher_x, init_launcher_y, daxpy_launcher, check_launcher
     integer(c_long) :: tag = 0
     type(legion_future_f_t) :: init_task_future, daxpy_task_future, check_task_future
     
-    integer(c_int) :: INIT_TASK_ID=1
-    integer(c_int) :: DAXPY_TASK_ID=2
-    integer(c_int) :: CHECK_TASK_ID=3
     integer*4, target :: i
     integer*4 :: num_elements = 2048
-   ! common HELLO_WORLD_TASK_ID
     
     Print *, "TOP Level Task!"
     
@@ -299,8 +296,8 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_launcher_create_f(INIT_TASK_ID, task_args, pred, 0, tag, init_launcher_x)
     call legion_task_launcher_add_region_requirement_logical_region_f(init_launcher_x, input_lr, & 
                                                                        WRITE_DISCARD, EXCLUSIVE, &
-                                                                       input_lr, tag, verified, rr_ix)
-    call legion_task_launcher_add_field_f(init_launcher_x, rr_ix, 0, inst)
+                                                                       input_lr, tag, .false., rr_ix)
+    call legion_task_launcher_add_field_f(init_launcher_x, rr_ix, fid_x, .true.)
     call legion_task_launcher_execute_f(runtime, ctx, init_launcher_x, init_task_future)
     
     !init task for Y
@@ -310,11 +307,9 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_launcher_create_f(INIT_TASK_ID, task_args, pred, 0, tag, init_launcher_y)
     call legion_task_launcher_add_region_requirement_logical_region_f(init_launcher_y, input_lr, & 
                                                                        WRITE_DISCARD, EXCLUSIVE, &
-                                                                       input_lr, tag, verified, rr_iy)
-    call legion_task_launcher_add_field_f(init_launcher_y, rr_iy, 1, inst)
+                                                                       input_lr, tag, .false., rr_iy)
+    call legion_task_launcher_add_field_f(init_launcher_y, rr_iy, fid_y, .true.)
     call legion_task_launcher_execute_f(runtime, ctx, init_launcher_y, init_task_future)
-    
-    print *, rr_ix, rr_iy
     
     !daxpy task
     i = 2
@@ -323,13 +318,13 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_launcher_create_f(DAXPY_TASK_ID, task_args, pred, 0, tag, daxpy_launcher)
     call legion_task_launcher_add_region_requirement_logical_region_f(daxpy_launcher, input_lr, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       input_lr, tag, verified, rr_cxy)
-    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cxy, 0, inst)
-    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cxy, 1, inst)
+                                                                       input_lr, tag, .false., rr_cxy)
+    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cxy, fid_x, .true.)
+    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cxy, fid_y, .true.)
     call legion_task_launcher_add_region_requirement_logical_region_f(daxpy_launcher, output_lr, & 
                                                                        WRITE_DISCARD, EXCLUSIVE, &
-                                                                       output_lr, tag, verified, rr_cz)
-    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cz, 2, inst)
+                                                                       output_lr, tag, .false., rr_cz)
+    call legion_task_launcher_add_field_f(daxpy_launcher, rr_cz, fid_z, .true.)
     call legion_task_launcher_execute_f(runtime, ctx, daxpy_launcher, daxpy_task_future)
     
     !check task
@@ -339,17 +334,14 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_launcher_create_f(CHECK_TASK_ID, task_args, pred, 0, tag, check_launcher)
     call legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, input_lr, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       input_lr, tag, verified, rr_cxy)
-    call legion_task_launcher_add_field_f(check_launcher, rr_cxy, 0, inst)
-    call legion_task_launcher_add_field_f(check_launcher, rr_cxy, 1, inst)
+                                                                       input_lr, tag, .false., rr_cxy)
+    call legion_task_launcher_add_field_f(check_launcher, rr_cxy, fid_x, .true.)
+    call legion_task_launcher_add_field_f(check_launcher, rr_cxy, fid_y, .true.)
     call legion_task_launcher_add_region_requirement_logical_region_f(check_launcher, output_lr, & 
                                                                        READ_ONLY, EXCLUSIVE, &
-                                                                       output_lr, tag, verified, rr_cz)
-    call legion_task_launcher_add_field_f(check_launcher, rr_cz, 2, inst)
+                                                                       output_lr, tag, .false., rr_cz)
+    call legion_task_launcher_add_field_f(check_launcher, rr_cz, fid_z, .true.)
     call legion_task_launcher_execute_f(runtime, ctx, check_launcher, check_task_future)
-    
-    print *, rr_cxy, rr_cz
-    
     
     ! clean up
     call legion_logical_region_destroy_f(runtime, ctx, input_lr)
@@ -362,87 +354,75 @@ function top_level_task(tdata, tdatalen, userdata, userlen, p)
     call legion_task_launcher_destroy_f(daxpy_launcher)
     call legion_task_launcher_destroy_f(check_launcher)
     call legion_task_postamble_f(runtime, ctx, c_null_ptr, retsize)
-    top_level_task = 0
-end function
+  end subroutine top_level_task
+end module daxpy
 
-Program Hello
+Program daxpy_raw_rect_pointer
     use legion_fortran
     use iso_c_binding
+    use daxpy
     implicit none
+    
     type(legion_execution_constraint_set_f_t) :: execution_constraints
     type(legion_task_layout_constraint_set_f_t) :: layout_constraints
     type(legion_task_config_options_f_t) :: config_options
     integer(c_int) :: proc_kind = 2
-    integer(c_int) :: TOP_LEVEL_TASK_ID, INIT_TASK_ID, DAXPY_TASK_ID, CHECK_TASK_ID
     integer(c_int) :: task_id_1, task_id_2, task_id_3, task_id_4
     integer(c_size_t) :: userlen = 0
     integer(c_int) :: runtime_start_rv
-    logical(c_bool) :: background = .FALSE.
     type(c_funptr) :: c_func_ptr
-    
-    external top_level_task
-    external init_task
-    external check_task
-    external daxpy_task
-    
-   ! common TOP_LEVEL_TASK_ID
-    !common HELLO_WORLD_TASK_ID
-    TOP_LEVEL_TASK_ID = 0
-    INIT_TASK_ID = 1
-    DAXPY_TASK_ID = 2
-    CHECK_TASK_ID = 3
         
     Print *, "Hello World from Main!"
     call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
-    execution_constraints = legion_execution_constraint_set_create_f()
+    call legion_execution_constraint_set_create_f(execution_constraints)
     call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, proc_kind)
-    layout_constraints = legion_task_layout_constraint_set_create_f()
-    config_options%leaf = .FALSE.
-    config_options%inner = .FALSE.
-    config_options%idempotent = .FALSE.
+    call legion_task_layout_constraint_set_create_f(layout_constraints)
+    config_options%leaf = .false.
+    config_options%inner = .false.
+    config_options%idempotent = .false.
     
     c_func_ptr = c_funloc(top_level_task)
     
-    task_id_1 = legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
-                                                                c_char_"cpu_variant"//c_null_char, &
-                                                                execution_constraints, &
-                                                                layout_constraints, &
-                                                                config_options, &
-                                                                c_func_ptr, &
-                                                                c_null_ptr, &
-                                                                userlen)
+    call legion_runtime_preregister_task_variant_fnptr_f(TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
+                                                        c_char_"cpu_variant"//c_null_char, &
+                                                        execution_constraints, &
+                                                        layout_constraints, &
+                                                        config_options, &
+                                                        c_func_ptr, &
+                                                        c_null_ptr, &
+                                                        userlen, task_id_1)
     
     c_func_ptr = c_funloc(init_task)
 
-    task_id_2 = legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, c_char_"init_task"//c_null_char, &
-                                                                c_char_"cpu_variant"//c_null_char, &
-                                                                execution_constraints, &
-                                                                layout_constraints, &
-                                                                config_options, &
-                                                                c_func_ptr, &
-                                                                c_null_ptr, &
-                                                                userlen)
+    call legion_runtime_preregister_task_variant_fnptr_f(INIT_TASK_ID, c_char_"init_task"//c_null_char, &
+                                                        c_char_"cpu_variant"//c_null_char, &
+                                                        execution_constraints, &
+                                                        layout_constraints, &
+                                                        config_options, &
+                                                        c_func_ptr, &
+                                                        c_null_ptr, &
+                                                        userlen, task_id_2)
                                                                 
     c_func_ptr = c_funloc(daxpy_task)
 
-    task_id_3 = legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, c_char_"daxpy_task"//c_null_char, &
-                                                                c_char_"cpu_variant"//c_null_char, &
-                                                                execution_constraints, &
-                                                                layout_constraints, &
-                                                                config_options, &
-                                                                c_func_ptr, &
-                                                                c_null_ptr, &
-                                                                userlen)
+    call legion_runtime_preregister_task_variant_fnptr_f(DAXPY_TASK_ID, c_char_"daxpy_task"//c_null_char, &
+                                                        c_char_"cpu_variant"//c_null_char, &
+                                                        execution_constraints, &
+                                                        layout_constraints, &
+                                                        config_options, &
+                                                        c_func_ptr, &
+                                                        c_null_ptr, &
+                                                        userlen, task_id_3)
     
     c_func_ptr = c_funloc(check_task)
 
-    task_id_4 = legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, c_char_"check_task"//c_null_char, &
-                                                                c_char_"cpu_variant"//c_null_char, &
-                                                                execution_constraints, &
-                                                                layout_constraints, &
-                                                                config_options, &
-                                                                c_func_ptr, &
-                                                                c_null_ptr, &
-                                                                userlen)
-    runtime_start_rv = legion_runtime_start_f(0, c_null_ptr, background)
-End Program Hello
+    call legion_runtime_preregister_task_variant_fnptr_f(CHECK_TASK_ID, c_char_"check_task"//c_null_char, &
+                                                        c_char_"cpu_variant"//c_null_char, &
+                                                        execution_constraints, &
+                                                        layout_constraints, &
+                                                        config_options, &
+                                                        c_func_ptr, &
+                                                        c_null_ptr, &
+                                                        userlen, task_id_4)
+    call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
+End Program daxpy_raw_rect_pointer
