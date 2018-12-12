@@ -87,8 +87,7 @@ contains
     type(c_ptr), intent(in) ::userdata
     integer(c_size_t), value, intent(in) :: userlen
     integer(c_long_long), value, intent(in) :: p
-    type(legion_accessor_array_1d_f_t) :: accessor_x
-    type(LegionFieldAccessor1D) :: accessor_y, accessor_z
+    type(LegionFieldAccessor1D) :: accessor_x, accessor_y, accessor_z
     type(LegionPoint1D) ::point_1d
     
     type(legion_task_f_t) :: task
@@ -107,10 +106,6 @@ contains
     type(legion_index_space_f_t) :: index_space
     type(legion_rect_1d_f_t) :: index_rect, subrect
     real(kind=8), target :: xy_value, x_value, y_value
-    type(c_ptr) :: x_ptr
-    type(legion_point_1d_f_t) :: point
-    type(c_ptr) :: raw_ptr_x, raw_ptr_y, raw_ptr_z
-    type(legion_byte_offset_f_t) :: offset
     integer :: i
         
     call legion_task_preamble_f(tdata, tdatalen, p, &
@@ -125,23 +120,16 @@ contains
     call legion_task_get_arglen_f(task, arglen)
  !   Print *, "Daxpy Task!", task_arg, arglen
     
-    call legion_physical_region_get_field_accessor_array_1d_f(pr1, 0, accessor_x)
+    accessor_x = LegionFieldAccessor1D(pr1, 0, c_sizeof(x_value))
     accessor_y = LegionFieldAccessor1D(pr1, 1, c_sizeof(y_value))
     accessor_z = LegionFieldAccessor1D(pr2, 2, c_sizeof(xy_value))
     call legion_task_get_index_space_from_logical_region_f(task, 0, index_space)
     call legion_index_space_get_domain_f(runtime, index_space, index_domain)
     call legion_domain_get_rect_1d_f(index_domain, index_rect)
     
-    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_x, index_rect, subrect, offset, raw_ptr_x)
-    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_y%accessor, index_rect, subrect, offset, raw_ptr_y)
-    call legion_accessor_array_1d_raw_rect_ptr_f(accessor_z%accessor, index_rect, subrect, offset, raw_ptr_z)
-    
-    Print *, "Daxpy Task!", task_arg, arglen, raw_ptr_x, raw_ptr_y, raw_ptr_z
     do i = index_rect%lo%x(0), index_rect%hi%x(0)
-        point%x(0) = i
         point_1d = LegionPoint1D(i)
-        x_ptr = c_loc(x_value)
-        call legion_accessor_array_1d_read_point_f(accessor_x, point, x_ptr, c_sizeof(x_value))
+        call accessor_x%read_point(point_1d, x_value)
         call accessor_y%read_point(point_1d, y_value)
         xy_value = x_value + y_value
         call accessor_z%write_point(point_1d, xy_value)
