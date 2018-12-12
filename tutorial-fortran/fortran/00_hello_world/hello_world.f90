@@ -84,50 +84,50 @@ end module hello_world
   
 
 Program hello
-    use legion_fortran
-    use iso_c_binding
-    use hello_world
-    implicit none
-    
-    type(legion_execution_constraint_set_f_t) :: execution_constraints
-    type(legion_task_layout_constraint_set_f_t) :: layout_constraints
-    type(legion_task_config_options_f_t) :: config_options
-    integer(c_int) :: task_id_1, task_id_2, runtime_start_rv
-    integer(c_size_t) :: userlen = 0
-    type(c_funptr) :: c_func_ptr
-        
-    Print *, "Hello World from Main!"
-    call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
-    call legion_execution_constraint_set_create_f(execution_constraints)
-    call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, LOC_PROC)
-    call legion_task_layout_constraint_set_create_f(layout_constraints)
-    config_options%leaf = .false.
-    config_options%inner = .false.
-    config_options%idempotent = .false.
-    
-    c_func_ptr = c_funloc(top_level_task)
-    
-    call legion_runtime_preregister_task_variant_fnptr_f( &
-      TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
-      c_char_"cpu_variant"//c_null_char, &
-      execution_constraints, &
-      layout_constraints, &
-      config_options, &
-      c_func_ptr, &
-      c_null_ptr, &
-      userlen, task_id_1)
-    
-    c_func_ptr = c_funloc(hello_world_task)
+  use legion_fortran
+  use iso_c_binding
+  use hello_world
+  implicit none
+  
+  type(legion_execution_constraint_set_f_t) :: execution_constraints
+  type(legion_task_layout_constraint_set_f_t) :: layout_constraints
+  type(legion_task_config_options_f_t) :: config_options
+  integer(c_int) :: task_id_1, task_id_2, runtime_start_rv
+  integer(c_size_t) :: userlen = 0
+  type(c_funptr) :: c_func_ptr
+      
+  Print *, "Hello World from Main!"
+  call legion_runtime_set_top_level_task_id_f(TOP_LEVEL_TASK_ID)
+  call legion_execution_constraint_set_create_f(execution_constraints)
+  call legion_execution_constraint_set_add_processor_constraint_f(execution_constraints, LOC_PROC)
+  call legion_task_layout_constraint_set_create_f(layout_constraints)
+  config_options%leaf = .false.
+  config_options%inner = .false.
+  config_options%idempotent = .false.
+  
+  c_func_ptr = c_funloc(top_level_task)
+  
+  call legion_runtime_preregister_task_variant_fnptr_f( &
+    TOP_LEVEL_TASK_ID, c_char_"top_level_task"//c_null_char, &
+    c_char_"cpu_variant"//c_null_char, &
+    execution_constraints, &
+    layout_constraints, &
+    config_options, &
+    c_func_ptr, &
+    c_null_ptr, &
+    userlen, task_id_1)
+  
+  c_func_ptr = c_funloc(hello_world_task)
 
-    call legion_runtime_preregister_task_variant_fnptr_f( &
-      HELLO_WORLD_TASK_ID, c_char_"hello_world_task"//c_null_char, &
-      c_char_"cpu_variant"//c_null_char, &
-      execution_constraints, &
-      layout_constraints, &
-      config_options, &
-      c_func_ptr, &
-      c_null_ptr, &
-      userlen, task_id_2)
-    
-    call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
+  call legion_runtime_preregister_task_variant_fnptr_f( &
+    HELLO_WORLD_TASK_ID, c_char_"hello_world_task"//c_null_char, &
+    c_char_"cpu_variant"//c_null_char, &
+    execution_constraints, &
+    layout_constraints, &
+    config_options, &
+    c_func_ptr, &
+    c_null_ptr, &
+    userlen, task_id_2)
+  
+  call legion_runtime_start_f(0, c_null_ptr, .false., runtime_start_rv)
 End Program hello

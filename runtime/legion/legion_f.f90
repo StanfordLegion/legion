@@ -323,11 +323,11 @@ contains
         integer(c_int), intent(in)                     :: prop
         type(legion_logical_region_f_t), intent(in)    :: parent
         integer(c_long), intent(in)                    :: tag
-        logical(c_bool), intent(in)                    :: verified
+        logical, intent(in)                            :: verified
         integer(c_int), intent(out)                    :: rr_idx
         
         rr_idx = legion_index_launcher_add_region_requirement_lp_c(launcher, handle, proj, priv, &
-            prop, parent, tag, verified)
+            prop, parent, tag, logical(verified, kind=c_bool))
     end subroutine legion_index_launcher_add_region_requirement_lp_f
     
     ! @see Legion::TaskLaunchxer::add_field()
@@ -337,9 +337,9 @@ contains
         type(legion_index_launcher_f_t), intent(in) :: launcher
         integer(c_int), intent(in)                  :: idx
         integer(c_int), intent(in)                  :: fid
-        logical(c_bool), intent(in)                 :: inst 
+        logical, intent(in)                         :: inst 
     
-        call legion_index_launcher_add_field_c(launcher, idx, fid, inst) 
+        call legion_index_launcher_add_field_c(launcher, idx, fid, logical(inst, kind=c_bool)) 
     end subroutine legion_index_launcher_add_field_f
     
     ! -----------------------------------------------------------------------
