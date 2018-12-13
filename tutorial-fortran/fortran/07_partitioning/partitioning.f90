@@ -118,7 +118,7 @@ contains
     call legion_task_get_args_f(task, task_arg_ptr)
     call c_f_pointer(task_arg_ptr, task_arg)
     call legion_task_get_arglen_f(task, arglen)
- !   Print *, "Daxpy Task!", task_arg, arglen
+    Print *, "Daxpy Task!", task_arg, arglen
     
     accessor_x = LegionFieldAccessor1D(pr1, 0, c_sizeof(x_value))
     accessor_y = LegionFieldAccessor1D(pr1, 1, c_sizeof(y_value))
@@ -251,7 +251,6 @@ contains
     character (len=9), target :: input_ip_name = "input_ip"//c_null_char
     character (len=10), target :: output_ip_name = "output_ip"//c_null_char
     type(legion_logical_partition_f_t) :: input_lp, output_lp
-    logical(c_bool) :: is_mutable = .false.
     
     type(legion_predicate_f_t) :: pred
     type(legion_task_argument_f_t) :: task_args
@@ -305,12 +304,12 @@ contains
     call legion_domain_from_rect_1d_f(color_rect, color_domain)
     call legion_index_space_create_domain_f(runtime, ctx, color_domain, color_is)
     call legion_index_partition_create_equal_f(runtime, ctx, is, color_is, granularity, 0, ip)
-    call legion_index_partition_attach_name_f(runtime, ip, ip_name, is_mutable)
+    call legion_index_partition_attach_name_f(runtime, ip, ip_name, .false.)
     
     call legion_logical_partition_create_f(runtime, ctx, input_lr, ip, input_lp)
-    call legion_logical_partition_attach_name_f(runtime, input_lp, input_ip_name, is_mutable)
+    call legion_logical_partition_attach_name_f(runtime, input_lp, input_ip_name, .false.)
     call legion_logical_partition_create_f(runtime, ctx, output_lr, ip, output_lp)
-    call legion_logical_partition_attach_name_f(runtime, output_lp, output_ip_name, is_mutable)
+    call legion_logical_partition_attach_name_f(runtime, output_lp, output_ip_name, .false.)
     
     call legion_predicate_true_f(pred) 
     call legion_argument_map_create_f(arg_map)
