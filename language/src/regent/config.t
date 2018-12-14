@@ -15,6 +15,7 @@
 -- Regent Configuration and Command Line Parsing
 
 local common_config = require("common/config")
+local data = require("common/data")
 
 local config = {}
 
@@ -46,7 +47,7 @@ local default_options = {
 
   -- Main user-facing optimization flags:
   ["cuda"] = true,
-  ["cuda-offline"] = false,
+  ["cuda-offline"] = not data.is_luajit(),
   ["cuda-arch"] = os.getenv("GPU_ARCH") or "fermi",
   ["index-launch"] = true,
   ["inline"] = true,
@@ -57,7 +58,7 @@ local default_options = {
   ["replicable"] = true,
   ["mapping"] = true,
   ["openmp"] = false,
-  ["openmp-offline"] = false,
+  ["openmp-offline"] = not data.is_luajit(),
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
   ["vectorize"] = true,
