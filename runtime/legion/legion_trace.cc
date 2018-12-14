@@ -1785,27 +1785,87 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const PhysicalTraceInfo trace_info(this);
+      std::set<RtEvent> registration_postconditions;
+      std::vector<CopyFillAggregator*> 
+        output_aggregators(requirements.size(), NULL);
+      std::vector<std::vector<InstanceView*> > 
+        target_views(requirements.size());
+      std::vector<std::set<ApEvent> > remote_ready(requirements.size());
+      std::set<ApEvent> wait_events;
+      std::vector<ApEvent> effects(requirements.size(), ApEvent::NO_AP_EVENT);
+      std::vector<IndexSpaceExpression*> local_exprs(requirements.size(), NULL);
+      std::vector<RtEvent> reg_pre(requirements.size(), RtEvent::NO_RT_EVENT);
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        runtime->forest->physical_register_only(requirements[idx],
-                                                version_infos[idx],
-                                                this, idx,
-                                                ApEvent::NO_AP_EVENT,
-                                                completion_event,
-                                                instances[idx],
-                                                trace_info
+      {
+        reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                                  requirements[idx],
+                                                  version_infos[idx],
+                                                  this, idx,
+                                                  ApEvent::NO_AP_EVENT,
+                                                  completion_event,
+                                                  instances[idx],
+                                                  trace_info,
+                                                  output_aggregators[idx],
+                                                  map_applied_conditions,
+                                                  remote_ready[idx],
+                                                  wait_events,
+                                                  target_views[idx],
+                                                  local_exprs[idx],
 #ifdef DEBUG_LEGION
-                                                , get_logging_name()
-                                                , unique_op_id
+                                                  get_logging_name(),
+                                                  unique_op_id,
 #endif
-                                                );
-      for (unsigned idx = 0; idx < requirements.size(); ++idx)
-        version_infos[idx].finalize_mapping(map_applied_conditions);
+                                                  true/*track effects*/);
+      }
+      for (unsigned idx = 0; idx < requirements.size(); idx++)
+      {
+        if (reg_pre[idx].exists() || (output_aggregators[idx] != NULL))
+        {
+          const RtEvent postcondition = 
+            runtime->forest->defer_physical_perform_registration(reg_pre[idx],
+                                                 local_exprs[idx],
+                                                 requirements[idx],
+                                                 version_infos[idx],
+                                                 this, idx,
+                                                 completion_event,
+                                                 instances[idx],
+                                                 trace_info,
+                                                 output_aggregators[idx],
+                                                 remote_ready[idx],
+                                                 target_views[idx],
+                                                 map_applied_conditions,
+                                                 effects[idx]);
+          registration_postconditions.insert(postcondition);
+        }
+        else
+          effects[idx] = 
+            runtime->forest->physical_perform_registration(
+                                                 local_exprs[idx],
+                                                 requirements[idx],
+                                                 version_infos[idx],
+                                                 this, idx,
+                                                 completion_event,
+                                                 instances[idx],
+                                                 trace_info,
+                                                 output_aggregators[idx],
+                                                 remote_ready[idx],
+                                                 target_views[idx],
+                                                 map_applied_conditions);
+      }
+      if (!registration_postconditions.empty())
+      {
+        const RtEvent wait_on = 
+          Runtime::merge_events(registration_postconditions);
+        wait_on.wait();
+      }
+      for (unsigned idx = 0; idx < effects.size(); idx++)
+        if (effects[idx].exists())
+          wait_events.insert(effects[idx]);
       if (!map_applied_conditions.empty())
         complete_mapping(Runtime::merge_events(map_applied_conditions));
       else
         complete_mapping();
 
-      std::set<ApEvent> wait_events;
       if (execution_fence_event.exists())
         wait_events.insert(execution_fence_event);
       for (unsigned idx = 0; idx < instances.size(); ++idx)

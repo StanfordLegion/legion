@@ -121,59 +121,23 @@ namespace Legion {
       return *this;
     }
 
-    //--------------------------------------------------------------------------
-    void PhysicalUser::pack_user(Serializer &rez, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      expr->pack_expression(rez, target);
-      rez.serialize(usage.privilege);
-      rez.serialize(usage.prop);
-      rez.serialize(usage.redop);
-      rez.serialize(op_id);
-      rez.serialize(index);
-      rez.serialize<bool>(copy_user);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
-        bool add_reference, RegionTreeForest *forest, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      IndexSpaceExpression *expr = 
-          IndexSpaceExpression::unpack_expression(derez, forest, source);
-#ifdef DEBUG_LEGION
-      assert(expr != NULL);
-#endif
-      PhysicalUser *result = new PhysicalUser(expr);
-      derez.deserialize(result->usage.privilege);
-      derez.deserialize(result->usage.prop);
-      derez.deserialize(result->usage.redop);
-      derez.deserialize(result->op_id);
-      derez.deserialize(result->index);
-      derez.deserialize(result->copy_user);
-      if (add_reference)
-        result->add_reference();
-      return result;
-    }
-
     /////////////////////////////////////////////////////////////
     // VersionInfo 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(void)
-      : op(NULL), owner(NULL)
+      : owner(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     VersionInfo::VersionInfo(const VersionInfo &rhs)
-      : op(NULL), owner(NULL)
+      : owner(NULL)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(rhs.op == NULL);
       assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
@@ -184,12 +148,6 @@ namespace Legion {
     VersionInfo::~VersionInfo(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op == NULL);
-      assert(owner == NULL);
-      assert(applied_events.empty());
-      assert(equivalence_sets.empty());
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -200,171 +158,61 @@ namespace Legion {
       assert(rhs.owner == NULL);
       assert(equivalence_sets.empty());
       assert(rhs.equivalence_sets.empty());
-      assert(applied_events.empty());
-      assert(rhs.applied_events.empty());
 #endif
       return *this;
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::initialize_mapping(Operation *o)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op == NULL);
-#endif
-      op = o;
-    }
-
-    //--------------------------------------------------------------------------
     void VersionInfo::record_equivalence_sets(VersionManager *own,
+                                          const unsigned ver_num,
                                           const std::set<EquivalenceSet*> &sets)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION 
-      assert(op != NULL);
-      assert(equivalence_sets.empty());
       assert(owner == NULL);
+      assert(equivalence_sets.empty());
 #endif
-      equivalence_sets = sets;
       // Save the owner in case we need to update this later
       owner = own;
+      version_number = ver_num;
+      equivalence_sets = sets;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionInfo::update_equivalence_sets(
+                                  const std::set<EquivalenceSet*> &to_add,
+                                  const std::vector<EquivalenceSet*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION 
+      assert(owner != NULL);
+#endif
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+#ifdef DEBUG_LEGION
+        assert(equivalence_sets.find(*it) != equivalence_sets.end());
+#endif
+        equivalence_sets.erase(*it);
+      }
       for (std::set<EquivalenceSet*>::const_iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+            to_add.begin(); it != to_add.end(); it++)
       {
-        // Check for unrefined remainders here before we record it
-        if ((*it)->has_unrefined_remainder())
-          (*it)->refine_remainder();
+#ifdef DEBUG_LEGION
+        assert(equivalence_sets.find(*it) == equivalence_sets.end());
+#endif
+        equivalence_sets.insert(*it);
       }
+      // Tell the owner about the updated set
+      owner->update_equivalence_sets(version_number, to_add, to_delete);
     }
 
     //--------------------------------------------------------------------------
-    void VersionInfo::acquire_equivalence_sets(const RegionRequirement &req, 
-                                               const FieldMask &acquire_mask,
-                                     std::set<Reservation> &needed_reservations)
+    void VersionInfo::clear(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-#endif
-      // First we need to go through and lock in the equivalence sets to
-      // confirm that they won't be refined while we're doing the mapping
-      std::set<EquivalenceSet*> alt_sets;
-      for (std::set<EquivalenceSet*>::iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
-      {
-        if ((*it)->acquire_mapping_guard(op, acquire_mask, alt_sets))
-        {
-#ifdef DEBUG_LEGION
-          assert(!alt_sets.empty());
-#endif
-          std::set<EquivalenceSet*>::iterator to_delete = it++;
-          equivalence_sets.erase(to_delete); 
-        }
-        else
-          it++;
-      }
-      if (!alt_sets.empty())
-      {
-        // Add references to the sets and put them in our equivalence sets
-        for (std::set<EquivalenceSet*>::const_iterator it = 
-              alt_sets.begin(); it != alt_sets.end(); it++)
-        {
-#ifdef DEBUG_LEGION
-          assert(equivalence_sets.find(*it) == equivalence_sets.end());
-#endif
-          equivalence_sets.insert(*it);
-        }
-        // This means that refinement has changed for this region so update it
-#ifdef DEBUG_LEGION
-        assert(owner != NULL);
-#endif
-        owner->update_equivalence_sets(equivalence_sets);
-      }
-      // If this is a read-only privilege operation then 
-      // we need the reservations for these equivalence sets since we 
-      // could potentially race on updates between them
-      if (IS_READ_ONLY(req))
-      {
-        for (std::set<EquivalenceSet*>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          needed_reservations.insert((*it)->version_lock);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::make_ready(const RegionRequirement &req, 
-                                 const FieldMask &ready_mask,
-                                 std::set<RtEvent> &ready_events)
-    //--------------------------------------------------------------------------
-    {
-      // We only need an exclusive mode for this operation if we're 
-      // writing otherwise, we know we can do things with a shared copy
-      for (std::set<EquivalenceSet*>::const_iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-        (*it)->request_valid_copy(op, ready_mask, RegionUsage(req), 
-                                  ready_events, applied_events,
-                                  (*it)->local_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::finalize_mapping(std::set<RtEvent> &map_applied_events,
-                                       bool block/*=false*/)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-#endif
-      // It's not safe to remove our mapping guards until all our applied
-      // events have triggered since they indicate that effects have propagated
-      if (!applied_events.empty())
-      {
-        const RtEvent applied = Runtime::merge_events(applied_events); 
-        applied_events.clear();
-        if (applied.exists() && !applied.has_triggered())
-        {
-          if (!block)
-          {
-            // Defer the finalization until the effects are done
-            const DeferredVersionFinalizeArgs args(this,op->get_unique_op_id());
-            const RtEvent done = op->runtime->issue_runtime_meta_task(args,
-                                  LG_LATENCY_DEFERRED_PRIORITY, applied);
-            map_applied_events.insert(done);
-            return;
-          }
-          else
-            applied.wait();
-        }
-      }
-      perform_finalize();
-    }
-
-    //--------------------------------------------------------------------------
-    void VersionInfo::perform_finalize(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(op != NULL);
-      assert(applied_events.empty());
-#endif
-      if (!equivalence_sets.empty())
-      {
-        for (std::set<EquivalenceSet*>::const_iterator it = 
-              equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-          (*it)->remove_mapping_guard(op);
-        equivalence_sets.clear();
-      }
-      op = NULL;
       owner = NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void VersionInfo::handle_defer_finalize(const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferredVersionFinalizeArgs *dargs = 
-        (const DeferredVersionFinalizeArgs*)args;
-      dargs->proxy_this->perform_finalize();
+      equivalence_sets.clear();
     }
 
     /////////////////////////////////////////////////////////////
@@ -1860,11 +1708,11 @@ namespace Legion {
         EquivalenceSet *left_temp = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), local_space,
             local_space, left_union_expr, NULL/*index space*/,
-            Reservation::NO_RESERVATION, true/*register now*/);
+            true/*register now*/);
         EquivalenceSet *right_temp = new EquivalenceSet(runtime,
             runtime->get_available_distributed_id(), local_space,
             local_space, right_union_expr, NULL/*index space*/,
-            Reservation::NO_RESERVATION, true/*register now*/);
+            true/*register now*/);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               left_set.begin(); it != left_set.end(); it++)
           left_temp->record_subset(*it);
@@ -1897,29 +1745,36 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o,
-                                    unsigned idx, std::set<RtEvent> &ev, bool t)
-      : WrapperReferenceMutator(ev), forest(f), op(o), src_index(idx), 
-        dst_index(idx), track_events(t), effects(ev)
+    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
+                                           Operation *o, unsigned idx, 
+                                           RtEvent g, bool t)
+      : WrapperReferenceMutator(effects), forest(f), op(o), src_index(idx), 
+        dst_index(idx), guard_precondition(g), 
+        guard_postcondition(Runtime::create_rt_user_event()),
+        applied_event(Runtime::create_rt_user_event()), track_events(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, Operation *o,
-                                           unsigned src_idx, unsigned dst_idx,
-                                           std::set<RtEvent> &ev, bool t)
-      : WrapperReferenceMutator(ev), forest(f), op(o), src_index(src_idx), 
-        dst_index(dst_idx), track_events(t), effects(ev)
+    CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
+                                Operation *o, unsigned src_idx, unsigned dst_idx,
+                                RtEvent g, bool t)
+      : WrapperReferenceMutator(effects), forest(f), op(o), src_index(src_idx), 
+        dst_index(dst_idx), guard_precondition(g),
+        guard_postcondition(Runtime::create_rt_user_event()),
+        applied_event(Runtime::create_rt_user_event()), track_events(t)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(const CopyFillAggregator &rhs)
-      : WrapperReferenceMutator(rhs.effects), forest(rhs.forest), op(rhs.op),
+      : WrapperReferenceMutator(effects), forest(rhs.forest), op(rhs.op),
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
-        track_events(rhs.track_events), effects(rhs.effects)
+        guard_precondition(rhs.guard_precondition),
+        guard_postcondition(rhs.guard_postcondition),
+        applied_event(rhs.applied_event), track_events(rhs.track_events)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -1930,6 +1785,10 @@ namespace Legion {
     CopyFillAggregator::~CopyFillAggregator(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(guard_postcondition.has_triggered());
+      assert(guarded_sets.empty());
+#endif
       // Remove references from any views that we have
       for (std::set<LogicalView*>::const_iterator it = 
             all_views.begin(); it != all_views.end(); it++)
@@ -2023,9 +1882,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::CopyUpdate::sort_updates(std::map<InstanceView*,
-                                           std::vector<CopyUpdate*> > &copies,
-                                          std::vector<FillUpdate*> &fills)
+    void CopyFillAggregator::CopyUpdate::sort_updates(
+                    std::map<InstanceView*, std::vector<CopyUpdate*> > &copies,
+                    std::vector<FillUpdate*> &fills)
     //--------------------------------------------------------------------------
     {
       copies[source].push_back(this);
@@ -2050,12 +1909,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::FillUpdate::sort_updates(std::map<InstanceView*,
-                                           std::vector<CopyUpdate*> > &copies,
-                                          std::vector<FillUpdate*> &fills)
+    void CopyFillAggregator::FillUpdate::sort_updates(
+                    std::map<InstanceView*, std::vector<CopyUpdate*> > &copies,
+                    std::vector<FillUpdate*> &fills)
     //--------------------------------------------------------------------------
     {
       fills.push_back(this);
+    }
+
+    //--------------------------------------------------------------------------
+    size_t CopyFillAggregator::count_updates(void) const
+    //--------------------------------------------------------------------------
+    {
+      size_t result = 0;
+      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+            const_iterator it = sources.begin(); it != sources.end(); it++)
+        result += it->second.size();
+      for (unsigned idx = 0; idx < reductions.size(); idx++)
+        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
+              const_iterator it = reductions[idx].begin(); it !=
+              reductions[idx].end(); it++)
+          result += it->second.size();
+      return result;
     }
 
     //--------------------------------------------------------------------------
@@ -2070,9 +1945,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!src_mask);
       assert(!src_views.empty());
+      assert(!expr->is_empty());
 #endif
-      if (expr->is_empty())
-        return;
       FieldMaskSet<Update> &updates = sources[dst_view];
       record_view(dst_view);
       if (src_views.size() == 1)
@@ -2268,9 +2142,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(all_views.find(dst_view) != all_views.end());
       assert(!!fill_mask);
+      assert(!expr->is_empty());
 #endif
-      if (expr->is_empty())
-        return;
       record_view(src_view);
       FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
       if (helper == NULL)
@@ -2290,9 +2163,8 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!src_views.empty());
+      assert(!expr->is_empty());
 #endif 
-      if (expr->is_empty())
-        return;
       record_view(dst_view);
       for (std::vector<ReductionView*>::const_iterator it = 
             src_views.begin(); it != src_views.end(); it++)
@@ -2380,12 +2252,30 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyFillAggregator::issue_updates(const PhysicalTraceInfo &trace_info,
+    RtEvent CopyFillAggregator::issue_updates(
+                                           const PhysicalTraceInfo &trace_info,
                                            ApEvent precondition,
                                            const bool has_src_preconditions,
-                                           const bool has_dst_preconditions)
+                                           const bool has_dst_preconditions,
+                                           const bool need_deferral)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!sources.empty() || !reductions.empty());
+#endif
+      if (need_deferral || 
+          (guard_precondition.exists() && !guard_precondition.has_triggered()))
+      {
+        CopyFillAggregation args(this, trace_info, precondition, 
+          has_src_preconditions, has_dst_preconditions, op->get_unique_op_id());
+        op->runtime->issue_runtime_meta_task(args, 
+                           LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
+        return guard_postcondition;
+      }
+#ifdef DEBUG_LEGION
+      assert(!guard_precondition.exists() || 
+              guard_precondition.has_triggered());
+#endif
       // Perform updates from any sources first
       if (!sources.empty())
         perform_updates(sources, trace_info, precondition,
@@ -2399,6 +2289,44 @@ namespace Legion {
           perform_updates(*it, trace_info, precondition,
                           has_src_preconditions, has_dst_preconditions);
       }
+      // We can trigger our postcondition now that we've applied our updates
+      Runtime::trigger_event(guard_postcondition);
+      // We can also trigger our appplied event
+      if (!effects.empty())
+        Runtime::trigger_event(applied_event,
+            Runtime::merge_events(effects));
+      else
+        Runtime::trigger_event(applied_event);
+      return RtEvent::NO_RT_EVENT;
+    }
+    
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::record_guard_set(EquivalenceSet *set)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(guarded_sets.find(set) == guarded_sets.end());
+#endif
+      guarded_sets.insert(set);
+    }
+
+    //--------------------------------------------------------------------------
+    bool CopyFillAggregator::release_guards(std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+      if (!applied_event.has_triggered())
+      {
+        // Meta-task will take responsibility for deletion
+        CopyFillDeletion args(this, op->get_unique_op_id(), 
+                              !guarded_sets.empty());
+        const RtEvent done = op->runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, applied_event);
+        applied.insert(done);
+        return false;
+      }
+      else if (!guarded_sets.empty())
+        release_guarded_sets();
+      return true;
     }
 
     //--------------------------------------------------------------------------
@@ -2967,6 +2895,1681 @@ namespace Legion {
       }
     }
 
+    //--------------------------------------------------------------------------
+    void CopyFillAggregator::release_guarded_sets(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!guarded_sets.empty());
+#endif
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            guarded_sets.begin(); it != guarded_sets.end(); it++)
+        (*it)->remove_update_guard(this);
+      guarded_sets.clear();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CopyFillAggregator::handle_aggregation(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const CopyFillAggregation *cfargs = (const CopyFillAggregation*)args;
+      cfargs->aggregator->issue_updates(cfargs->info, cfargs->pre,
+                cfargs->has_src, cfargs->has_dst, false/*needs deferral*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void CopyFillAggregator::handle_deletion(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const CopyFillDeletion *dargs = (const CopyFillDeletion*)args;
+      if (dargs->remove_guards)
+        dargs->aggregator->release_guarded_sets();
+      delete dargs->aggregator;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Remote Eq Tracker
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    bool RemoteEqTracker::request_remote_instances(
+                                              FieldMaskSet<LogicalView> &insts,
+                                              const FieldMask &mask, 
+                                              std::set<RtEvent> &ready_events,
+                                              RemoteEqTracker *target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      if (this == target)
+      {
+        remote_lock = new LocalLock();
+        sync_events = new std::set<RtEvent>();
+        remote_insts = new FieldMaskSet<LogicalView>();
+        restricted = false;
+      }
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
+          rez.serialize(mask);
+          rez.serialize(target);
+          rez.serialize(ready);
+        }
+        runtime->send_equivalence_set_remote_request_instances(rit->first, rez);
+        if (this == target)
+        {
+          AutoLock r_lock(*remote_lock);
+          sync_events->insert(ready);
+        }
+        else
+          ready_events.insert(ready);
+      }
+      if (this == target)
+      {
+        sync_remote_instances(insts);
+        return restricted;
+      }
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RemoteEqTracker::request_remote_reductions(
+                                            FieldMaskSet<ReductionView> &insts,
+                                            const FieldMask &mask, 
+                                            const ReductionOpID redop,
+                                            std::set<RtEvent> &ready_events,
+                                            RemoteEqTracker *target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      if (this == target)
+      {
+        remote_lock = new LocalLock();
+        sync_events = new std::set<RtEvent>();
+        remote_insts = new FieldMaskSet<LogicalView>();
+        restricted = false;
+      }
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
+          rez.serialize(mask);
+          rez.serialize(redop);
+          rez.serialize(target);
+          rez.serialize(ready);
+        }
+        runtime->send_equivalence_set_remote_request_reductions(rit->first,rez);
+        if (this == target)
+        {
+          AutoLock r_lock(*remote_lock);
+          sync_events->insert(ready);
+        }
+        else
+          ready_events.insert(ready);
+      }
+      if (this == target)
+      {
+        sync_remote_instances(insts);
+        return restricted;
+      }
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_updates(Operation *op, unsigned index,
+                                  LogicalRegion handle,
+                                  const RegionUsage &usage,
+                                  const FieldMask &user_mask,
+                                  const InstanceSet &targets,
+                                  const std::vector<InstanceView*> &views,
+                                  ApEvent precondition, ApEvent term_event,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &remote_events,
+                                  std::set<ApEvent> &effects_events,
+                                  std::set<IndexSpaceExpression*> &remote_exprs,
+                                  const bool track_effects,
+                                  const bool check_initialized) 
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+      assert(!targets.empty());
+      assert(targets.size() == views.size());
+#endif
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        const ApUserEvent ready = Runtime::create_ap_user_event();
+        const ApUserEvent effects = track_effects ? 
+          Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            remote_exprs.insert((*it)->set_expr);
+          }
+          op->pack_remote_operation(rez);
+          rez.serialize(index);
+          rez.serialize(handle);
+          rez.serialize(usage);
+          rez.serialize(user_mask);
+          rez.serialize<size_t>(targets.size());
+          for (unsigned idx = 0; idx < targets.size(); idx++)
+          {
+            const InstanceRef &ref = targets[idx];
+            rez.serialize(ref.get_manager()->did);
+            rez.serialize(views[idx]->did);
+            rez.serialize(ref.get_valid_fields());
+          }
+          rez.serialize(precondition);
+          rez.serialize(term_event);
+          rez.serialize(applied);
+          rez.serialize(ready);
+          rez.serialize(effects);
+          rez.serialize<bool>(check_initialized);
+        }
+        runtime->send_equivalence_set_remote_updates(rit->first, rez);
+        map_applied_events.insert(applied);
+        remote_events.insert(ready);
+        if (track_effects)
+          effects_events.insert(effects);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_acquires(Operation *op, 
+                                       const unsigned index,
+                                       const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       const ApEvent term_event,
+                                       std::set<RtEvent> &map_applied_events,
+                                       std::set<ApEvent> &acquired_events,
+                                       RemoteEqTracker *inst_target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      if (this == inst_target)
+      {
+        remote_lock = new LocalLock();
+        sync_events = new std::set<RtEvent>();
+        remote_insts = new FieldMaskSet<LogicalView>();
+      }
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        const ApUserEvent acquired = Runtime::create_ap_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
+          op->pack_remote_operation(rez);
+          rez.serialize(index);
+          rez.serialize(usage);
+          rez.serialize(user_mask);
+          rez.serialize(term_event);
+          rez.serialize(applied);
+          rez.serialize(acquired);
+          rez.serialize(inst_target);
+        }
+        runtime->send_equivalence_set_remote_acquires(rit->first, rez);
+        map_applied_events.insert(applied);
+        acquired_events.insert(acquired);
+        if (this == inst_target)
+        {
+          AutoLock r_lock(*remote_lock);
+          sync_events->insert(applied);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_releases(Operation *op,
+                                       const unsigned index,
+                                       const RegionUsage &usage,
+                                       const FieldMask &user_mask,
+                                       const ApEvent precondition,
+                                       const ApEvent term_event,
+                                       std::set<RtEvent> &map_applied_events,
+                                       std::set<ApEvent> &released_events,
+                                       RemoteEqTracker *inst_target)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      if (this == inst_target)
+      {
+        remote_lock = new LocalLock();
+        sync_events = new std::set<RtEvent>();
+        remote_insts = new FieldMaskSet<LogicalView>();
+      }
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        const ApUserEvent released = Runtime::create_ap_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
+          op->pack_remote_operation(rez);
+          rez.serialize(index);
+          rez.serialize(usage);
+          rez.serialize(user_mask);
+          rez.serialize(precondition);
+          rez.serialize(term_event);
+          rez.serialize(applied);
+          rez.serialize(released);
+          rez.serialize(inst_target);
+        }
+        runtime->send_equivalence_set_remote_releases(rit->first, rez);
+        map_applied_events.insert(applied);
+        released_events.insert(released);
+        if (this == inst_target)
+        {
+          AutoLock r_lock(*remote_lock);
+          sync_events->insert(applied);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_copies_across(Operation *op, 
+                            const unsigned src_index,
+                            const unsigned dst_index,
+                            const RegionUsage &src_usage,
+                            const RegionUsage &dst_usage,
+                            const FieldMask &src_mask,
+                            const FieldMask &dst_mask,
+                            const InstanceSet &src_instances,
+                            const InstanceSet &dst_instances,
+                            const std::vector<InstanceView*> &src_views,
+                            const std::vector<InstanceView*> &dst_views,
+                            const LogicalRegion src_handle,
+                            const LogicalRegion dst_handle,
+                            const PredEvent pred_guard,
+                            const ApEvent precondition,
+                            const ReductionOpID redop,
+                            const bool perfect,
+                            const std::vector<unsigned> &src_indexes,
+                            const std::vector<unsigned> &dst_indexes,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &copy_events,
+                                  std::set<IndexSpaceExpression*> &remote_exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+      assert(src_instances.size() == src_views.size());
+      assert(dst_instances.size() == dst_views.size());
+      assert(src_indexes.size() == dst_indexes.size());
+#endif
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const ApUserEvent copy = Runtime::create_ap_user_event();
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            remote_exprs.insert((*it)->set_expr);
+          }
+          op->pack_remote_operation(rez);
+          rez.serialize(src_index);
+          rez.serialize(dst_index);
+          rez.serialize(src_usage);
+          rez.serialize(dst_usage);
+          rez.serialize(src_mask);
+          rez.serialize(dst_mask);
+          rez.serialize<size_t>(src_instances.size());
+          for (unsigned idx = 0; idx < src_instances.size(); idx++)
+          {
+            src_instances[idx].pack_reference(rez);
+            rez.serialize(src_views[idx]->did);
+          }
+          rez.serialize<size_t>(dst_instances.size());
+          for (unsigned idx = 0; idx < dst_instances.size(); idx++)
+          {
+            dst_instances[idx].pack_reference(rez);
+            rez.serialize(dst_views[idx]->did); 
+          }
+          rez.serialize(src_handle);
+          rez.serialize(dst_handle);
+          rez.serialize(pred_guard);
+          rez.serialize(precondition);
+          rez.serialize(redop);
+          rez.serialize<bool>(perfect);
+          if (!perfect)
+          {
+            rez.serialize<size_t>(src_indexes.size());
+            for (unsigned idx = 0; idx < src_indexes.size(); idx++)
+            {
+              rez.serialize(src_indexes[idx]);
+              rez.serialize(dst_indexes[idx]);
+            }
+          }
+          rez.serialize(applied);
+          rez.serialize(copy);
+        }
+        runtime->send_equivalence_set_remote_copies_across(rit->first, rez);
+        map_applied_events.insert(applied);
+        copy_events.insert(copy);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_overwrite(Operation *op, 
+                                  const unsigned index,
+                                  const RegionUsage &usage,
+                                  LogicalView *overwrite_view,
+                                  const FieldMask &overwrite_mask,
+                                  const PredEvent pred_guard,
+                                  const ApEvent precondition,
+                                  const ApEvent term_event,
+                                  const bool add_restriction,
+                                  const bool track_effects,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &effects_events,
+                                  std::set<IndexSpaceExpression*> &remote_exprs)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        const ApUserEvent effects = track_effects ? 
+          Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            remote_exprs.insert((*it)->set_expr);
+          }
+          op->pack_remote_operation(rez);
+          rez.serialize(index);
+          rez.serialize(usage);
+          rez.serialize(overwrite_view->did);
+          rez.serialize(overwrite_mask);
+          rez.serialize(pred_guard);
+          rez.serialize(precondition);
+          rez.serialize(term_event);
+          rez.serialize<bool>(add_restriction);
+          rez.serialize(applied);
+          rez.serialize(effects);
+        }
+        runtime->send_equivalence_set_remote_overwrites(rit->first, rez);
+        map_applied_events.insert(applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::perform_remote_filter(Operation *op, 
+                                         LogicalView *filter_view,
+                                         const FieldMask &filter_mask,
+                                         const bool remove_restriction,
+                                         std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!remote_sets.empty());
+#endif
+      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(source);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<EquivalenceSet*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
+          op->pack_remote_operation(rez);
+          rez.serialize(filter_view->did);
+          rez.serialize(filter_mask);
+          rez.serialize(remove_restriction);
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_remote_filters(rit->first, rez);
+        map_applied_events.insert(applied);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::sync_remote_instances(FieldMaskSet<LogicalView> &set)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      RtEvent wait_on;
+      {
+        AutoLock r_lock(*remote_lock);
+#ifdef DEBUG_LEGION
+        assert(!sync_events->empty());
+#endif
+        wait_on = Runtime::merge_events(*sync_events);
+        sync_events->clear();
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Do a second round to make sure all the views are valid
+      // Don't need the lock this time as we know all the updates
+      // have arrived now
+      if (!sync_events->empty())
+      {
+        wait_on = Runtime::merge_events(*sync_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            remote_insts->begin(); it != remote_insts->end(); it++)
+        set.insert(it->first, it->second);
+      delete remote_lock;
+      delete sync_events;
+      delete remote_insts;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::sync_remote_instances(FieldMaskSet<InstanceView> &set)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      RtEvent wait_on;
+      {
+        AutoLock r_lock(*remote_lock);
+#ifdef DEBUG_LEGION
+        assert(!sync_events->empty());
+#endif
+        wait_on = Runtime::merge_events(*sync_events);
+        sync_events->clear();
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Do a second round to make sure all the views are valid
+      // Don't need the lock this time as we know all the updates
+      // have arrived now
+      if (!sync_events->empty())
+      {
+        wait_on = Runtime::merge_events(*sync_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            remote_insts->begin(); it != remote_insts->end(); it++)
+      {
+        InstanceView *view = it->first->as_instance_view();
+        set.insert(view, it->second);
+      }
+      delete remote_lock;
+      delete sync_events;
+      delete remote_insts;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::sync_remote_instances(FieldMaskSet<ReductionView> &st)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      RtEvent wait_on;
+      {
+        AutoLock r_lock(*remote_lock);
+#ifdef DEBUG_LEGION
+        assert(!sync_events->empty());
+#endif
+        wait_on = Runtime::merge_events(*sync_events);
+        sync_events->clear();
+      }
+      if (wait_on.exists() && !wait_on.has_triggered())
+        wait_on.wait();
+      // Do a second round to make sure all the views are valid
+      // Don't need the lock this time as we know all the updates
+      // have arrived now
+      if (!sync_events->empty())
+      {
+        wait_on = Runtime::merge_events(*sync_events);
+        if (wait_on.exists() && !wait_on.has_triggered())
+          wait_on.wait();
+      }
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            remote_insts->begin(); it != remote_insts->end(); it++)
+      {
+        ReductionView *view = it->first->as_reduction_view();
+        st.insert(view, it->second);
+      }
+      delete remote_lock;
+      delete sync_events;
+      delete remote_insts;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::process_remote_instances(Deserializer &derez,
+                                                   Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      size_t num_views;
+      derez.deserialize(num_views);
+      AutoLock r_lock(*remote_lock);
+      for (unsigned idx = 0; idx < num_views; idx++)
+      {
+        DistributedID view_did;
+        derez.deserialize(view_did);
+        RtEvent ready;  
+        LogicalView *view = 
+          runtime->find_or_request_logical_view(view_did, ready);
+        if (ready.exists())
+          sync_events->insert(ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        remote_insts->insert(view, mask);
+      }
+      bool remote_restrict;
+      derez.deserialize(remote_restrict);
+      if (remote_restrict)
+        restricted = true;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_request_instances(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
+      RemoteEqTracker *target;
+      derez.deserialize(target);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      bool restricted = false;
+      FieldMaskSet<LogicalView> valid_insts;
+      RemoteEqTracker remote_tracker(source, runtime);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        if ((*it)->find_valid_instances(remote_tracker, 
+                                        valid_insts, request_mask))
+          restricted = true;
+      if (remote_tracker.has_remote_sets())
+        remote_tracker.request_remote_instances(valid_insts, request_mask,
+                                                ready_events, target);
+      if (!valid_insts.empty())
+      {
+        const RtUserEvent response_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(response_event);
+          rez.serialize<size_t>(valid_insts.size());
+          for (FieldMaskSet<LogicalView>::const_iterator it = 
+                valid_insts.begin(); it != valid_insts.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize<bool>(restricted);
+        }
+        runtime->send_equivalence_set_remote_instances(source, rez);
+        ready_events.insert(response_event);
+      }
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_request_reductions(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      FieldMask request_mask;
+      derez.deserialize(request_mask);
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      RemoteEqTracker *target;
+      derez.deserialize(target);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+
+      bool restricted = false;
+      FieldMaskSet<ReductionView> reduction_insts;
+      RemoteEqTracker remote_tracker(source, runtime);
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        ready_events.clear();
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        if ((*it)->find_reduction_instances(remote_tracker, reduction_insts,
+                                            redop, request_mask))
+          restricted = true;
+      if (remote_tracker.has_remote_sets())
+        remote_tracker.request_remote_reductions(reduction_insts, request_mask,
+                                                 redop, ready_events, target);
+      if (!reduction_insts.empty())
+      {
+        const RtUserEvent response_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(target);
+          rez.serialize(response_event);
+          rez.serialize<size_t>(reduction_insts.size());
+          for (FieldMaskSet<ReductionView>::const_iterator it = 
+                reduction_insts.begin(); it != reduction_insts.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize<bool>(restricted);
+        }
+        runtime->send_equivalence_set_remote_instances(source, rez);
+        ready_events.insert(response_event);
+      }
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_updates(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned index;
+      derez.deserialize(index);
+      LogicalRegion handle;
+      derez.deserialize(handle);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      size_t num_targets;
+      derez.deserialize(num_targets);
+      InstanceSet targets(num_targets);
+      std::vector<InstanceView*> target_views(num_targets, NULL);
+      for (unsigned idx = 0; idx < num_targets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        PhysicalManager *manager = 
+          runtime->find_or_request_physical_manager(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(did);
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        target_views[idx] = static_cast<InstanceView*>(view);
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask valid_fields;
+        derez.deserialize(valid_fields);
+        targets[idx] = InstanceRef(manager, valid_fields);
+      }
+      ApEvent precondition;
+      derez.deserialize(precondition);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      ApUserEvent remote_ready;
+      derez.deserialize(remote_ready);
+      ApUserEvent effects_done;
+      derez.deserialize(effects_done);
+      const bool track_effects = effects_done.exists();
+      bool check_initialized;
+      derez.deserialize(check_initialized);
+
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      std::map<RtEvent,CopyFillAggregator*> input_aggregators;
+      CopyFillAggregator *output_aggregator = NULL;
+      std::set<RtEvent> guard_events;
+      std::set<RtEvent> map_applied_events;
+      std::set<ApEvent> remote_events;
+      std::set<ApEvent> effects_events;
+      PhysicalTraceInfo trace_info(op);
+      std::set<IndexSpaceExpression*> local_exprs;
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      if (!IS_DISCARD(usage) && !IS_SIMULT(usage) && check_initialized)
+      {
+        FieldMask initialized(user_mask);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          (*it)->update_set(remote_tracker, dummy_alt_sets, op, index, 
+                usage, user_mask, targets, target_views, input_aggregators, 
+                output_aggregator,map_applied_events,guard_events,&initialized);
+          local_exprs.insert((*it)->set_expr);
+        }
+        if (user_mask != initialized)
+        {
+          RegionNode *region_node = runtime->forest->get_node(handle);
+          const FieldMask uninitialized = user_mask - initialized;
+          region_node->report_uninitialized_usage(op,index,usage,uninitialized);
+        }
+      }
+      else
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          (*it)->update_set(remote_tracker, dummy_alt_sets, op, index, usage, 
+                          user_mask, targets, target_views, input_aggregators, 
+                          output_aggregator, map_applied_events, guard_events);
+          local_exprs.insert((*it)->set_expr);
+        }
+      }
+      IndexSpaceExpression *local_expr = 
+        runtime->forest->union_index_spaces(local_exprs);
+      // If we have remote messages to send do that now
+      if (remote_tracker.has_remote_sets())
+      {
+        std::set<IndexSpaceExpression*> remote_exprs;
+        remote_tracker.perform_remote_updates(op, index, handle, usage, 
+               user_mask, targets, target_views, precondition, term_event, 
+               map_applied_events, remote_events, effects_events, remote_exprs,
+               track_effects, check_initialized);
+        local_expr = runtime->forest->subtract_index_spaces(local_expr,
+            runtime->forest->union_index_spaces(remote_exprs));
+      }
+      // If we have any input aggregators, perform those copies now too
+      // so that we know they'll be done before we do our registration
+      if (!input_aggregators.empty())
+      {
+        for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
+              input_aggregators.begin(); it != input_aggregators.end(); it++)
+        {
+          const RtEvent done = 
+            it->second->issue_updates(trace_info, precondition);
+          if (done.exists())
+            guard_events.insert(done);
+          if (it->second->release_guards(map_applied_events))
+            delete it->second;
+        }
+      }
+      // Wait for our guards to be done before continuing
+      if (!guard_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(guard_events);
+        wait_on.wait();
+      }
+      if (term_event.exists() && (local_expr != NULL) && 
+          (!local_expr->is_empty()))
+      {
+        const UniqueID op_id = op->get_unique_op_id();
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          const FieldMask &inst_mask = targets[idx].get_valid_fields();
+          ApEvent ready = target_views[idx]->register_user(usage, inst_mask, 
+            local_expr, op_id, index, term_event,map_applied_events,trace_info);
+          if (ready.exists())
+            remote_events.insert(ready);
+        }
+      }
+      // Perform any output copies (e.g. for restriction) that need to be done
+      ApEvent result;
+      if (output_aggregator != NULL)
+      {
+        // Make sure we don't defer this
+        output_aggregator->issue_updates(trace_info, term_event);
+        result = output_aggregator->summarize(trace_info);
+        if (output_aggregator->release_guards(map_applied_events))
+          delete output_aggregator;
+      }
+      // Now hook up all our output events
+      if (!remote_events.empty())
+        Runtime::trigger_event(remote_ready,
+            Runtime::merge_events(&trace_info, remote_events));
+      else
+        Runtime::trigger_event(remote_ready);
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (effects_done.exists())
+        Runtime::trigger_event(effects_done, result);
+      // We can clean up our remote operation
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_acquires(Deserializer &derez,
+                                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned index;
+      derez.deserialize(index);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      ApUserEvent acquired;
+      derez.deserialize(acquired);
+      RemoteEqTracker *inst_target;
+      derez.deserialize(inst_target);
+
+      FieldMaskSet<InstanceView> instances;
+      std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      std::set<RtEvent> map_applied_events;
+      std::set<ApEvent> acquired_events;
+      PhysicalTraceInfo trace_info(op);
+      const UniqueID op_id = op->get_unique_op_id();
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->acquire_restrictions(remote_tracker, dummy_alt_sets, op,
+                  user_mask, instances, inst_exprs, map_applied_events);
+      if (remote_tracker.has_remote_sets())
+        remote_tracker.perform_remote_acquires(op, index, usage, user_mask, 
+              term_event, map_applied_events, acquired_events, inst_target);
+      // Now add users for all the instances
+#ifdef DEBUG_LEGION
+      assert(instances.size() == inst_exprs.size());
+#endif
+      for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+           const_iterator it = inst_exprs.begin(); it != inst_exprs.end(); it++)
+      {
+        IndexSpaceExpression *union_expr = 
+          runtime->forest->union_index_spaces(it->second);
+        FieldMaskSet<InstanceView>::const_iterator finder = 
+          instances.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != instances.end());
+#endif
+        ApEvent ready = it->first->register_user(usage, finder->second,
+          union_expr, op_id, index, term_event, map_applied_events, trace_info);
+        if (ready.exists())
+          acquired_events.insert(ready);
+      }
+      // If we have response to send then we do that now
+      if ((inst_target != NULL) && !instances.empty())
+      {
+        const RtUserEvent response_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(inst_target);
+          rez.serialize(response_event);
+          rez.serialize<size_t>(instances.size());
+          for (FieldMaskSet<InstanceView>::const_iterator it = 
+                instances.begin(); it != instances.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize<bool>(false); // dummy restricted value
+        }
+        runtime->send_equivalence_set_remote_instances(source, rez);
+        map_applied_events.insert(response_event);
+      }
+      if (!acquired_events.empty())
+        Runtime::trigger_event(acquired,
+            Runtime::merge_events(&trace_info, acquired_events));
+      else
+        Runtime::trigger_event(acquired);
+      // Now we can trigger our applied event
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      // Clean up the remote operation we allocated
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_releases(Deserializer &derez,
+                                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned index;
+      derez.deserialize(index);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      FieldMask user_mask;
+      derez.deserialize(user_mask);
+      ApEvent precondition;
+      derez.deserialize(precondition);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      ApUserEvent released;
+      derez.deserialize(released);
+      RemoteEqTracker *inst_target;
+      derez.deserialize(inst_target);
+
+      FieldMaskSet<InstanceView> instances;
+      std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      std::set<RtEvent> map_applied_events;
+      std::set<ApEvent> released_events;
+      PhysicalTraceInfo trace_info(op);
+      const UniqueID op_id = op->get_unique_op_id();
+      CopyFillAggregator *release_aggregator = NULL;
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->release_restrictions(remote_tracker, dummy_alt_sets, op, 
+                                    user_mask, release_aggregator, instances,
+                                    inst_exprs, map_applied_events);
+      if (remote_tracker.has_remote_sets())
+        remote_tracker.perform_remote_releases(op, index, usage, user_mask, 
+                              precondition, term_event, map_applied_events,
+                              released_events, inst_target);
+      // Issue any release copies/fills that need to be done
+      if (release_aggregator != NULL)
+      {
+        const RtEvent done = 
+          release_aggregator->issue_updates(trace_info, precondition);
+        if (release_aggregator->release_guards(map_applied_events))
+          delete release_aggregator;
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+      }
+      // Now add users for all the instances
+#ifdef DEBUG_LEGION
+      assert(instances.size() == inst_exprs.size());
+#endif
+      for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
+           const_iterator it = inst_exprs.begin(); it != inst_exprs.end(); it++)
+      {
+        IndexSpaceExpression *union_expr = 
+          runtime->forest->union_index_spaces(it->second);
+        FieldMaskSet<InstanceView>::const_iterator finder = 
+          instances.find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != instances.end());
+#endif
+        ApEvent ready = it->first->register_user(usage, finder->second,
+          union_expr, op_id, index, term_event, map_applied_events, trace_info);
+        if (ready.exists())
+          released_events.insert(ready);
+      }
+      // If we have response to send then we do that now
+      if ((inst_target != NULL) && !instances.empty())
+      {
+        const RtUserEvent response_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(inst_target);
+          rez.serialize(response_event);
+          rez.serialize<size_t>(instances.size());
+          for (FieldMaskSet<InstanceView>::const_iterator it = 
+                instances.begin(); it != instances.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+        }
+        runtime->send_equivalence_set_remote_instances(source, rez);
+        map_applied_events.insert(response_event);
+      }
+      if (!released_events.empty())
+        Runtime::trigger_event(released,
+            Runtime::merge_events(&trace_info, released_events));
+      else
+        Runtime::trigger_event(released);
+      // Now we can trigger our applied event
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      // Clean up the remote operation we allocated
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_copies_across(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned src_index, dst_index;
+      derez.deserialize(src_index);
+      derez.deserialize(dst_index);
+      RegionUsage src_usage, dst_usage;
+      derez.deserialize(src_usage);
+      derez.deserialize(dst_usage);
+      FieldMask src_mask, dst_mask;
+      derez.deserialize(src_mask);
+      derez.deserialize(dst_mask);
+      size_t num_srcs;
+      derez.deserialize(num_srcs);
+      InstanceSet src_instances(num_srcs);
+      std::vector<InstanceView*> src_views(num_srcs, NULL);
+      for (unsigned idx = 0; idx < num_srcs; idx++)
+      {
+        RtEvent ready;
+        src_instances[idx].unpack_reference(runtime, derez, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        DistributedID did;
+        derez.deserialize(did);
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        src_views[idx] = static_cast<InstanceView*>(view);
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      size_t num_dsts;
+      derez.deserialize(num_dsts);
+      InstanceSet dst_instances(num_dsts);
+      std::vector<InstanceView*> dst_views(num_dsts, NULL);
+      for (unsigned idx = 0; idx < num_dsts; idx++)
+      {
+        RtEvent ready;
+        dst_instances[idx].unpack_reference(runtime, derez, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        DistributedID did;
+        derez.deserialize(did);
+        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
+        dst_views[idx] = static_cast<InstanceView*>(view);
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      LogicalRegion src_handle, dst_handle;
+      derez.deserialize(src_handle);
+      derez.deserialize(dst_handle);
+      PredEvent pred_guard;
+      derez.deserialize(pred_guard);
+      ApEvent precondition;
+      derez.deserialize(precondition);
+      ReductionOpID redop;
+      derez.deserialize(redop);
+      bool perfect;
+      derez.deserialize(perfect);
+      std::vector<unsigned> src_indexes, dst_indexes;
+      if (!perfect)
+      {
+        size_t num_indexes;
+        derez.deserialize(num_indexes);
+        src_indexes.resize(num_indexes);
+        dst_indexes.resize(num_indexes);
+        for (unsigned idx = 0; idx < num_indexes; idx++)
+        {
+          derez.deserialize(src_indexes[idx]);
+          derez.deserialize(dst_indexes[idx]);
+        }
+      }
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      ApUserEvent copy;
+      derez.deserialize(copy);
+
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      CopyFillAggregator *across_aggregator = NULL;
+      FieldMask initialized = src_mask;
+      std::vector<CopyAcrossHelper*> across_helpers;
+      RegionNode *dst_node = runtime->forest->get_node(dst_handle);
+      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      std::set<IndexSpaceExpression*> local_exprs;
+      std::set<RtEvent> map_applied_events;
+      std::set<ApEvent> copy_events;
+      PhysicalTraceInfo trace_info(op);
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      if (perfect)
+      {
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          // Check that the index spaces intersect
+          IndexSpaceExpression *overlap = 
+            runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+          (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
+              src_index, dst_index, dst_usage, src_mask, src_instances, 
+              dst_instances, src_views, dst_views, overlap, across_aggregator,
+              pred_guard, redop, initialized, map_applied_events);
+          local_exprs.insert(overlap);
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < dst_instances.size(); idx++)
+        {
+          across_helpers.push_back(
+              new CopyAcrossHelper(src_mask, src_indexes, dst_indexes));
+          InstanceManager *manager = 
+            dst_instances[idx].get_manager()->as_instance_manager();
+          manager->initialize_across_helper(across_helpers.back(), 
+                                dst_mask, src_indexes, dst_indexes);
+        }
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          // Check that the index spaces intersect
+          IndexSpaceExpression *overlap = 
+            runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+          (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
+                                     src_index, dst_index, dst_usage, 
+                                     src_mask, src_instances, dst_instances,
+                                     src_views, dst_views, overlap, 
+                                     across_aggregator, pred_guard, redop, 
+                                     initialized, map_applied_events, 
+                                     &src_indexes,&dst_indexes,&across_helpers);
+          local_exprs.insert(overlap);
+        } 
+      }
+      if (initialized != src_mask)
+      {
+        RegionNode *src_node = runtime->forest->get_node(src_handle);
+        const FieldMask uninitialized = src_mask - initialized;
+        src_node->report_uninitialized_usage(op, src_index,
+                                             src_usage, uninitialized);
+      }
+      IndexSpaceExpression *local_expr = 
+        runtime->forest->union_index_spaces(local_exprs);
+      if (remote_tracker.has_remote_sets())
+      {
+        std::set<IndexSpaceExpression*> remote_exprs;
+        remote_tracker.perform_remote_copies_across(op, src_index, dst_index,
+            src_usage, dst_usage, src_mask, dst_mask, src_instances, 
+            dst_instances, src_views, dst_views, src_handle, dst_handle,
+            pred_guard, precondition, redop, perfect, src_indexes, 
+            dst_indexes, map_applied_events, copy_events, remote_exprs);
+        IndexSpaceExpression *remote_expr = 
+          runtime->forest->union_index_spaces(remote_exprs);
+        local_expr = 
+          runtime->forest->subtract_index_spaces(local_expr, remote_expr);
+      }
+      if (across_aggregator != NULL)
+      {
+        // Record the event field preconditions for each view
+        // Use the destination expr since we know we we're only actually
+        // issuing copies for that particular expression
+        const bool has_src_preconditions = !src_instances.empty();
+        if (has_src_preconditions)
+        {
+          for (unsigned idx = 0; idx < src_instances.size(); idx++)
+          {
+            const InstanceRef &ref = src_instances[idx];
+            const ApEvent event = ref.get_ready_event();
+            if (!event.exists())
+              continue;
+            const FieldMask &mask = ref.get_valid_fields();
+            InstanceView *view = src_views[idx];
+            across_aggregator->record_precondition(view, true/*reading*/,
+                                                   event, mask, local_expr);
+          }
+        } 
+        for (unsigned idx = 0; idx < dst_instances.size(); idx++)
+        {
+          const InstanceRef &ref = dst_instances[idx];
+          const ApEvent event = ref.get_ready_event();
+          if (!event.exists())
+            continue;
+          const FieldMask &mask = ref.get_valid_fields();
+          InstanceView *view = dst_views[idx];
+          across_aggregator->record_precondition(view, false/*reading*/,
+                                                 event, mask, local_expr);
+        }
+        const RtEvent done = 
+          across_aggregator->issue_updates(trace_info, precondition,
+              has_src_preconditions, true/*has dst preconditions*/);
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+        const ApEvent result = across_aggregator->summarize(trace_info);
+        if (result.exists())
+          copy_events.insert(result);
+        if (across_aggregator->release_guards(map_applied_events))
+          delete across_aggregator;
+      }
+      if (!across_helpers.empty())
+      {
+        for (unsigned idx = 0; idx < across_helpers.size(); idx++)
+          delete across_helpers[idx];
+      }
+      if (!copy_events.empty())
+        Runtime::trigger_event(copy,
+            Runtime::merge_events(&trace_info, copy_events));
+      else
+        Runtime::trigger_event(copy);
+      // Now we can trigger our applied event
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_overwrites(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      unsigned index;
+      derez.deserialize(index);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      RtEvent view_ready;
+      LogicalView *overwrite_view = 
+        runtime->find_or_request_logical_view(view_did, view_ready);
+      if (view_ready.exists())
+        ready_events.insert(view_ready);
+      FieldMask overwrite_mask;
+      derez.deserialize(overwrite_mask);
+      PredEvent pred_guard;
+      derez.deserialize(pred_guard);
+      ApEvent precondition;
+      derez.deserialize(precondition);
+      ApEvent term_event;
+      derez.deserialize(term_event);
+      bool add_restriction;
+      derez.deserialize(add_restriction);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+      ApUserEvent effects;
+      derez.deserialize(effects);
+
+      CopyFillAggregator *output_aggregator = NULL;
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      std::set<RtEvent> map_applied_events;
+      std::set<ApEvent> effects_events;
+      PhysicalTraceInfo trace_info(op);
+      const UniqueID op_id = op->get_unique_op_id();
+      std::set<IndexSpaceExpression*> local_exprs;
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+      {
+        (*it)->overwrite_set(remote_tracker, dummy_alt_sets, op, index, 
+                             overwrite_view, overwrite_mask, output_aggregator,
+                             map_applied_events, pred_guard, add_restriction);
+        local_exprs.insert((*it)->set_expr);
+      }
+      IndexSpaceExpression *local_expr = 
+        runtime->forest->union_index_spaces(local_exprs);
+      if (remote_tracker.has_remote_sets())
+      {
+        std::set<IndexSpaceExpression*> remote_exprs;
+        remote_tracker.perform_remote_overwrite(op, index, usage, 
+                overwrite_view, overwrite_mask, pred_guard, precondition, 
+                term_event, add_restriction, effects.exists(), 
+                map_applied_events, effects_events, remote_exprs);
+        local_expr = runtime->forest->subtract_index_spaces(local_expr,
+            runtime->forest->union_index_spaces(remote_exprs));
+      }
+      if (output_aggregator != NULL)
+      {
+        const RtEvent done = 
+          output_aggregator->issue_updates(trace_info, precondition);
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+        const ApEvent result = output_aggregator->summarize(trace_info); 
+        if (result.exists())
+          effects_events.insert(result);
+        if (output_aggregator->release_guards(map_applied_events))
+          delete output_aggregator;
+      }
+      if (term_event.exists())
+      {
+        InstanceView *inst_view = overwrite_view->as_instance_view();
+        const ApEvent ready = inst_view->register_user(usage, 
+                overwrite_mask, local_expr, op_id, index, term_event,
+                map_applied_events, trace_info);
+        if (ready.exists())
+          effects_events.insert(ready);
+      }
+      if (effects.exists())
+      {
+        if (!effects_events.empty())
+          Runtime::trigger_event(effects,
+              Runtime::merge_events(&trace_info, effects_events));
+        else
+          Runtime::trigger_event(effects);
+      }
+      // Now we can trigger our applied event
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_filters(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID source;
+      derez.deserialize(source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
+        if (ready.exists())
+          ready_events.insert(ready);
+      }
+      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      DistributedID view_did;
+      derez.deserialize(view_did);
+      RtEvent view_ready;
+      LogicalView *filter_view = 
+        runtime->find_or_request_logical_view(view_did, view_ready);
+      if (view_ready.exists())
+        ready_events.insert(view_ready);
+      FieldMask filter_mask;
+      derez.deserialize(filter_mask);
+      bool remove_restriction;
+      derez.deserialize(remove_restriction);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      std::set<RtEvent> map_applied_events;
+      std::set<EquivalenceSet*> dummy_alt_sets;
+      RemoteEqTracker remote_tracker(source, runtime);
+      // Make sure that all our pointers are ready
+      if (!ready_events.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(ready_events);
+        wait_on.wait();
+      }
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        (*it)->filter_set(remote_tracker, dummy_alt_sets, op, 
+            filter_view, filter_mask, map_applied_events, remove_restriction);
+      if (remote_tracker.has_remote_sets())
+        remote_tracker.perform_remote_filter(op, filter_view, filter_mask, 
+                                   remove_restriction, map_applied_events);
+      // Now we can trigger our applied event
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(applied, 
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(applied);
+      delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_remote_instances(
+                                          Deserializer &derez, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RemoteEqTracker *target;
+      derez.deserialize(target);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      target->process_remote_instances(derez, runtime);
+      Runtime::trigger_event(done_event); 
+    }
+
     /////////////////////////////////////////////////////////////
     // Equivalence Set
     /////////////////////////////////////////////////////////////
@@ -2979,10 +4582,9 @@ namespace Legion {
                                    AddressSpaceID owner, AddressSpace logical,
                                    IndexSpaceExpression *expr,
                                    IndexSpaceNode *node,
-                                   Reservation ver_lock, bool reg_now)
+                                   bool reg_now)
       : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
         index_space_node(node), logical_owner_space(logical),
-        version_lock(is_owner() ? Reservation::create_reservation() : ver_lock),
         eq_state(is_logical_owner() ? MAPPING_STATE : 
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
@@ -3007,21 +4609,8 @@ namespace Legion {
 #endif
         index_space_node->add_nested_resource_ref(did);
       }
-      if (is_logical_owner())
-      {
-        // If we're the logical owner then whoever is the actual owner
-        // is the node where the equivalence class was first made which
-        // is where the refinement took place so that is where all the
-        // data is initially
-        exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-        exclusive_copies[owner_space] = exclusive_fields;
-        if (owner_space != local_space)
-          remote_subsets.insert(owner_space);
-      }
-      else if (is_owner())
-        // Otherwise we're not the owner, but we're where the refinement
-        // took place so that is where the metadata all starts
-        exclusive_fields = FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
+      if (is_logical_owner() && !is_owner())
+        remote_subsets.insert(owner_space);
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -3030,8 +4619,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     EquivalenceSet::EquivalenceSet(const EquivalenceSet &rhs)
       : DistributedCollectable(rhs), set_expr(NULL), index_space_node(NULL), 
-        logical_owner_space(rhs.logical_owner_space),
-        version_lock(rhs.version_lock)
+        logical_owner_space(rhs.logical_owner_space)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3082,11 +4670,6 @@ namespace Legion {
           if (it->first->remove_nested_valid_ref(did))
             delete it->first;
       }
-      if (is_owner())
-      {
-        Reservation copy = version_lock;
-        copy.destroy_reservation();
-      }
       if (disjoint_partition_refinement != NULL)
         delete disjoint_partition_refinement;
     }
@@ -3105,31 +4688,43 @@ namespace Legion {
               IndexSpaceNode *node, EquivalenceSet *own, AddressSpaceID source)
       : owner(own), expr(exp), refinement(new EquivalenceSet(owner->runtime, 
             owner->runtime->get_available_distributed_id(), 
-            owner->runtime->address_space, source, expr, node, 
-            Reservation::NO_RESERVATION, true/*register*/))
+            owner->runtime->address_space, source, expr, node,true/*register*/))
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet* EquivalenceSet::RefinementThunk::perform_refinement(void)
+    RtEvent EquivalenceSet::RefinementThunk::perform_refinement(void)
     //--------------------------------------------------------------------------
     {
-      if (refinement_ready.exists() && !refinement_ready.has_triggered())
-        refinement_ready.wait();
 #ifdef DEBUG_LEGION
       assert(refinement != NULL);
 #endif
-      refinement->clone_from(owner);
-      return refinement;
+      if (!refinement->is_logical_owner())
+      {
+        // We need to package up the state and send it to where the
+        // logical owner is on the remote node
+        RtUserEvent done_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez); 
+          rez.serialize(refinement->did);
+          rez.serialize(done_event);
+          owner->pack_state(rez);
+        }
+        owner->runtime->send_equivalence_set_remote_refinement(
+            refinement->logical_owner_space, rez);
+        return done_event;
+      }
+      else
+        refinement->clone_from(owner);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
-    EquivalenceSet* EquivalenceSet::RefinementThunk::get_refinement(void)
+    EquivalenceSet* EquivalenceSet::RefinementThunk::get_refinement(void) const
     //--------------------------------------------------------------------------
     {
-      if (refinement_ready.exists() && !refinement_ready.has_triggered())
-        refinement_ready.wait();
 #ifdef DEBUG_LEGION
       assert(refinement != NULL);
 #endif
@@ -3175,6 +4770,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Should be cloning from the parent on it's owner space
       assert(parent->logical_owner_space == this->local_space);
+      assert(is_logical_owner());
 #endif
       // No need to hold a lock on the parent since we know that
       // no one else will be modifying these data structures
@@ -3211,353 +4807,77 @@ namespace Legion {
               restricted_instances.end(); it++)
           it->first->add_nested_valid_ref(did);
       }
-      // Handle updates for the reduction fields so that we get
-      // the right meta-data for those fields
-      if (!!this->reduction_fields)
-      {
-        exclusive_fields -= this->reduction_fields;
-        single_redop_fields = this->reduction_fields;
-        redop_modes = parent->redop_modes;
-        if (is_logical_owner())
-        {
-          single_reduction_copies[local_space] = this->reduction_fields;
-          LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-            exclusive_copies.find(local_space);
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::remove_update_guard(CopyFillAggregator *aggregator)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
-          assert(finder != exclusive_copies.end());
+      assert(is_logical_owner());
+      assert((eq_state == MAPPING_STATE) || 
+             (eq_state == PENDING_REFINED_STATE));
 #endif
-          finder->second -= this->reduction_fields;
-          if (!finder->second)
-            exclusive_copies.erase(finder);
-        }
+      if (update_guards.empty())
+        return;
+      FieldMaskSet<CopyFillAggregator>::iterator finder = 
+        update_guards.find(aggregator);
+      if (finder == update_guards.end())
+        return;
+      update_guards.erase(finder);
+      if (update_guards.empty() && (eq_state == PENDING_REFINED_STATE))
+      {
+#ifdef DEBUG_LEGION
+        assert(transition_event.exists());
+#endif
+        Runtime::trigger_event(transition_event);
+        transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::refine_remainder(void)
+    void EquivalenceSet::check_for_unrefined_remainder(AutoLock &eq,
+                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      if (!is_logical_owner())
+        return;
+#ifdef DEBUG_LEGION
+      assert(update_guards.empty());
+      assert((eq_state == REFINED_STATE) || (eq_state == REFINING_STATE) ||
+             (eq_state == PENDING_REFINED_STATE));
+#endif
+      // Check for any disjoint pieces
       if (disjoint_partition_refinement != NULL)
         finalize_disjoint_refinement();
-      // Could have lost the race so check again
+      // Check for unrefined remainder pieces too
       if (unrefined_remainder != NULL)
       {
         RefinementThunk *refinement = 
-          new RefinementThunk(unrefined_remainder, NULL/*node*/,
-                              this, runtime->address_space);
+          new RefinementThunk(unrefined_remainder, NULL/*node*/, this, source);
         // We can clear the unrefined remainder now
         unrefined_remainder = NULL;
         add_pending_refinement(refinement);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    bool EquivalenceSet::acquire_mapping_guard(Operation *op,
-                                               const FieldMask &guard_mask,
-                  std::set<EquivalenceSet*> &alt_sets, bool recursed /*=false*/)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<EquivalenceSet*> to_recurse;
+      // See if we need to wait for any refinements to finish
+      if (refinement_event.exists())
       {
-        AutoLock eq(eq_lock);
-        // A special case here where if our operation already 
-        // acquired this equivalence class then we can piggy back 
-        // onto this same reservation. Note that this prevents the
-        // ABA problem where we have aliased but non-interfering
-        // region requirements that need to acquire the same 
-        // equivalence class, but a refinement request comes in
-        // from a different operation between the two acquires.
-        if (!mapping_guards.empty())
-        {
-          LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
-            mapping_guards.find(op);
-          if (finder != mapping_guards.end())
-          {
-            finder->second.count++;
-            // See if we have any new fields which we need to check for updates
-            finder->second.guard_mask |= guard_mask;
-            if (recursed)
-            {
-              const std::pair<std::set<EquivalenceSet*>::iterator,bool> result =
-                alt_sets.insert(this);
-              // Don't double count for reaching this node from different paths
-              // This can happen when we build intermediate nodes to reduce 
-              // fanout and some equivalence sets end up on both sides
-              // See the KDNode 'refine' method to understand
-              if (!result.second)
-                finder->second.count--;
-            }
-            return false;
-          }
-        }
-        // We need to iterate until we get a valid lease while holding the lock
-        if (is_logical_owner())
-        {
-          // We only need to finalize the refinement if we've already
-          // made some refinements or are about to
-          if (!subsets.empty() || (eq_state == REFINING_STATE))
-          {
-            if (disjoint_partition_refinement != NULL)
-              finalize_disjoint_refinement();
-            // If we have an unrefined remainder then we need to do that now
-            if (unrefined_remainder != NULL)
-            {
-              RefinementThunk *refinement = 
-                new RefinementThunk(unrefined_remainder, NULL/*node*/,
-                                    this, runtime->address_space);
-              // We can clear the unrefined remainder now
-              unrefined_remainder = NULL;
-              add_pending_refinement(refinement);
-            }
-          }
-          // Wait until the refinement task is done running before 
-          // we can go on to the next step
-          while (eq_state == REFINING_STATE)
-          {
-#ifdef DEBUG_LEGION
-            assert(refinement_event.exists());
-#endif
-            const RtEvent wait_on = refinement_event;
-            eq.release();
-            wait_on.wait();
-            eq.reacquire();
-          }
-        }
-        else
-        {
-          // We're not the owner so see if we need to request a mapping state
-          while ((eq_state != VALID_STATE) && 
-                  (eq_state != PENDING_INVALID_STATE))
-          {
-            bool send_request = false;
-            if (eq_state == INVALID_STATE)
-            {
-#ifdef DEBUG_LEGION
-              assert(!transition_event.exists());
-#endif
-              transition_event = Runtime::create_rt_user_event(); 
-              eq_state = PENDING_VALID_STATE;
-              // Send the request for the update
-              send_request = true;
-            }
-#ifdef DEBUG_LEGION
-            assert(transition_event.exists());
-#endif
-            RtEvent wait_on = transition_event;
-            eq.release();
-            if (send_request)
-            {
-              Serializer rez;
-              {
-                RezCheck z(rez);
-                rez.serialize(did);
-              }
-              runtime->send_equivalence_set_subset_request(logical_owner_space,
-                                                           rez);
-            }
-            wait_on.wait();
-            eq.reacquire();
-          }
-        }
-        // If we have subsets then we're going to need to recurse and
-        // traverse those as well since we need to get to the leaves
-        if (subsets.empty())
-        {
-          // We're going to record ourself so add the mapping guard
-#ifdef DEBUG_LEGION
-          if (is_logical_owner())
-            assert((eq_state == MAPPING_STATE) || 
-                    (eq_state == PENDING_REFINED_STATE));
-          else
-            assert((eq_state == VALID_STATE) ||
-                    (eq_state == PENDING_INVALID_STATE));
-          // Should have been handled above
-          assert(mapping_guards.find(op) == mapping_guards.end());
-#endif
-          mapping_guards[op] = MappingGuard(guard_mask);
-        }
-        else // Our set of subsets are now what we need
-        {
-          // Wait until all the refinements are done
-          while ((eq_state == PENDING_REFINED_STATE) ||
-                  (eq_state == REFINING_STATE))
-          {
-#ifdef DEBUG_LEGION
-            assert(refinement_event.exists());
-#endif
-            const RtEvent wait_on = refinement_event;
-            eq.release();
-            wait_on.wait();
-            eq.reacquire();
-          }
-#ifdef DEBUG_LEGION
-          assert(pending_refinements.empty());
-#endif
-          to_recurse = subsets;
-        }
-      }
-      // If we have subsets then continue the traversal
-      if (!to_recurse.empty())
-      {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              to_recurse.begin(); it != to_recurse.end(); it++)
-          (*it)->acquire_mapping_guard(op,guard_mask,alt_sets,true/*recursed*/);
-        // We've been refined so return true indicating that we changed
-        return true;
-      }
-      // If we recursed then record ourselves in the alt_sets 
-      else if (recursed)
-      {
-#ifdef DEBUG_LEGION
-        assert(alt_sets.find(this) == alt_sets.end());
-#endif
-        alt_sets.insert(this);
-      }
-      return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::remove_mapping_guard(Operation *op)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock);
-      LegionMap<Operation*,MappingGuard>::aligned::iterator finder = 
-        mapping_guards.find(op);
-#ifdef DEBUG_LEGION
-      if (is_logical_owner())
-        assert((eq_state == MAPPING_STATE) || 
-                (eq_state == PENDING_REFINED_STATE));
-      else
-        assert((eq_state == VALID_STATE) ||
-                (eq_state == PENDING_INVALID_STATE));
-      assert(finder != mapping_guards.end());
-      assert(finder->second.count > 0);
-#endif
-      if (finder->second.count == 1)
-      {
-        if (finder->second.aliased_waiters.exists())
-          Runtime::trigger_event(finder->second.aliased_waiters);
-        // Last removal so we are done
-        mapping_guards.erase(finder);
-        if (mapping_guards.empty())
-        {
-          // Clear the summary mask
-          mutated_guard_summary.clear();
-          // Issue any deferred requests now so we can get them in
-          // flight before we handle any invalidations
-          if (!deferred_requests.empty())
-            perform_all_deferred_requests();
-          if (is_logical_owner() && (eq_state == PENDING_REFINED_STATE))
-          {
-            // Check to see if we have a transition event to trigger to 
-            // indicate to the refinement task that it can try to run again
-            if (transition_event.exists())
-            {
-              Runtime::trigger_event(transition_event);
-              transition_event = RtUserEvent::NO_RT_USER_EVENT;
-            }
-          }
-          else if (!is_logical_owner() && (eq_state == PENDING_INVALID_STATE))
-          {
-#ifdef DEBUG_LEGION
-            assert(transition_event.exists());
-#endif
-            eq_state = INVALID_STATE;
-            invalidate_remote_state(transition_event);
-            transition_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
-        }
-        else if (!deferred_requests.empty())
-        {
-          // Tighten the mask and then use it to find any requests
-          // which are now free to be performed
-          mutated_guard_summary.clear();
-          FieldMask mutated_guard_summary;
-          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator it =
-                mapping_guards.begin(); it != mapping_guards.end(); it++)
-            mutated_guard_summary |= it->second.mutated_mask;
-          if (mutated_guard_summary * deferred_requests.get_valid_mask())
-            // We can just perform all of them
-            perform_all_deferred_requests();
-          else
-            // Only perform those that are not protected anymore
-            perform_ready_deferred_requests();
-        }
-      }
-      else // Just remove the count
-        finder->second.count--;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_all_deferred_requests(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!deferred_requests.empty());
-#endif
-      for (FieldMaskSet<DeferredRequest>::const_iterator it = 
-            deferred_requests.begin(); it != deferred_requests.end(); it++)
-      {
-        unsigned dummy_updates = 0;
-        request_update(local_space, it->first->invalid_space,
-                       it->second, it->first->pending_request,
-                       dummy_updates, it->first->invalidate,
-                       it->first->skip_redop, false/*needs lock*/);
-        delete it->first;
-      }
-      deferred_requests.clear();
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::perform_ready_deferred_requests(void)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!deferred_requests.empty());
-#endif
-      std::vector<DeferredRequest*> to_delete;
-      for (FieldMaskSet<DeferredRequest>::const_iterator it = 
-            deferred_requests.begin(); it != deferred_requests.end(); it++)
-      {
-        // We just need to be independent of mutated guards
-        if (it->second * mutated_guard_summary)
-        {
-          unsigned dummy_updates = 0;
-          request_update(local_space, it->first->invalid_space,
-                         it->second, it->first->pending_request,
-                         dummy_updates, it->first->invalidate,
-                         it->first->skip_redop, false/*needs lock*/);
-          to_delete.push_back(it->first);
-        }
-      }
-      if (!to_delete.empty())
-      {
-        if (to_delete.size() == deferred_requests.size())
-        {
-          deferred_requests.clear();
-          for (std::vector<DeferredRequest*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            delete (*it);
-        }
-        else
-        {
-          for (std::vector<DeferredRequest*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-          {
-            deferred_requests.erase(*it);
-            delete (*it);
-          }
-          deferred_requests.tighten_valid_mask();
-        }
+        RtEvent wait_on = refinement_event;
+        eq.release();
+        if (!wait_on.has_triggered())
+          wait_on.wait();
+        eq.reacquire();
       }
     }
 
     //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::ray_trace_equivalence_sets(VersionManager *target,
-                                                     IndexSpaceExpression *expr,
-                                                     IndexSpace handle,
-                                                     AddressSpaceID source) 
+    void EquivalenceSet::ray_trace_equivalence_sets(VersionManager *target,
+                                                    IndexSpaceExpression *expr,
+                                                    IndexSpace handle,
+                                                    AddressSpaceID source,
+                                                    RtUserEvent trace_done,
+                                                    RtUserEvent deferral_event) 
     //--------------------------------------------------------------------------
     {
       // Handle a special case to avoid over-decomposing with larger index
@@ -3568,31 +4888,36 @@ namespace Legion {
       if (handle.exists() && (index_space_node != NULL) &&
           (index_space_node->handle == handle))
       {
+#ifdef DEBUG_LEGION
+        assert(!deferral_event.exists());
+#endif
         // Just record this as one of the results
         if (source != runtime->address_space)
         {
           // Not local so we need to send a message
-          RtUserEvent recorded_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
             rez.serialize(target);
-            rez.serialize(recorded_event);
+            rez.serialize(trace_done);
           }
           runtime->send_equivalence_set_ray_trace_response(source, rez);
-          return recorded_event;
+          return;
         }
         else // Local so we can update this directly
         {
           target->record_equivalence_set(this);
-          return RtEvent::NO_RT_EVENT;
+          Runtime::trigger_event(trace_done);
+          return;
         }
       }
       // If this is not the owner node then send the request there
       if (!is_logical_owner())
       {
-        RtUserEvent done_event = Runtime::create_rt_user_event();
+#ifdef DEBUG_LEGION
+        assert(!deferral_event.exists());
+#endif
         Serializer rez;
         {
           RezCheck z(rez);
@@ -3601,11 +4926,11 @@ namespace Legion {
           expr->pack_expression(rez, logical_owner_space);
           rez.serialize(handle);
           rez.serialize(source);
-          rez.serialize(done_event);
+          rez.serialize(trace_done);
         }
         runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
                                                         rez);
-        return done_event;
+        return;
       }
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
@@ -3619,18 +4944,54 @@ namespace Legion {
       bool precise_intersection = handle.exists();
       {
         RegionTreeForest *forest = runtime->forest;
-        AutoLock eq(eq_lock);
-        // Ray tracing can run as long as we don't have an outstanding
-        // refining task that we need to wait for
-        while (eq_state == REFINING_STATE)
+        // Try to get the lock, if we don't get it build a continuation 
+        AutoTryLock eq(eq_lock);
+        if (!eq.has_lock())
+        {
+          // We didn't get the lock so build a continuation
+          // We need a name for our completion event that we can use for
+          // the atomic compare and swap below
+          if (!deferral_event.exists())
+          {
+            // If we haven't already been deferred then we need to 
+            // add ourselves to the back of the list of deferrals
+            deferral_event = Runtime::create_rt_user_event();
+            volatile Realm::Event::id_t *ptr = 
+              (volatile Realm::Event::id_t*)&next_deferral_precondition.id;
+            RtEvent continuation_pre;
+            do {
+              continuation_pre.id = *ptr;
+            } while (!__sync_bool_compare_and_swap(ptr,
+                      continuation_pre.id, deferral_event.id));
+            DeferRayTraceArgs args(this, target, expr, handle, source, 
+                                   trace_done, deferral_event);
+            runtime->issue_runtime_meta_task(args, 
+                            LG_THROUGHPUT_DEFERRED_PRIORITY, continuation_pre);
+          }
+          else
+          {
+            // We've already been deferred and our precondition has already
+            // triggered so just launch ourselves again whenever the lock
+            // should be ready to try again
+            DeferRayTraceArgs args(this, target, expr, handle, source, 
+                                   trace_done, deferral_event);
+            runtime->issue_runtime_meta_task(args,
+                              LG_THROUGHPUT_DEFERRED_PRIORITY, eq.try_next());
+          }
+          return;
+        }
+        else if (eq_state == REFINING_STATE)
         {
 #ifdef DEBUG_LEGION
           assert(refinement_event.exists());
 #endif
-          const RtEvent wait_on = refinement_event;
-          eq.release();
-          wait_on.wait();
-          eq.reacquire();
+          // If we're refining then we also need to defer this until 
+          // the refinements are done
+          DeferRayTraceArgs args(this, target, expr, handle, source, 
+                                 trace_done, deferral_event);
+          runtime->issue_runtime_meta_task(args,
+                            LG_THROUGHPUT_DEFERRED_PRIORITY, refinement_event);
+          return;
         }
         // Two cases here, one where refinement has already begun and
         // one where it is just starting
@@ -3868,22 +5229,27 @@ namespace Legion {
             if (source != runtime->address_space)
             {
               // Not local so we need to send a message
-              RtUserEvent recorded_event = Runtime::create_rt_user_event();
               Serializer rez;
               {
                 RezCheck z(rez);
                 rez.serialize(did);
                 rez.serialize(target);
-                rez.serialize(recorded_event);
+                rez.serialize(trace_done);
               }
               runtime->send_equivalence_set_ray_trace_response(source, rez);
-              return recorded_event;
+              if (deferral_event.exists())
+                Runtime::trigger_event(deferral_event);
+              return;
             }
             else // Local so we can update this directly
               record_self = true;
           }
         }
       }
+      // We've done our traversal, so if we had a deferral even we can 
+      // trigger it now to signal to the next user that they can start
+      if (deferral_event.exists())
+        Runtime::trigger_event(deferral_event);
       if (record_self)
         target->record_equivalence_set(this);
       // Traverse anything we can now before we have to wait
@@ -3895,10 +5261,10 @@ namespace Legion {
         for (std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator 
               it = to_traverse.begin(); it != to_traverse.end(); it++)
         {
-          RtEvent done = it->first->ray_trace_equivalence_sets(target, 
-                                    it->second, subset_handle, source);
-          if (done.exists())
-            done_events.insert(done);
+          RtUserEvent done = Runtime::create_rt_user_event();
+          it->first->ray_trace_equivalence_sets(target, it->second, 
+                                                subset_handle, source, done);
+          done_events.insert(done);
         }
         // Clear these since we are done doing them
         to_traverse.clear();
@@ -3916,1157 +5282,33 @@ namespace Legion {
               it != refinements_to_traverse.end(); it++)
         {
           EquivalenceSet *result = it->first->get_refinement();
-          RtEvent done = result->ray_trace_equivalence_sets(target, it->second,
-                                                        subset_handle, source);
-          if (done.exists())
-            done_events.insert(done);
+          RtUserEvent done = Runtime::create_rt_user_event();
+          result->ray_trace_equivalence_sets(target, it->second,
+                                             subset_handle, source, done);
+          done_events.insert(done);
           if (it->first->remove_reference())
             delete it->first;
         }
       }
       if (!done_events.empty())
-        return Runtime::merge_events(done_events);
+        Runtime::trigger_event(trace_done, Runtime::merge_events(done_events));
       else
-        return RtEvent::NO_RT_EVENT;
+        Runtime::trigger_event(trace_done);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::request_valid_copy(Operation *op, 
-                                            FieldMask request_mask,
-                                            const RegionUsage usage,
-                                            std::set<RtEvent> &ready_events, 
-                                            std::set<RtEvent> &applied_events,
-                                            AddressSpaceID request_space,
-                                            PendingRequest *pending_request)
+    void EquivalenceSet::pack_state(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-      if ((request_space == local_space) && (IS_READ_ONLY(usage)))
-      {
-        // In order to prevent read-only races we need to order the mapping
-        // of all simultaneous users of this equivalence class on this node, 
-        // we do it based on the mapping guard index  
-#ifdef DEBUG_LEGION
-        assert(mapping_guards.find(op) != mapping_guards.end());
-#endif
-        MappingGuard &our_guard = mapping_guards[op];
-        // We use a guard index to determine which order operations arrive,
-        // 0 is used as an unset value so we don't have to record any 
-        // dependences on operations that haven't arrived yet. We then 
-        // record dependences on any operations that arrived before us. We 
-        // guarantee the same partial order on all operations across all 
-        // equivalence classes by serializing this process using the per 
-        // context "equivalence class locks" (e.g. eq_acquire_lock).
-        // We only need to do this one time since we can do it for all 
-        // our fields in our guard mask
-        if (our_guard.guard_index == 0)
-        {
-// Set our guard index
-          our_guard.guard_index = next_guard_index++;
-#ifdef DEBUG_LEGION
-          // This will check for overflow too, hopefully we never exceed 2^64
-          assert(our_guard.guard_index != 0);
-#endif
-          for (LegionMap<Operation*,MappingGuard>::aligned::iterator it =
-                mapping_guards.begin(); it != mapping_guards.end(); it++)
-          {
-            // Skip ourself
-            if (it->first == op)
-              continue;
-            // Skip any that haven't done their request yet    
-            if (it->second.guard_index == 0)
-              continue;
-#ifdef DEBUG_LEGION
-            // Should never be larger than our guard index
-            assert(it->second.guard_index < our_guard.guard_index);
-#endif
-            // Skip any with disjoint fields
-            if (it->second.guard_mask * our_guard.guard_mask)
-              continue;
-            // Make an aliased waiter event to trigger once the guard is removed
-            if (!it->second.aliased_waiters.exists())
-              it->second.aliased_waiters = Runtime::create_rt_user_event();
-            // Need to record mapping dependences on any of these ops
-            ready_events.insert(it->second.aliased_waiters);
-          }
-        }
-      }
-      if (!is_logical_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(pending_request == NULL);
-#endif
-        // Check to see which fields we need to request
-        if (IS_REDUCE(usage))
-        {
-#ifdef DEBUG_LEGION
-          assert(usage.redop != 0);
-#endif
-          // Check to see if we are single or multiple reduce with
-          // the right reduction operator
-          FieldMask valid_mask = 
-                      request_mask & (single_redop_fields | multi_redop_fields);
-          if (!!valid_mask)
-          {
-            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
-              finder = redop_modes.find(usage.redop);
-            if (finder != redop_modes.end())
-            {
-              valid_mask &= finder->second;
-              if (!!valid_mask)
-                request_mask -= valid_mask;
-            }
-          }
-        }
-        else if (IS_READ_ONLY(usage))
-        {
-          // For read-only we'll be happy with 
-          // exclusive, shared, or single reduce
-          const FieldMask valid_mask = request_mask & 
-            (exclusive_fields | shared_fields | single_redop_fields);
-          if (!!valid_mask)
-          {
-            request_mask -= valid_mask;
-            // If we overlap on single reduce record that we mutated this
-            // already to prevent it from being invalidated underneath us
-            if (!!single_redop_fields)
-            {
-              const FieldMask redop_overlap = valid_mask & single_redop_fields;
-              if (!!redop_overlap)
-                record_mutated_guard(op, redop_overlap);
-            }
-          }
-        }
-        else
-        {
-          // for write privileges then we need to be exclusive or single reduce
-          const FieldMask valid_mask = request_mask & 
-            (exclusive_fields | single_redop_fields);
-          if (!!valid_mask)
-          {
-            request_mask -= valid_mask;
-            // If we overlap on single reduce record that we mutated this
-            // already to prevent it from being invalidated underneath us
-            if (!!single_redop_fields)
-            {
-              const FieldMask redop_overlap = valid_mask & single_redop_fields;
-              if (!!redop_overlap)
-                record_mutated_guard(op, redop_overlap);
-            }
-          }
-        }
-        // If not all our fields are valid send a request to the owner
-        if (!!request_mask)
-        {
-          // Check to see if there are already any pending requests
-          // that we need to check against
-          if (!outstanding_requests.empty() &&
-              !(request_mask * outstanding_requests.get_valid_mask()))
-          {
-            for (FieldMaskSet<PendingRequest>::const_iterator it = 
-                  outstanding_requests.begin(); it != 
-                  outstanding_requests.end(); it++)
-            {
-              const FieldMask overlap = request_mask & it->second;
-              if (!overlap)
-                continue;
-              ready_events.insert(it->first->ready_event);
-              applied_events.insert(it->first->applied_event);
-              request_mask -= overlap;
-              if (!request_mask)
-                break;
-            }
-          }
-          // If we still have fields to request then issue our request
-          if (!!request_mask)
-          {
-            RtUserEvent ready = Runtime::create_rt_user_event();
-            RtUserEvent applied = Runtime::create_rt_user_event(); 
-            PendingRequest *request = 
-              new PendingRequest(op, ready, applied, usage);
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(request_mask);
-              rez.serialize(usage);
-              rez.serialize(request);
-            }
-            runtime->send_equivalence_set_valid_request(logical_owner_space,
-                                                        rez);
-            outstanding_requests.insert(request, request_mask);
-            ready_events.insert(ready);
-            applied_events.insert(applied);
-          }
-        }
-      }
-      else
-      {
-        // If the request is local then check to see which fields are already
-        // valid, if its remote this check was already done on the remote node
-        const FieldMask orig_mask = request_mask;
-        if (request_space == logical_owner_space)
-        {
-          // First see which ones we already have outstanding requests for
-          if (!outstanding_requests.empty() && 
-              !(request_mask * outstanding_requests.get_valid_mask()))
-          {
-            for (FieldMaskSet<PendingRequest>::const_iterator it = 
-                  outstanding_requests.begin(); it != 
-                  outstanding_requests.end(); it++)
-            {
-              const FieldMask overlap = request_mask & it->second;
-              if (!overlap)
-                continue;
-              ready_events.insert(it->first->ready_event);
-              applied_events.insert(it->first->applied_event);
-              request_mask -= overlap;
-              if (!request_mask)
-                break;
-            }
-          }
-          if (!!request_mask)
-          {
-            if (IS_REDUCE(usage))
-            {
-              // Check to see if we have it in a reduction mode
-              FieldMask redop_mask;
-              if (!(request_mask * single_redop_fields))
-              {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = single_reduction_copies.find(logical_owner_space);
-                if (finder != single_reduction_copies.end())
-                  redop_mask |= finder->second & request_mask;
-              }
-              if (!(request_mask * multi_redop_fields))
-              {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = multi_reduction_copies.find(logical_owner_space);
-                if (finder != multi_reduction_copies.end())
-                  redop_mask |= finder->second & request_mask;
-              }
-              if (!!redop_mask)
-              {
-                // Has to be in the right reduction mode too
-                LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
-                  redop_finder = redop_modes.find(usage.redop);
-                if (redop_finder != redop_modes.end())
-                  request_mask -= (redop_finder->second & redop_mask);
-              }
-            }
-            else 
-            {
-              // Check to see if we have it in exclusive mode
-              if (!(request_mask * exclusive_fields))
-              {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = exclusive_copies.find(logical_owner_space);
-                if (finder != exclusive_copies.end())
-                  request_mask -= finder->second;
-              }
-              // Check to see if we have it in single redop mode too
-              if (!(request_mask * single_redop_fields))
-              {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = single_reduction_copies.find(logical_owner_space);
-                if (finder != single_reduction_copies.end())
-                {
-                  const FieldMask redop_overlap = request_mask & finder->second;
-                  if (!!redop_overlap)
-                  {
-                    request_mask -= redop_overlap;
-                    // If we overlap on single reduce record that we mutated 
-                    // this to prevent it from being invalidated underneath us
-                    record_mutated_guard(op, redop_overlap);
-                  }
-                }
-              }
-              // Read-only can also be in shared mode
-              if (IS_READ_ONLY(usage) && !(request_mask * shared_fields))
-              {
-                LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                  finder = shared_copies.find(logical_owner_space);
-                if (finder != shared_copies.end())
-                  request_mask -= finder->second;
-              }
-            }
-            if (!!request_mask)
-            {
-#ifdef DEBUG_LEGION
-              assert(pending_request == NULL);
-#endif
-              RtUserEvent ready = Runtime::create_rt_user_event();
-              RtUserEvent applied = Runtime::create_rt_user_event(); 
-              pending_request = 
-                new PendingRequest(op, ready, applied, usage);
-              outstanding_requests.insert(pending_request, request_mask); 
-              ready_events.insert(ready);
-              applied_events.insert(applied);
-            }
-          }
-        }
-        // If we still have fields that aren't valid then we need to 
-        // send messages to remote nodes for updates and invalidations
-        if (!!request_mask)
-        {
-#ifdef DEBUG_LEGION
-          assert(pending_request != NULL);
-#endif
-          unsigned pending_updates = 0;
-          unsigned pending_invalidates = 0;
-          if (IS_REDUCE(usage))
-          {
-            FieldMask same_redop_mask;
-            // If we're in single or multi reduce mode with the same reduction 
-            // operation then we can go to multi-reduce mode for the requester
-            LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator 
-              redop_finder = redop_modes.find(usage.redop);
-            if (redop_finder != redop_modes.end())
-            {
-              same_redop_mask = redop_finder->second & request_mask;
-              if (!!same_redop_mask)
-              {
-                // Remove these fields from the request mask
-                request_mask -= same_redop_mask;
-                upgrade_single_to_multi(same_redop_mask, request_space, 
-                        pending_request, pending_updates, usage.redop,
-                        single_redop_fields, single_reduction_copies,
-                        multi_redop_fields, multi_reduction_copies);
-              }
-            }
-            // See if we still have request fields
-            if (!!request_mask)
-            {
-              FieldMask filter_mask = request_mask;
-              // No matter what mode we're in now we're going to single-reduce
-              // Issue updates from all exclusive and reduction copies
-              // and send invalidations to any shared copies
-              // Keep track of which fields we've issue updates from for
-              // when we get to any shared nodes in case we need to issue
-              // an update from one of them as well
-              filter_single_copies(filter_mask, exclusive_fields, 
-                                   exclusive_copies, request_space, 
-                                   pending_request, pending_updates,
-                                   pending_invalidates, 
-                                   true/*needs updates*/);
-              // For now we'll collapse the entire list of shared users down
-              // to one copy in order to maintain precise information
-              filter_multi_copies(filter_mask, shared_fields, shared_copies,
-                                  request_space, pending_request, 
-                                  pending_updates, pending_invalidates,
-                                  true/*needs updates*/,
-                                  true/*updates from all*/);
-              const FieldMask redop_overlap = filter_mask & 
-                                  (single_redop_fields | multi_redop_fields);
-              if (!!redop_overlap)
-              {
-                filter_single_copies(filter_mask, single_redop_fields, 
-                    single_reduction_copies, request_space, 
-                    pending_request, pending_updates, 
-                    pending_invalidates, true/*needs updates*/);
-                filter_multi_copies(filter_mask, multi_redop_fields,
-                    multi_reduction_copies, request_space,
-                    pending_request, pending_updates, pending_invalidates,
-                    true/*needs updates*/, true/*updates from all*/);
-                filter_redop_modes(redop_overlap); 
-              }
-#ifdef DEBUG_LEGION
-              assert(!filter_mask); // should have seen them all
-#endif
-              // Now put everything in single reduce mode
-              record_single_reduce(request_space, request_mask, usage.redop); 
-            }
-          }
-          else
-          {
-            // If we're discarding everything from before we don't need
-            // updates we just need to send invalidates to everyone
-            const bool needs_updates = !IS_DISCARD(usage);
-            // Any reduction modes are going to exclusive regardless of
-            // whether we are reading or writing 
-            FieldMask redop_overlap = request_mask &
-                              (single_redop_fields | multi_redop_fields);
-            if (!!redop_overlap)
-            {
-              if (needs_updates)
-              {
-                // If we have reductions, then we need to go to 
-                // single reduce mode until someone actually goes
-                // ahead and applies the reductions
-                FieldMask multi_overlap = request_mask & multi_redop_fields;
-                if (!!multi_overlap)
-                {
-                  record_single_reduce(request_space, multi_overlap, 
-                                       0/*redop already recorded*/); 
-                  request_mask -= multi_overlap;
-                  filter_multi_copies(multi_overlap, multi_redop_fields,
-                                      multi_reduction_copies, request_space,
-                                      pending_request, pending_updates,
-                                      pending_invalidates,true/*needs updates*/,
-                                      true/*updates from all*/);
-                }
-                FieldMask single_overlap = request_mask & single_redop_fields;
-                if (!!single_overlap)
-                {
-                  request_mask -= single_overlap;
-                  update_single_copies(single_overlap, request_space,
-                                       pending_request, pending_updates,
-                                       pending_invalidates,
-                                       true/*needs updates*/,
-                                       single_redop_fields,
-                                       single_reduction_copies);
-                }
-              }
-              else
-              {
-                // If we're discarding then we can just filter these
-                // things out and go to exclusive mode
-                filter_redop_modes(redop_overlap);
-                record_exclusive_copy(request_space, redop_overlap);
-                request_mask -= redop_overlap;
-                // These next two methods will remove fields from the 
-                // 'redop_overlap' mask so we do them last
-                filter_single_copies(redop_overlap, single_redop_fields,
-                                     single_reduction_copies, request_space,
-                                     pending_request, pending_updates,
-                                     pending_invalidates,
-                                     false/*needs updates*/);
-                filter_multi_copies(redop_overlap, multi_redop_fields,
-                                    multi_reduction_copies, request_space,
-                                    pending_request, pending_updates,
-                                    pending_invalidates, false/*needs updates*/,
-                                    false/*updates from all*/);
-              }
-            }
-            if (!!request_mask)
-            {
-              if (IS_READ_ONLY(usage))
-              {
-#ifdef DEBUG_LEGION
-                // Should not have read-only discard
-                assert(needs_updates);
-#endif
-                // Upgrade exclusive to shared
-                upgrade_single_to_multi(request_mask, request_space,
-                      pending_request, pending_updates, 0/*redop*/,
-                      exclusive_fields, exclusive_copies,
-                      shared_fields, shared_copies);
-                // If we still have fields we can record a new shared user
-                if (!!request_mask)
-                  record_shared_copy(request_space, request_mask);
-              }
-              else
-              {
-                // Must be in shared or exclusive mode going to exclusive mode
-                const FieldMask shared_overlap = shared_fields & request_mask;
-                if (!!shared_overlap)
-                {
-                  filter_multi_copies(request_mask, shared_fields,shared_copies,
-                                    request_space, pending_request, 
-                                    pending_updates, pending_invalidates,
-                                    needs_updates, true/*updates from all*/);
-                  record_exclusive_copy(request_space, shared_overlap);
-                }
-                if (!!request_mask)
-                  update_single_copies(request_mask, request_space,
-                                       pending_request, pending_updates, 
-                                       pending_invalidates, needs_updates,
-                                       exclusive_fields, exclusive_copies);
-              }
-            }
-          }
-          // Now either make a new request if this was from the owner
-          // or send back an update message to the requester with
-          // the expected number of updates
-          if (request_space != local_space)
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize(pending_request);
-              rez.serialize(pending_updates);
-              rez.serialize(pending_invalidates);
-              // Pack any exclusive fields
-              LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-                finder = exclusive_copies.find(request_space);
-              if (finder != exclusive_copies.end())
-              {
-                const FieldMask excl_mask = finder->second & orig_mask;
-                if (!!excl_mask)
-                {
-                  rez.serialize<bool>(true);
-                  rez.serialize(excl_mask);
-                }
-                else
-                  rez.serialize<bool>(false);
-              }
-              else
-                rez.serialize<bool>(false);
-              // Pack any exclusive redop fields
-              finder = single_reduction_copies.find(request_space);
-              if (finder != single_reduction_copies.end())
-              {
-                const FieldMask redop_mask = finder->second & orig_mask;
-                if (!!redop_mask)
-                {
-                  rez.serialize<bool>(true);
-                  rez.serialize(redop_mask);
-                }
-                else
-                  rez.serialize<bool>(false);
-              }
-              else
-                rez.serialize<bool>(false);
-            }
-            runtime->send_equivalence_set_valid_response(request_space, rez);
-          }
-          else 
-            record_pending_counts(pending_request, pending_updates, 
-                                  pending_invalidates, false/*need lock*/);
-        }
-      }
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::update_single_copies(FieldMask &to_update,
-                                              AddressSpaceID request_space,
-                                              PendingRequest *pending_request,
-                                              unsigned &pending_updates,
-                                              unsigned &pending_invalidates,
-                                              const bool needs_updates,
-                                              FieldMask &single_fields,
-                    LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!(to_update - single_fields)); // should all be exclusive
-#endif
-      // Scan through the single copies, send any updates
-      FieldMask to_add;
-      std::vector<AddressSpaceID> to_delete;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
-            single_copies.begin(); it != single_copies.end(); it++)
-      {
-        const FieldMask overlap = to_update & it->second;
-        if (!overlap)
-          continue;
-        // If it's already valid then there's nothing to do
-        if (it->first == request_space)
-          continue;
-        if (needs_updates)
-          request_update(it->first, request_space, overlap, 
-                         pending_request, pending_updates, true/*invalidate*/);
-        else
-          request_invalidate(it->first, request_space, overlap,
-                             pending_request, pending_invalidates, 
-                             false/*meta only*/);
-        to_add |= overlap;
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        to_update -= overlap;
-        if (!to_update)
-          break;
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<AddressSpaceID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          single_copies.erase(*it);
-      }
-      if (!!to_add)
-      {
-        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          single_copies.find(request_space);
-        if (finder == single_copies.end())
-          single_copies[request_space] = to_add;
-        else
-          finder->second |= to_add;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::upgrade_single_to_multi(FieldMask &to_update,
-                                                AddressSpaceID request_space,
-                                                PendingRequest *pending_request,
-                                                unsigned &pending_updates,
-                                                ReductionOpID redop,
-                                                FieldMask &single_fields,
-                    LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
-                                                FieldMask &multi_fields,
-                    LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies)
-    //--------------------------------------------------------------------------
-    {
-      // Check to the multi-case first
-      FieldMask multi_overlap = to_update & multi_fields;
-      if (!!multi_overlap)
-      {
-        to_update -= multi_overlap;
-        // Add it to the set, none of the fields should be valid currently
-        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          multi_copies.find(request_space);
-        if (finder != multi_copies.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second * multi_overlap);
-#endif
-          finder->second |= multi_overlap; 
-        }
-        else
-          multi_copies[request_space] = multi_overlap;
-        // Request one update for all the fields
-        for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator
-              it = multi_copies.begin(); it != multi_copies.end(); it++)
-        {
-          if (it->first == request_space)
-            continue;
-          const FieldMask overlap = multi_overlap & it->second;
-          if (!overlap)
-            continue;
-          request_update(it->first, request_space, overlap, pending_request,
-                         pending_updates, false/*invalidate*/, redop);
-          multi_overlap -= overlap;
-          if (!multi_overlap)
-            break;
-        }
-      }
-      // If we still have fields left then do the single case
-      if (!!to_update)
-      {
-#ifdef DEBUG_LEGION
-        assert(!(to_update - single_fields));
-#endif
-        // All these fields are about to become multi-reduction fields
-        single_fields -= to_update;
-        multi_fields |= to_update;
-        // Add it to the set, none of the fields should be valid currently
-        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          multi_copies.find(request_space);
-        if (finder != multi_copies.end())
-        {
-#ifdef DEBUG_LEGION
-          assert(finder->second * to_update);
-#endif
-          finder->second |= to_update; 
-        }
-        else
-          multi_copies[request_space] = to_update;
-        // Filter any single reduction nodes to multi-nodes
-        std::vector<AddressSpaceID> to_delete;
-        for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
-              single_copies.begin(); it != single_copies.end(); it++)
-        {
-          const FieldMask overlap = to_update & it->second;
-          if (!overlap)
-            continue;
-#ifdef DEBUG_LEGION
-          assert(it->first != request_space);
-#endif
-          // Note that on reception of this update request, the remote
-          // copy will realize that it needs to go to multi-reduce
-          request_update(it->first, request_space, overlap, pending_request, 
-                         pending_updates, false/*invalidate*/, redop);
-          it->second -= overlap;
-          if (!it->second)
-            to_delete.push_back(it->first);
-          // Move it to multi reduction
-          LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-            multi_copies.find(it->first);
-          if (finder != multi_copies.end())
-          {
-#ifdef DEBUG_LEGION
-            assert(finder->second * overlap);
-#endif
-            finder->second |= overlap;
-          }
-          else
-            multi_copies[it->first] = overlap;
-          // Fields should only appear once for single reductions
-          to_update -= overlap;
-          if (!to_update)
-            break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            single_copies.erase(*it);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_exclusive_copy(AddressSpaceID request_space,
-                                               const FieldMask &request_mask)
-    //--------------------------------------------------------------------------
-    {
-      exclusive_copies[request_space] |= request_mask; 
-      exclusive_fields |= request_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_shared_copy(AddressSpaceID request_space,
-                                            const FieldMask &request_mask)
-    //--------------------------------------------------------------------------
-    {
-      shared_copies[request_space] |= request_mask;
-      shared_fields |= request_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_single_reduce(AddressSpaceID request_space,
-                                              const FieldMask &request_mask,
-                                              ReductionOpID redop)
-    //--------------------------------------------------------------------------
-    {
-      single_reduction_copies[request_space] |= request_mask;
-      single_redop_fields |= request_mask;
-      if (redop != 0)
-        redop_modes[redop] |= request_mask;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::filter_single_copies(FieldMask &to_filter, 
-                                              FieldMask &single_fields,
-              LegionMap<AddressSpaceID,FieldMask>::aligned &single_copies,
-                                              AddressSpaceID request_space,
-                                              PendingRequest *pending_request,
-                                              unsigned &pending_updates,
-                                              unsigned &pending_invalidates,
-                                              const bool needs_updates)
-    //--------------------------------------------------------------------------
-    {
-      if (!to_filter)
-        return;
-      FieldMask single_overlap = to_filter & single_fields;
-      if (!single_overlap)
-        return;
-      single_fields -= single_overlap;
-      to_filter -= single_overlap;
-      std::vector<AddressSpaceID> to_delete;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
-            single_copies.begin(); it != single_copies.end(); it++)
-      {
-        const FieldMask overlap = single_overlap & it->second;
-        if (!overlap)
-          continue;
-        if (it->first == request_space)
-          // Just send an invalidate, when the response goes back
-          // it will restore it to being valid, note that this
-          // gets counted as an update since it's going back to the origin
-          request_invalidate(request_space, request_space, overlap, 
-              pending_request, pending_updates, true/*meta only*/);
-        else if (needs_updates)
-          request_update(it->first, request_space, overlap, pending_request, 
-                         pending_updates, true/*invalidate*/);
-        else
-          request_invalidate(it->first, request_space, overlap, pending_request,
-                             pending_invalidates, false/*meta only*/);
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        single_overlap -= overlap;
-        if (!single_overlap)
-          break;
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<AddressSpaceID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          single_copies.erase(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::filter_multi_copies(FieldMask &to_filter,
-                                             FieldMask &multi_fields,
-                LegionMap<AddressSpaceID,FieldMask>::aligned &multi_copies,
-                                             AddressSpaceID request_space,
-                                             PendingRequest *pending_request,
-                                             unsigned &pending_updates,
-                                             unsigned &pending_invalidates,
-                                             const bool needs_updates,
-                                             const bool updates_from_all)
-    //--------------------------------------------------------------------------
-    {
-      if (!to_filter)
-        return;
-      const FieldMask multi_overlap = to_filter & multi_fields;
-      if (!multi_overlap)
-        return;
-      // Track which fields still need updates
-      FieldMask update_mask = multi_overlap;
-      // Handle the same node case now to avoid unnecessary communication
-      LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator finder = 
-        multi_copies.find(request_space);
-      if (finder != multi_copies.end())
-      {
-        const FieldMask overlap = update_mask & finder->second;
-        if (!!overlap)
-        {
-          // Note that this gets counted as a pending update since
-          // it's going back to the origin of the request
-          request_invalidate(request_space, request_space, overlap,
-              pending_request, pending_updates, true/*meta only*/);
-          if (!updates_from_all)
-            update_mask -= overlap;
-        }
-      }
-      std::vector<AddressSpaceID> to_delete;
-      for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it = 
-            multi_copies.begin(); it != multi_copies.end(); it++)
-      {
-        const FieldMask overlap = multi_overlap & it->second;
-        if (!overlap)
-          continue;
-        // We already handled the same node case above
-        if (it->first != request_space)
-        {
-          // See if we need an update
-          FieldMask update;
-          // Only compute an update mask if we actually need it
-          if (needs_updates)
-            update = update_mask & overlap;
-          if (!!update)
-          {
-            request_update(it->first, request_space, update, pending_request,
-                           pending_updates, true/*invalidate*/);
-            if (!updates_from_all)
-              update_mask -= update;
-            const FieldMask invalidate = overlap - update;
-            if (!!invalidate)
-              request_invalidate(it->first, request_space, invalidate,
-                  pending_request, pending_invalidates, false/*meta only*/);
-          }
-          else
-            request_invalidate(it->first, request_space, overlap,
-                pending_request, pending_invalidates, false/*meta only*/);
-        }
-        it->second -= overlap;
-        if (!it->second) 
-          to_delete.push_back(it->first); 
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<AddressSpaceID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          multi_copies.erase(*it);
-      }
-      multi_fields -= multi_overlap;
-      to_filter -= multi_overlap;
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::filter_redop_modes(FieldMask to_filter)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<ReductionOpID> to_delete;
-      for (LegionMap<ReductionOpID,FieldMask>::aligned::iterator it = 
-            redop_modes.begin(); it != redop_modes.end(); it++)
-      {
-        const FieldMask overlap = to_filter & it->second;
-        if (!overlap)
-          continue;
-        it->second -= overlap;
-        if (!it->second)
-          to_delete.push_back(it->first);
-        to_filter -= overlap;
-        if (!to_filter)
-          break;
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<ReductionOpID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          redop_modes.erase(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::request_update(AddressSpaceID valid_space, 
-                                        AddressSpaceID invalid_space,
-                                        const FieldMask &update_mask,
-                                        PendingRequest *pending_request,
-                                        unsigned &pending_updates,
-                                        bool invalidate,
-                                        ReductionOpID skip_redop,
-                                        bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        request_update(valid_space, invalid_space, update_mask, pending_request,
-                       pending_updates, invalidate, skip_redop, false);
-        return;
-      }
-#ifdef DEBUG_LEGION
-      assert(valid_space != invalid_space);
-#endif
-      // Increment the number of updates that the requestor should expect
-      pending_updates++;
-      if (valid_space != local_space)
-      {
-        // Send the request to the valid node  
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(invalid_space);
-          rez.serialize(update_mask);
-          rez.serialize(pending_request);
-          rez.serialize<bool>(invalidate);
-          rez.serialize(skip_redop);
-        }
-        runtime->send_equivalence_set_update_request(valid_space, rez);
-      }
-      else
-      {
-        // We're on the valid node 
-#ifdef DEBUG_LEGION
-        assert(invalid_space != local_space);
-#endif
-        // Before we going packing things up and sending them off
-        // see if we need to defer this response until all the current
-        // interfering guards of this equivalence class are done
-        // This is important since it's not safe for other copies
-        // to use the meta-data until all the effects of the operations
-        // mapping here are applied. This is especially important
-        // for multiple readers are mapping the same equivalence set
-        // at the same time.
-        if (!mapping_guards.empty() && 
-            !(mutated_guard_summary * update_mask))
-        {
-          // If this is an invalidate request then we need to wait for
-          // all the guards to have mapped before we can perform it
-          // Otherwise if it is just a read update then we just need 
-          // to wait for any mutated guards to finish
-          for (LegionMap<Operation*,MappingGuard>::aligned::const_iterator 
-                it = mapping_guards.begin(); it != mapping_guards.end(); it++)
-          {
-            // If we're disjoint from all it's mutated fields then
-            // we don't need to wait for it
-            if (it->second.mutated_mask * update_mask)
-              continue;
-            // Now we need to defer this until later
-            DeferredRequest *deferred = 
-              new DeferredRequest(invalid_space, pending_request, 
-                                  invalidate, skip_redop);
-            deferred_requests.insert(deferred, update_mask);
-            return;
-          }
-        }
-        // Make an event that will be triggered once the message is
-        // handled on the remote node
-        RtUserEvent handled_event = Runtime::create_rt_user_event();
-        // Pack up the message
-        Serializer rez;
-        pack_state(rez, handled_event, pending_request, 
-                   update_mask, skip_redop, invalidate);
-        // Do any invalidation meta-updates before we send the message
-        if (!is_logical_owner())
-        {
-          if (invalidate)
-          {
-            exclusive_fields -= update_mask;
-            shared_fields -= update_mask;
-            if (!!single_redop_fields || !!multi_redop_fields)
-            {
-              const FieldMask redop_overlap = update_mask &
-                (single_redop_fields | multi_redop_fields);
-              if (!!redop_overlap)
-              {
-                single_redop_fields -= redop_overlap;
-                multi_redop_fields -= redop_overlap;
-                if (!single_redop_fields && !multi_redop_fields)
-                  redop_modes.clear();
-                else
-                  filter_redop_modes(redop_overlap);
-              }
-            }
-          }
-          else
-          {
-            // Any of our exclusive or single redop fields are now multi
-            const FieldMask exclusive_overlap = exclusive_fields & update_mask;
-            if (!!exclusive_overlap)
-            {
-              exclusive_fields -= exclusive_overlap;
-              shared_fields |= exclusive_overlap;
-            }
-            const FieldMask redop_overlap = single_redop_fields & update_mask;
-            if (!!redop_overlap)
-            {
-              single_redop_fields -= redop_overlap;
-              multi_redop_fields |= redop_overlap;
-            }
-          }
-        }
-        // If we still have clean-up to do then launch that task now
-        if (handled_event.exists())
-        {
-          // Add a resource reference to this to prevent it being collected
-          add_base_resource_ref(REMOTE_DID_REF);
-          RemoteRefTaskArgs args(this, handled_event);
-          runtime->issue_runtime_meta_task(args, 
-              LG_THROUGHPUT_WORK_PRIORITY, handled_event);
-        }
-        runtime->send_equivalence_set_update_response(invalid_space, rez);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    RtEvent EquivalenceSet::record_reduction_application(
-                              FieldMask reduced_mask, bool needs_lock/*=false*/)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        return record_reduction_application(reduced_mask, false/*needs lock*/);
-      }
-#ifdef DEBUG_LEGION
-      // We should be in single redop mode for all these fields
-      // if we're applying the reduction for it
-      assert(!(reduced_mask - single_redop_fields));
-#endif
-      // All of these fields are going from single reduce mode to exclusive mode
-      single_redop_fields -= reduced_mask;
-      filter_redop_modes(reduced_mask);
-      exclusive_fields |= reduced_mask;
-      if (is_logical_owner())
-      {
-        // Move the fields to the exclusive mode and record that 
-        // whoever currently has the valid copy of the meta data
-        // now has an exclusive copy of that metadata
-        std::vector<AddressSpaceID> to_delete;
-        for (LegionMap<AddressSpaceID,FieldMask>::aligned::iterator it =
-              single_reduction_copies.begin(); it != 
-              single_reduction_copies.end(); it++)
-        {
-          const FieldMask overlap = it->second & reduced_mask;
-          if (!overlap)
-            continue;
-          exclusive_copies[it->first] |= overlap;
-          it->second -= overlap;
-          if (!it->second)
-            to_delete.push_back(it->first);
-          reduced_mask -= overlap;
-          if (!reduced_mask)
-            break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<AddressSpaceID>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            single_reduction_copies.erase(*it);
-        }
-        // Effects are applied
-        return RtEvent::NO_RT_EVENT;
-      }
-      else
-      {
-        // Send the notification to the owner
-        RtUserEvent recorded = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(reduced_mask);
-          rez.serialize(recorded);
-        }
-        runtime->send_equivalence_set_reduction_application(
-                                    logical_owner_space, rez);
-        return recorded;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::pack_state(Serializer &rez, RtUserEvent &handled_event,
-                                    PendingRequest *pending_request,
-                                    const FieldMask &pack_mask, 
-                                    ReductionOpID skip_redop, bool invalidate)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(did);
-      rez.serialize(pending_request);
-      std::vector<LogicalView*> &inflight_refs = 
-        inflight_references[handled_event];
       // Pack the valid instances
-      if (!valid_instances.empty() &&
-          !(valid_instances.get_valid_mask() * pack_mask))
+      if (!valid_instances.empty())
       {
-        if (valid_instances.size() == 1)
+        rez.serialize<size_t>(valid_instances.size());
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
         {
-          rez.serialize<size_t>(1);
-          FieldMaskSet<LogicalView>::iterator it = 
-            valid_instances.begin();
-          // Add a remote reference to this that will be
-          // removed when the message is received
-          it->first->add_nested_valid_ref(did);
-          inflight_refs.push_back(it->first);
           rez.serialize(it->first->did);
-          const FieldMask overlap = it->second & pack_mask;
-          rez.serialize(overlap);
-          if (invalidate)
-          {
-            it.filter(overlap);
-            if (!it->second)
-            {
-              if (it->first->remove_nested_valid_ref(did))
-                delete it->first;
-              valid_instances.erase(it);
-            }
-          }
-        }
-        else
-        {
-          std::vector<DistributedID> dids;
-          LegionVector<FieldMask>::aligned masks;
-          std::vector<LogicalView*> to_delete;
-          for (FieldMaskSet<LogicalView>::iterator it = 
-                valid_instances.begin(); it != valid_instances.end(); it++)
-          {
-            const FieldMask overlap = pack_mask & it->second;
-            if (!overlap)
-              continue;
-            // Add a remote reference to this that will be
-            // removed when the message is received
-            it->first->add_nested_valid_ref(did);
-            inflight_refs.push_back(it->first);
-            dids.push_back(it->first->did);
-            masks.push_back(overlap);
-            if (invalidate)
-            {
-              it.filter(overlap);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-          }
-          rez.serialize<size_t>(dids.size());
-          for (unsigned idx = 0; idx < dids.size(); idx++)
-          {
-            rez.serialize(dids[idx]);
-            rez.serialize(masks[idx]);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<LogicalView*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              valid_instances.erase(*it);
-              if ((*it)->remove_nested_valid_ref(did))
-                delete (*it);
-            }
-          }
+          rez.serialize(it->second);
         }
       }
       else
@@ -5074,289 +5316,150 @@ namespace Legion {
       // Pack the reduction instances
       if (!reduction_instances.empty())
       {
-        const FieldMask redop_overlap = reduction_fields & pack_mask;
-        if (!!redop_overlap)
+        rez.serialize<size_t>(reduction_instances.size());
+        for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              rit = reduction_instances.begin(); 
+              rit != reduction_instances.end(); rit++)
         {
-          rez.serialize<size_t>(redop_overlap.pop_count());
-          int fidx = redop_overlap.find_first_set();
-          while (fidx >= 0)
-          {
-            rez.serialize(fidx);
-            std::map<unsigned,std::vector<ReductionView*> >::iterator
-              finder = reduction_instances.find(fidx);
-#ifdef DEBUG_LEGION
-            assert(finder != reduction_instances.end());
-            assert(!finder->second.empty());
-#endif
-            if (skip_redop > 0)
-            {
-              size_t send_size = finder->second.size(); 
-              // Skip any reduction views with the same redop
-              // at the end of the list (e.g. ones in the same epoch)
-              while (finder->second[send_size-1]->get_redop() == skip_redop)
-              {
-                send_size--;
-                if (send_size == 0)
-                  break;
-              }
-              rez.serialize<size_t>(send_size);
-              for (unsigned idx = 0; idx < send_size; idx++)
-                rez.serialize(finder->second[idx]->did);
-            }
-            else
-            {
-              rez.serialize<size_t>(finder->second.size());
-              for (std::vector<ReductionView*>::const_iterator it = 
-                   finder->second.begin(); it != finder->second.end(); it++)
-              {
-                // Add a remote reference to this that will be
-                // removed when the message is received
-                (*it)->add_nested_valid_ref(did);
-                inflight_refs.push_back(*it);
-                rez.serialize((*it)->did);
-              }
-            }
-            if (invalidate)
-            {
-              for (std::vector<ReductionView*>::const_iterator it = 
-                   finder->second.begin(); it != finder->second.end(); it++)
-                if ((*it)->remove_nested_valid_ref(did))
-                  delete (*it);
-              reduction_instances.erase(finder);
-            }
-            fidx = redop_overlap.find_next_set(fidx+1);
-          }
-          if (invalidate)
-            reduction_fields -= redop_overlap;
+          rez.serialize(rit->first);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<ReductionView*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+            rez.serialize((*it)->did);
         }
-        else
-          rez.serialize<size_t>(0);
       }
       else
         rez.serialize<size_t>(0);
       // Pack the restricted instances
-      if (!restricted_instances.empty() && 
-          !(restricted_instances.get_valid_mask() * pack_mask))
+      if (!restricted_instances.empty())
       {
-        if (restricted_instances.size() == 1)
+        rez.serialize(restricted_fields);
+        rez.serialize<size_t>(restricted_instances.size());  
+        for (FieldMaskSet<InstanceView>::const_iterator it = 
+              restricted_instances.begin(); it != 
+              restricted_instances.end(); it++)
         {
-          rez.serialize<size_t>(1);
-          FieldMaskSet<InstanceView>::iterator it = 
-            restricted_instances.begin();
-          // Add a remote reference to this that will be
-          // removed when the message is received
-          it->first->add_nested_valid_ref(did);
-          inflight_refs.push_back(it->first);
           rez.serialize(it->first->did);
-          const FieldMask overlap = it->second & pack_mask;
-          rez.serialize(overlap);
-          if (invalidate)
-          {
-            it.filter(overlap);
-            if (!it->second)
-            {
-              if (it->first->remove_nested_valid_ref(did))
-                delete it->first;
-              restricted_instances.erase(it);
-            }
-          }
+          rez.serialize(it->second);
         }
-        else
-        {
-          std::vector<DistributedID> dids;
-          LegionVector<FieldMask>::aligned masks;
-          std::vector<InstanceView*> to_delete;
-          for (FieldMaskSet<InstanceView>::iterator it = 
-                restricted_instances.begin(); it != 
-                restricted_instances.end(); it++)
-          {
-            const FieldMask overlap = pack_mask & it->second;
-            if (!overlap)
-              continue;
-            // Add a remote reference to this that will be
-            // removed when the message is received
-            it->first->add_nested_valid_ref(did);
-            inflight_refs.push_back(it->first);
-            dids.push_back(it->first->did);
-            masks.push_back(overlap);
-            if (invalidate)
-            {
-              it.filter(overlap);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-          }
-          rez.serialize<size_t>(dids.size());
-          for (unsigned idx = 0; idx < dids.size(); idx++)
-          {
-            rez.serialize(dids[idx]);
-            rez.serialize(masks[idx]);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<InstanceView*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              restricted_instances.erase(*it);
-              if ((*it)->remove_nested_valid_ref(did))
-                delete (*it);
-            }
-          }
-        }
-        const FieldMask restricted_mask = pack_mask & restricted_fields;
-        rez.serialize(restricted_mask);
-        if (invalidate && !!restricted_mask)
-          restricted_fields -= restricted_mask;
       }
       else
         rez.serialize<size_t>(0);
       // Pack the version numbers
-      std::vector<VersionID> versions;
-      LegionVector<FieldMask>::aligned masks;
-      std::vector<VersionID> to_delete;
-      for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
-            version_numbers.begin(); it != version_numbers.end(); it++)
+      if (!version_numbers.empty())
       {
-        const FieldMask overlap = pack_mask & it->second;
-        if (!overlap)
-          continue;
-        versions.push_back(it->first);
-        masks.push_back(overlap);
-        if (invalidate)
+        rez.serialize<size_t>(version_numbers.size());
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              version_numbers.begin(); it != version_numbers.end(); it++)
         {
-          it->second -= overlap;
-          if (!it->second)
-            to_delete.push_back(it->first);
+          rez.serialize(it->first);
+          rez.serialize(it->second);
         }
       }
-      rez.serialize<size_t>(versions.size());
-      for (unsigned idx = 0; idx < versions.size(); idx++)
-      {
-        rez.serialize(versions[idx]);
-        rez.serialize(masks[idx]);
-      }
-      if (!to_delete.empty())
-      {
-        for (std::vector<VersionID>::const_iterator it = 
-              to_delete.begin(); it != to_delete.end(); it++)
-          version_numbers.erase(*it);
-      }
-      // Finally record the event to trigger when it is finally handled
-      rez.serialize(handled_event);
-      // If we don't have any references to deal with then we can
-      // remove the entry now and mark that we don't need to 
-      // launch the reference clean up task later
-      if (inflight_refs.empty())
-      {
-        inflight_references.erase(handled_event);
-        handled_event = RtUserEvent::NO_RT_USER_EVENT;
-      }
+      else
+        rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_update_response(
-                           PendingRequest *pending_request, Deserializer &derez)
+    void EquivalenceSet::unpack_state(Deserializer &derez, 
+                                      ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
-      std::set<RtEvent> wait_for;
-      std::vector<LogicalView*> need_references;
-      LocalReferenceMutator mutator;
-
-      size_t num_valid;
-      derez.deserialize(num_valid);
-      for (unsigned idx = 0; idx < num_valid; idx++)
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+      assert(valid_instances.empty());
+      assert(reduction_instances.empty());
+      assert(restricted_instances.empty());
+      assert(version_numbers.empty());
+#endif
+      std::set<RtEvent> deferred_reference_events;
+      std::map<LogicalView*,unsigned> *deferred_references = NULL;
+      size_t num_valid_insts;
+      derez.deserialize(num_valid_insts);
+      for (unsigned idx = 0; idx < num_valid_insts; idx++)
       {
-        DistributedID view_did;
-        derez.deserialize(view_did);
+        DistributedID valid_did;
+        derez.deserialize(valid_did);
         RtEvent ready;
         LogicalView *view = 
-          runtime->find_or_request_logical_view(view_did, ready);
-        FieldMask view_mask;
-        derez.deserialize(view_mask);
-        if (valid_instances.insert(view, view_mask))
+          runtime->find_or_request_logical_view(valid_did, ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        valid_instances.insert(view, mask);
+        if (ready.exists() && !ready.has_triggered())
         {
-          // New view
-          if (ready.exists() && !ready.has_triggered())
-          {
-            wait_for.insert(ready);
-            need_references.push_back(view);
-          }
-          else
-            view->add_nested_valid_ref(did, &mutator);
+          deferred_reference_events.insert(ready);
+          if (deferred_references == NULL)
+            deferred_references = new std::map<LogicalView*,unsigned>();
+          (*deferred_references)[view] = 1;
         }
-        else if (ready.exists() && !ready.has_triggered())
-          wait_for.insert(ready);
+        else
+          view->add_nested_valid_ref(did, &mutator);
       }
       size_t num_reduc_fields;
       derez.deserialize(num_reduc_fields);
       for (unsigned idx1 = 0; idx1 < num_reduc_fields; idx1++)
       {
-        int fidx;
+        unsigned fidx;
         derez.deserialize(fidx);
         reduction_fields.set_bit(fidx);
+        size_t num_reduc_insts;
+        derez.deserialize(num_reduc_insts);
         std::vector<ReductionView*> &reduc_views = reduction_instances[fidx];
-        size_t num_views;
-        derez.deserialize(num_views);
-        for (unsigned idx2 = 0; idx2 < num_views; idx2++)
+        for (unsigned idx2 = 0; idx2 < num_reduc_insts; idx2++)
         {
-          DistributedID view_did;
-          derez.deserialize(view_did);
+          DistributedID reduc_did;
+          derez.deserialize(reduc_did);
           RtEvent ready;
           LogicalView *view = 
-            runtime->find_or_request_logical_view(view_did, ready);
+            runtime->find_or_request_logical_view(reduc_did, ready);
           ReductionView *reduc_view = static_cast<ReductionView*>(view);
-          // Unpack these in order, as long as they zip then we can
-          // ignore them, once they stop zipping that is when we begin
-          // doing the merge and appending to the end of the list
-          if ((idx2 < reduc_views.size()) && (reduc_views[idx2] == reduc_view))
-            continue;
           reduc_views.push_back(reduc_view);
           if (ready.exists() && !ready.has_triggered())
           {
-            wait_for.insert(ready);
-            need_references.push_back(view);
+            if (deferred_references == NULL)
+              deferred_references = new std::map<LogicalView*,unsigned>();
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              deferred_references->find(view);
+            if (finder == deferred_references->end())
+              (*deferred_references)[view] = 1;
+            else
+              finder->second++;
           }
           else
             view->add_nested_valid_ref(did, &mutator);
         }
       }
-      size_t num_restricted;
-      derez.deserialize(num_restricted);
-      if (num_restricted > 0)
+      size_t num_restrict_insts;
+      derez.deserialize(num_restrict_insts);
+      if (num_restrict_insts > 0)
       {
-        for (unsigned idx = 0; idx < num_restricted; idx++)
+        derez.deserialize(restricted_fields);
+        for (unsigned idx = 0; idx < num_restrict_insts; idx++)
         {
-          DistributedID view_did;
-          derez.deserialize(view_did);
+          DistributedID valid_did;
+          derez.deserialize(valid_did);
           RtEvent ready;
           LogicalView *view = 
-            runtime->find_or_request_logical_view(view_did, ready);
-          FieldMask view_mask;
-          derez.deserialize(view_mask); 
-          if (restricted_instances.insert(
-                static_cast<InstanceView*>(view), view_mask))
+            runtime->find_or_request_logical_view(valid_did, ready);
+          InstanceView *inst_view = static_cast<InstanceView*>(view);
+          FieldMask mask;
+          derez.deserialize(mask);
+          restricted_instances.insert(inst_view, mask);
+          if (ready.exists() && !ready.has_triggered())
           {
-            // New view
-            if (ready.exists() && !ready.has_triggered())
-            {
-              wait_for.insert(ready);
-              need_references.push_back(view);
-            }
+            if (deferred_references == NULL)
+              deferred_references = new std::map<LogicalView*,unsigned>();
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              deferred_references->find(view);
+            if (finder == deferred_references->end())
+              (*deferred_references)[view] = 1;
             else
-              view->add_nested_valid_ref(did, &mutator);
+              finder->second++;
           }
-          else if (ready.exists() && !ready.has_triggered())
-            wait_for.insert(ready);
+          else
+            view->add_nested_valid_ref(did, &mutator);
         }
-        if (!!restricted_fields)
-        {
-          FieldMask restrict_mask;
-          derez.deserialize(restrict_mask);
-          restricted_fields |= restrict_mask;
-        }
-        else
-          derez.deserialize(restricted_fields);
       }
       size_t num_versions;
       derez.deserialize(num_versions);
@@ -5364,504 +5467,32 @@ namespace Legion {
       {
         VersionID vid;
         derez.deserialize(vid);
-        LegionMap<VersionID,FieldMask>::aligned::iterator finder = 
-          version_numbers.find(vid);
-        if (finder != version_numbers.end())
-        {
-          FieldMask mask;
-          derez.deserialize(mask);
-          finder->second |= mask;
-        }
-        else // can do it in-place
-          derez.deserialize(version_numbers[vid]);
+        derez.deserialize(version_numbers[vid]);
       }
-      RtUserEvent handled_event;
-      derez.deserialize(handled_event);
-      if (!wait_for.empty())
+      if (deferred_references != NULL)
       {
-        RtEvent wait_on = Runtime::merge_events(wait_for);
+        const RtEvent wait_on = 
+          Runtime::merge_events(deferred_reference_events);
         if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
-      if (!need_references.empty())
-      {
-        for (std::vector<LogicalView*>::const_iterator it = 
-              need_references.begin(); it != need_references.end(); it++)
-          (*it)->add_nested_valid_ref(did, &mutator);
-      }
-      const RtEvent handled_precondition = mutator.get_done_event(); 
-      Runtime::trigger_event(handled_event, handled_precondition);
-      // The pending request could be NULL if this is actually an 
-      // invalidation coming back from a remote node in order to 
-      // do a refinement
-      if (pending_request != NULL)
-      {
-        if (handled_precondition.exists())
-          pending_request->applied_events.insert(handled_precondition);
-        pending_request->remaining_updates -= 1;
-        if ((pending_request->remaining_updates == 0) &&
-            finalize_pending_update(pending_request))
-          finalize_pending_request(pending_request);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::request_invalidate(AddressSpaceID target,
-                                            AddressSpaceID source,
-                                            const FieldMask &invalidate_mask,
-                                            PendingRequest *pending_request,
-                                            unsigned &pending_invalidates,
-                                            bool meta_only, bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        request_invalidate(target, source, invalidate_mask, pending_request,
-                           pending_invalidates, meta_only, false/*needs lock*/);
-        return;
-      }
-#ifdef DEBUG_LEGION
-      // Should only be doing meta invaliations on the origin
-      assert(!meta_only || (target == source));
-#endif
-      // Increment the number of updates that the requestor should expect
-      pending_invalidates++;
-      if (target != local_space)
-      {
-        // Send the request to the target node 
-        Serializer rez;
         {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(source);
-          rez.serialize(invalidate_mask);
-          rez.serialize(pending_request);
-          rez.serialize<bool>(meta_only);
-        }
-        runtime->send_equivalence_set_invalidate_request(target, rez);
-      }
-      else
-      {
-        // We're the local node so do the invalidation here
-        if (!meta_only)
-        {
-          if (!valid_instances.empty() && 
-              !(valid_instances.get_valid_mask() * invalidate_mask))
-          {
-            std::vector<LogicalView*> to_delete;
-            for (FieldMaskSet<LogicalView>::iterator it = 
-                  valid_instances.begin(); it != valid_instances.end(); it++)
-            {
-              const FieldMask overlap = it->second & invalidate_mask;
-              if (!overlap)
-                continue;
-              it.filter(overlap);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            if (!to_delete.empty())
-            {
-              for (std::vector<LogicalView*>::const_iterator it = 
-                    to_delete.begin(); it != to_delete.end(); it++)
-              {
-                valid_instances.erase(*it);
-                if ((*it)->remove_nested_valid_ref(did))
-                  delete (*it);
-              }
-            }
-          }
-          if (!reduction_instances.empty())
-          {
-            const FieldMask redop_overlap = reduction_fields & invalidate_mask;
-            if (!!redop_overlap)
-            {
-              int fidx = redop_overlap.find_first_set();
-              while (fidx >= 0)
-              {
-                std::map<unsigned,std::vector<ReductionView*> >::iterator
-                  finder = reduction_instances.find(fidx);
-#ifdef DEBUG_LEGION
-                assert(finder != reduction_instances.end());
-#endif
-                for (std::vector<ReductionView*>::const_iterator it = 
-                      finder->second.begin(); it != finder->second.end(); it++)
-                  if ((*it)->remove_nested_valid_ref(did))
-                    delete (*it);
-                reduction_instances.erase(finder);
-                fidx = redop_overlap.find_next_set(fidx+1);
-              }
-              reduction_fields -= redop_overlap;
-            }
-          }
-          if (!restricted_instances.empty() &&
-              !(restricted_instances.get_valid_mask() * invalidate_mask))
-          {
-            std::vector<InstanceView*> to_delete;
-            for (FieldMaskSet<InstanceView>::iterator it = 
-                  restricted_instances.begin(); it != 
-                  restricted_instances.end(); it++)
-            {
-              const FieldMask overlap = it->second & invalidate_mask;
-              if (!overlap)
-                continue;
-              it.filter(invalidate_mask);
-              if (!it->second)
-                to_delete.push_back(it->first);
-            }
-            for (std::vector<InstanceView*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-            {
-              restricted_instances.erase(*it);
-              if ((*it)->remove_nested_valid_ref(did))
-                delete (*it);
-            }
-            restricted_fields -= invalidate_mask;
-          }
-          std::vector<VersionID> to_delete;
-          for (LegionMap<VersionID,FieldMask>::aligned::iterator it =
-                version_numbers.begin(); it != version_numbers.end(); it++)
-          {
-            it->second -= invalidate_mask;
-            if (!it->second)
-              to_delete.push_back(it->first);
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<VersionID>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
-              version_numbers.erase(*it);
-          }
-        }
-        // We only need to invalidate meta-state on remote nodes
-        // since the update logic will handle it on the owner node
-        if (!is_logical_owner())
-        {
-          exclusive_fields -= invalidate_mask;
-          shared_fields -= invalidate_mask;
-          if (!!single_redop_fields || !!multi_redop_fields)
-          {
-            const FieldMask redop_overlap = invalidate_mask &
-              (single_redop_fields | multi_redop_fields);
-            if (!!redop_overlap)
-            {
-              single_redop_fields -= redop_overlap;
-              multi_redop_fields -= redop_overlap;
-              if (!single_redop_fields && !multi_redop_fields)
-                redop_modes.clear();
-              else
-                filter_redop_modes(redop_overlap);
-            }
-          }
-        }
-        // Then send the response to the source node telling it that
-        // the invalidation was done successfully
-        if (source != local_space)
-        {
-          Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(did);
-            rez.serialize(pending_request);
-            rez.serialize<bool>(meta_only);
-          }
-          runtime->send_equivalence_set_invalidate_response(source, rez);
-        }
-        else
-          record_invalidation(pending_request, meta_only);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_pending_counts(PendingRequest *pending_request,
-                                               unsigned pending_updates,
-                                               unsigned pending_invalidates,
-                                               bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        record_pending_counts(pending_request, pending_updates,
-                              pending_invalidates, false/*needs lock*/);
-        return;
-      }
-      pending_request->remaining_updates += pending_updates;
-      if (pending_request->remaining_updates == 0)
-        finalize_pending_update(pending_request);
-      pending_request->remaining_invalidates += pending_invalidates;
-      // See if we need to do the deletion
-      if ((pending_request->remaining_updates == 0) && 
-          (pending_request->remaining_invalidates == 0))
-        finalize_pending_request(pending_request);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::record_invalidation(PendingRequest *pending_request,
-                                             bool meta_only, bool needs_lock)
-    //--------------------------------------------------------------------------
-    {
-      if (needs_lock)
-      {
-        AutoLock eq(eq_lock);
-        record_invalidation(pending_request, meta_only, false/*needs lock*/);
-        return;
-      }
-      if (meta_only)
-      {
-        // Meta only invalidations are a kind of update since they have 
-        // to be done as part of making a local space valid
-        pending_request->remaining_updates -= 1;
-        if ((pending_request->remaining_updates == 0) && 
-            finalize_pending_update(pending_request))
-          finalize_pending_request(pending_request);
-      }
-      else
-      {
-        pending_request->remaining_invalidates -= 1;
-        if ((pending_request->remaining_invalidates == 0) &&
-            (pending_request->remaining_updates == 0))
-          finalize_pending_request(pending_request);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool EquivalenceSet::finalize_pending_update(
-                                                PendingRequest *pending_request)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      sanity_check();
-      assert(pending_request->remaining_updates == 0);
-#endif
-      FieldMaskSet<PendingRequest>::iterator finder = 
-        outstanding_requests.find(pending_request);
-#ifdef DEBUG_LEGION
-      assert(finder != outstanding_requests.end());
-#endif
-      if (!is_logical_owner())
-      {
-        FieldMask update_mask = finder->second;
-        // If we're not the owner then we have to update the state 
-        if (pending_request->usage.redop > 0)
-        {
-          // Reduction case
-#ifdef DEBUG_LEGION
-          // Shouldn't have any exclusive fields
-          assert(!pending_request->exclusive_mask);
-#endif
-          redop_modes[pending_request->usage.redop] |= update_mask;
-          if (!!pending_request->single_redop_mask)
-          {
-#ifdef DEBUG_LEGION
-            assert(single_redop_fields * pending_request->single_redop_mask);
-#endif
-            single_redop_fields |= pending_request->single_redop_mask;
-            update_mask -= pending_request->single_redop_mask;
-          }
-          if (!!update_mask)
-          {
-#ifdef DEBUG_LEGION
-            assert(multi_redop_fields * update_mask);
-#endif
-            multi_redop_fields |= update_mask;
-          }
+          RtUserEvent done_event = Runtime::create_rt_user_event();
+          // This will take ownership of the deferred references
+          // map and delete it when it is done with it
+          RemoteRefTaskArgs args(this, done_event, deferred_references);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+          mutator.record_reference_mutation_effect(done_event);
         }
         else
         {
-          // Read-only or read-write
-          // Handle the especially nasty case first of dealing
-          // with any reduction use cases where we need to stay
-          // in single reduce mode until someone does a reduction
-          if (!!pending_request->single_redop_mask)
-          {
-#ifdef DEBUG_LEGION
-            assert(pending_request->single_redop_mask * 
-                    pending_request->exclusive_mask);
-#endif
-            // We think we are in single reduction mode, check to
-            // see if someone actually did the reductions. We'll
-            // know that they did because there will be no
-            // reductions present for these fields
-            FieldMask &single_redop_mask = pending_request->single_redop_mask;
-            // None of these fields will be shared
-            update_mask -= single_redop_mask;
-            // Record that we mutated these fields to prevent
-            // anyone else from invalidating them out from under us
-            // Note that we do this even for fields for which 
-            // reductions have already been applied to prevent us
-            // from losing information about valid instances when
-            // the later invalidation comes since this will force
-            // it to wait and then move the information about any
-            // newly made valid instances
-            // The one case where the "op" can be NULL is if we are
-            // refining and in that case we already know that no one
-            // is going to be recording things out from under us
-            if (pending_request->op != NULL)
-              record_mutated_guard(pending_request->op, single_redop_mask);
-            const FieldMask done_reductions = 
-              single_redop_mask - reduction_fields; 
-            single_redop_mask &= reduction_fields;
-            if (!!single_redop_mask)
-            {
-#ifdef DEBUG_LEGION
-              assert(single_redop_fields * single_redop_mask);
-#endif
-              single_redop_fields |= single_redop_mask;
-              // Use 0 as a proxy for no actual reduction
-              redop_modes[0] |= single_redop_mask;
-            }
-            if (!!done_reductions)
-            {
-              // The owner thinks we're in single redop mode
-              // so we'll put ourselves in an equivalence exclusive mode
-              // Either we'll see a later invalidation or we'll 
-              // remain the exclusive owner, either way we'll
-              // eventually end up in the same mode that the owner
-              // thinks that we are in
-#ifdef DEBUG_LEGION
-              assert(exclusive_fields * done_reductions);
-#endif
-              exclusive_fields |= done_reductions;
-            }
-          }
-          // The rest of this is easy
-          // Record exclusive and shared fields as we would expect
-          if (!!pending_request->exclusive_mask)
-          {
-#ifdef DEBUG_LEGION
-            assert(exclusive_fields * pending_request->exclusive_mask);
-#endif
-            exclusive_fields |= pending_request->exclusive_mask;
-            update_mask -= pending_request->exclusive_mask;
-          }
-          if (!!update_mask)
-          {
-#ifdef DEBUG_LEGION
-            assert(shared_fields * update_mask);
-#endif
-            shared_fields |= update_mask;
-          }
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                deferred_references->begin(); it != 
+                deferred_references->end(); it++)
+            it->first->add_nested_valid_ref(did, &mutator, it->second);
+          delete deferred_references;
         }
       }
-#ifdef DEBUG_LEGION
-      sanity_check();
-#endif
-      outstanding_requests.erase(finder);
-      Runtime::trigger_event(pending_request->ready_event);
-      return (pending_request->remaining_invalidates == 0);
     }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::finalize_pending_request(
-                                                PendingRequest *pending_request)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(pending_request->remaining_updates == 0);
-      assert(pending_request->remaining_invalidates == 0);
-#endif
-      if (!pending_request->applied_events.empty())
-        Runtime::trigger_event(pending_request->applied_event,
-            Runtime::merge_events(pending_request->applied_events));
-      else
-        Runtime::trigger_event(pending_request->applied_event);
-      delete pending_request;
-    }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::sanity_check(void) const
-    //--------------------------------------------------------------------------
-    {
-      // All the summary masks should be disjoint
-      assert(exclusive_fields * shared_fields);
-      assert(exclusive_fields * single_redop_fields);
-      assert(exclusive_fields * multi_redop_fields);
-      assert(shared_fields * single_redop_fields);
-      assert(shared_fields * multi_redop_fields);
-      assert(single_redop_fields * multi_redop_fields);
-      // Reduction modes should all be present
-      if (!!single_redop_fields || !! multi_redop_fields)
-      {
-        FieldMask summary;
-        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator
-              it = redop_modes.begin(); it != redop_modes.end(); it++)
-        {
-          assert(!!it->second);
-          // fields should appear exactly once
-          assert(summary * it->second);
-          summary |= it->second;
-        }
-        const FieldMask combined = single_redop_fields | multi_redop_fields;
-        assert(summary == combined);
-      }
-      else
-        assert(redop_modes.empty());
-      if (is_logical_owner())
-      {
-        // Summary masks should match their sets
-        if (!!exclusive_fields)
-        {
-          FieldMask summary;
-          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-                exclusive_copies.begin(); it != exclusive_copies.end(); it++)
-          {
-            assert(!!it->second);
-            // fields should appear exactly once
-            assert(summary * it->second);
-            summary |= it->second;
-          }
-          assert(summary == exclusive_fields);
-        }
-        else
-          assert(exclusive_copies.empty());
-        if (!!shared_fields)
-        {
-          FieldMask summary;
-          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-                shared_copies.begin(); it != shared_copies.end(); it++)
-          {
-            assert(!!it->second);
-            summary |= it->second;
-          }
-          assert(summary == shared_fields);
-        }
-        else
-          assert(shared_copies.empty());
-        if (!!single_redop_fields)
-        {
-          FieldMask summary;
-          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-                single_reduction_copies.begin(); it != 
-                single_reduction_copies.end(); it++)
-          {
-            assert(!!it->second);
-            // fields should appear exactly once
-            assert(summary * it->second);
-            summary |= it->second;
-          }
-          assert(summary == single_redop_fields);
-        }
-        else
-          assert(single_reduction_copies.empty());
-        if (!!multi_redop_fields)
-        {
-          FieldMask summary;
-          for (LegionMap<AddressSpaceID,FieldMask>::aligned::const_iterator it =
-                multi_reduction_copies.begin(); it != 
-                multi_reduction_copies.end(); it++)
-          {
-            assert(!!it->second);
-            summary |= it->second;
-          }
-          assert(summary == multi_redop_fields);
-        }
-        else
-          assert(multi_reduction_copies.empty()); 
-      }
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::initialize_set(const RegionUsage &usage,
@@ -5956,11 +5587,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::find_valid_instances(FieldMaskSet<LogicalView> &insts,
+    bool EquivalenceSet::find_valid_instances(RemoteEqTracker &remote_tracker,
+                                              FieldMaskSet<LogicalView> &insts,
                                               const FieldMask &user_mask) const
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock,1,false/*exclusive*/);
+      if (!is_logical_owner())
+      {
+        remote_tracker.record_remote(logical_owner_space, 
+                                     const_cast<EquivalenceSet*>(this));
+        return false;
+      }
       for (FieldMaskSet<LogicalView>::const_iterator it = 
             valid_instances.begin(); it != valid_instances.end(); it++)
       {
@@ -5979,51 +5617,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::filter_valid_instances(
-             FieldMaskSet<LogicalView> &insts, const FieldMask &user_mask) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
-      std::vector<LogicalView*> to_erase;
-      for (FieldMaskSet<LogicalView>::iterator it = 
-            insts.begin(); it != insts.end(); it++)
-      {
-        FieldMaskSet<LogicalView>::const_iterator finder = 
-          valid_instances.find(it->first);
-        if (finder != valid_instances.end())
-        {
-          const FieldMask diff = it->second - finder->second;
-          if (!!diff)
-          {
-            it.filter(diff);
-            if (!it->second)
-              to_erase.push_back(it->first);
-          }
-        }
-        else
-          to_erase.push_back(it->first);
-      }
-      if (!to_erase.empty())
-      {
-        if (to_erase.size() != insts.size())
-        {
-          for (std::vector<LogicalView*>::const_iterator it = 
-                to_erase.begin(); it != to_erase.end(); it++)
-            insts.erase(*it);
-        }
-        else
-          insts.clear();
-      }
-      return has_restrictions(user_mask);
-    }
-
-    //--------------------------------------------------------------------------
     bool EquivalenceSet::find_reduction_instances(
-                        FieldMaskSet<ReductionView> &insts, ReductionOpID redop,
-                        const FieldMask &user_mask) const
+                       RemoteEqTracker &remote_tracker,
+                       FieldMaskSet<ReductionView> &insts, ReductionOpID redop,
+                       const FieldMask &user_mask) const
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock,1,false/*exclusive*/);
+      if (!is_logical_owner())
+      {
+        remote_tracker.record_remote(logical_owner_space, 
+                                     const_cast<EquivalenceSet*>(this));
+        return false;
+      }
       // Iterate over all the fields
       int fidx = user_mask.find_first_set();
       while (fidx >= 0)
@@ -6041,8 +5647,7 @@ namespace Legion {
               (*it)->get_manager()->as_reduction_manager();
             if (manager->redop != redop)
               break;
-            FieldMaskSet<ReductionView>::iterator finder = 
-              insts.find(*it);
+            FieldMaskSet<ReductionView>::iterator finder = insts.find(*it);
             if (finder == insts.end())
               insts.insert(*it, local_mask);
             else
@@ -6055,77 +5660,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool EquivalenceSet::filter_reduction_instances(
-                       FieldMaskSet<ReductionView> &insts, ReductionOpID redop,
-                       const FieldMask &user_mask) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
-      // Iterate over all the fields
-      int fidx = user_mask.find_first_set();
-      FieldMask filter_mask;
-      std::vector<ReductionView*> to_erase;
-      while (fidx >= 0)
-      {
-        std::map<unsigned,std::vector<ReductionView*> >::const_iterator 
-          current = reduction_instances.find(fidx);
-        if (current != reduction_instances.end())
-        {
-          FieldMask local_mask;
-          local_mask.set_bit(fidx);
-          for (FieldMaskSet<ReductionView>::iterator cit = 
-                insts.begin(); cit != insts.end(); cit++)
-          {
-            bool found = false;
-            for (std::vector<ReductionView*>::const_reverse_iterator it = 
-                  current->second.rbegin(); it != current->second.rend(); it++)
-            {
-              ReductionManager *manager = 
-                  (*it)->get_manager()->as_reduction_manager();
-              if (manager->redop != redop)
-                break;
-              if (cit->first != (*it))
-                continue;
-              found = true;
-              break;
-            }
-            if (!found)
-            {
-              cit.filter(local_mask);
-              if (!cit->second)
-                to_erase.push_back(cit->first);
-            }
-          }
-        }
-        else
-          filter_mask.set_bit(fidx);
-        fidx = user_mask.find_next_set(fidx+1);
-      }
-      if (!!filter_mask)
-        insts.filter(filter_mask);
-      if (!to_erase.empty())
-      {
-        if (to_erase.size() != insts.size())
-        {
-          for (std::vector<ReductionView*>::const_iterator it = 
-                to_erase.begin(); it != to_erase.end(); it++)
-            insts.erase(*it);
-        }
-        else
-          insts.clear();
-      }
-      return has_restrictions(user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::update_set(Operation *op, const RegionUsage &usage, 
+    bool EquivalenceSet::update_set(RemoteEqTracker &remote_tracker,
+                                std::set<EquivalenceSet*> &alt_sets,
+                                Operation *op, const unsigned index,
+                                const RegionUsage &usage, 
                                 const FieldMask &user_mask,
                                 const InstanceSet &target_instances,
                                 const std::vector<InstanceView*> &target_views,
-                                CopyFillAggregator &input_aggregator,
-                                CopyFillAggregator &output_aggregator,
+                                std::map<RtEvent,
+                                       CopyFillAggregator*> &input_aggregators,
+                                CopyFillAggregator *&output_aggregator,
                                 std::set<RtEvent> &applied_events,
-                                FieldMask *initialized/*=NULL*/)
+                                std::set<RtEvent> &guard_events,
+                                FieldMask *initialized/*=NULL*/,
+                                const bool original_set/*=true*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6133,12 +5681,45 @@ namespace Legion {
 #endif
       WrapperReferenceMutator mutator(applied_events);
       AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      assert(mapping_guards.find(op) != mapping_guards.end());
-      assert(!(user_mask - mapping_guards[op].guard_mask));
-#endif
-      // Record that this operation is mutating
-      record_mutated_guard(op, user_mask);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(applied_events); 
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+        // Otherwise we fall through and record our subsets
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+          (*it)->update_set(remote_tracker, alt_sets, op, index,
+              usage, user_mask, target_instances, target_views, 
+              input_aggregators, output_aggregator, applied_events,
+              guard_events, initialized, false/*original set*/);
+        eq.reacquire();
+        return true;
+      }
       // Check for any uninitialized data
       // Don't report uninitialized warnings for empty equivalence classes
       if ((initialized != NULL) && !set_expr->is_empty())
@@ -6170,7 +5751,8 @@ namespace Legion {
         {
           const FieldMask reduce_mask = user_mask & restricted_fields;
           if (!!reduce_mask)
-            apply_reductions(reduce_mask, output_aggregator); 
+            apply_reductions(reduce_mask, output_aggregator,
+                RtEvent::NO_RT_EVENT, op, index, true/*track events*/); 
           // No need to record that we applied the reductions, we'll
           // discover that when we collapse the single/multi-reduce state
           reduction_fields |= (user_mask - restricted_fields);
@@ -6200,78 +5782,249 @@ namespace Legion {
           const FieldMask restricted_mask = user_mask & restricted_fields;
           if (!!restricted_mask)
             copy_out(restricted_mask, target_instances,
-                     target_views, output_aggregator);
+                     target_views, op, index, output_aggregator);
         }
         // Advance our version numbers
         advance_version_numbers(user_mask);
       }
-      else
+      else if (IS_READ_ONLY(usage) && !update_guards.empty() && 
+                !(user_mask * update_guards.get_valid_mask()))
       {
-        // Read-write or read-only
-        // Check for any copies from normal instances first
-        issue_update_copies_and_fills(input_aggregator, user_mask, 
-                                      target_instances, target_views, set_expr);
-        // Get the set of fields to filter, any for which we're about
-        // to apply pending reductions or overwite, except those that
-        // are restricted
-        const FieldMask reduce_mask = reduction_fields & user_mask;
-        const FieldMask restricted_mask = restricted_fields & user_mask;
-        const bool is_write = IS_WRITE(usage);
-        FieldMask filter_mask = is_write ? user_mask : reduce_mask;
-        if (!!restricted_mask)
-          filter_mask -= restricted_mask;
-        if (!!filter_mask)
-          filter_valid_instances(filter_mask);
-        // Save the instances if they are not restricted
-        // Otherwise if they are restricted then the restricted instances
-        // are already listed as the valid views so there's nothing more
-        // for us to have to do
-        if (!!restricted_mask)
+        // If we're doing read-only mode, get the set of events that
+        // we need to wait for before we can do our registration, this 
+        // ensures that we serialize read-only operations correctly
+        // In order to avoid deadlock we have to make different copy fill
+        // aggregators for each of the different fields of prior updates
+        FieldMask remainder_mask = user_mask;
+        LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::aligned to_add;
+        std::vector<CopyFillAggregator*> to_delete;
+        for (FieldMaskSet<CopyFillAggregator>::iterator it = 
+              update_guards.begin(); it != update_guards.end(); it++)
         {
-          const FieldMask non_restricted = user_mask - restricted_fields;
-          if (!!non_restricted)
-            record_instances(non_restricted, target_instances, 
-                             target_views, mutator); 
+          const FieldMask guard_mask = remainder_mask & it->second;
+          if (!guard_mask)
+            continue;
+          // No matter what record our dependences on the prior guards
+          const RtEvent guard_event = it->first->guard_postcondition;
+          guard_events.insert(guard_event);
+          applied_events.insert(it->first->applied_event);
+          CopyFillAggregator *input_aggregator = NULL;
+          // See if we have an input aggregator that we can use now
+          std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
+            input_aggregators.find(guard_event);
+          if (finder != input_aggregators.end())
+            input_aggregator = finder->second;
+          // Use this to see if any new updates are recorded
+          const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
+            input_aggregator->count_updates();
+          update_set_internal(input_aggregator, guard_event, op, index,
+                              usage, guard_mask, target_instances, 
+                              target_views, applied_events);
+          // If we did any updates record ourselves as the new guard here
+          if ((input_aggregator != NULL) && 
+              ((finder == input_aggregators.end()) ||
+               (initial_updates != input_aggregator->count_updates())))
+          {
+            if (finder == input_aggregators.end())
+            {
+              input_aggregators[guard_event] = input_aggregator;
+              // Chain applied events for dependent guard updates
+              // Only need to do this the first time we make an aggregator
+              input_aggregator->record_reference_mutation_effect(
+                                        it->first->applied_event);
+            }
+            // Record this as a guard for later operations
+            to_add.resize(to_add.size() + 1);
+            std::pair<CopyFillAggregator*,FieldMask> &back = to_add.back();
+            back.first = input_aggregator;
+            back.second = guard_mask;
+            input_aggregator->record_guard_set(this);
+            // Remove the current guard since it doesn't matter anymore
+            it.filter(guard_mask);
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          remainder_mask -= guard_mask;
+          if (!remainder_mask)
+            break;
         }
-        else
-          record_instances(user_mask, target_instances,
-                           target_views, mutator);
-        // Next check for any reductions that need to be applied
-        if (!!reduce_mask)
+        if (!to_delete.empty())
         {
-          apply_reductions(reduce_mask, input_aggregator); 
-          const RtEvent recorded = record_reduction_application(reduce_mask);
-          if (recorded.exists() && !recorded.has_triggered())
-            applied_events.insert(recorded);
+          for (std::vector<CopyFillAggregator*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
+            update_guards.erase(*it);
         }
-        // Issue copy-out copies for any restricted fields if we wrote stuff
-        if (is_write) 
+        if (!to_add.empty())
         {
-          advance_version_numbers(user_mask);
-          if (!!restricted_mask)
-            copy_out(restricted_mask, target_instances,
-                     target_views, output_aggregator);
+          for (LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::
+                aligned::const_iterator it = to_add.begin(); 
+                it != to_add.end(); it++)
+            update_guards.insert(it->first, it->second);
+        }
+        // If we have unguarded fields we can easily do thos
+        if (!!remainder_mask)
+        {
+          CopyFillAggregator *input_aggregator = NULL;
+          // See if we have an input aggregator that we can use now
+          std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
+            input_aggregators.find(RtEvent::NO_RT_EVENT);
+          if (finder != input_aggregators.end())
+            input_aggregator = finder->second;
+          const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
+            input_aggregator->count_updates();
+          update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, op, index,
+                              usage, remainder_mask, target_instances, 
+                              target_views, applied_events);
+          // If we made the input aggregator then store it
+          if ((input_aggregator != NULL) && 
+              ((finder == input_aggregators.end()) ||
+               (initial_updates != input_aggregator->count_updates())))
+          {
+            input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+            // Record this as a guard for later operations
+            update_guards.insert(input_aggregator, remainder_mask);
+            input_aggregator->record_guard_set(this);
+          }
         }
       }
+      else
+      {
+        // Read-write or read-only case
+        // Read-only case if there are no guards
+        CopyFillAggregator *input_aggregator = NULL;
+        // See if we have an input aggregator that we can use now
+        std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
+          input_aggregators.find(RtEvent::NO_RT_EVENT);
+        if (finder != input_aggregators.end())
+          input_aggregator = finder->second;
+        const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
+            input_aggregator->count_updates();
+        update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, op, index,
+            usage, user_mask, target_instances, target_views, applied_events);
+        if (IS_WRITE(usage))
+        {
+          advance_version_numbers(user_mask);
+          // Issue copy-out copies for any restricted fields if we wrote stuff
+          const FieldMask restricted_mask = restricted_fields & user_mask;
+          if (!!restricted_mask)
+            copy_out(restricted_mask, target_instances,
+                     target_views, op, index, output_aggregator);
+        }
+        // If we made the input aggregator then store it
+        if ((input_aggregator != NULL) && 
+            ((finder == input_aggregators.end()) ||
+             (initial_updates != input_aggregator->count_updates())))
+        {
+          input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+          // Record this as a guard for later operations
+          if (IS_READ_ONLY(usage))
+          {
+            update_guards.insert(input_aggregator, user_mask);
+            input_aggregator->record_guard_set(this);
+          }
+        }
+      }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::acquire_restrictions(Operation *op,
-                                              FieldMask acquire_mask,
+    void EquivalenceSet::update_set_internal(
+                                 CopyFillAggregator *&input_aggregator,
+                                 const RtEvent guard_event,
+                                 Operation *op, const unsigned index,
+                                 const RegionUsage &usage,
+                                 const FieldMask &user_mask,
+                                 const InstanceSet &target_instances,
+                                 const std::vector<InstanceView*> &target_views,
+                                 std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      // Read-write or read-only
+      // Check for any copies from normal instances first
+      issue_update_copies_and_fills(input_aggregator, guard_event, op, index,
+          false/*track*/, user_mask, target_instances, target_views, set_expr);
+      // Get the set of fields to filter, any for which we're about
+      // to apply pending reductions or overwite, except those that
+      // are restricted
+      const FieldMask reduce_mask = reduction_fields & user_mask;
+      const FieldMask restricted_mask = restricted_fields & user_mask;
+      const bool is_write = IS_WRITE(usage);
+      FieldMask filter_mask = is_write ? user_mask : reduce_mask;
+      if (!!restricted_mask)
+        filter_mask -= restricted_mask;
+      if (!!filter_mask)
+        filter_valid_instances(filter_mask);
+      WrapperReferenceMutator mutator(applied_events);
+      // Save the instances if they are not restricted
+      // Otherwise if they are restricted then the restricted instances
+      // are already listed as the valid views so there's nothing more
+      // for us to have to do
+      if (!!restricted_mask)
+      {
+        const FieldMask non_restricted = user_mask - restricted_fields;
+        if (!!non_restricted)
+          record_instances(non_restricted, target_instances, 
+                           target_views, mutator); 
+      }
+      else
+        record_instances(user_mask, target_instances,
+                         target_views, mutator);
+      // Next check for any reductions that need to be applied
+      if (!!reduce_mask)
+        apply_reductions(reduce_mask, input_aggregator, guard_event,
+                         op, index, false/*track events*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    bool EquivalenceSet::acquire_restrictions(RemoteEqTracker &remote_tracker,
+                                          std::set<EquivalenceSet*> &alt_sets,
+                                          Operation *op, FieldMask acquire_mask,
                                           FieldMaskSet<InstanceView> &instances,
-           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs)
+           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
+                                          std::set<RtEvent> &applied_events,
+                                          const bool original_set /*=true*/)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(applied_events);
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+          (*it)->acquire_restrictions(remote_tracker, alt_sets, op,acquire_mask,
+                  instances, inst_exprs, applied_events, false/*original set*/);
+        eq.reacquire();
+        return true;
+      }
       acquire_mask &= restricted_fields;
       if (!acquire_mask)
-        return;
-#ifdef DEBUG_LEGION
-      assert(mapping_guards.find(op) != mapping_guards.end());
-      assert(!(acquire_mask - mapping_guards[op].guard_mask));
-#endif
-      // Record that this operation is mutating these fields
-      record_mutated_guard(op, acquire_mask);
+        return false;
       for (FieldMaskSet<InstanceView>::const_iterator it = 
             restricted_instances.begin(); it != restricted_instances.end();it++)
       {
@@ -6288,24 +6041,59 @@ namespace Legion {
         inst_exprs[view].insert(set_expr);
       }
       restricted_fields -= acquire_mask;
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::release_restrictions(Operation *op,
+    bool EquivalenceSet::release_restrictions(RemoteEqTracker &remote_tracker,
+                                        std::set<EquivalenceSet*> &alt_sets,
+                                        Operation *op,
                                         const FieldMask &release_mask,
-                                        CopyFillAggregator &release_aggregator,
+                                        CopyFillAggregator *&release_aggregator,
                                         FieldMaskSet<InstanceView> &instances,
            std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
-                                        std::set<RtEvent> &ready_events)
+                                        std::set<RtEvent> &ready_events,
+                                        const bool original_set /*=true*/)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      assert(mapping_guards.find(op) != mapping_guards.end());
-      assert(!(release_mask - mapping_guards[op].guard_mask));
-#endif
-      // Record that this operation is mutating these fields
-      record_mutated_guard(op, release_mask);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(ready_events);
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+          (*it)->release_restrictions(remote_tracker, alt_sets, op,
+              release_mask, release_aggregator, instances, inst_exprs, 
+              ready_events, false/*original set*/);
+        eq.reacquire();
+        return true;
+      }
       // Find our local restricted instances and views and record them
       InstanceSet local_instances;
       std::vector<InstanceView*> local_views;
@@ -6326,7 +6114,8 @@ namespace Legion {
         inst_exprs[view].insert(set_expr);
       }
       // Issue the updates
-      issue_update_copies_and_fills(release_aggregator, release_mask,
+      issue_update_copies_and_fills(release_aggregator, RtEvent::NO_RT_EVENT,
+                                    op, 0/*index*/, false/*track*/,release_mask,
                                     local_instances, local_views, set_expr);
       // Filter the valid views
       filter_valid_instances(release_mask);
@@ -6336,35 +6125,78 @@ namespace Legion {
       // See if we have any reductions to apply as well
       const FieldMask reduce_mask = release_mask & reduction_fields;
       if (!!reduce_mask)
-      {
-        apply_reductions(reduce_mask, release_aggregator);
-        const RtEvent recorded = record_reduction_application(reduce_mask);
-        if (recorded.exists() && !recorded.has_triggered())
-          ready_events.insert(recorded);
-      }
+        apply_reductions(reduce_mask, release_aggregator, 
+                         RtEvent::NO_RT_EVENT, op, 0/*index*/, false/*track*/);
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::issue_across_copies(const RegionUsage &usage,
-                const FieldMask &src_mask, 
+    bool EquivalenceSet::issue_across_copies(RemoteEqTracker &remote_tracker,
+                std::set<EquivalenceSet*> &alt_sets, Operation *op, 
+                const unsigned src_index, const unsigned dst_index, 
+                const RegionUsage &usage, const FieldMask &src_mask, 
                 const InstanceSet &source_instances,
                 const InstanceSet &target_instances,
                 const std::vector<InstanceView*> &source_views,
                 const std::vector<InstanceView*> &target_views,
-                IndexSpaceExpression *overlap, CopyFillAggregator &aggregator, 
+                IndexSpaceExpression *overlap, CopyFillAggregator *&aggregator,
                 PredEvent pred_guard, ReductionOpID redop,
-                FieldMask &initialized_fields,
+                FieldMask &initialized_fields,std::set<RtEvent> &applied_events,
                 const std::vector<unsigned> *src_indexes,
                 const std::vector<unsigned> *dst_indexes,
-                const std::vector<CopyAcrossHelper*> *across_helpers) const
+                const std::vector<CopyAcrossHelper*> *across_helpers,
+                const bool original_set)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target_instances.size() == target_views.size());
 #endif
       AutoLock eq(eq_lock,1,false/*exclusive*/);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(applied_events);
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+        {
+          IndexSpaceExpression *subset_overlap = 
+            runtime->forest->intersect_index_spaces((*it)->set_expr, overlap);
+          (*it)->issue_across_copies(remote_tracker, alt_sets, op, src_index, 
+              dst_index, usage, src_mask, source_instances, target_instances, 
+              source_views, target_views, subset_overlap, aggregator, 
+              pred_guard, redop, initialized_fields, applied_events, 
+              src_indexes, dst_indexes, across_helpers, false/*original set*/);
+        }
+        eq.reacquire();
+        return true;
+      }
       // Check for any uninitialized fields
       initialized_fields &= valid_instances.get_valid_mask();
       if (pred_guard.exists())
@@ -6413,10 +6245,10 @@ namespace Legion {
             for (unsigned idx2 = 0; idx2 < source_views.size(); idx2++)
             {
               const FieldMask &mask = source_instances[idx2].get_valid_fields();
-              const FieldMask overlap = mask & src_mask;
-              if (!overlap)
+              const FieldMask field_overlap = mask & src_mask;
+              if (!field_overlap)
                 continue;
-              src_views.insert(source_views[idx2], overlap);
+              src_views.insert(source_views[idx2], field_overlap);
             }
           }
           else
@@ -6424,13 +6256,16 @@ namespace Legion {
             for (FieldMaskSet<LogicalView>::const_iterator it =
                   valid_instances.begin(); it != valid_instances.end(); it++)
             {
-              const FieldMask overlap = it->second & src_mask;
-              if (!overlap)
+              const FieldMask field_overlap = it->second & src_mask;
+              if (!field_overlap)
                 continue;
-              src_views.insert(it->first, overlap);
+              src_views.insert(it->first, field_overlap);
             }
           }
-          aggregator.record_updates(target_views[idx], src_views,
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op,
+                src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+          aggregator->record_updates(target_views[idx], src_views,
               src_mask, overlap, redop, (*across_helpers)[idx]);
         }
         // Now check for any reductions that need to be applied
@@ -6460,8 +6295,11 @@ namespace Legion {
                 target_instances[idx].get_valid_fields();
               if (!target_mask.is_set(dst_fidx))
                 continue;
-              aggregator.record_reductions(target_views[idx], finder->second,
-                        src_fidx, dst_fidx, overlap, (*across_helpers)[idx]);
+              if (aggregator == NULL)
+                aggregator = new CopyFillAggregator(runtime->forest, op,
+                    src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+              aggregator->record_reductions(target_views[idx], finder->second,
+                         src_fidx, dst_fidx, overlap, (*across_helpers)[idx]);
             }
             src_fidx = reduce_mask.find_next_set(src_fidx+1);
           }
@@ -6490,13 +6328,19 @@ namespace Legion {
           for (unsigned idx = 0; idx < target_views.size(); idx++)
           {
             const FieldMask &mask = target_instances[idx].get_valid_fields(); 
-            aggregator.record_updates(target_views[idx], src_views, mask,
-                                      overlap, redop, NULL/*across*/);
+            if (aggregator == NULL)
+              aggregator = new CopyFillAggregator(runtime->forest, op,
+                  src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+            aggregator->record_updates(target_views[idx], src_views, mask,
+                                       overlap, redop, NULL/*across*/);
           }
         }
         else
-          issue_update_copies_and_fills(aggregator, src_mask, target_instances,
-                                    target_views, overlap, true/*skip check*/);
+          issue_update_copies_and_fills(aggregator, RtEvent::NO_RT_EVENT,
+                                        op, src_index, true/*track effects*/,
+                                        src_mask, target_instances,
+                                        target_views, overlap, 
+                                        true/*skip check*/, dst_index);
         // We also need to check for any reductions that need to be applied
         const FieldMask reduce_mask = reduction_fields & src_mask;
         if (!!reduce_mask)
@@ -6516,8 +6360,11 @@ namespace Legion {
                 target_instances[idx].get_valid_fields();
               if (!target_mask.is_set(fidx))
                 continue;
-              aggregator.record_reductions(target_views[idx], 
-                          finder->second, fidx, fidx, overlap);
+              if (aggregator == NULL)
+                aggregator = new CopyFillAggregator(runtime->forest, op,
+                    src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+              aggregator->record_reductions(target_views[idx], 
+                            finder->second, fidx, fidx, overlap);
             }
             fidx = reduce_mask.find_next_set(fidx+1);
           }
@@ -6559,32 +6406,70 @@ namespace Legion {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
           const FieldMask &mask = target_instances[idx].get_valid_fields(); 
-          aggregator.record_updates(target_views[idx], src_views, mask,
-                                    overlap, redop, NULL/*across*/);
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op,
+                src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+          aggregator->record_updates(target_views[idx], src_views, mask,
+                                     overlap, redop, NULL/*across*/);
         }
         // There shouldn't be any reduction instances to worry about here
 #ifdef DEBUG_LEGION
         assert(reduction_fields * src_mask);
 #endif
       }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::overwrite_set(Operation *op, LogicalView *view, 
-                                       const FieldMask &mask,
-                                       CopyFillAggregator &output_aggregator,
+    bool EquivalenceSet::overwrite_set(RemoteEqTracker &remote_tracker,
+                                       std::set<EquivalenceSet*> &alt_sets, 
+                                       Operation *op, const unsigned index,
+                                       LogicalView *view, const FieldMask &mask,
+                                       CopyFillAggregator *&output_aggregator,
                                        std::set<RtEvent> &ready_events,
                                        PredEvent pred_guard,
-                                       bool add_restriction)
+                                       const bool add_restriction,
+                                       const bool original_set)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      assert(mapping_guards.find(op) != mapping_guards.end());
-      assert(!(mask - mapping_guards[op].guard_mask));
-#endif
-      // Record that this operation is mutating these fields
-      record_mutated_guard(op, mask);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(ready_events);
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+          (*it)->overwrite_set(remote_tracker, alt_sets, op, index,
+              view, mask, output_aggregator, ready_events, pred_guard,
+              add_restriction, false/*original set*/);
+        eq.reacquire();
+        return true;
+      }
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -6663,24 +6548,59 @@ namespace Legion {
           // Check to see if we have any restricted outputs to write
           const FieldMask restricted_overlap = mask & restricted_fields;
           if (!!restricted_overlap)
-            copy_out(restricted_overlap, view, output_aggregator);  
+            copy_out(restricted_overlap, view, op, index, output_aggregator);
         }
       }
+      return false;
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::filter_set(Operation *op, LogicalView *view, 
+    bool EquivalenceSet::filter_set(RemoteEqTracker &remote_tracker,
+                                    std::set<EquivalenceSet*> &alt_sets,
+                                    Operation *op, LogicalView *view, 
                                     const FieldMask &mask,
-                                    bool remove_restriction/*= false*/)
+                                    std::set<RtEvent> &applied_events,
+                                    const bool remove_restriction/*= false*/,
+                                    const bool original_set/*= true*/)
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-#ifdef DEBUG_LEGION
-      assert(mapping_guards.find(op) != mapping_guards.end());
-      assert(!(mask - mapping_guards[op].guard_mask));
-#endif
-      // Record that this operation is mutating these fields
-      record_mutated_guard(op, mask);
+      if (!original_set)
+      {
+        std::pair<std::set<EquivalenceSet*>::iterator,bool> exists = 
+          alt_sets.insert(this);
+        // If we already traversed it then we don't need to do it again 
+        if (!exists.second)
+          return false;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(applied_events);
+        if (subsets.empty())
+        {
+          remote_tracker.record_remote(logical_owner_space, this);
+          return false;
+        }
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      if (is_refined())
+      {
+        check_for_unrefined_remainder(eq, remote_tracker.source);
+        std::vector<EquivalenceSet*> subsets_copy(subsets); 
+        eq.release();
+        // Remove ourselves if we recursed
+        if (!original_set)
+          alt_sets.erase(this);
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              subsets_copy.begin(); it != subsets_copy.end(); it++) 
+          (*it)->filter_set(remote_tracker, alt_sets, op, view, mask,
+              applied_events, remove_restriction, false/*original set*/);
+        eq.reacquire();
+        return true;
+      }
       FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
       if (finder != valid_instances.end())
       {
@@ -6712,6 +6632,31 @@ namespace Legion {
           }
         }
       }
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::request_remote_subsets(std::set<RtEvent> &applied)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
+      assert(eq_state == INVALID_STATE);
+      assert(!transition_event.exists());
+#endif
+      // It's not actually ok to block here or we risk a hang so if we're
+      // not already valid and haven't requested a valid copy yet then
+      // go ahead and do that and record the event as an applied event 
+      // to ensure we get the update for the next user
+      transition_event = Runtime::create_rt_user_event();
+      eq_state = PENDING_VALID_STATE;
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+      }
+      runtime->send_equivalence_set_subset_request(logical_owner_space,rez);
+      applied.insert(transition_event);
     }
     
     //--------------------------------------------------------------------------
@@ -6743,14 +6688,20 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::issue_update_copies_and_fills(
-                                 CopyFillAggregator &aggregator,
+                                 CopyFillAggregator *&aggregator,
+                                 const RtEvent guard_event,
+                                 Operation *op, const unsigned index,
+                                 const bool track_events,
                                  FieldMask update_mask,
                                  const InstanceSet &target_instances,
                                  const std::vector<InstanceView*> &target_views,
                                  IndexSpaceExpression *update_expr,
-                                 bool skip_check) const
+                                 const bool skip_check,
+                                 const int dst_index /*= -1*/) const
     //--------------------------------------------------------------------------
     {
+      if (update_expr->is_empty())
+        return;
       if (!skip_check)
       {
         // Scan through and figure out which fields are already valid
@@ -6789,15 +6740,29 @@ namespace Legion {
       if (valid_views.empty())
         return;
       if (target_instances.size() == 1)
-        aggregator.record_updates(target_views[0], valid_views, 
-                                  update_mask, update_expr);
+      {
+        if (aggregator == NULL)
+          aggregator = (dst_index >= 0) ?
+            new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                   guard_event, track_events) :
+            new CopyFillAggregator(runtime->forest, op, index,
+                                   guard_event, track_events); 
+        aggregator->record_updates(target_views[0], valid_views, 
+                                   update_mask, update_expr);
+      }
       else if (valid_views.size() == 1)
       {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
           const FieldMask &mask = target_instances[idx].get_valid_fields();
-          aggregator.record_updates(target_views[idx], valid_views,
-                                    mask, update_expr);
+          if (aggregator == NULL)
+            aggregator = (dst_index >= 0) ?
+              new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                     guard_event, track_events) :
+              new CopyFillAggregator(runtime->forest, op, index,
+                                     guard_event, track_events);
+          aggregator->record_updates(target_views[idx], valid_views,
+                                     mask, update_expr);
         }
       }
       else
@@ -6817,8 +6782,14 @@ namespace Legion {
               continue;
             src_views.insert(it->first, overlap);
           }
-          aggregator.record_updates(target_views[idx], src_views,
-                                    dst_mask, update_expr);
+          if (aggregator == NULL)
+            aggregator = (dst_index >= 0) ?
+              new CopyFillAggregator(runtime->forest, op, index, dst_index,
+                                     guard_event, track_events) :
+              new CopyFillAggregator(runtime->forest, op, index,
+                                     guard_event, track_events);
+          aggregator->record_updates(target_views[idx], src_views,
+                                     dst_mask, update_expr);
         }
       }
     }
@@ -6880,12 +6851,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::apply_reductions(const FieldMask &reduce_mask,
-                                          CopyFillAggregator &aggregator)
+                                          CopyFillAggregator *&aggregator,
+                                          const RtEvent guard_event,
+                                          Operation *op, const unsigned index,
+                                          const bool trace_events)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!reduce_mask);
 #endif
+      if (set_expr->is_empty())
+        return;
       int fidx = reduce_mask.find_first_set();
       while (fidx >= 0)
       {
@@ -6902,8 +6878,11 @@ namespace Legion {
             continue;
           // Shouldn't have any deferred views here
           InstanceView *dst_view = it->first->as_instance_view();
-          aggregator.record_reductions(dst_view, finder->second, fidx, 
-                                       fidx, set_expr);
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                                guard_event, trace_events);
+          aggregator->record_reductions(dst_view, finder->second, fidx, 
+                                        fidx, set_expr);
         }
         // Remove the reduction views from those available
         for (std::vector<ReductionView*>::const_iterator it = 
@@ -6923,12 +6902,15 @@ namespace Legion {
     void EquivalenceSet::copy_out(const FieldMask &restricted_mask,
                                   const InstanceSet &src_instances,
                                   const std::vector<InstanceView*> &src_views,
-                                  CopyFillAggregator &aggregator) const
+                                  Operation *op, const unsigned index,
+                                  CopyFillAggregator *&aggregator) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!!restricted_mask);
 #endif
+      if (set_expr->is_empty())
+        return;
       if (valid_instances.size() == 1)
       {
         // Only 1 destination
@@ -6950,7 +6932,12 @@ namespace Legion {
           srcs.insert(src_views[idx], overlap);
         }
         if (!srcs.empty())
-          aggregator.record_updates(dst_view, srcs, restricted_mask, set_expr);
+        {
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                      RtEvent::NO_RT_EVENT, true/*track*/);
+          aggregator->record_updates(dst_view, srcs, restricted_mask, set_expr);
+        }
       }
       else if (src_instances.size() == 1)
       {
@@ -6969,7 +6956,10 @@ namespace Legion {
           if (!overlap)
             continue;
           InstanceView *dst_view = it->first->as_instance_view();
-          aggregator.record_updates(dst_view, srcs, overlap, set_expr);
+          if (aggregator == NULL)
+            aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                      RtEvent::NO_RT_EVENT, true/*track*/);
+          aggregator->record_updates(dst_view, srcs, overlap, set_expr);
         }
       }
       else
@@ -6994,16 +6984,25 @@ namespace Legion {
             srcs.insert(src_views[idx], src_overlap);
           }
           if (!srcs.empty())
-            aggregator.record_updates(dst_view, srcs, dst_overlap, set_expr);
+          {
+            if (aggregator == NULL)
+              aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                        RtEvent::NO_RT_EVENT, true/*track*/);
+            aggregator->record_updates(dst_view, srcs, dst_overlap, set_expr);
+          }
         }
       }
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::copy_out(const FieldMask &restricted_mask, 
-                    LogicalView *src_view, CopyFillAggregator &aggregator) const
+                                   LogicalView *src_view, 
+                                   Operation *op, const unsigned index,
+                                   CopyFillAggregator *&aggregator) const
     //--------------------------------------------------------------------------
     {
+      if (set_expr->is_empty())
+        return;
       FieldMaskSet<LogicalView> srcs;
       srcs.insert(src_view, restricted_mask);
       for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -7015,7 +7014,10 @@ namespace Legion {
         if (!overlap)
           continue;
         InstanceView *dst_view = it->first->as_instance_view();
-        aggregator.record_updates(dst_view, srcs, overlap, set_expr);
+        if (aggregator == NULL)
+          aggregator = new CopyFillAggregator(runtime->forest, op, index,
+                                    RtEvent::NO_RT_EVENT, true/*track*/);
+        aggregator->record_updates(dst_view, srcs, overlap, set_expr);
       }
     }
 
@@ -7062,6 +7064,7 @@ namespace Legion {
       bool first = true;
       do 
       {
+        std::set<RtEvent> refinements_done;
         std::vector<EquivalenceSet*> to_add;
         for (std::vector<RefinementThunk*>::const_iterator it = 
               to_perform.begin(); it != to_perform.end(); it++)
@@ -7069,10 +7072,18 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert((*it)->owner == this);
 #endif
-          EquivalenceSet *result = (*it)->perform_refinement();
+          EquivalenceSet *result = (*it)->get_refinement();
           // Add our resource reference too
           result->add_nested_resource_ref(did);
           to_add.push_back(result);
+          const RtEvent done = (*it)->perform_refinement();
+          if (done.exists())
+            refinements_done.insert(done);
+        }
+        if (!refinements_done.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(refinements_done);
+          wait_on.wait();
         }
         AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
@@ -7086,73 +7097,23 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(eq_state == PENDING_REFINED_STATE);
 #endif
-          // Record whether we have any remote copies that we'll
-          // need to ask for updates from before we can perform
-          // the refinements
-          const bool remote_copies = !remote_subsets.empty();
           // First we need to spin until we know that there are
           // no more acquires done for this equivalence set
-          while (!mapping_guards.empty() || !remote_subsets.empty())
+          while (!update_guards.empty())
           {
-            // We won't even bother trying to do the remote invalidates 
-            // until all the local mapping guards are gone
-            if (!mapping_guards.empty())
-            {
-              // If there are any mapping guards then defer ourselves
-              // until a later time when there aren't any mapping guards
+            // If there are any mapping guards then defer ourselves
+            // until a later time when there aren't any mapping guards
 #ifdef DEBUG_LEGION
-              assert(!transition_event.exists());
+            assert(!transition_event.exists());
 #endif
-              transition_event = Runtime::create_rt_user_event();
-              const RtEvent wait_on = transition_event;
-              eq.release();
-              wait_on.wait();
-              eq.reacquire();
-            }
-            else
-            {
-              // Send remote invalidations to all the remote subsets
-              std::set<RtEvent> refinement_acknowledgements;
-              for (std::set<AddressSpaceID>::const_iterator it = 
-                    remote_subsets.begin(); it != remote_subsets.end(); it++)
-              {
-                Serializer rez;
-                {
-                  RezCheck z(rez);
-                  rez.serialize(did);
-                  RtUserEvent remote_done = Runtime::create_rt_user_event();
-                  rez.serialize(remote_done);
-                  refinement_acknowledgements.insert(remote_done);
-                }
-                runtime->send_equivalence_set_subset_invalidation(*it, rez);
-              } 
-              remote_subsets.clear();
-              eq.release();
-              const RtEvent wait_on = 
-                Runtime::merge_events(refinement_acknowledgements);
-              wait_on.wait();
-              eq.reacquire();
-            }
+            transition_event = Runtime::create_rt_user_event();
+            const RtEvent wait_on = transition_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
           }
           // Once we get here we can mark that we're doing a refinement
           eq_state = REFINING_STATE;
-          // If we had remote copies we need to do a valid request in
-          // order to bring them up to date here
-          if (remote_copies)
-          {
-            // Release the lock, we're protected by the change of state above
-            eq.release();
-            std::set<RtEvent> preconditions;
-            const FieldMask request_mask(LEGION_FIELD_MASK_FIELD_ALL_ONES);
-            const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0/*redop*/);
-            request_valid_copy(NULL/*op*/, request_mask, usage,
-                      preconditions, preconditions,runtime->address_space);
-            const RtEvent wait_on = Runtime::merge_events(preconditions);
-            if (wait_on.exists())
-              wait_on.wait();
-            // Reacquire the lock
-            eq.reacquire();
-          }
           first = false;
         }
 #ifdef DEBUG_LEGION
@@ -7216,30 +7177,35 @@ namespace Legion {
             // Clean up the tree
             delete tree;
           }
-          // This is the end of the refinement task so we need to update
-          // the state and send out any notifications to anyone that the
-          // refinements are done
-          if (!remote_subsets.empty())
-          {
-            Serializer rez;
-            {
-              RezCheck z(rez);
-              rez.serialize(did);
-              rez.serialize<size_t>(subsets.size());
-              for (std::vector<EquivalenceSet*>::const_iterator it = 
-                    subsets.begin(); it != subsets.end(); it++)
-                rez.serialize((*it)->did);
-            }
-            for (std::set<AddressSpaceID>::const_iterator it = 
-                  remote_subsets.begin(); it != remote_subsets.end(); it++)
-              runtime->send_equivalence_set_subset_response(*it, rez);
-          }
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
           // and remove any valid references that we might be holding
           if ((unrefined_remainder == NULL) &&
               (disjoint_partition_refinement == NULL))
           {
+            // If we're doing refining then send updates to any
+            // remote sets informing them of the complete set of subsets
+            std::set<RtEvent> remote_subsets_informed;
+            if (!remote_subsets.empty())
+            {
+              for (std::set<AddressSpaceID>::const_iterator it = 
+                    remote_subsets.begin(); it != remote_subsets.end(); it++)
+              {
+                const RtUserEvent informed = Runtime::create_rt_user_event();
+                Serializer rez;
+                {
+                  RezCheck z(rez);
+                  rez.serialize(did);
+                  rez.serialize(informed);
+                  rez.serialize<size_t>(subsets.size());
+                  for (std::vector<EquivalenceSet*>::const_iterator it = 
+                        subsets.begin(); it != subsets.end(); it++)
+                    rez.serialize((*it)->did);
+                }
+                runtime->send_equivalence_set_subset_update(*it, rez);
+                remote_subsets_informed.insert(informed);
+              }
+            }
             if (!valid_instances.empty())
             {
               for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -7273,6 +7239,19 @@ namespace Legion {
               restricted_fields.clear();
             }
             version_numbers.clear();
+            // Wait for everyone to be informed before we record
+            // that we are done refining
+            if (!remote_subsets_informed.empty())
+            {
+              const RtEvent wait_on = 
+                Runtime::merge_events(remote_subsets_informed);
+              if (wait_on.exists() && !wait_on.has_triggered())
+              {
+                eq.release();
+                wait_on.wait();
+                eq.reacquire();
+              }
+            }
           }
           // Go back to the refined state and trigger our done event
           eq_state = REFINED_STATE;
@@ -7302,6 +7281,7 @@ namespace Legion {
 #endif
       set->add_nested_resource_ref(did);
       subsets.push_back(set);
+      eq_state = REFINED_STATE;
     }
 
     //--------------------------------------------------------------------------
@@ -7350,29 +7330,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::remove_remote_references(RtEvent done)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<LogicalView*> to_remove;
-      {
-        AutoLock eq(eq_lock);
-        std::map<RtEvent,std::vector<LogicalView*> >::iterator finder = 
-          inflight_references.find(done);
-#ifdef DEBUG_LEGION
-        assert(finder != inflight_references.end());
-#endif
-        to_remove.swap(finder->second);
-        inflight_references.erase(finder);
-      }
-      for (std::vector<LogicalView*>::const_iterator it = 
-            to_remove.begin(); it != to_remove.end(); it++)
-      {
-        if ((*it)->remove_nested_valid_ref(did))
-          delete (*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void EquivalenceSet::send_equivalence_set(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
@@ -7392,76 +7349,8 @@ namespace Legion {
           rez.serialize(index_space_node->handle);
         else
           rez.serialize(IndexSpace::NO_SPACE);
-        rez.serialize(version_lock);
-        if (target == logical_owner_space)
-          pack_initial_reduction_state(rez);
       }
       runtime->send_equivalence_set_response(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::pack_initial_reduction_state(Serializer &rez) const
-    //--------------------------------------------------------------------------
-    {
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(!multi_redop_fields);
-#endif
-      if (!redop_modes.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(!!single_redop_fields);
-#endif
-        rez.serialize<size_t>(redop_modes.size());
-        for (LegionMap<ReductionOpID,FieldMask>::aligned::const_iterator it =
-              redop_modes.begin(); it != redop_modes.end(); it++)
-        {
-          rez.serialize(it->first);
-          rez.serialize(it->second);
-        }
-      }
-      else
-      {
-#ifdef DEBUG_LEGION
-        assert(!single_redop_fields);
-#endif
-        rez.serialize<size_t>(0);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::unpack_initial_reduction_state(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-      assert(!is_owner());
-      assert(redop_modes.empty());
-#endif
-      // No need for the lock yet since no one knows we exist yet
-      size_t num_redop_modes;
-      derez.deserialize(num_redop_modes);
-      if (num_redop_modes > 0)
-      {
-        for (unsigned idx = 0; idx < num_redop_modes; idx++)
-        {
-          ReductionOpID redop;
-          derez.deserialize(redop);
-          FieldMask &mask = redop_modes[redop];
-          derez.deserialize(mask);
-          single_redop_fields |= mask;
-        }
-        exclusive_fields -= single_redop_fields;
-        single_reduction_copies[owner_space] = single_redop_fields;
-        LegionMap<AddressSpaceID,FieldMask>::aligned::iterator finder = 
-          exclusive_copies.find(owner_space);
-#ifdef DEBUG_LEGION
-        assert(finder != exclusive_copies.end());
-#endif
-        finder->second -= single_redop_fields;
-        if (!finder->second)
-          exclusive_copies.erase(finder);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -7476,95 +7365,143 @@ namespace Legion {
       if ((eq_state == MAPPING_STATE) || (eq_state == REFINED_STATE))
       {
 #ifdef DEBUG_LEGION
+        assert(!transition_event.exists());
         assert(!refinement_event.exists());
 #endif
         refinement_event = Runtime::create_rt_user_event();
         eq_state = PENDING_REFINED_STATE;
-        // Just launch the refinement task, it will do its own checks to 
-        // see if it is safe to perform the refinements
+        // Launch the refinement task to be performed
         RefinementTaskArgs args(this);
-        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_DEFERRED_PRIORITY);
+        // If we have outstanding guard events then make a transition event
+        // for them to trigger when the last one has been removed such
+        // that the refinement task will not start before it's ready
+        if (!update_guards.empty())
+          transition_event = Runtime::create_rt_user_event();
+        runtime->issue_runtime_meta_task(args, 
+            LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
       }
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::process_subset_request(AddressSpaceID source,
-                                                bool needs_lock/*=true*/)
+                                                RtEvent deferral_event)
     //--------------------------------------------------------------------------
     {
-      if (needs_lock)
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
       {
-        AutoLock eq(eq_lock);
-        process_subset_request(source, false/*needs lock*/);
+        // We didn't get the lock so build a continuation
+        // We need a name for our completion event that we can use for
+        // the atomic compare and swap below
+        if (!deferral_event.exists())
+        {
+          // If we haven't already been deferred then we need to 
+          // add ourselves to the back of the list of deferrals
+          deferral_event = Runtime::create_rt_user_event();
+          volatile Realm::Event::id_t *ptr = 
+            (volatile Realm::Event::id_t*)&next_deferral_precondition.id;
+          RtEvent continuation_pre;
+          do {
+            continuation_pre.id = *ptr;
+          } while (!__sync_bool_compare_and_swap(ptr,
+                    continuation_pre.id, deferral_event.id));
+          DeferSubsetRequestArgs args(this, source, deferral_event);
+          runtime->issue_runtime_meta_task(args, 
+                          LG_LATENCY_DEFERRED_PRIORITY, continuation_pre);
+        }
+        else
+        {
+          // We've already been deferred and our precondition has already
+          // triggered so just launch ourselves again whenever the lock
+          // should be ready to try again
+          DeferSubsetRequestArgs args(this, source, deferral_event);
+          runtime->issue_runtime_meta_task(args,
+                   LG_LATENCY_DEFERRED_PRIORITY, eq.try_next());
+        }
+        return;
+      }
+      // If we're in the process of doing a refinement, wait for
+      // that to be done before we do anything else
+      if (eq_state == REFINING_STATE)
+      {
+#ifdef DEBUG_LEGION
+        assert(refinement_event.exists());
+#endif
+        DeferSubsetRequestArgs args(this, source, deferral_event);       
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
         return;
       }
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
-      // If we haven't actually done any refinements yet, then we
-      // still need to be able to allow acquires to bypass the
-      // pending refinements
-      if (!subsets.empty() || (eq_state == REFINING_STATE))
+      // Record the remote subsets
+      remote_subsets.insert(source);
+      // Remote copies of the subsets either have to be empty or a 
+      // full copy of the subsets with no partial refinements
+      if (!subsets.empty())
       {
-        // If we have a disjoint refinement happenning then we need
-        // to finish that before checking the unrefined remainder
-        if (disjoint_partition_refinement != NULL)
-          finalize_disjoint_refinement();
-        // First check to see if we need to complete this refinement
-        if (unrefined_remainder != NULL)
+        // Check to see if we are fully refined, if we are then we
+        // can send the actual copy of our subsets, otherwise we'll
+        // fall through and just report an empty copy of our subsets
+        if ((disjoint_partition_refinement == NULL) &&
+            (unrefined_remainder == NULL))
         {
-#ifdef DEBUG_LEGION
-          assert(remote_subsets.empty()); // should not have any remote subsets
-#endif
-          RefinementThunk *refinement = 
-            new RefinementThunk(unrefined_remainder, NULL/*node*/, this,source);
-          // We can clear the unrefined remainder now
-          unrefined_remainder = NULL;
-          add_pending_refinement(refinement);
-        }
-        // If we have subsets and there are pending refinements then 
-        // wait until all the refinements are done before sending the
-        // subsets to the remote nodes, this handles the case where
-        // we are partially refined and we need to wait for any
-        // unrefined remainders to finish being made
-        if (eq_state == PENDING_REFINED_STATE)
-        {
-#ifdef DEBUG_LEGION
-          assert(!subsets.empty());
-          assert(refinement_event.exists());
-          assert(!pending_refinements.empty());
-#endif
-          DeferSubsetRequestArgs args(this, source);       
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, refinement_event);
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize<size_t>(subsets.size());
+            for (std::vector<EquivalenceSet*>::const_iterator it = 
+                  subsets.begin(); it != subsets.end(); it++)
+              rez.serialize((*it)->did);
+          }
+          runtime->send_equivalence_set_subset_response(source, rez);
           return;
         }
       }
-      // We can only send the response if we're not doing any refinements 
-      if (eq_state != REFINING_STATE)
+      // If we make it here then we just send a message with an 
+      // empty set of subsets to allow forward progress to be made
+      Serializer rez;
       {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize<size_t>(subsets.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                subsets.begin(); it != subsets.end(); it++)
-            rez.serialize((*it)->did);
-        }
-        runtime->send_equivalence_set_subset_response(source, rez);
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize<size_t>(0);
       }
-      // No matter what we record this as a remote subset
-      // If we're refining when doing this then we'll send
-      // the result out when we're done with the refinements
-      remote_subsets.insert(source);
+      runtime->send_equivalence_set_subset_response(source, rez);
     }
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::process_subset_response(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      size_t num_subsets;
+      derez.deserialize(num_subsets);
+      std::vector<EquivalenceSet*> new_subsets(num_subsets); 
+      if (num_subsets > 0)
+      {
+        std::set<RtEvent> wait_for;
+        for (unsigned idx = 0; idx < num_subsets; idx++)
+        {
+          DistributedID subdid;
+          derez.deserialize(subdid);
+          RtEvent ready;
+          new_subsets[idx] = 
+            runtime->find_or_request_equivalence_set(subdid, ready);
+          if (ready.exists())
+            wait_for.insert(ready);
+        }
+        if (!wait_for.empty())
+        {
+          const RtEvent wait_on = Runtime::merge_events(wait_for);
+          wait_on.wait();
+        }
+        // Add our references
+        for (std::vector<EquivalenceSet*>::const_iterator it = 
+              new_subsets.begin(); it != new_subsets.end(); it++)
+          (*it)->add_nested_resource_ref(did);
+      }
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
@@ -7573,40 +7510,8 @@ namespace Legion {
       assert(transition_event.exists());
       assert(!transition_event.has_triggered());
 #endif
-      size_t num_subsets;
-      derez.deserialize(num_subsets);
-      std::set<RtEvent> wait_for;
-      if (num_subsets > 0)
-      {
-        subsets.resize(num_subsets);
-        for (unsigned idx = 0; idx < num_subsets; idx++)
-        {
-          DistributedID subdid;
-          derez.deserialize(subdid);
-          RtEvent ready;
-          subsets[idx] = 
-            runtime->find_or_request_equivalence_set(subdid, ready);
-          if (ready.exists())
-            wait_for.insert(ready);
-        }
-      }
-      if (!wait_for.empty())
-      {
-        // This has to block in case there is an invalidation that comes
-        // after it in the same virtual channel and we need to maintain
-        // the ordering of those two operations.
-        RtEvent wait_on = Runtime::merge_events(wait_for);
-        if (wait_on.exists() && !wait_on.has_triggered())
-        {
-          eq.release();
-          wait_on.wait();
-          eq.reacquire();
-        }
-      }
-      // Add our references
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            subsets.begin(); it != subsets.end(); it++)
-        (*it)->add_nested_resource_ref(did);
+      if (!new_subsets.empty()) 
+        subsets.swap(new_subsets);
       // Update the state
       eq_state = VALID_STATE;
       // Trigger the transition state to wake up any waiters
@@ -7615,50 +7520,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::process_subset_invalidation(RtUserEvent to_trigger)
+    void EquivalenceSet::process_subset_update(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
+      size_t num_subsets;
+      derez.deserialize(num_subsets);
+      if (num_subsets == 0)
+        return;
+      std::vector<EquivalenceSet*> new_subsets(num_subsets); 
+      std::set<RtEvent> wait_for;
+      for (unsigned idx = 0; idx < num_subsets; idx++)
+      {
+        DistributedID subdid;
+        derez.deserialize(subdid);
+        RtEvent ready;
+        new_subsets[idx] = 
+          runtime->find_or_request_equivalence_set(subdid, ready);
+        if (ready.exists())
+          wait_for.insert(ready);
+      }
+      if (!wait_for.empty())
+      {
+        const RtEvent wait_on = Runtime::merge_events(wait_for);
+        wait_on.wait();
+      }
+      // Add our references
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            new_subsets.begin(); it != new_subsets.end(); it++)
+        (*it)->add_nested_resource_ref(did);
       AutoLock eq(eq_lock);
 #ifdef DEBUG_LEGION
       assert(!is_logical_owner());
       assert(eq_state == VALID_STATE);
       assert(!transition_event.exists());
+      assert(subsets.empty());
 #endif
-      // Check to see if we have any mapping guards in place
-      if (mapping_guards.empty())
-      {
-        // Update the state to reflect that we are now invalid
-        eq_state = INVALID_STATE;
-        invalidate_remote_state(to_trigger);
-      }
-      else
-      {
-        // Update the state and save the event to trigger
-        eq_state = PENDING_INVALID_STATE;
-        transition_event = to_trigger;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void EquivalenceSet::invalidate_remote_state(RtUserEvent to_trigger)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
-      assert(to_trigger.exists());
-      assert(eq_state == INVALID_STATE);
-#endif
-      if (!subsets.empty())
-      {
-        // Easy case, just invalidate our local subsets and then
-        // we can trigger the event
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              subsets.begin(); it != subsets.end(); it++)
-          if ((*it)->remove_nested_resource_ref(did))
-            delete (*it);
-        subsets.clear();
-      }
-      Runtime::trigger_event(to_trigger);
+      subsets.swap(new_subsets);
     }
 
     //--------------------------------------------------------------------------
@@ -7674,10 +7571,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RemoteRefTaskArgs *rargs = (const RemoteRefTaskArgs*)args;
-      rargs->set->remove_remote_references(rargs->done);
-      // Remove the reference that we added before launching the task
-      if (rargs->set->remove_base_resource_ref(REMOTE_DID_REF))
-        delete rargs->set;
+      LocalReferenceMutator mutator; 
+      for (std::map<LogicalView*,unsigned>::const_iterator it = 
+            rargs->refs_to_add->begin(); it != rargs->refs_to_add->end(); it++)
+        it->first->add_nested_valid_ref(rargs->set->did, &mutator, it->second);
+      delete rargs->refs_to_add;
+      const RtEvent done_pre = mutator.get_done_event();
+      Runtime::trigger_event(rargs->done_event, done_pre);
     }
 
     //--------------------------------------------------------------------------
@@ -7685,9 +7585,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
-      const RtEvent traced = dargs->set->ray_trace_equivalence_sets(
-                      dargs->target, dargs->expr, dargs->handle, dargs->origin);
-      Runtime::trigger_event(dargs->done, traced);
+      // If we don't defer this again, then we can trigger our deferral event
+      // Otherwise it is up to the next iteration to do the deferral
+      dargs->set->ray_trace_equivalence_sets(dargs->target, dargs->expr, 
+            dargs->handle, dargs->origin, dargs->done, dargs->deferral);
     }
 
     //--------------------------------------------------------------------------
@@ -7695,7 +7596,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferSubsetRequestArgs *dargs = (const DeferSubsetRequestArgs*)args;
-      dargs->set->process_subset_request(dargs->source);
+      dargs->set->process_subset_request(dargs->source, dargs->deferral);
     }
 
     //--------------------------------------------------------------------------
@@ -7730,8 +7631,7 @@ namespace Legion {
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
       IndexSpace handle;
       derez.deserialize(handle);
-      Reservation version_lock;
-      derez.deserialize(version_lock);
+
       void *location;
       EquivalenceSet *set = NULL;
       // We only actually need the index space node on the owner and the
@@ -7741,12 +7641,10 @@ namespace Legion {
         node = runtime->forest->get_node(handle);
       if (runtime->find_pending_collectable_location(did, location))
         set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
-                               expr, node, version_lock, false/*register now*/);
+                                           expr, node, false/*register now*/);
       else
         set = new EquivalenceSet(runtime, did, source, logical_owner,
-                               expr, node, version_lock, false/*register now*/);
-      if (logical_owner == runtime->address_space)
-        set->unpack_initial_reduction_state(derez);
+                                 expr, node, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
     }
@@ -7763,7 +7661,7 @@ namespace Legion {
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->process_subset_request(source);
+      set->process_subset_request(source, RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -7785,7 +7683,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_subset_invalidation(
+    /*static*/ void EquivalenceSet::handle_subset_update(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
@@ -7801,7 +7699,8 @@ namespace Legion {
 #else
       EquivalenceSet *set = static_cast<EquivalenceSet*>(dc);
 #endif
-      set->process_subset_invalidation(to_trigger);
+      set->process_subset_update(derez);
+      Runtime::trigger_event(to_trigger);
     }
 
     //--------------------------------------------------------------------------
@@ -7825,12 +7724,7 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-
-      // This operation could always block so in order to avoid head of 
-      // line blocking on the virtual channel we always defer it into a 
-      // meta-task on the local processor
-      DeferRayTraceArgs args(set, target, expr, handle, origin, done_event);
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,ready);
+      set->ray_trace_equivalence_sets(target, expr, handle, origin, done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -7855,189 +7749,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_valid_request(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)  
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-
-      std::set<RtEvent> fake_ready, fake_applied;
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->request_valid_copy(NULL/*dummy op*/, request_mask, usage, fake_ready,
-                              fake_applied, source, pending_request);
-#ifdef DEBUG_LEGION
-      assert(fake_ready.empty());
-      assert(fake_applied.empty());
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_valid_response(Deserializer &derez,
-                                                          Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-      unsigned pending_updates, pending_invalidates;
-      derez.deserialize(pending_updates);
-      derez.deserialize(pending_invalidates);
-      bool has_exclusive_mask;
-      derez.deserialize(has_exclusive_mask);
-      if (has_exclusive_mask)
-        derez.deserialize(pending_request->exclusive_mask);
-      bool has_single_redop_mask;
-      derez.deserialize(has_single_redop_mask);
-      if (has_single_redop_mask)
-        derez.deserialize(pending_request->single_redop_mask);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->record_pending_counts(pending_request, pending_updates, 
-                                 pending_invalidates, true/*need lock*/);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_update_request(Deserializer &derez,
-                                                          Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      AddressSpaceID invalid_space;
-      derez.deserialize(invalid_space);
-      FieldMask update_mask;
-      derez.deserialize(update_mask);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-      bool invalidate;
-      derez.deserialize(invalidate);
-      ReductionOpID skip_redop;
-      derez.deserialize(skip_redop);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      unsigned dummy_updates = 0;
-      set->request_update(runtime->address_space, invalid_space,
-                          update_mask, pending_request, dummy_updates,
-                          invalidate, skip_redop, true/*needs lock*/);
-#ifdef DEBUG_LEGION
-      assert(dummy_updates == 1);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_update_response(Deserializer &derez,
-                                                           Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->process_update_response(pending_request, derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_invalidate_request(
+    /*static*/ void EquivalenceSet::handle_remote_refinement(
                                           Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       DistributedID did;
       derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      AddressSpaceID source;
-      derez.deserialize(source);
-      FieldMask invalidate_mask;
-      derez.deserialize(invalidate_mask);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-      bool meta_only;
-      derez.deserialize(meta_only);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      unsigned dummy_invalidates = 0;
-      set->request_invalidate(runtime->address_space, source, invalidate_mask,
-          pending_request, dummy_invalidates , meta_only, true/*needs lock*/);
-#ifdef DEBUG_LEGION
-      assert(dummy_invalidates == 1);
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_invalidate_response(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      PendingRequest *pending_request;
-      derez.deserialize(pending_request);
-      bool meta_only;
-      derez.deserialize<bool>(meta_only);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      set->record_invalidation(pending_request, meta_only, true/*needs lock*/);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_reduction_application(
-                                          Deserializer &derez, Runtime *runtime)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      DistributedID did;
-      derez.deserialize(did);
-      RtEvent ready_event;
-      EquivalenceSet *set = 
-        runtime->find_or_request_equivalence_set(did, ready_event);
-      FieldMask reduced_mask;
-      derez.deserialize(reduced_mask);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
       RtUserEvent done_event;
       derez.deserialize(done_event);
-
-      if (ready_event.exists() && !ready_event.has_triggered())
-        ready_event.wait();
-      const RtEvent recorded = 
-        set->record_reduction_application(reduced_mask, true/*needs lock*/);
-      Runtime::trigger_event(done_event, recorded);
+      LocalReferenceMutator mutator;
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->unpack_state(derez, mutator);
+      const RtEvent done_pre = mutator.get_done_event();
+      Runtime::trigger_event(done_event, done_pre);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8046,7 +7774,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     VersionManager::VersionManager(RegionTreeNode *n, ContextID c)
-      : ctx(c), node(n), runtime(n->context->runtime),
+      : ctx(c), node(n), runtime(n->context->runtime), version_number(0),
         has_equivalence_sets(false)
     //--------------------------------------------------------------------------
     {
@@ -8096,12 +7824,13 @@ namespace Legion {
               equivalence_sets_ready.has_triggered());
 #endif
       equivalence_sets_ready = RtUserEvent::NO_RT_USER_EVENT;
+      version_number = 0;
       has_equivalence_sets = false;
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::perform_versioning_analysis(InnerContext *context,
-                             VersionInfo *version_info, RegionNode *region_node)
+    RtEvent VersionManager::perform_versioning_analysis(InnerContext *context,
+              VersionInfo *version_info, RegionNode *region_node, Operation *op)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -8109,42 +7838,53 @@ namespace Legion {
 #endif
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
-      RtEvent wait_on;
-      bool compute_sets = false;
+      RtUserEvent compute_event;
       if (!has_equivalence_sets)
       {
         // Retake the lock and see if we lost the race
         AutoLock m_lock(manager_lock);
         if (!has_equivalence_sets)
         {
+          // Record that we need to update this equivalence set
+          if (version_info != NULL)
+            waiting_infos.push_back(version_info);
           if (!equivalence_sets_ready.exists()) 
           {
             equivalence_sets_ready = Runtime::create_rt_user_event();
-            compute_sets = true;
+            compute_event = equivalence_sets_ready;
           }
-          wait_on = equivalence_sets_ready;
+          else
+            return equivalence_sets_ready;
         }
       }
-      if (compute_sets)
+      if (compute_event.exists())
       {
         IndexSpaceExpression *expr = region_node->row_source; 
         IndexSpace handle = region_node->row_source->handle;
         RtEvent ready = context->compute_equivalence_sets(this, 
             region_node->get_tree_id(), handle, expr, runtime->address_space);
-        Runtime::trigger_event(equivalence_sets_ready, ready);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          // Launch task to finalize the sets once they are ready
+          LgFinalizeEqSetsArgs args(this, op->get_unique_op_id());
+          runtime->issue_runtime_meta_task(args, 
+                             LG_LATENCY_DEFERRED_PRIORITY, ready);
+          return compute_event;
+        }
+        else
+        {
+          finalize_equivalence_sets();
+          return RtEvent::NO_RT_EVENT; 
+        }
       }
-      // Wait if necessary for the results
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
-      // Possibly duplicate writes, but that is alright
-      if (!has_equivalence_sets)
-        has_equivalence_sets = true;
-      if (version_info != NULL)
+      else if (version_info != NULL)
       {
         // Grab the lock in read-only mode in case any updates come later
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        version_info->record_equivalence_sets(this, equivalence_sets);
+        version_info->record_equivalence_sets(this, version_number, 
+                                              equivalence_sets);
       }
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -8160,28 +7900,55 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VersionManager::update_equivalence_sets(
-                                      const std::set<EquivalenceSet*> &alt_sets)
+    void VersionManager::finalize_equivalence_sets(void)
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      // Remove any sets from the old set that aren't in the new one
-      for (std::set<EquivalenceSet*>::iterator it = 
-            equivalence_sets.begin(); it != equivalence_sets.end(); /*nothing*/)
+#ifdef DEBUG_LEGION
+      assert(!has_equivalence_sets);
+      assert(equivalence_sets_ready.exists());
+#endif
+      has_equivalence_sets = true;
+      if (!waiting_infos.empty())
       {
-        if (alt_sets.find(*it) == alt_sets.end())
+        for (std::vector<VersionInfo*>::const_iterator it = 
+              waiting_infos.begin(); it != waiting_infos.end(); it++)
+          (*it)->record_equivalence_sets(this, version_number,equivalence_sets);
+        waiting_infos.clear();
+      }
+      Runtime::trigger_event(equivalence_sets_ready);
+      equivalence_sets_ready = RtUserEvent::NO_RT_USER_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void VersionManager::update_equivalence_sets(const unsigned previous_number,
+                                  const std::set<EquivalenceSet*> &to_add,
+                                  const std::vector<EquivalenceSet*> &to_delete)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+#ifdef DEBUG_LEGION
+      assert(previous_number <= version_number);
+#endif
+      if (previous_number < version_number)
+        return;
+      // Increment the version number so that we don't get stale updates
+      version_number++;
+      // Remove any sets from the old set that aren't in the new one
+      for (std::vector<EquivalenceSet*>::const_iterator it = 
+            to_delete.begin(); it != to_delete.end(); it++)
+      {
+        std::set<EquivalenceSet*>::iterator finder = equivalence_sets.find(*it);
+        if (finder != equivalence_sets.end())
         {
-          std::set<EquivalenceSet*>::iterator to_delete = it++;
-          if ((*to_delete)->remove_base_resource_ref(VERSION_MANAGER_REF))
-            delete (*to_delete);
-          equivalence_sets.erase(to_delete);
+          equivalence_sets.erase(finder);
+          if ((*it)->remove_base_resource_ref(VERSION_MANAGER_REF))
+            delete (*it);
         }
-        else
-          it++;
       }
       // Add in all the alt_sets and add references where necessary
       for (std::set<EquivalenceSet*>::const_iterator it = 
-            alt_sets.begin(); it != alt_sets.end(); it++)
+            to_add.begin(); it != to_add.end(); it++)
       {
         std::pair<std::set<EquivalenceSet*>::iterator,bool> result = 
           equivalence_sets.insert(*it);
@@ -8202,6 +7969,14 @@ namespace Legion {
       assert(false);
       logger->up();
     } 
+
+    //--------------------------------------------------------------------------
+    /*static*/ void VersionManager::handle_finalize_eq_sets(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const LgFinalizeEqSetsArgs *fargs = (const LgFinalizeEqSetsArgs*)args;
+      fargs->manager->finalize_equivalence_sets();
+    }
 
     /////////////////////////////////////////////////////////////
     // RegionTreePath 
@@ -8840,6 +8615,30 @@ namespace Legion {
           refs.multi->vector.clear();
       }
       shared = false;
+    }
+
+    //--------------------------------------------------------------------------
+    void InstanceSet::swap(InstanceSet &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Swap references
+      {
+        InternalSet *other = rhs.refs.multi;
+        rhs.refs.multi = refs.multi;
+        refs.multi = other;
+      }
+      // Swap single
+      {
+        bool other = rhs.single;
+        rhs.single = single;
+        single = other;
+      }
+      // Swap shared
+      {
+        bool other = rhs.shared;
+        rhs.shared = shared;
+        shared = other;
+      }
     }
 
     //--------------------------------------------------------------------------

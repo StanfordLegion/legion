@@ -315,20 +315,28 @@ namespace Legion {
                                                       AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      // Handle a special case where we are going to the same node
-      if (target == context->runtime->address_space)
+      if (target != context->runtime->address_space)
       {
+        rez.serialize<bool>(false); // not an index space
+        rez.serialize(expr_id);
         rez.serialize<IndexSpaceExpression*>(this);
-        return;
       }
+      else // Handle a special case where we are going to the same node
+        rez.serialize<IndexSpaceExpression*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceOperationT<DIM,T>::pack_full(Serializer &rez,
+                                                AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
       Realm::IndexSpace<DIM,T> temp;
       ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      rez.serialize<bool>(false); // not an index space
-      rez.serialize(expr_id);
-      rez.serialize<size_t>(sizeof(type_tag) + sizeof(temp) + sizeof(ready));
       rez.serialize(type_tag);
       rez.serialize(temp);
       rez.serialize(ready);
+      rez.serialize(this);
       // Record that we are sending this expression remotely
       record_remote_instance(target);
     }
@@ -767,6 +775,7 @@ namespace Legion {
     {
       derez.deserialize(realm_index_space);
       derez.deserialize(realm_index_space_ready);
+      derez.deserialize(origin);
       // Always add a reference from our owner node that will be removed
       // when we can be deleted
       add_reference();
@@ -866,20 +875,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Handle a special case where we are going to the same node
-      if (target == context->runtime->address_space)
+      if (target != context->runtime->address_space)
       {
-        rez.serialize<IndexSpaceExpression*>(this);
-        return;
+        rez.serialize<bool>(false); // not an index space
+        rez.serialize(expr_id);
+        rez.serialize(origin);
       }
-      rez.serialize<bool>(false); // not an index space
-      rez.serialize(expr_id);
-      rez.serialize<size_t>(sizeof(type_tag) + sizeof(realm_index_space) + 
-                            sizeof(realm_index_space_ready));
-      rez.serialize(type_tag);
-      rez.serialize(realm_index_space);
-      rez.serialize(realm_index_space_ready);
-      // Record that we are sending this expression remotely
-      record_remote_instance(target);
+      else
+        rez.serialize<IndexSpaceExpression*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void RemoteExpression<DIM,T>::pack_full(Serializer &rez,
+                                            AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // This should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -1239,6 +1252,16 @@ namespace Legion {
       }
       else
         rez.serialize<IndexSpaceExpression*>(this);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::pack_full(Serializer &rez, 
+                                           AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
     }
 
     //--------------------------------------------------------------------------

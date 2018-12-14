@@ -779,7 +779,7 @@ namespace Legion {
       stealable = false;
       options_selected = false;
       map_origin = false;
-      valid_instances = false;
+      request_valid_instances = false;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
       local_cached = false;
@@ -869,7 +869,7 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      rez.serialize(valid_instances);
+      rez.serialize(request_valid_instances);
       rez.serialize(execution_fence_event);
       rez.serialize(true_guard);
       rez.serialize(false_guard);
@@ -908,7 +908,7 @@ namespace Legion {
           derez.deserialize(atomic_locks[lock]);
         }
       }
-      derez.deserialize(valid_instances);
+      derez.deserialize(request_valid_instances);
       derez.deserialize(execution_fence_event);
       derez.deserialize(true_guard);
       derez.deserialize(false_guard);
@@ -1066,7 +1066,7 @@ namespace Legion {
       options.inline_task = false;
       options.stealable = false;
       options.map_locally = false;
-      options.valid_instances = true;
+      options.valid_instances = mapper->request_valid_instances;
       options.memoize = false;
       options.replicate = false;
       const TaskPriority parent_priority = parent_ctx->is_priority_mutable() ?
@@ -1077,7 +1077,7 @@ namespace Legion {
       target_proc = options.initial_proc;
       stealable = options.stealable;
       map_origin = options.map_locally;
-      valid_instances = options.valid_instances;
+      request_valid_instances = options.valid_instances;
       if (parent_priority != options.parent_priority)
       {
         // Request for priority change see if it is legal or not
@@ -1743,7 +1743,7 @@ namespace Legion {
       this->parent_task = rhs->parent_task;
       this->map_origin = rhs->map_origin;
       this->sharding_space = rhs->sharding_space;
-      this->valid_instances = rhs->valid_instances;
+      this->request_valid_instances = rhs->request_valid_instances;
       // From TaskOp
       this->atomic_locks = rhs->atomic_locks;
       this->early_mapped_regions = rhs->early_mapped_regions;
@@ -1876,8 +1876,9 @@ namespace Legion {
         InstanceSet valid;    
         VersionInfo &version_info = get_version_info(*it);
         // Do the premapping
-        runtime->forest->physical_premap_only(this, *it, regions[*it],
-                                              version_info, valid);
+        if (request_valid_instances)
+          runtime->forest->physical_premap_region(this, *it, regions[*it],
+                                                  version_info, valid);
         // If we need visible instances, filter them as part of the conversion
         if (regions[*it].is_no_access())
           prepare_for_mapping(valid, input.valid_instances[*it]);
@@ -2025,17 +2026,19 @@ namespace Legion {
         // Passed all the error checking tests so register it
         // Always defer the users, the point tasks will do that
         // for themselves when they map their regions
+        const bool track_effects = 
+          (!atomic_locks.empty() || !arrive_barriers.empty());
         ApEvent effects_done = 
-          runtime->forest->physical_register_only(regions[*it], version_info, 
+          runtime->forest->physical_perform_updates_and_registration(
+                              regions[*it], version_info, 
                               this, *it, init_precondition, completion_event,
-                              chosen_instances, trace_info
+                              chosen_instances, trace_info, applied_conditions,
 #ifdef DEBUG_LEGION
-                              , get_logging_name(), unique_op_id
+                              get_logging_name(), unique_op_id,
 #endif
-                              );
+                              track_effects);
         if (effects_done.exists())
           effects_postconditions.insert(effects_done);
-        version_info.finalize_mapping(applied_conditions);
       }
     }
 
@@ -2564,118 +2567,21 @@ namespace Legion {
 #endif
       version_infos.resize(regions.size());
       std::set<RtEvent> ready_events;
-      LegionVector<FieldMask>::aligned version_masks(regions.size());
-      const bool multiple_reqs = (regions.size() > 1);
-      std::vector<unsigned> to_skip;
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         if (no_access_regions[idx] || 
             (post_mapper && virtual_mapped[idx]) ||
             (early_mapped_regions.find(idx) != early_mapped_regions.end()))
-        {
-          if (multiple_reqs)
-            to_skip.push_back(idx);
           continue;
-        }
         VersionInfo &version_info = version_infos[idx];
         if (version_info.has_version_info())
-        {
-          if (multiple_reqs)
-            to_skip.push_back(idx);
           continue;
-        }
         runtime->forest->perform_versioning_analysis(this, idx, regions[idx],
-              version_info, ready_events, multiple_reqs, &version_masks[idx]);
+                                                 version_info, ready_events);
       }
-      if (multiple_reqs && (to_skip.size() < regions.size()))
-      {
-        // Do the acquires first
-        std::set<Reservation> eq_reservations;
-        if (!to_skip.empty())
-        {
-          unsigned skip_index = 0;
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-          {
-            if ((skip_index < to_skip.size()) && (idx == to_skip[skip_index]))
-              skip_index++;
-            else
-              version_infos[idx].acquire_equivalence_sets(regions[idx],
-                                  version_masks[idx], eq_reservations);
-          }
-#ifdef DEBUG_LEGION
-          assert(skip_index == to_skip.size());
-#endif
-        }
-        else
-        {
-          // Easy case with no skip indexes
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            version_infos[idx].acquire_equivalence_sets(regions[idx],
-                                version_masks[idx], eq_reservations);
-        }
-        if (!eq_reservations.empty())
-        {
-          RtEvent locks_acquired;
-          for (std::set<Reservation>::const_iterator it = 
-                eq_reservations.begin(); it != eq_reservations.end(); it++)
-          {
-            RtEvent next = Runtime::acquire_rt_reservation(*it,
-                              true/*exclusive*/, locks_acquired);
-            locks_acquired = next;
-          }
-          if (locks_acquired.exists() && !locks_acquired.has_triggered())
-            locks_acquired.wait();
-        }
-        if (!to_skip.empty())
-        {
-          unsigned skip_index = 0;
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-          {
-            if ((skip_index < to_skip.size()) && (idx == to_skip[skip_index]))
-              skip_index++;
-            else
-              version_infos[idx].make_ready(regions[idx], 
-                        version_masks[idx], ready_events);
-          }
-#ifdef DEBUG_LEGION
-          assert(skip_index == to_skip.size());
-#endif
-        }
-        else
-        {
-          // Easy case with no skip indexes
-          for (unsigned idx = 0; idx < regions.size(); idx++)
-            version_infos[idx].make_ready(regions[idx],
-                      version_masks[idx], ready_events);
-        }
-        if (!ready_events.empty())
-        {
-          const RtEvent ready = Runtime::merge_events(ready_events);
-          if (!eq_reservations.empty())
-          {
-            for (std::set<Reservation>::const_iterator it = 
-                  eq_reservations.begin(); it != eq_reservations.end(); it++)
-              Runtime::release_reservation(*it, ready);
-          }
-          return ready;
-        }
-        else
-        {
-          if (!eq_reservations.empty())
-          {
-            for (std::set<Reservation>::const_iterator it = 
-                  eq_reservations.begin(); it != eq_reservations.end(); it++)
-              Runtime::release_reservation(*it);
-          }
-          return RtEvent::NO_RT_EVENT;
-        }
-      }
-      else
-      {
-        if (!ready_events.empty())
-          return Runtime::merge_events(ready_events);
-        return RtEvent::NO_RT_EVENT;
-      }
+      if (!ready_events.empty())
+        return Runtime::merge_events(ready_events);
+      return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -2697,7 +2603,6 @@ namespace Legion {
         must_epoch_owner->must_epoch_map_task_callback(this, input, output);
       std::set<Memory> visible_memories;
       runtime->machine.get_visible_memories(target_proc, visible_memories);
-      RegionTreeContext enclosing = parent_ctx->get_context();
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         // Skip any early mapped regions
@@ -2717,9 +2622,10 @@ namespace Legion {
         // Skip any NO_ACCESS or empty privilege field regions
         if (IS_NO_ACCESS(regions[idx]) || regions[idx].privilege_fields.empty())
           continue;
-        // Always have to do the traversal at this point to mark open children
         InstanceSet &current_valid = valid[idx];
-        perform_physical_traversal(idx, enclosing, current_valid);
+        if (request_valid_instances)
+          runtime->forest->physical_premap_region(this, idx, regions[idx],
+                                        version_infos[idx], current_valid);
         // See if we've already got an output from a must-epoch mapping
         if (!output.chosen_instances[idx].empty())
         {
@@ -3460,7 +3366,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, MAP_ALL_REGIONS_CALL);
-      if (valid_instances)
+      if (request_valid_instances)
       {
         // If the mapper wants valid instances we first need to do our
         // versioning analysis and then call the mapper
@@ -3502,50 +3408,136 @@ namespace Legion {
       }
 #endif
       // After we've got our results, apply the state to the region tree
-      for (unsigned idx = 0; idx < regions.size(); idx++)
+      if (!regions.empty())
       {
-        if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+        const bool track_effects = 
+          (!atomic_locks.empty() || !arrive_barriers.empty());
+        if (regions.size() == 1)
         {
-          if (runtime->legion_spy_enabled)
-            LegionSpy::log_task_premapping(unique_op_id, idx);
-          continue;
+          if (early_mapped_regions.empty() && 
+              !no_access_regions[0] && !virtual_mapped[0])
+          {
+            // Set the current mapping index before doing anything
+            // that sould result in a copy
+            set_current_mapping_index(0);
+            const ApEvent effects = 
+              runtime->forest->physical_perform_updates_and_registration(
+                  regions[0], version_infos[0], this, 0, 
+                  init_precondition, local_termination_event,
+                  physical_instances[0], trace_info, map_applied_conditions,
+#ifdef DEBUG_LEGION
+                                        get_logging_name(),
+                                        unique_op_id,
+#endif
+                                        track_effects);
+            if (effects.exists())
+              effects_postconditions.insert(effects);
+#ifdef DEBUG_LEGION
+            dump_physical_state(&regions[0], 0);
+#endif
+          }
         }
-        if (no_access_regions[idx])
-          continue;
-        VersionInfo &local_info = get_version_info(idx);
-        // If we virtual mapped it, there is nothing to do
-        if (virtual_mapped[idx])
+        else
         {
-          local_info.finalize_mapping(map_applied_conditions);
-          continue;
+          std::vector<unsigned> performed_regions;
+          std::set<RtEvent> registration_postconditions;
+          std::vector<CopyFillAggregator*> 
+            output_aggregators(regions.size(), NULL);
+          std::vector<std::vector<InstanceView*> > target_views(regions.size());
+          std::vector<std::set<ApEvent> > remote_ready(regions.size());
+          std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
+          std::vector<IndexSpaceExpression*> local_exprs(regions.size(), NULL);
+          std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
+          for (unsigned idx = 0; idx < regions.size(); idx++)
+          {
+            if (early_mapped_regions.find(idx) != early_mapped_regions.end())
+            {
+              if (runtime->legion_spy_enabled)
+                LegionSpy::log_task_premapping(unique_op_id, idx);
+              continue;
+            }
+            if (no_access_regions[idx])
+              continue;
+            VersionInfo &local_info = get_version_info(idx);
+            // If we virtual mapped it, there is nothing to do
+            if (virtual_mapped[idx])
+              continue;
+            performed_regions.push_back(idx);
+            // Set the current mapping index before doing anything
+            // that sould result in a copy
+            set_current_mapping_index(idx);
+            // apply the results of the mapping to the tree
+            reg_pre[idx] = runtime->forest->physical_perform_updates(
+                                        regions[idx], local_info, 
+                                        this, idx, init_precondition,
+                                        local_termination_event,
+                                        physical_instances[idx],
+                                        trace_info,
+                                        output_aggregators[idx],
+                                        map_applied_conditions,
+                                        remote_ready[idx],
+                                        effects_postconditions,
+                                        target_views[idx],
+                                        local_exprs[idx],
+#ifdef DEBUG_LEGION
+                                        get_logging_name(),
+                                        unique_op_id,
+#endif
+                                        track_effects);
+          }
+          for (std::vector<unsigned>::const_iterator it = 
+                performed_regions.begin(); it != performed_regions.end(); it++)
+          {
+            VersionInfo &local_info = get_version_info(*it);
+            // If we have updates for either copy launcher then defer it
+            // in order to avoid blocking here, otherwise we can just do
+            // it here as we know that we won't block
+            if (reg_pre[*it].exists() || output_aggregators[*it] != NULL)
+            {
+              const RtEvent registration_post = 
+                runtime->forest->defer_physical_perform_registration(
+                                          reg_pre[*it], local_exprs[*it],
+                                          regions[*it], local_info,
+                                          this, *it, local_termination_event,
+                                          physical_instances[*it], trace_info,
+                                          output_aggregators[*it],
+                                          remote_ready[*it],
+                                          target_views[*it], 
+                                          map_applied_conditions, effects[*it]);
+              registration_postconditions.insert(registration_post);
+            }
+            else
+              effects[*it] = runtime->forest->physical_perform_registration(
+                                          local_exprs[*it], regions[*it], 
+                                          local_info, this, *it, 
+                                          local_termination_event,
+                                          physical_instances[*it], trace_info,
+                                          output_aggregators[*it],
+                                          remote_ready[*it],
+                                          target_views[*it], 
+                                          map_applied_conditions);
+          }
+          // Wait for all the registrations to be done
+          if (!registration_postconditions.empty())
+          {
+            const RtEvent wait_on = 
+              Runtime::merge_events(registration_postconditions);
+            wait_on.wait();
+          }
+          // Now we can do the registrations
+          for (std::vector<unsigned>::const_iterator it =
+                performed_regions.begin(); it != performed_regions.end(); it++)
+          {
+            if (effects[*it].exists())
+              effects_postconditions.insert(effects[*it]);
+#ifdef DEBUG_LEGION
+            dump_physical_state(&regions[*it], *it);
+#endif
+          }
         }
-        // Set the current mapping index before doing anything
-        // that sould result in a copy
-        set_current_mapping_index(idx);
-        // apply the results of the mapping to the tree
-        ApEvent effects = 
-          runtime->forest->physical_register_only(regions[idx], local_info, 
-                                    this, idx, init_precondition,
-                                    local_termination_event, 
-                                    physical_instances[idx],
-                                    trace_info
-#ifdef DEBUG_LEGION
-                                    , get_logging_name()
-                                    , unique_op_id
-#endif
-                                    );
-        if (effects.exists())
-          effects_postconditions.insert(effects);
-        // We'll finalize in post mapping if we're doing that
-        if (!perform_postmap)
-          local_info.finalize_mapping(map_applied_conditions);
-#ifdef DEBUG_LEGION
-        dump_physical_state(&regions[idx], idx);
-#endif
-      }
-      if (perform_postmap)
-        perform_post_mapping(trace_info);
-
+        if (perform_postmap)
+          perform_post_mapping(trace_info);
+      } // if (!regions.empty())
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
@@ -3583,9 +3575,10 @@ namespace Legion {
         // valid instances for all the regions
         RegionTreePath path;
         initialize_mapping_path(path, regions[idx], regions[idx].region);
-        runtime->forest->physical_premap_only(this, idx, regions[idx], 
-                                              get_version_info(idx),
-                                              postmap_valid[idx]);
+        if (request_valid_instances)
+          runtime->forest->physical_premap_region(this, idx, regions[idx], 
+                                                  get_version_info(idx),
+                                                  postmap_valid[idx]);
         // No need to filter these because they are on the way out
         prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
         prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);
@@ -3727,20 +3720,16 @@ namespace Legion {
         const PrivilegeMode mode = regions[idx].privilege;
         regions[idx].privilege = READ_ONLY; 
         VersionInfo &local_version_info = get_version_info(idx);
-        ApEvent effects_done = 
-          runtime->forest->physical_register_only(regions[idx], 
-                            local_version_info, this, idx,
-                            completion_event/*wait for task to be done*/,
-                            ApEvent::NO_AP_EVENT/*done immediately*/, 
-                            result, trace_info
+        runtime->forest->physical_perform_updates_and_registration(
+                          regions[idx], local_version_info, this, idx,
+                          completion_event/*wait for task to be done*/,
+                          ApEvent::NO_AP_EVENT/*done immediately*/, 
+                          result, trace_info, map_applied_conditions,
 #ifdef DEBUG_LEGION
-                            , get_logging_name(), unique_op_id
+                          get_logging_name(), unique_op_id,
 #endif
-                            );
-        if (effects_done.exists())
-          effects_postconditions.insert(effects_done);
+                          false/*track effects*/);
         regions[idx].privilege = mode; 
-        local_version_info.finalize_mapping(map_applied_conditions);
       }
     } 
 
@@ -4991,10 +4980,7 @@ namespace Legion {
       const RtEvent deferred = map_all_regions(get_task_completion(), 
                                   first_invocation, must_epoch_owner);
       if (deferred.exists())
-        return deferred;
-      // Release any acquired instances that we have
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+        return deferred; 
       // If we mapped, then we are no longer stealable
       stealable = false;
       // We can now apply any arrives or releases
@@ -5154,6 +5140,9 @@ namespace Legion {
       if ((__sync_add_and_fetch(&outstanding_profiling_requests, -1) == 0) &&
           profiling_reported.exists())
         Runtime::trigger_event(profiling_reported);
+      // Release any acquired instances that we have
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       // Invalidate any state that we had if we didn't already
       // Do this before sending the complete message to avoid the
       // race condition in the remote case where the top-level
@@ -5307,15 +5296,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       map_applied_conditions.insert(event);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndividualTask::perform_physical_traversal(unsigned idx, 
-                                      RegionTreeContext ctx, InstanceSet &valid)
-    //--------------------------------------------------------------------------
-    {
-      runtime->forest->physical_premap_only(this, idx, regions[idx], 
-                                            version_infos[idx], valid);
     }
 
     //--------------------------------------------------------------------------
@@ -5924,15 +5904,6 @@ namespace Legion {
       // In the deactivation of the slice task is when we will actually
       // have our commit call done
       slice_owner->record_child_committed(profiling_reported);
-    }
-
-    //--------------------------------------------------------------------------
-    void PointTask::perform_physical_traversal(unsigned idx,
-                                      RegionTreeContext ctx, InstanceSet &valid)
-    //--------------------------------------------------------------------------
-    {
-      runtime->forest->physical_premap_only(this, idx, regions[idx], 
-                                            version_infos[idx], valid);
     }
 
     //--------------------------------------------------------------------------
@@ -8124,9 +8095,7 @@ namespace Legion {
           index_owner->return_slice_mapped(points.size(), denominator, 
                              applied_condition, ApEvent::NO_AP_EVENT);
       }
-      complete_mapping(applied_condition);
-      if (!acquired_instances.empty())
-        release_acquired_instances(acquired_instances);
+      complete_mapping(applied_condition); 
       complete_execution();
     }
 
@@ -8164,6 +8133,8 @@ namespace Legion {
         std::set<ApEvent> slice_postconditions;
         index_owner->return_slice_complete(points.size(), slice_postcondition);
       }
+      if (!acquired_instances.empty())
+        release_acquired_instances(acquired_instances);
       complete_operation();
     }
 

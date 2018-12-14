@@ -74,6 +74,42 @@ namespace Legion {
         const IndexPartition handle;
         const RtUserEvent ready;
       };   
+      struct DeferPhysicalRegistrationArgs : 
+        public LgTaskArgs<DeferPhysicalRegistrationArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
+      public:
+        DeferPhysicalRegistrationArgs(IndexSpaceExpression *expr,
+                                 const RegionRequirement &r, VersionInfo &v,
+                                 Operation *o, UniqueID uid, unsigned idx,
+                                 ApEvent term, InstanceSet &t,
+                                 const PhysicalTraceInfo &info,
+                                 CopyFillAggregator *&output,
+                                 const std::set<ApEvent> &remote,
+                                 std::vector<InstanceView*> &views, 
+                                 std::set<RtEvent> &map_applied,
+                                 ApEvent &res)
+          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
+            local_expr(expr), req(r), version_info(v), op(o), index(idx), 
+            term_event(term), targets(t), trace_info(info),
+            output_aggregator(output), remote_ready(remote), 
+            target_views(views), map_applied_events(map_applied),
+            result(res) { }
+      public:
+        IndexSpaceExpression *const local_expr;
+        const RegionRequirement &req;
+        VersionInfo &version_info;
+        Operation *const op; 
+        const unsigned index;
+        const ApEvent term_event;
+        InstanceSet &targets;
+        const PhysicalTraceInfo &trace_info;
+        CopyFillAggregator *const output_aggregator;
+        const std::set<ApEvent> &remote_ready;
+        std::vector<InstanceView*> &target_views;
+        std::set<RtEvent> &map_applied_events;
+        ApEvent &result;
+      };
     public:
       RegionTreeForest(Runtime *rt);
       RegionTreeForest(const RegionTreeForest &rhs);
@@ -301,9 +337,7 @@ namespace Legion {
       void perform_versioning_analysis(Operation *op, unsigned idx,
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
-                                       std::set<RtEvent> &ready_events,
-                                       bool defer_make_ready = false,
-                                       FieldMask *defer_mask = NULL);
+                                       std::set<RtEvent> &ready_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
     public:
@@ -320,45 +354,96 @@ namespace Legion {
                                  const InstanceSet &inst1,
                                  const InstanceSet &inst2);
     public: // Physical analysis methods
-      void physical_premap_only(Operation *op, unsigned index,
-                                RegionRequirement &req,
-                                VersionInfo &version_info,
-                                InstanceSet &valid_instances);
+      void physical_premap_region(Operation *op, unsigned index,
+                                  RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  InstanceSet &valid_instances);
+      // Return a runtime event for when it's safe to perform
+      // the registration for this equivalence set
+      RtEvent physical_perform_updates(const RegionRequirement &req,
+                                  VersionInfo &version_info,
+                                  Operation *op, unsigned index,
+                                  ApEvent precondition, ApEvent term_event,
+                                  const InstanceSet &targets,
+                                  const PhysicalTraceInfo &trace_info,
+                                  CopyFillAggregator *&output_aggregator,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &remote_events,
+                                  std::set<ApEvent> &effects_events,
+                                  std::vector<InstanceView*> &target_views,
+                                  IndexSpaceExpression *&local_expr,
+#ifdef DEBUG_LEGION
+                                  const char *log_name,
+                                  UniqueID uid,
+#endif
+                                  const bool track_effects,
+                                  const bool check_initialized = true,
+                                  const bool defer_copies = true);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
-      ApEvent physical_register_only(const RegionRequirement &req,
-                                     VersionInfo &version_info,
-                                     Operation *op, unsigned index,
-                                     ApEvent precondition, ApEvent term_event,
-                                     InstanceSet &targets,
-                                     const PhysicalTraceInfo &trace_info,
+      ApEvent physical_perform_registration(IndexSpaceExpression *local_expr,
+                                 const RegionRequirement &req,
+                                 VersionInfo &version_info,
+                                 Operation *op, unsigned index,
+                                 ApEvent term_event, InstanceSet &targets,
+                                 const PhysicalTraceInfo &trace_info,
+                                 CopyFillAggregator *output_aggregator,
+                                 const std::set<ApEvent> &remote_events,
+                                 std::vector<InstanceView*> &target_views,
+                                 std::set<RtEvent> &map_applied_events);
+      // Same as the two above merged together
+      ApEvent physical_perform_updates_and_registration(
+                                   const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op, unsigned index,
+                                   ApEvent precondition, ApEvent term_event,
+                                   InstanceSet &targets,
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
-                                     const char *log_name,
-                                     UniqueID uid,
+                                   const char *log_name,
+                                   UniqueID uid,
 #endif
-                                     const bool check_initialized = true);
-      void acquire_restrictions(const RegionRequirement &req,
-                                VersionInfo &version_info,
-                                Operation *op, unsigned index,
-                                ApEvent term_event,
-                                InstanceSet &restricted_instances,
-                                const PhysicalTraceInfo &trace_info
+                                   const bool track_effects,
+                                   const bool check_initialized = true);
+      // A helper method for deferring the computation of registration
+      RtEvent defer_physical_perform_registration(RtEvent register_pre,
+                                   IndexSpaceExpression *local_expr,
+                                   const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op, unsigned index,
+                                   ApEvent term_event, InstanceSet &targets,
+                                   const PhysicalTraceInfo &trace_info,
+                                   CopyFillAggregator *output_aggregator,
+                                   const std::set<ApEvent> &remote_ready,
+                                   std::vector<InstanceView*> &target_views,
+                                   std::set<RtEvent> &map_applied_events,
+                                   ApEvent &result);
+      void handle_defer_registration(const void *args);
+      ApEvent acquire_restrictions(const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op, unsigned index,
+                                   ApEvent term_event,
+                                   InstanceSet &restricted_instances,
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
-                                , const char *log_name
-                                , UniqueID uid
+                                   const char *log_name,
+                                   UniqueID uid,
 #endif
-                                );
-      void release_restrictions(const RegionRequirement &req,
-                                VersionInfo &version_info,
-                                Operation *op, unsigned index,
-                                ApEvent precondition, ApEvent term_event,
-                                InstanceSet &restricted_instances,
-                                const PhysicalTraceInfo &trace_info
+                                   const bool need_restricted_insts);
+      ApEvent release_restrictions(const RegionRequirement &req,
+                                   VersionInfo &version_info,
+                                   Operation *op, unsigned index,
+                                   ApEvent precondition, ApEvent term_event,
+                                   InstanceSet &restricted_instances,
+                                   const PhysicalTraceInfo &trace_info,
+                                   std::set<RtEvent> &map_applied_events,
 #ifdef DEBUG_LEGION
-                                , const char *log_name
-                                , UniqueID uid
+                                   const char *log_name,
+                                   UniqueID uid,
 #endif
-                               );
+                                   const bool need_restricted_insts);
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
                           VersionInfo &src_version_info,
@@ -367,7 +452,8 @@ namespace Legion {
                           const InstanceSet &dst_targets, Operation *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
-                          const PhysicalTraceInfo &trace_info);
+                          const PhysicalTraceInfo &trace_info,
+                          std::set<RtEvent> &map_applied_events);
       // This takes ownership of the value buffer
       ApEvent fill_fields(Operation *op,
                           const RegionRequirement &req,
@@ -375,7 +461,8 @@ namespace Legion {
                           const void *value, size_t value_size,
                           VersionInfo &version_info, ApEvent precondition,
                           PredEvent true_guard,
-                          const PhysicalTraceInfo &trace_info);
+                          const PhysicalTraceInfo &trace_info,
+                          std::set<RtEvent> &map_applied_events);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);
@@ -384,11 +471,13 @@ namespace Legion {
                               const InstanceRef &ext_instance,
                               VersionInfo &version_info,
                               const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &map_applied_events,
                               const bool restricted);
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               const InstanceRef &ref,
-                              const PhysicalTraceInfo &trace_info); 
+                              const PhysicalTraceInfo &trace_info,
+                              std::set<RtEvent> &map_applied_events); 
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,
@@ -608,11 +697,14 @@ namespace Legion {
                        IndexSpaceExpression *lhs, IndexSpaceExpression *rhs);
     public:
       // Remote expression methods
-      IndexSpaceExpression* find_or_create_remote_expression(
-              IndexSpaceExprID remote_expr_id, Deserializer &derez);
+      IndexSpaceExpression* find_or_request_remote_expression(
+              IndexSpaceExprID remote_expr_id, IndexSpaceExpression *origin);
       IndexSpaceExpression* find_remote_expression(
               IndexSpaceExprID remote_expr_id);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
+      void handle_remote_expression_request(Deserializer &derez,
+                                            AddressSpaceID source);
+      void handle_remote_expression_response(Deserializer &derez);
     public:
       Runtime *const runtime;
     protected:
@@ -640,6 +732,7 @@ namespace Legion {
       std::map<IndexSpaceExprID/*lhs*/,ExpressionTrieNode*> difference_ops;
       // Remote expressions
       std::map<IndexSpaceExprID,IndexSpaceExpression*> remote_expressions;
+      std::map<IndexSpaceExprID,RtEvent> pending_remote_expressions;
     };
 
     /**
@@ -676,9 +769,7 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
-      // Should only be called on inherited types
-      virtual void record_remote_instance(AddressSpaceID target) 
-        { assert(false); }
+      virtual void pack_full(Serializer &rez, AddressSpaceID target) = 0;
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
@@ -707,6 +798,7 @@ namespace Legion {
                                  const OrderingConstraint &constraint) = 0;
     public:
       static void handle_tighten_index_space(const void *args);
+      static AddressSpaceID get_owner_space(IndexSpaceExprID id, Runtime *rt);
     public:
       void add_parent_operation(IndexSpaceOperation *op);
       void remove_parent_operation(IndexSpaceOperation *op);
@@ -774,17 +866,6 @@ namespace Legion {
     class IntermediateExpression : 
       public IndexSpaceExpression, public Collectable {
     public:
-      struct DestructionFunctor {
-      public:
-        DestructionFunctor(Runtime *rt, Serializer &r)
-          : runtime(rt), rez(r) { }
-      public:
-        void apply(AddressSpaceID target);
-      public:
-        Runtime *const runtime;
-        Serializer &rez;
-      };
-    public:
       IntermediateExpression(TypeTag tag, RegionTreeForest *ctx);
       IntermediateExpression(TypeTag tag, RegionTreeForest *ctx, 
                              IndexSpaceExprID expr_id);
@@ -797,10 +878,10 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
-      virtual void record_remote_instance(AddressSpaceID target);
+      virtual void pack_full(Serializer &rez, AddressSpaceID target) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
+      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0; 
     public:
       static void handle_expression_invalidation(Deserializer &derez,
                                                  RegionTreeForest *forest);
@@ -812,9 +893,7 @@ namespace Legion {
       // An equivalent index space node with the same IndexSpaceExprID as this
       // We only make this if we actually need to since IndexSpaceNodes
       // are more expensive to maintain
-      IndexSpaceNode *node;
-    private:
-      NodeSet remote_instances;
+      IndexSpaceNode *node; 
     };
 
     class IndexSpaceOperation : public IntermediateExpression {
@@ -823,6 +902,17 @@ namespace Legion {
         UNION_OP_KIND,
         INTERSECT_OP_KIND,
         DIFFERENCE_OP_KIND,
+      };
+    public:
+      struct DestructionFunctor {
+      public:
+        DestructionFunctor(Runtime *rt, Serializer &r)
+          : runtime(rt), rez(r) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        Runtime *const runtime;
+        Serializer &rez;
       };
     public:
       IndexSpaceOperation(TypeTag tag, OperationKind kind,
@@ -836,14 +926,18 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
+      virtual void pack_full(Serializer &rez, AddressSpaceID target) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
+    protected:
+      void record_remote_instance(AddressSpaceID target);
     public:
       const OperationKind op_kind;
     private:
+      NodeSet remote_instances;
       int invalidated;
     };
 
@@ -860,6 +954,7 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_full(Serializer &rez, AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
@@ -1027,6 +1122,7 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_full(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1054,6 +1150,7 @@ namespace Legion {
     public:
       Realm::IndexSpace<DIM,T> realm_index_space;
       ApEvent realm_index_space_ready;
+      IndexSpaceExpression *origin;
     };
 
     struct RemoteExpressionCreator {
@@ -1099,6 +1196,7 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual size_t get_volume(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_full(Serializer &rez, AddressSpaceID target);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1388,6 +1486,7 @@ namespace Legion {
       virtual void tighten_index_space(void) = 0;
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
+      virtual void pack_full(Serializer &rez, AddressSpaceID target) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) 
@@ -1550,6 +1649,7 @@ namespace Legion {
       virtual void tighten_index_space(void);
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
+      virtual void pack_full(Serializer &rez, AddressSpaceID target);
     public:
       virtual void log_index_space_points(void);
       void log_index_space_points(const Realm::IndexSpace<DIM,T> &space) const;
@@ -2785,10 +2885,11 @@ namespace Legion {
                                          const FieldMask &mask);
 #endif
     public:
-      void perform_versioning_analysis(ContextID ctx,
-                                       InnerContext *parent_ctx,
-                                       VersionInfo *version_info,
-                                       LogicalRegion upper_bound);
+      RtEvent perform_versioning_analysis(ContextID ctx,
+                                          InnerContext *parent_ctx,
+                                          VersionInfo *version_info,
+                                          LogicalRegion upper_bound,
+                                          Operation *op);
     public:
       void find_open_complete_partitions(ContextID ctx,
                                          const FieldMask &mask,
