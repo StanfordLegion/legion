@@ -5301,9 +5301,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Pack the valid instances
+      rez.serialize<size_t>(valid_instances.size());
       if (!valid_instances.empty())
       {
-        rez.serialize<size_t>(valid_instances.size());
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               valid_instances.begin(); it != valid_instances.end(); it++)
         {
@@ -5311,12 +5311,10 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      else
-        rez.serialize<size_t>(0);
       // Pack the reduction instances
+      rez.serialize<size_t>(reduction_instances.size());
       if (!reduction_instances.empty())
       {
-        rez.serialize<size_t>(reduction_instances.size());
         for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator
               rit = reduction_instances.begin(); 
               rit != reduction_instances.end(); rit++)
@@ -5328,13 +5326,11 @@ namespace Legion {
             rez.serialize((*it)->did);
         }
       }
-      else
-        rez.serialize<size_t>(0);
       // Pack the restricted instances
+      rez.serialize<size_t>(restricted_instances.size());  
       if (!restricted_instances.empty())
       {
         rez.serialize(restricted_fields);
-        rez.serialize<size_t>(restricted_instances.size());  
         for (FieldMaskSet<InstanceView>::const_iterator it = 
               restricted_instances.begin(); it != 
               restricted_instances.end(); it++)
@@ -5343,12 +5339,10 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      else
-        rez.serialize<size_t>(0);
       // Pack the version numbers
+      rez.serialize<size_t>(version_numbers.size());
       if (!version_numbers.empty())
       {
-        rez.serialize<size_t>(version_numbers.size());
         for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
               version_numbers.begin(); it != version_numbers.end(); it++)
         {
@@ -5356,8 +5350,6 @@ namespace Legion {
           rez.serialize(it->second);
         }
       }
-      else
-        rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
