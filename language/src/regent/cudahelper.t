@@ -83,16 +83,16 @@ do
     if has_symbol("cuInit") then
       local r = DriverAPI.cuInit(0)
       assert(r == 0)
-      terra cudahelper.check_cuda_available()
-        return [r] == 0;
+      function cudahelper.check_cuda_available()
+        return true
       end
     else
-      terra cudahelper.check_cuda_available()
+      function cudahelper.check_cuda_available()
         return false
       end
     end
   else
-    terra cudahelper.check_cuda_available()
+    function cudahelper.check_cuda_available()
       return true
     end
   end
@@ -113,7 +113,7 @@ local terra assert(x : bool, message : rawstring)
   end
 end
 
-local terra get_cuda_version() : uint64
+local terra get_cuda_version_terra() : uint64
   var cx : &CUctx_st
   var cx_created = false
   var r = DriverAPI.cuCtxGetCurrent(&cx)
@@ -178,7 +178,7 @@ local function find_device_library(target)
       libdevice = device_lib_dir .. f
     end
   end
-  assert(libdevice ~= nil, "Failed to find a device library")
+  lua_assert(libdevice ~= nil, "Failed to find a device library")
   return libdevice
 end
 
@@ -206,17 +206,28 @@ local function parse_cuda_arch(arch)
   return sm
 end
 
+local get_cuda_version
+do
+  local cached_cuda_version = nil
+  get_cuda_version = function()
+    if cached_cuda_version ~= nil then
+      return cached_cuda_version
+    end
+    if not config["cuda-offline"] then
+      cached_cuda_version = get_cuda_version_terra()
+    else
+      cached_cuda_version = parse_cuda_arch(config["cuda-arch"])
+    end
+    return cached_cuda_version
+  end
+end
+
 function cudahelper.jit_compile_kernels_and_register(kernels)
   local module = {}
   for k, v in pairs(kernels) do
     module[v.name] = v.kernel
   end
-  local version
-  if not config["cuda-offline"] then
-    version = get_cuda_version()
-  else
-    version = parse_cuda_arch(config["cuda-arch"])
-  end
+  local version = get_cuda_version()
   local libdevice = find_device_library(tonumber(version))
   local llvmbc = terralib.linkllvm(libdevice)
   externcall_builtin = function(name, ftype)
@@ -301,6 +312,9 @@ local function generate_atomic(op, typ)
   if op == "+" and typ == float then
     return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
                               {&float,float} -> {float})
+  elseif op == "+" and typ == double and get_cuda_version() >= 60 then
+    return terralib.intrinsic("llvm.nvvm.atomic.load.add.f64.p0f64",
+                              {&double,double} -> {double})
   end
 
   local cas_type
@@ -974,7 +988,6 @@ function cudahelper.generate_parallel_prefix_op(variant, total, lhs_wr, lhs_rd, 
         var [num_threads] = total - [BLOCK_SIZE]
         [call_postscan_full]
       end
-      RuntimeAPI.cudaDeviceSynchronize()
     end
   end
 

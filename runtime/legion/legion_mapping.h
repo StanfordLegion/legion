@@ -268,6 +268,23 @@ namespace Legion {
         SERIALIZED_NON_REENTRANT_MAPPER_MODEL,
       };
       virtual MapperSyncModel get_mapper_sync_model(void) const = 0;
+    public:
+      /**
+       * ----------------------------------------------------------------------
+       *  Request Valid Instances
+       * ----------------------------------------------------------------------
+       * Indicate whether the runtime should populate the valid instances as
+       * inputs for mapping operations. This will control the setting for all
+       * operations that are not tasks. For tasks, this will just set the 
+       * initial value of 'valid_instances' in the select_task_options struct
+       * as we give mappers more control over needing valid inputs for tasks
+       * than generic operations at the moment. We provide a default 
+       * implementation of this method because older versions of the runtime
+       * would always fill in this data structure, however, we now allow
+       * mappers to disable this in order to reduce the cost of physical
+       * analysis done for mapping operations.
+       */
+      virtual bool request_valid_instances(void) const { return true; }
     public: // Task mapping calls
       /**
        * ----------------------------------------------------------------------
@@ -318,7 +335,7 @@ namespace Legion {
        *     from being stolen as it will have already been mapped
        *     once it enters the ready queue.
        *
-       * valid_instance default:true
+       * valid_instance default:result of request_valid_instances
        *     When calls to map_task are performed, it's often the 
        *     case that the mapper will want to know the currently valid
        *     instances are for that region. There is some overhead to

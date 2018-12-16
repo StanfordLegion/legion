@@ -2304,6 +2304,10 @@ namespace Legion {
                                            Serializer &rez);
       void send_index_space_colors_response(AddressSpaceID target,
                                             Serializer &rez);
+      void send_index_space_remote_expression_request(AddressSpaceID target,
+                                                      Serializer &rez);
+      void send_index_space_remote_expression_response(AddressSpaceID target,
+                                                       Serializer &rez);
       void send_remote_expression_invalidation(AddressSpaceID target,
                                                Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
@@ -2435,32 +2439,31 @@ namespace Legion {
                                                Serializer &rez);
       void send_equivalence_set_subset_response(AddressSpaceID target, 
                                                 Serializer &rez);
-      void send_equivalence_set_subset_invalidation(AddressSpaceID target,
-                                                    Serializer &rez);
+      void send_equivalence_set_subset_update(AddressSpaceID target,
+                                              Serializer &rez);
       void send_equivalence_set_ray_trace_request(AddressSpaceID target,
                                                   Serializer &rez);
       void send_equivalence_set_ray_trace_response(AddressSpaceID target,
                                                    Serializer &rez);
-      void send_equivalence_set_valid_request(AddressSpaceID target,
+      void send_equivalence_set_remote_refinement(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_remote_request_instances(AddressSpaceID target,
+                                                         Serializer &rez);
+      void send_equivalence_set_remote_request_reductions(AddressSpaceID target,
+                                                          Serializer &rez);
+      void send_equivalence_set_remote_updates(AddressSpaceID target,
                                                Serializer &rez);
-      void send_equivalence_set_valid_response(AddressSpaceID target,
-                                               Serializer &rez);
-      void send_equivalence_set_update_request(AddressSpaceID target,
-                                               Serializer &rez);
-      void send_equivalence_set_update_response(AddressSpaceID target,
+      void send_equivalence_set_remote_acquires(AddressSpaceID target,
                                                 Serializer &rez);
-      void send_equivalence_set_invalidate_request(AddressSpaceID target,
-                                                   Serializer &rez);
-      void send_equivalence_set_invalidate_response(AddressSpaceID target,
-                                                    Serializer &rez);
-      void send_equivalence_set_reduction_application(AddressSpaceID target,
-                                                      Serializer &rez);
-      void send_version_state_response(AddressSpaceID target, Serializer &rez);
-      void send_version_state_update_request(AddressSpaceID target, 
-                                             Serializer &rez);
-      void send_version_state_update_response(AddressSpaceID target, 
-                                              Serializer &rez);
-      void send_version_state_valid_notification(AddressSpaceID target,
+      void send_equivalence_set_remote_releases(AddressSpaceID target,
+                                                Serializer &rez);
+      void send_equivalence_set_remote_copies_across(AddressSpaceID target,
+                                                     Serializer &rez);
+      void send_equivalence_set_remote_overwrites(AddressSpaceID target,
+                                                  Serializer &rez);
+      void send_equivalence_set_remote_filters(AddressSpaceID target,
+                                               Serializer &rez);
+      void send_equivalence_set_remote_instances(AddressSpaceID target,
                                                  Serializer &rez);
       void send_instance_request(AddressSpaceID target, Serializer &rez);
       void send_instance_response(AddressSpaceID target, Serializer &rez);
@@ -2502,6 +2505,8 @@ namespace Legion {
                                                  Serializer &rez);
       void send_remote_op_select_sources_response(AddressSpaceID target,
                                                   Serializer &rez);
+      void send_remote_op_report_uninitialized(AddressSpaceID target,
+                                               Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2520,6 +2525,9 @@ namespace Legion {
       void handle_index_space_colors_request(Deserializer &derez,
                                              AddressSpaceID source);
       void handle_index_space_colors_response(Deserializer &derez);
+      void handle_index_space_remote_expression_request(Deserializer &derez,
+                                                        AddressSpaceID source);
+      void handle_index_space_remote_expression_response(Deserializer &derez);
       void handle_remote_expression_invalidation(Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
@@ -2650,18 +2658,20 @@ namespace Legion {
       void handle_equivalence_set_subset_request(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_equivalence_set_subset_response(Deserializer &derez);
-      void handle_equivalence_set_subset_invalidation(Deserializer &derez);
+      void handle_equivalence_set_subset_update(Deserializer &derez);
       void handle_equivalence_set_ray_trace_request(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_equivalence_set_ray_trace_response(Deserializer &derez);
-      void handle_equivalence_set_valid_request(Deserializer &derez,
-                                                AddressSpaceID source);
-      void handle_equivalence_set_valid_response(Deserializer &derez);
-      void handle_equivalence_set_update_request(Deserializer &derez);
-      void handle_equivalence_set_update_response(Deserializer &derez);
-      void handle_equivalence_set_invalidate_request(Deserializer &derez);
-      void handle_equivalence_set_invalidate_response(Deserializer &derez);
-      void handle_equivalence_set_reduction_application(Deserializer &derez);
+      void handle_equivalence_set_remote_refinement(Deserializer &derez);
+      void handle_equivalence_set_remote_request_instances(Deserializer &derez);
+      void handle_equivalence_set_remote_request_reductions(Deserializer &derz);
+      void handle_equivalence_set_remote_updates(Deserializer &derez);
+      void handle_equivalence_set_remote_acquires(Deserializer &derez);
+      void handle_equivalence_set_remote_releases(Deserializer &derez);
+      void handle_equivalence_set_remote_copies_across(Deserializer &derez);
+      void handle_equivalence_set_remote_overwrites(Deserializer &derez);
+      void handle_equivalence_set_remote_filters(Deserializer &derez);
+      void handle_equivalence_set_remote_instances(Deserializer &derez);
       void handle_version_state_request(Deserializer &derez,
                                         AddressSpaceID source);
       void handle_version_state_response(Deserializer &derez,
@@ -2715,6 +2725,7 @@ namespace Legion {
       void handle_remote_op_sources_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_remote_op_sources_response(Deserializer &derez);
+      void handle_remote_op_report_uninitialized(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

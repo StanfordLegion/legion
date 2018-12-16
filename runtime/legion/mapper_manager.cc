@@ -48,7 +48,8 @@ namespace Legion {
     MapperManager::MapperManager(Runtime *rt, Mapping::Mapper *mp, 
                                  MapperID mid, Processor p)
       : runtime(rt), mapper(mp), mapper_id(mid), processor(p),
-        profile_mapper(runtime->profiler != NULL)
+        profile_mapper(runtime->profiler != NULL),
+        request_valid_instances(mp->request_valid_instances())
     //--------------------------------------------------------------------------
     {
     }

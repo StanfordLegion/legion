@@ -37,7 +37,9 @@ end
 -- ## Legion Bindings
 -- #################
 
-terralib.linklibrary("libregent.so")
+if data.is_luajit() then
+  terralib.linklibrary("libregent.so")
+end
 local c = terralib.includecstring([[
 #include "legion.h"
 #include "regent.h"
@@ -854,6 +856,7 @@ do
       kernel = kernel,
     }
     global_kernel_id = global_kernel_id + 1
+    kernel:setname(kernel_name)
     return kernel_id
   end
 end

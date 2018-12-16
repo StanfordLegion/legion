@@ -2271,10 +2271,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RtEvent ReductionView::find_copy_preconditions(bool reading,
-                                                const FieldMask &copy_mask,
-                                                IndexSpaceExpression *copy_expr,
-                                                UniqueID op_id, unsigned index,
-                                                CopyFillAggregator &aggregator,
+                                            const FieldMask &copy_mask,
+                                            IndexSpaceExpression *copy_expr,
+                                            UniqueID op_id, unsigned index,
+                                            CopyFillAggregator &aggregator,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {

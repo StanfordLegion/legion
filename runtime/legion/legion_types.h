@@ -291,6 +291,7 @@ namespace Legion {
       LG_TOP_FINISH_TASK_ID,
       LG_MAPPER_TASK_ID,
       LG_DISJOINTNESS_TASK_ID,
+      LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID,
       LG_PART_INDEPENDENCE_TASK_ID,
       LG_SPACE_INDEPENDENCE_TASK_ID,
       LG_POST_DECREMENT_TASK_ID,
@@ -330,7 +331,10 @@ namespace Legion {
       LG_DEFER_RAY_TRACE_TASK_ID,
       LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
-      LG_DEFER_VERSION_FINALIZE_TASK_ID,
+      LG_COPY_FILL_AGGREGATION_TASK_ID,
+      LG_COPY_FILL_DELETION_TASK_ID,
+      LG_FINALIZE_EQ_SETS_TASK_ID,
+      LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -370,6 +374,7 @@ namespace Legion {
         "Top Finish",                                             \
         "Mapper Task",                                            \
         "Disjointness Test",                                      \
+        "Defer Physical Registration",                            \
         "Partition Independence Test",                            \
         "Index Space Independence Test",                          \
         "Post Decrement Task",                                    \
@@ -409,7 +414,10 @@ namespace Legion {
         "Defer Ray Trace",                                        \
         "Defer Subset Request",                                   \
         "Defer Remote Decrement",                                 \
-        "Defer Version Info Finalize",                            \
+        "Copy Fill Aggregation",                                  \
+        "Copy Fill Deletion",                                     \
+        "Finalize Equivalence Sets",                              \
+        "Deferred Copy Across",                                   \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };
@@ -597,6 +605,8 @@ namespace Legion {
       SEND_INDEX_SPACE_CHILD_RESPONSE,
       SEND_INDEX_SPACE_COLORS_REQUEST,
       SEND_INDEX_SPACE_COLORS_RESPONSE,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
       SEND_REMOTE_EXPRESSION_INVALIDATION,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
@@ -688,16 +698,19 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_RESPONSE,
       SEND_EQUIVALENCE_SET_SUBSET_REQUEST,
       SEND_EQUIVALENCE_SET_SUBSET_RESPONSE,
-      SEND_EQUIVALENCE_SET_SUBSET_INVALIDATION,
+      SEND_EQUIVALENCE_SET_SUBSET_UPDATE,
       SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST,
       SEND_EQUIVALENCE_SET_RAY_TRACE_RESPONSE,
-      SEND_EQUIVALENCE_SET_VALID_REQUEST,
-      SEND_EQUIVALENCE_SET_VALID_RESPONSE,
-      SEND_EQUIVALENCE_SET_UPDATE_REQUEST,
-      SEND_EQUIVALENCE_SET_UPDATE_RESPONSE,
-      SEND_EQUIVALENCE_SET_INVALIDATE_REQUEST,
-      SEND_EQUIVALENCE_SET_INVALIDATE_RESPONSE,
-      SEND_EQUIVALENCE_SET_REDUCTION_APPLICATION,
+      SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS,
+      SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
+      SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
+      SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
+      SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS,
+      SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES,
+      SEND_EQUIVALENCE_SET_REMOTE_FILTERS,
+      SEND_EQUIVALENCE_SET_REMOTE_INSTANCES,
       SEND_INSTANCE_REQUEST,
       SEND_INSTANCE_RESPONSE,
       SEND_EXTERNAL_DETACH,
@@ -731,6 +744,7 @@ namespace Legion {
       SEND_LIBRARY_TASK_RESPONSE,
       SEND_REMOTE_OP_SOURCES_REQUEST,
       SEND_REMOTE_OP_SOURCES_RESPONSE,
+      SEND_REMOTE_OP_REPORT_UNINIT,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -749,6 +763,8 @@ namespace Legion {
         "Send Index Space Child Response",                            \
         "Send Index Space Colors Request",                            \
         "Send Index Space Colors Response",                           \
+        "Send Index Space Remote Expression Request",                 \
+        "Send Index Space Remote Expression Response",                \
         "Send Remote Expression Invalidation",                        \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
@@ -840,16 +856,19 @@ namespace Legion {
         "Send Equivalence Set Response",                              \
         "Send Equivalence Set Subset Request",                        \
         "Send Equivalence Set Subset Response",                       \
-        "Send Equivalence Set Subset Invalidation",                   \
+        "Send Equivalence Set Subset Update",                         \
         "Send Equivalence Set Ray Trace Request",                     \
         "Send Equivalence Set Ray Trace Response",                    \
-        "Send Equivalence Set Valid Request",                         \
-        "Send Equivalence Set Valid Response",                        \
-        "Send Equivalence Set Update Request",                        \
-        "Send Equivalence Set Update Response",                       \
-        "Send Equivalence Set Invalidate Request",                    \
-        "Send Equivalence Set Invalidate Response",                   \
-        "Send Equivalence Set Reduction Application",                 \
+        "Send Equivalence Set Remote Refinement",                     \
+        "Send Equivalence Set Remote Request Instances",              \
+        "Send Equivalence Set Remote Request Reductions",             \
+        "Send Equivalence Set Remote Updates",                        \
+        "Send Equivalence Set Remote Acquires",                       \
+        "Send Equivalence Set Remote Releases",                       \
+        "Send Equivalence Set Remote Copies Across",                  \
+        "Send Equivalence Set Remote Overwrites",                     \
+        "Send Equivalence Set Remote Filters",                        \
+        "Send Equivalence Set Remote Instances",                      \
         "Send Instance Request",                                      \
         "Send Instance Response",                                     \
         "Send External Detach",                                       \
@@ -883,6 +902,7 @@ namespace Legion {
         "Send Library Task Response",                                 \
         "Remote Op Sources Request",                                  \
         "Remote Op Sources Response",                                 \
+        "Remote Op Report Uninitialized",                             \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1279,6 +1299,7 @@ namespace Legion {
     // legion_types.h
     class LocalLock;
     class AutoLock;
+    class AutoTryLock;
     class LgEvent; // base event type for legion
     class ApEvent; // application event
     class ApUserEvent; // application user event
@@ -2165,9 +2186,13 @@ namespace Legion {
     private:
       // These are only accessible via AutoLock
       friend class AutoLock;
+      friend class AutoTryLock;
       inline RtEvent lock(void)   { return RtEvent(wrlock()); }
       inline RtEvent wrlock(void) { return RtEvent(reservation.wrlock()); }
       inline RtEvent rdlock(void) { return RtEvent(reservation.rdlock()); }
+      inline bool trylock(void) { return reservation.trylock(); }
+      inline bool trywrlock(void) { return reservation.trywrlock(); }
+      inline bool tryrdlock(void) { return reservation.tryrdlock(); }
       inline void unlock(void) { reservation.unlock(); }
     private:
       inline void advise_sleep_entry(Realm::UserEvent guard)
@@ -2213,6 +2238,18 @@ namespace Legion {
         }
         Internal::local_lock_list = this;
       }
+    protected:
+      // Helper constructor for AutoTryLock
+      inline AutoLock(int mode, bool excl, LocalLock &r)
+        : local_lock(r), previous(Internal::local_lock_list), 
+          exclusive(excl), held(false)
+      {
+#ifdef DEBUG_REENTRANT_LOCKS
+        if (previous != NULL)
+          previous->check_for_reentrant_locks(&local_lock);
+#endif
+        Internal::local_lock_list = this;
+      }
     public:
       inline AutoLock(const AutoLock &rhs)
         : local_lock(rhs.local_lock), previous(NULL), exclusive(false)
@@ -2223,10 +2260,10 @@ namespace Legion {
       inline ~AutoLock(void)
       {
 #ifdef DEBUG_LEGION
-        assert(held);
         assert(Internal::local_lock_list == this);
 #endif
-        local_lock.unlock();
+        if (held)
+          local_lock.unlock();
         Internal::local_lock_list = previous;
       }
     public:
@@ -2301,11 +2338,31 @@ namespace Legion {
           previous->check_for_reentrant_locks(to_acquire);
       }
 #endif
-    private:
+    protected:
       LocalLock &local_lock;
       AutoLock *const previous;
       const bool exclusive;
       bool held;
+    };
+
+    // AutoTryLock is an extension of AutoLock that supports try lock
+    class AutoTryLock : public AutoLock {
+    public:
+      inline AutoTryLock(LocalLock &r, int mode = 0, bool excl = true)
+        : AutoLock(mode, excl, r) 
+      {
+        if (exclusive)
+          ready = local_lock.wrlock();
+        else
+          ready = local_lock.rdlock();
+        held = !ready.exists();
+      }
+    public:
+      // Allow an easy test for whether we got the lock or not
+      inline bool has_lock(void) const { return held; }
+      inline RtEvent try_next(void) const { return ready; }
+    protected:
+      RtEvent ready;
     };
     
     // Special method that we need here for waiting on events

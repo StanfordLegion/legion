@@ -1727,19 +1727,17 @@ local bounded_type = terralib.memoize(function(index_type, ...)
     -- TODO: Would be nice to compress smaller than one byte.
     local bitmask_type
     if terralib.llvmversion >= 38 then
-      if #bounds <= bit.lshift(1, 8) then
+      if #bounds <= 2 ^ 8 then
         bitmask_type = uint8
-      elseif #bounds <= bit.lshift(1, 16) then
+      elseif #bounds <= 2 ^ 16 then
         bitmask_type = uint16
-      -- XXX: What we really want here is bit.lshift(1ULL, 32),
-      --      which is supported only in LuaJIT 2.1 or higher
-      elseif #bounds <= bit.lshift(1, 30) then
+      elseif #bounds <= 2 ^ 32 then
         bitmask_type = uint32
       else
         assert(false) -- really?
       end
     else
-      assert(#bounds <= bit.lshift(1, 30))
+      assert(#bounds <= 2 ^ 32)
       bitmask_type = uint32
     end
     st.entries:insert({ "__index", bitmask_type })
@@ -2645,19 +2643,17 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
     -- Find the smallest bitmask that will fit.
     -- TODO: Would be nice to compress smaller than one byte.
     if terralib.llvmversion >= 38 then
-      if #bounds <= bit.lshift(1, 8) then
+      if #bounds <= 1 ^ 8 then
         bitmask_type = vector(uint8, width)
-      elseif #bounds <= bit.lshift(1, 16) then
+      elseif #bounds <= 2 ^ 16 then
         bitmask_type = vector(uint16, width)
-      -- XXX: What we really want here is bit.lshift(1ULL, 32),
-      --      which is supported only in LuaJIT 2.1 or higher
-      elseif #bounds <= bit.lshift(1, 30) then
+      elseif #bounds <= 2 ^ 32 then
         bitmask_type = vector(uint32, width)
       else
         assert(false) -- really?
       end
     else
-      assert(#bounds <= bit.lshift(1, 30))
+      assert(#bounds <= 2 ^ 32)
       bitmask_type = vector(uint32, width)
     end
     st.entries:insert({ "__index", bitmask_type })
@@ -3745,7 +3741,9 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     end)
   local cuda_setup = quote end
   if std.config["cuda"] and cudahelper.check_cuda_available() then
-    cudahelper.link_driver_library()
+    if data.is_luajit() then
+      cudahelper.link_driver_library()
+    end
     local all_kernels = {}
     variants:map(function(variant)
       if variant:is_cuda() then

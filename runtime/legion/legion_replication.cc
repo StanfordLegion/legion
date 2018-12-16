@@ -3407,6 +3407,7 @@ namespace Legion {
                                    ctx->owner_shard->shard_id, perform_checks);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplMapOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -3605,6 +3606,7 @@ namespace Legion {
       else
         deferred_execute();
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplMapOp::activate(void)
@@ -3714,6 +3716,7 @@ namespace Legion {
       runtime->free_repl_attach_op(this);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplAttachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -3890,6 +3893,7 @@ namespace Legion {
         }
       }
     }
+#endif
 
     /////////////////////////////////////////////////////////////
     // Repl Detach Op 
@@ -3962,6 +3966,7 @@ namespace Legion {
       runtime->free_repl_detach_op(this);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void ReplDetachOp::trigger_ready(void)
     //--------------------------------------------------------------------------
@@ -4087,6 +4092,7 @@ namespace Legion {
       request_early_complete(detach_event);
       complete_execution(Runtime::protect_event(detach_event));
     }
+#endif
 
     //--------------------------------------------------------------------------
     void ReplDetachOp::select_sources(const InstanceRef &target,

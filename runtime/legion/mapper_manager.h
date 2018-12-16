@@ -558,6 +558,7 @@ namespace Legion {
       const MapperID mapper_id;
       const Processor processor;
       const bool profile_mapper;
+      const bool request_valid_instances;
     protected:
       mutable LocalLock mapper_lock;
     protected:

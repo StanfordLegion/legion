@@ -2453,8 +2453,8 @@ local function expr_call_setup_task_args(
          function(i, arg_type)
            if std.is_future(arg_type) then
              return quote
-               params_map_value[ [math.floor((i-1)/64)] ] =
-                 params_map_value[ [math.floor((i-1)/64)] ] + [2ULL ^ math.fmod(i-1, 64)]
+               params_map_value[(uint64([i])-1)/64] =
+                 params_map_value[(uint64([i])-1)/64] + (uint64(1) << ((uint64([i])-1)%64))
              end
            end
            return quote end
@@ -6642,7 +6642,7 @@ function codegen.expr_allocate_scratch_fields(cx, node)
          local field_type = cx:region_or_list(region_type):field_type(field_path)
          return quote
            [field_ids][i] = c.legion_field_allocator_allocate_local_field(
-             fsa, terralib.sizeof(field_type), -1ULL)
+             fsa, terralib.sizeof(field_type), [uint64](-1))
            c.legion_field_id_attach_name(
              [cx.runtime], [field_space], [field_ids][i], field_name, false)
          end
@@ -9585,7 +9585,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
 
   local terra unpack_param([c_task], [params_map], [fixed_ptr], [data_ptr],
                            [future_count], [future_i])
-    if ([params_map][ [math.floor((i-1)/64)] ] and [2ULL ^ math.fmod(i-1, 64)]) == 0 then
+    if ([params_map][(uint64([i])-1)/64] and (uint64(1) << ((uint64([i])-1)%64))) == 0 then
       [deser_actions]
       return [deser_value]
     else
@@ -10205,12 +10205,6 @@ function codegen.top(cx, node)
 
   elseif node:is(ast.typed.top.Fspace) then
     return codegen.top_fspace(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteExpr) then
-    return codegen.top_quote_expr(cx, node)
-
-  elseif node:is(ast.specialized.top.QuoteStat) then
-    return codegen.top_quote_stat(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))

@@ -369,6 +369,10 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void report_uninitialized_usage(const unsigned index,
+                                              LogicalRegion handle,
+                                              const RegionUsage usage,
+                                              const char *field_string);
       // Get a reference to our data structure for tracking acquired instances
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
@@ -530,7 +534,7 @@ namespace Legion {
 #endif
     public:
       // Pack the needed parts of this operation for a remote operation
-      void pack_remote_operation(Serializer &rez) const;
+      virtual void pack_remote_operation(Serializer &rez) const;
     public:
       Runtime *const runtime;
     protected:
@@ -870,8 +874,7 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(const InstanceSet &valid_instances,
-                               InstanceSet &mapped_instances);
+      void invoke_mapper(InstanceSet &mapped_instances);
       virtual void add_copy_profiling_request(
                             Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
@@ -906,6 +909,26 @@ namespace Legion {
                    public LegionHeapify<CopyOp> {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
+    public:
+      struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
+      public:
+        DeferredCopyAcross(CopyOp *op, unsigned idx, ApEvent pre, ApUserEvent d,
+                 PredEvent g, RtUserEvent a, InstanceSet *src, InstanceSet *dst)
+          : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), copy(op),
+            index(idx), precondition(pre), done(d), guard(g), applied(a),
+            src_targets(src), dst_targets(dst) { }
+      public:
+        CopyOp *const copy;
+        const unsigned index;
+        const ApEvent precondition;
+        const ApUserEvent done;
+        const PredEvent guard;
+        const RtUserEvent applied;
+        InstanceSet *const src_targets;
+        InstanceSet *const dst_targets;
+      };
     public:
       CopyOp(Runtime *rt);
       CopyOp(const CopyOp &rhs);
@@ -957,6 +980,16 @@ namespace Legion {
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
                                 bool permit_projection = false);
       void compute_parent_indexes(void);
+      void perform_copy_across(const unsigned index, 
+                               const ApEvent local_init_precondition,
+                               const ApUserEvent local_completion,
+                               const PredEvent predication_guard,
+                               const InstanceSet &src_targets,
+                               const InstanceSet &dst_targets,
+                               const PhysicalTraceInfo &trace_info,
+                               std::set<RtEvent> &applied_conditions);
+    public:
+      static void handle_deferred_across(const void *args);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
@@ -2456,8 +2489,7 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
       void select_partition_projection(void);
-      void invoke_mapper(const InstanceSet &valid_instances,
-                               InstanceSet &mapped_instances);
+      void invoke_mapper(InstanceSet &mapped_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
     public:
@@ -2837,12 +2869,18 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void report_uninitialized_usage(const unsigned index,
+                                              LogicalRegion handle,
+                                              const RegionUsage usage,
+                                              const char *field_string);
+      virtual void pack_remote_operation(Serializer &rez) const;
     public:
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
                                                Runtime *runtime);
       static void handle_remote_sources_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_remote_sources_response(Deserializer &derez);
+      static void handle_report_uninitialized(Deserializer &derez);
     public:
       // This is a pointer to an operation on a remote node
       // it should never be dereferenced

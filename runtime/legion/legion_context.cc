@@ -2160,8 +2160,7 @@ namespace Legion {
             IndexSpaceNode *node = runtime->forest->get_node(handle);
             root = new EquivalenceSet(runtime,
               runtime->get_available_distributed_id(),
-              local_space, local_space, expr, node,
-              Reservation::NO_RESERVATION, true/*register now*/); 
+              local_space, local_space, expr, node, true/*register now*/); 
             empty_equivalence_sets[key] = root;
             root->add_base_resource_ref(CONTEXT_REF);
           }
@@ -2197,11 +2196,34 @@ namespace Legion {
           root = finder->second;
       }
       if (root == NULL)
-        root = find_or_create_top_equivalence_set(tree_id);
+      {
+        RegionNode *root_node = runtime->forest->get_tree(tree_id);
+        IndexSpaceExpression *root_expr = 
+          root_node->get_index_space_expression();
+        AutoLock tree_lock(tree_set_lock);
+        // See if we lost the race
+        std::map<RegionTreeID,EquivalenceSet*>::const_iterator finder = 
+          tree_equivalence_sets.find(tree_id);
+        if (finder == tree_equivalence_sets.end())
+        {
+          // Didn't loose the race so we have to make the top-level
+          // equivalence set for this region tree
+          const AddressSpaceID local_space = runtime->address_space;
+          root = new EquivalenceSet(runtime, 
+              runtime->get_available_distributed_id(), local_space, local_space,
+              root_expr, root_node->row_source, true/*register now*/); 
+          tree_equivalence_sets[tree_id] = root;
+          root->add_base_resource_ref(CONTEXT_REF);
+        }
+        else
+          root = finder->second;
+      }
 #ifdef DEBUG_LEGION
       assert(root != NULL);
 #endif
-      return root->ray_trace_equivalence_sets(manager, expr, handle, source);
+      RtUserEvent ready = Runtime::create_rt_user_event();
+      root->ray_trace_equivalence_sets(manager, expr, handle, source, ready);
+      return ready;
     } 
 
     //--------------------------------------------------------------------------
@@ -2224,7 +2246,7 @@ namespace Legion {
         EquivalenceSet *root = new EquivalenceSet(runtime, 
             runtime->get_available_distributed_id(),
             local_space, local_space, root_expr, root_node->row_source,
-            Reservation::NO_RESERVATION, true/*register now*/); 
+            true/*register now*/); 
         tree_equivalence_sets[tree_id] = root;
         root->add_base_resource_ref(CONTEXT_REF);
         return root;
@@ -7284,7 +7306,7 @@ namespace Legion {
             root = new EquivalenceSet(runtime,
               runtime->get_available_distributed_id(),
               local_space, local_space, expr, node,
-              Reservation::NO_RESERVATION, true/*register now*/); 
+              true/*register now*/); 
             empty_equivalence_sets[key] = root;
             root->add_base_resource_ref(CONTEXT_REF);
           }
@@ -7386,7 +7408,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(root != NULL);
 #endif
-      return root->ray_trace_equivalence_sets(manager, expr, handle, source);
+      RtUserEvent ready = Runtime::create_rt_user_event();
+      root->ray_trace_equivalence_sets(manager, expr, handle, source, ready);
+      return ready;
     }
 
     //--------------------------------------------------------------------------

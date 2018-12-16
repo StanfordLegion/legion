@@ -45,6 +45,11 @@
 
 local data = {}
 
+-- Utility for figuring out if we're in LuaJIT or PUC Lua.
+function data.is_luajit()
+  return type(rawget(_G,"jit")) == "table"
+end
+
 -- #####################################
 -- ## Hashing
 -- #################
