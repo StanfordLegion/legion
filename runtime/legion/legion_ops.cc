@@ -13774,7 +13774,7 @@ namespace Legion {
       InstanceView *ext_view = external_views[0];
       ApEvent detach_event = 
         runtime->forest->detach_external(requirement, this, 0/*idx*/,
-                                         version_info, ext_view, ext_view,
+                                         version_info, ext_view,
                                          trace_info, map_applied_conditions);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
