@@ -3390,7 +3390,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteEqTracker::perform_remote_filter(Operation *op, 
-                                         LogicalView *filter_view,
+                                         InstanceView *inst_view,
+                                         LogicalView *registration_view,
                                          const FieldMask &filter_mask,
                                          const bool remove_restriction,
                                          std::set<RtEvent> &map_applied_events)
@@ -3416,7 +3417,14 @@ namespace Legion {
                 rit->second.begin(); it != rit->second.end(); it++)
             rez.serialize((*it)->did);
           op->pack_remote_operation(rez);
-          rez.serialize(filter_view->did);
+          if (inst_view != NULL)
+            rez.serialize(inst_view->did);
+          else
+            rez.serialize<DistributedID>(0);
+          if (registration_view != NULL)
+            rez.serialize(registration_view->did);
+          else
+            rez.serialize<DistributedID>(0);
           rez.serialize(filter_mask);
           rez.serialize(remove_restriction);
           rez.serialize(applied);
@@ -4532,11 +4540,25 @@ namespace Legion {
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       DistributedID view_did;
       derez.deserialize(view_did);
-      RtEvent view_ready;
-      LogicalView *filter_view = 
-        runtime->find_or_request_logical_view(view_did, view_ready);
-      if (view_ready.exists())
-        ready_events.insert(view_ready);
+      InstanceView *inst_view = NULL;
+      if (view_did != 0)
+      {
+        RtEvent view_ready;
+        inst_view = static_cast<InstanceView*>(
+          runtime->find_or_request_logical_view(view_did, view_ready));
+        if (view_ready.exists())
+          ready_events.insert(view_ready);
+      }
+      derez.deserialize(view_did);
+      LogicalView *registration_view = NULL;
+      if (view_did != 0)
+      {
+        RtEvent view_ready;
+        registration_view = 
+          runtime->find_or_request_logical_view(view_did, view_ready);
+        if (view_ready.exists())
+          ready_events.insert(view_ready);
+      }
       FieldMask filter_mask;
       derez.deserialize(filter_mask);
       bool remove_restriction;
@@ -4555,11 +4577,12 @@ namespace Legion {
       }
       for (std::vector<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->filter_set(remote_tracker, dummy_alt_sets, op, 
-            filter_view, filter_mask, map_applied_events, remove_restriction);
+        (*it)->filter_set(remote_tracker, dummy_alt_sets, op, inst_view, 
+                          filter_mask, map_applied_events,
+                          registration_view, remove_restriction);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_filter(op, filter_view, filter_mask, 
-                                   remove_restriction, map_applied_events);
+        remote_tracker.perform_remote_filter(op, inst_view, registration_view,
+            filter_mask, remove_restriction, map_applied_events);
       // Now we can trigger our applied event
       if (!map_applied_events.empty())
         Runtime::trigger_event(applied, 
@@ -6562,9 +6585,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool EquivalenceSet::filter_set(RemoteEqTracker &remote_tracker,
                                     std::set<EquivalenceSet*> &alt_sets,
-                                    Operation *op, LogicalView *view, 
+                                    Operation *op, InstanceView *inst_view, 
                                     const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
+                                    LogicalView *registration_view/*= NULL*/,
                                     const bool remove_restriction/*= false*/,
                                     const bool original_set/*= true*/)
     //--------------------------------------------------------------------------
@@ -6601,29 +6625,44 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->filter_set(remote_tracker, alt_sets, op, view, mask,
-              applied_events, remove_restriction, false/*original set*/);
+          (*it)->filter_set(remote_tracker, alt_sets, op, inst_view, 
+              mask, applied_events, registration_view,
+              remove_restriction, false/*original set*/);
         eq.reacquire();
         return true;
       }
-      FieldMaskSet<LogicalView>::iterator finder = valid_instances.find(view);
+      FieldMaskSet<LogicalView>::iterator finder = 
+        valid_instances.find(inst_view);
       if (finder != valid_instances.end())
       {
         finder.filter(mask);
         if (!finder->second)
         {
-          if (view->remove_nested_valid_ref(did))
-            delete view;
-          valid_instances.erase(view);
+          if (inst_view->remove_nested_valid_ref(did))
+            delete inst_view;
+          valid_instances.erase(finder);
+        }
+      }
+      if ((registration_view != NULL) && (registration_view != inst_view))
+      {
+        finder = valid_instances.find(registration_view);
+        if (finder != valid_instances.end())
+        {
+          finder.filter(mask);
+          if (!finder->second)
+          {
+            if (registration_view->remove_nested_valid_ref(did))
+              delete registration_view;
+            valid_instances.erase(finder);
+          }
         }
       }
       if (remove_restriction)
       {
         restricted_fields -= mask;
 #ifdef DEBUG_LEGION
-        assert(view->is_instance_view());
+        assert(inst_view != NULL);
 #endif
-        InstanceView *inst_view = view->as_instance_view();
         FieldMaskSet<InstanceView>::iterator restricted_finder = 
           restricted_instances.find(inst_view);
         if (restricted_finder != restricted_instances.end())
@@ -6631,9 +6670,9 @@ namespace Legion {
           restricted_finder.filter(mask);
           if (!restricted_finder->second)
           {
-            if (view->remove_nested_valid_ref(did))
-              delete view;
-            restricted_instances.erase(inst_view);
+            if (inst_view->remove_nested_valid_ref(did))
+              delete inst_view;
+            restricted_instances.erase(restricted_finder);
           }
         }
       }

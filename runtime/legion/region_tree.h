@@ -476,9 +476,9 @@ namespace Legion {
       ApEvent detach_external(const RegionRequirement &req, DetachOp *detach_op,
                               unsigned index, VersionInfo &version_info, 
                               InstanceView *local_view,
-                              LogicalView *registration_view,
                               const PhysicalTraceInfo &trace_info,
-                              std::set<RtEvent> &map_applied_events); 
+                              std::set<RtEvent> &map_applied_events,
+                              LogicalView *registration_view = NULL);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,

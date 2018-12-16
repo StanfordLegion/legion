@@ -767,7 +767,8 @@ namespace Legion {
                                     std::set<RtEvent> &map_applied_events,
                                     std::set<ApEvent> &effects_events,
                                 std::set<IndexSpaceExpression*> &remote_exprs);
-      void perform_remote_filter(Operation *op, LogicalView *filter_view,
+      void perform_remote_filter(Operation *op, InstanceView *inst_view,
+                                 LogicalView *registration_view,
                                  const FieldMask &filter_mask,
                                  const bool remove_restriction,
                                  std::set<RtEvent> &map_applied_events);
@@ -1027,8 +1028,9 @@ namespace Legion {
                          const bool original_set = true);
       bool filter_set(RemoteEqTracker &remote_tracker, 
                       std::set<EquivalenceSet*> &alt_sets, Operation *op, 
-                      LogicalView *view, const FieldMask &mask,
+                      InstanceView *inst_view, const FieldMask &mask,
                       std::set<RtEvent> &applied_events,
+                      LogicalView *registration_view = NULL,
                       const bool remove_restriction = false,
                       const bool original_set = true);
     protected:

@@ -2526,9 +2526,9 @@ namespace Legion {
                                           unsigned index,
                                           VersionInfo &version_info,
                                           InstanceView *local_view,
-                                          LogicalView *registration_view,
                                           const PhysicalTraceInfo &trace_info,
-                                          std::set<RtEvent> &map_applied_events)
+                                          std::set<RtEvent> &map_applied_events,
+                                          LogicalView *registration_view)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
@@ -2553,13 +2553,14 @@ namespace Legion {
       RemoteEqTracker remote_tracker(runtime->address_space, runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->filter_set(remote_tracker, alt_sets, detach_op, 
-                              registration_view, ext_mask, map_applied_events,
+        if ((*it)->filter_set(remote_tracker, alt_sets, detach_op, local_view,
+                              ext_mask, map_applied_events, registration_view,
                               true/*remove restriction*/))
           to_delete.push_back(*it);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_filter(detach_op, registration_view, 
-                ext_mask, true/*remove restriction*/, map_applied_events);
+        remote_tracker.perform_remote_filter(detach_op, local_view, 
+            registration_view, ext_mask, true/*remove restriction*/, 
+            map_applied_events);
       if (!alt_sets.empty())
         version_info.update_equivalence_sets(alt_sets, to_delete);
       return done;
