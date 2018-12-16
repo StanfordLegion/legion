@@ -2425,10 +2425,10 @@ namespace Legion {
       {
         std::set<IndexSpaceExpression*> dummy_remote;
         const RegionUsage usage(req);
-        remote_tracker.perform_remote_overwrite(op, index, usage, fill_view, 
-            fill_mask, true_guard, precondition, ApEvent::NO_AP_EVENT, 
-            false/*restricted*/, true/*track effects*/, map_applied_events, 
-            effects_events, dummy_remote);
+        remote_tracker.perform_remote_overwrite(op, index, usage, NULL, 
+            fill_view, fill_mask, true_guard, precondition, 
+            ApEvent::NO_AP_EVENT, false/*restricted*/, true/*track effects*/, 
+            map_applied_events, effects_events, dummy_remote);
       }
       if (!alt_sets.empty())
         version_info.update_equivalence_sets(alt_sets, to_delete);
@@ -2467,7 +2467,8 @@ namespace Legion {
     ApEvent RegionTreeForest::attach_external(AttachOp *attach_op, 
                                           unsigned index,
                                           const RegionRequirement &req,
-                                          const InstanceRef &ext_instance, 
+                                          InstanceView *local_view,
+                                          LogicalView *registration_view,
                                           VersionInfo &version_info,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
@@ -2478,14 +2479,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      InstanceSet external(1);
-      external[0] = ext_instance;
-      InnerContext *context = attach_op->find_physical_context(index);
-      std::vector<InstanceView*> external_views;
-      context->convert_target_views(external, external_views);
-#ifdef DEBUG_LEGION
-      assert(external_views.size() == 1);
-#endif
+      
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
       RegionNode *region_node = get_node(req.region);
@@ -2499,7 +2493,7 @@ namespace Legion {
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->overwrite_set(remote_tracker, alt_sets, attach_op, index, 
-                      external_views[0], ext_mask, dummy_aggregator, 
+                      registration_view, ext_mask, dummy_aggregator, 
                       map_applied_events, PredEvent::NO_PRED_EVENT, restricted))
           to_delete.push_back(*it);
       const RegionUsage usage(req);
@@ -2509,7 +2503,7 @@ namespace Legion {
       {
         std::set<IndexSpaceExpression*> remote_exprs;
         remote_tracker.perform_remote_overwrite(attach_op, index, usage,
-            external_views[0], ext_mask, PredEvent::NO_PRED_EVENT,
+            local_view, registration_view, ext_mask, PredEvent::NO_PRED_EVENT,
             ApEvent::NO_AP_EVENT, term_event, restricted, true/*track effects*/,
             map_applied_events, effects_events, remote_exprs);
         IndexSpaceExpression *remote_expr = union_index_spaces(remote_exprs);
@@ -2519,7 +2513,7 @@ namespace Legion {
       assert(dummy_aggregator == NULL);
 #endif
       const UniqueID op_id = attach_op->get_unique_op_id();
-      const ApEvent ready = external_views[0]->register_user(usage, ext_mask, 
+      const ApEvent ready = local_view->register_user(usage, ext_mask, 
               expr, op_id, index, term_event, map_applied_events, trace_info);
       if (ready.exists())
         effects_events.insert(ready);
@@ -2535,7 +2529,8 @@ namespace Legion {
                                           DetachOp *detach_op,
                                           unsigned index,
                                           VersionInfo &version_info,
-                                          const InstanceRef &ext_instance,
+                                          InstanceView *local_view,
+                                          LogicalView *registration_view,
                                           const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -2543,14 +2538,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_DETACH_EXTERNAL_CALL);
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
-#endif
-      InstanceSet external(1);
-      external[0] = ext_instance;
-      InnerContext *context = detach_op->find_physical_context(index);
-      std::vector<InstanceView*> external_views;
-      context->convert_target_views(external, external_views);
-#ifdef DEBUG_LEGION
-      assert(external_views.size() == 1);
 #endif
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
@@ -2561,21 +2548,21 @@ namespace Legion {
       const UniqueID op_id = detach_op->get_unique_op_id();
       const ApEvent term_event = detach_op->get_completion_event();
       const RegionUsage usage(req);
-      ApEvent done = external_views[0]->register_user(usage, ext_mask, expr,
-                                                      op_id, index, term_event,
-                                                      map_applied_events, 
-                                                      trace_info);
+      ApEvent done = local_view->register_user(usage, ext_mask, expr,
+                                               op_id, index, term_event,
+                                               map_applied_events, 
+                                               trace_info);
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       RemoteEqTracker remote_tracker(runtime->address_space, runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->filter_set(remote_tracker, alt_sets, detach_op, 
-                              external_views[0], ext_mask, map_applied_events,
+                              registration_view, ext_mask, map_applied_events,
                               true/*remove restriction*/))
           to_delete.push_back(*it);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_filter(detach_op, external_views[0],
+        remote_tracker.perform_remote_filter(detach_op, registration_view, 
                 ext_mask, true/*remove restriction*/, map_applied_events);
       if (!alt_sets.empty())
         version_info.update_equivalence_sets(alt_sets, to_delete);
