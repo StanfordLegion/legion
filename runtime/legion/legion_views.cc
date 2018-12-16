@@ -1731,11 +1731,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view,
-                           const FieldMask src_mask,
-                           IndexSpaceExpression *expr,
-                           CopyAcrossHelper *helper)
+    void FillView::flatten(CopyFillAggregator &aggregator, Operation *op,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       aggregator.record_fill(dst_view, this, src_mask, expr, helper);
@@ -2019,11 +2017,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::flatten(CopyFillAggregator &aggregator,
-                          InstanceView *dst_view,
-                          const FieldMask src_mask,
-                          IndexSpaceExpression *expr,
-                          CopyAcrossHelper *helper)
+    void PhiView::flatten(CopyFillAggregator &aggregator, Operation *op,
+                          InstanceView *dst_view, const FieldMask &src_mask,
+                          IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
     {
       // TODO: implement this

@@ -562,10 +562,9 @@ namespace Legion {
       virtual void update_gc_events(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
-      virtual void flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view,
-                           const FieldMask src_mask,
-                           IndexSpaceExpression *expr,
+      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper) = 0;
     };
 
@@ -616,10 +615,9 @@ namespace Legion {
       virtual InnerContext* get_shard_context(void) const
         { return NULL; }
     public:
-      virtual void flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view,
-                           const FieldMask src_mask,
-                           IndexSpaceExpression *expr,
+      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper);
     public:
       static void handle_send_fill_view(Runtime *runtime, Deserializer &derez,
@@ -691,10 +689,9 @@ namespace Legion {
       virtual InnerContext* get_shard_context(void) const
         { return owner_context; }
     public:
-      virtual void flatten(CopyFillAggregator &aggregator,
-                           InstanceView *dst_view,
-                           const FieldMask src_mask,
-                           IndexSpaceExpression *expr,
+      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper);
     public:
       void record_true_view(LogicalView *view, const FieldMask &view_mask,
