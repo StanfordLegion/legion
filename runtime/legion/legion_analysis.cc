@@ -3668,7 +3668,8 @@ namespace Legion {
     void RemoteEqTracker::perform_remote_overwrite(Operation *op, 
                                   const unsigned index,
                                   const RegionUsage &usage,
-                                  LogicalView *overwrite_view,
+                                  InstanceView *local_view,
+                                  LogicalView *registration_view,
                                   const FieldMask &overwrite_mask,
                                   const PredEvent pred_guard,
                                   const ApEvent precondition,
@@ -3707,7 +3708,11 @@ namespace Legion {
           op->pack_remote_operation(rez);
           rez.serialize(index);
           rez.serialize(usage);
-          rez.serialize(overwrite_view->did);
+          if (local_view != NULL)
+            rez.serialize(local_view->did);
+          else
+            rez.serialize<DistributedID>(0);
+          rez.serialize(registration_view->did);
           rez.serialize(overwrite_mask);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
@@ -4742,7 +4747,16 @@ namespace Legion {
       DistributedID view_did;
       derez.deserialize(view_did);
       RtEvent view_ready;
-      LogicalView *overwrite_view = 
+      InstanceView *local_view = NULL;
+      if (view_did > 0)
+      {
+        local_view = static_cast<InstanceView*>(
+          runtime->find_or_request_logical_view(view_did, view_ready));
+        if (view_ready.exists())
+          ready_events.insert(view_ready);
+      }
+      derez.deserialize(view_did);
+      LogicalView *registration_view = 
         runtime->find_or_request_logical_view(view_did, view_ready);
       if (view_ready.exists())
         ready_events.insert(view_ready);
@@ -4779,7 +4793,7 @@ namespace Legion {
             eq_sets.begin(); it != eq_sets.end(); it++)
       {
         (*it)->overwrite_set(remote_tracker, dummy_alt_sets, op, index, 
-                             overwrite_view, overwrite_mask, output_aggregator,
+                             registration_view,overwrite_mask,output_aggregator,
                              map_applied_events, pred_guard, add_restriction);
         local_exprs.insert((*it)->set_expr);
       }
@@ -4788,8 +4802,8 @@ namespace Legion {
       if (remote_tracker.has_remote_sets())
       {
         std::set<IndexSpaceExpression*> remote_exprs;
-        remote_tracker.perform_remote_overwrite(op, index, usage, 
-                overwrite_view, overwrite_mask, pred_guard, precondition, 
+        remote_tracker.perform_remote_overwrite(op, index, usage, local_view, 
+                registration_view, overwrite_mask, pred_guard, precondition, 
                 term_event, add_restriction, effects.exists(), 
                 map_applied_events, effects_events, remote_exprs);
         local_expr = runtime->forest->subtract_index_spaces(local_expr,
@@ -4809,8 +4823,7 @@ namespace Legion {
       }
       if (term_event.exists())
       {
-        InstanceView *inst_view = overwrite_view->as_instance_view();
-        const ApEvent ready = inst_view->register_user(usage, 
+        const ApEvent ready = local_view->register_user(usage, 
                 overwrite_mask, local_expr, op_id, index, term_event,
                 map_applied_events, trace_info);
         if (ready.exists())

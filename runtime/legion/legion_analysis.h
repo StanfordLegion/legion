@@ -787,7 +787,8 @@ namespace Legion {
                                 std::set<IndexSpaceExpression*> &remote_exprs);
       void perform_remote_overwrite(Operation *op, const unsigned index,
                                     const RegionUsage &usage,
-                                    LogicalView *overwrite_view,
+                                    InstanceView *local_view,
+                                    LogicalView *registration_view,
                                     const FieldMask &overwrite_mask,
                                     const PredEvent pred_guard,
                                     const ApEvent precondition,

@@ -13211,9 +13211,18 @@ namespace Legion {
       MemoryManager *memory_manager = external_manager->memory_manager;
       memory_manager->attach_external_instance(external_manager);
       const PhysicalTraceInfo trace_info(this);
+      InstanceSet external(1);
+      external[0] = external_instance;
+      InnerContext *context = find_physical_context(0/*index*/);
+      std::vector<InstanceView*> external_views;
+      context->convert_target_views(external, external_views);
+#ifdef DEBUG_LEGION
+      assert(external_views.size() == 1);
+#endif
+      InstanceView *ext_view = external_views[0];
       ApEvent attach_event = runtime->forest->attach_external(this, 0/*idx*/,
                                                         requirement,
-                                                        external_instance,
+                                                        ext_view, ext_view,
                                                         version_info,
                                                         trace_info,
                                                         map_applied_conditions,
@@ -13756,9 +13765,16 @@ namespace Legion {
                                                   false/*check initialized*/);
         requirement.privilege = READ_WRITE;
       }
+      InnerContext *context = find_physical_context(0/*index*/);
+      std::vector<InstanceView*> external_views;
+      context->convert_target_views(references, external_views);
+#ifdef DEBUG_LEGION
+      assert(external_views.size() == 1);
+#endif
+      InstanceView *ext_view = external_views[0];
       ApEvent detach_event = 
-        runtime->forest->detach_external(requirement, this, 0/*idx*/, 
-                                         version_info, reference, 
+        runtime->forest->detach_external(requirement, this, 0/*idx*/,
+                                         version_info, ext_view, ext_view,
                                          trace_info, map_applied_conditions);
       if (detach_event.exists() && effects_done.exists())
         detach_event = 
