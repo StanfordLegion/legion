@@ -1827,7 +1827,6 @@ namespace Legion {
             runtime->forest->defer_physical_perform_registration(reg_pre[idx],
                                                  local_exprs[idx],
                                                  requirements[idx],
-                                                 version_infos[idx],
                                                  this, idx,
                                                  completion_event,
                                                  instances[idx],
@@ -1844,7 +1843,6 @@ namespace Legion {
             runtime->forest->physical_perform_registration(
                                                  local_exprs[idx],
                                                  requirements[idx],
-                                                 version_infos[idx],
                                                  this, idx,
                                                  completion_event,
                                                  instances[idx],

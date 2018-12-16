@@ -3809,7 +3809,6 @@ namespace Legion {
           for (std::vector<unsigned>::const_iterator it = 
                 performed_regions.begin(); it != performed_regions.end(); it++)
           {
-            VersionInfo &local_info = get_version_info(*it);
             // If we have updates for either copy launcher then defer it
             // in order to avoid blocking here, otherwise we can just do
             // it here as we know that we won't block
@@ -3818,7 +3817,7 @@ namespace Legion {
               const RtEvent registration_post = 
                 runtime->forest->defer_physical_perform_registration(
                                           reg_pre[*it], local_exprs[*it],
-                                          regions[*it], local_info,
+                                          regions[*it],
                                           this, *it, local_termination_event,
                                           physical_instances[*it], trace_info,
                                           output_aggregators[*it],
@@ -3830,8 +3829,7 @@ namespace Legion {
             else
               effects[*it] = runtime->forest->physical_perform_registration(
                                           local_exprs[*it], regions[*it], 
-                                          local_info, this, *it, 
-                                          local_termination_event,
+                                          this, *it, local_termination_event,
                                           physical_instances[*it], trace_info,
                                           output_aggregators[*it],
                                           remote_ready[*it],

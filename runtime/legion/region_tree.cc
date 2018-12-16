@@ -2069,10 +2069,8 @@ namespace Legion {
     ApEvent RegionTreeForest::physical_perform_registration(
                                    IndexSpaceExpression *local_expr,
                                    const RegionRequirement &req,
-                                   VersionInfo &version_info,
                                    Operation *op, unsigned index,
-                                   ApEvent term_event,
-                                   InstanceSet &targets,
+                                   ApEvent term_event, InstanceSet &targets,
                                    const PhysicalTraceInfo &trace_info,
                                    CopyFillAggregator *output_aggregator,
                                    const std::set<ApEvent> &remote_events,
@@ -2174,8 +2172,8 @@ namespace Legion {
           !registration_precondition.has_triggered())
         registration_precondition.wait();
       const ApEvent effects = physical_perform_registration(local_expr,
-          req, version_info, op, index, term_event, targets, trace_info, 
-          output_aggregator, remote_ready, target_views, map_applied_events);
+          req, op, index, term_event, targets, trace_info, output_aggregator,
+          remote_ready, target_views, map_applied_events);
       if (!effects_events.empty())
       {
         if (effects.exists())
@@ -2190,7 +2188,6 @@ namespace Legion {
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
                                    IndexSpaceExpression *local_expr,
                                    const RegionRequirement &req,
-                                   VersionInfo &version_info,
                                    Operation *op, unsigned index,
                                    ApEvent term_event, InstanceSet &targets,
                                    const PhysicalTraceInfo &trace_info,
@@ -2201,11 +2198,11 @@ namespace Legion {
                                    ApEvent &result)
     //--------------------------------------------------------------------------
     {
-      DeferPhysicalRegistrationArgs args(local_expr, req, version_info, op, 
+      DeferPhysicalRegistrationArgs args(local_expr, req, op,
                                          op->get_unique_op_id(), index,
                                          term_event, targets,
-                                         trace_info, output_aggregator, 
-                                         remote_ready, target_views, 
+                                         trace_info, output_aggregator,
+                                         remote_ready, target_views,
                                          map_applied_events, result);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
@@ -2218,10 +2215,9 @@ namespace Legion {
       const DeferPhysicalRegistrationArgs *dargs = 
         (const DeferPhysicalRegistrationArgs*)args;
       dargs->result = physical_perform_registration(dargs->local_expr, 
-          dargs->req, dargs->version_info, dargs->op, dargs->index, 
-          dargs->term_event, dargs->targets, dargs->trace_info, 
-          dargs->output_aggregator, dargs->remote_ready, dargs->target_views,
-          dargs->map_applied_events);
+          dargs->req, dargs->op, dargs->index, dargs->term_event, 
+          dargs->targets, dargs->trace_info, dargs->output_aggregator, 
+          dargs->remote_ready, dargs->target_views, dargs->map_applied_events);
     }
 
     //--------------------------------------------------------------------------

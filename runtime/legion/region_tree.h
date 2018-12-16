@@ -80,7 +80,7 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
         DeferPhysicalRegistrationArgs(IndexSpaceExpression *expr,
-                                 const RegionRequirement &r, VersionInfo &v,
+                                 const RegionRequirement &r,
                                  Operation *o, UniqueID uid, unsigned idx,
                                  ApEvent term, InstanceSet &t,
                                  const PhysicalTraceInfo &info,
@@ -90,7 +90,7 @@ namespace Legion {
                                  std::set<RtEvent> &map_applied,
                                  ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
-            local_expr(expr), req(r), version_info(v), op(o), index(idx), 
+            local_expr(expr), req(r), op(o), index(idx), 
             term_event(term), targets(t), trace_info(info),
             output_aggregator(output), remote_ready(remote), 
             target_views(views), map_applied_events(map_applied),
@@ -98,7 +98,6 @@ namespace Legion {
       public:
         IndexSpaceExpression *const local_expr;
         const RegionRequirement &req;
-        VersionInfo &version_info;
         Operation *const op; 
         const unsigned index;
         const ApEvent term_event;
@@ -422,7 +421,6 @@ namespace Legion {
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(IndexSpaceExpression *local_expr,
                                  const RegionRequirement &req,
-                                 VersionInfo &version_info,
                                  Operation *op, unsigned index,
                                  ApEvent term_event, InstanceSet &targets,
                                  const PhysicalTraceInfo &trace_info,
@@ -449,7 +447,6 @@ namespace Legion {
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
                                    IndexSpaceExpression *local_expr,
                                    const RegionRequirement &req,
-                                   VersionInfo &version_info,
                                    Operation *op, unsigned index,
                                    ApEvent term_event, InstanceSet &targets,
                                    const PhysicalTraceInfo &trace_info,
