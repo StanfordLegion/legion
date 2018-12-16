@@ -1731,7 +1731,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillView::flatten(CopyFillAggregator &aggregator, Operation *op,
+    void FillView::flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
@@ -2017,7 +2017,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhiView::flatten(CopyFillAggregator &aggregator, Operation *op,
+    void PhiView::flatten(CopyFillAggregator &aggregator,
                           InstanceView *dst_view, const FieldMask &src_mask,
                           IndexSpaceExpression *expr, CopyAcrossHelper *helper)
     //--------------------------------------------------------------------------
