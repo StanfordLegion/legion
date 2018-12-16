@@ -1970,7 +1970,7 @@ namespace Legion {
           else
           {
             DeferredView *def = view->as_deferred_view();
-            def->flatten(*this, op, dst_view, record_mask, expr, helper);
+            def->flatten(*this, dst_view, record_mask, expr, helper);
           }
         }
       }
@@ -2003,7 +2003,7 @@ namespace Legion {
             else
             {
               DeferredView *def = view->as_deferred_view();
-              def->flatten(*this, op, dst_view, record_mask, expr, helper);
+              def->flatten(*this, dst_view, record_mask, expr, helper);
             }
           }
           else
@@ -2122,7 +2122,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               assert(deferred != NULL);
 #endif
-              deferred->flatten(*this, op, dst_view, vit->set_mask,expr,helper);
+              deferred->flatten(*this, dst_view, vit->set_mask, expr, helper);
             }
           }
         }

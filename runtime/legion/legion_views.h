@@ -561,7 +561,7 @@ namespace Legion {
       virtual void update_gc_events(const std::set<ApEvent> &term_events)
         { assert(false); }
     public:
-      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+      virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper) = 0;
@@ -612,7 +612,7 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target); 
     public:
-      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+      virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper);
@@ -686,7 +686,7 @@ namespace Legion {
       virtual InnerContext* get_context(void) const
         { return owner_context; }
     public:
-      virtual void flatten(CopyFillAggregator &aggregator, Operation *op,
+      virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
                            IndexSpaceExpression *expr, 
                            CopyAcrossHelper *helper);
