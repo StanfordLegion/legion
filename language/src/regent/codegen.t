@@ -1384,7 +1384,7 @@ function ref:get_index(cx, node, index, result_type)
   end
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
-  return values.rawref(node, result, &result_type, data.newtuple())
+  return values.rawref(node, result, &result_type, data.newtuple(), self.centered)
 end
 
 function aref:__ref(cx, index)
@@ -1856,11 +1856,11 @@ end
 -- equivalent to a pointer rvalue which has been dereferenced. Note
 -- that value_type is still the pointer type, not the reference
 -- type.
-function values.rawref(node, value_expr, value_type, field_path)
+function values.rawref(node, value_expr, value_type, field_path, centered)
   if not terralib.types.istype(value_type) or not value_type:ispointer() then
     error("rawref requires a pointer type, got " .. tostring(value_type), 2)
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), rawref)
+  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), rawref)
 end
 
 function rawref:new(node, value_expr, value_type, field_path)
@@ -1901,33 +1901,53 @@ function rawref:reduce(cx, value, op)
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
   local value_type = std.as_read(value.value_type)
 
-  local reduce = ast.typed.expr.Binary {
-    op = op,
-    lhs = ast.typed.expr.Internal {
-      value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
-      expr_type = ref_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    rhs = ast.typed.expr.Internal {
-      value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
-      expr_type = value_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    expr_type = ref_type,
-    annotations = ast.default_annotations(),
-    span = ast.trivial_span(),
-  }
-
-  local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
-
   local actions = quote
     [value_expr.actions];
     [ref_expr.actions];
-    [reduce_expr.actions];
-    [cleanup];
-    [ref_expr.value] = [reduce_expr.value]
+  end
+
+  local fold_op = reduction_fold[op]
+
+  if cx.variant:is_openmp() and not self.centered then
+    actions = quote
+      [actions];
+      [openmphelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  elseif cx.variant:is_cuda() and not self.centered then
+    actions = quote
+      [actions];
+      [cudahelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  else
+    local reduce = ast.typed.expr.Binary {
+      op = op,
+      lhs = ast.typed.expr.Internal {
+        value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
+        expr_type = ref_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      rhs = ast.typed.expr.Internal {
+        value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
+        expr_type = value_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      expr_type = ref_type,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
+    }
+
+    local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
+
+    actions = quote
+      [actions];
+      [reduce_expr.actions];
+      [cleanup];
+      [ref_expr.value] = [reduce_expr.value]
+    end
   end
   return expr.just(actions, quote end)
 end
