@@ -43,14 +43,15 @@ namespace Legion {
       REDUCTION_VIEW_DC = 0x5,
       FILL_VIEW_DC = 0x6,
       PHI_VIEW_DC = 0x7,
-      VERSION_STATE_DC = 0x8,
-      FUTURE_DC = 0x9,
-      FUTURE_MAP_DC = 0xA,
-      INDEX_TREE_NODE_DC = 0xB,
-      FIELD_SPACE_DC = 0xC,
-      REGION_TREE_NODE_DC = 0xD,
-      EQUIVALENCE_SET_DC = 0xE,
-      DIST_TYPE_LAST_DC = 0xF,
+      SHARDED_VIEW_DC = 0x8,
+      VERSION_STATE_DC = 0x9,
+      FUTURE_DC = 0xA,
+      FUTURE_MAP_DC = 0xB,
+      INDEX_TREE_NODE_DC = 0xC,
+      FIELD_SPACE_DC = 0xD,
+      REGION_TREE_NODE_DC = 0xE,
+      EQUIVALENCE_SET_DC = 0xF,
+      DIST_TYPE_LAST_DC = 0x10,
     };
 
     enum ReferenceSource {

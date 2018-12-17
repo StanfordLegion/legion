@@ -17692,6 +17692,12 @@ namespace Legion {
       else if (LogicalView::is_fill_did(did))
         dc = find_or_request_distributed_collectable<
           FillView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else if (LogicalView::is_phi_did(did))
+        dc = find_or_request_distributed_collectable<
+          PhiView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
+      else if (LogicalView::is_sharded_did(did))
+        dc = find_or_request_distributed_collectable<
+          ShardedView, SEND_VIEW_REQUEST, VIEW_VIRTUAL_CHANNEL>(did, ready);
       else
         assert(false);
       // Have to static cast since the memory might not have been initialized

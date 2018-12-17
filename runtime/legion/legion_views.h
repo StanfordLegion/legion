@@ -46,6 +46,7 @@ namespace Legion {
       inline bool is_reduction_view(void) const;
       inline bool is_fill_view(void) const;
       inline bool is_phi_view(void) const;
+      inline bool is_sharded_view(void) const;
     public:
       inline InstanceView* as_instance_view(void) const;
       inline DeferredView* as_deferred_view(void) const;
@@ -53,6 +54,7 @@ namespace Legion {
       inline ReductionView* as_reduction_view(void) const;
       inline FillView* as_fill_view(void) const;
       inline PhiView *as_phi_view(void) const;
+      inline ShardedView* as_sharded_view(void) const;
     public:
       virtual bool has_manager(void) const = 0;
       virtual PhysicalManager* get_manager(void) const = 0;
@@ -73,10 +75,12 @@ namespace Legion {
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
       static inline DistributedID encode_phi_did(DistributedID did);
+      static inline DistributedID encode_sharded_did(DistributedID did);
       static inline bool is_materialized_did(DistributedID did);
       static inline bool is_reduction_did(DistributedID did);
       static inline bool is_fill_did(DistributedID did);
       static inline bool is_phi_did(DistributedID did);
+      static inline bool is_sharded_did(DistributedID did);
     public:
       RegionTreeForest *const context;
     protected:
@@ -813,6 +817,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ inline DistributedID LogicalView::encode_sharded_did(
+                                                              DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(DIST_TYPE_LAST_DC < (1U << 7));
+#endif
+      return LEGION_DISTRIBUTED_HELP_ENCODE(did, SHARDED_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ inline bool LogicalView::is_materialized_did(DistributedID did)
     //--------------------------------------------------------------------------
     {
@@ -841,6 +856,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == PHI_VIEW_DC);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ inline bool LogicalView::is_sharded_did(DistributedID did)
+    //--------------------------------------------------------------------------
+    {
+      return ((LEGION_DISTRIBUTED_HELP_DECODE(did) & 0xFULL) == 
+                                                SHARDED_VIEW_DC);
     }
 
     //--------------------------------------------------------------------------
@@ -883,6 +906,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return is_phi_did(did);
+    }
+
+    //--------------------------------------------------------------------------
+    inline bool LogicalView::is_sharded_view(void) const
+    //--------------------------------------------------------------------------
+    {
+      return is_sharded_did(did);
     }
 
     //--------------------------------------------------------------------------
@@ -943,6 +973,16 @@ namespace Legion {
       assert(is_phi_view());
 #endif
       return static_cast<PhiView*>(const_cast<LogicalView*>(this));
+    }
+
+    //--------------------------------------------------------------------------
+    inline ShardedView* LogicalView::as_sharded_view(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_sharded_view());
+#endif
+      return static_cast<ShardedView*>(const_cast<LogicalView*>(this));
     }
 
     //--------------------------------------------------------------------------
