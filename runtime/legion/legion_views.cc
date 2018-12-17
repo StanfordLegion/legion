@@ -2093,13 +2093,13 @@ namespace Legion {
       : DeferredView(forest, encode_sharded_did(did), owner_space, register_now)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      valid = true;
+#endif
       // If we're not the owner add a reference that will be removed
       // by the owner when no one is valid any longer
       if (!is_owner())
         add_base_gc_ref(REMOTE_DID_REF);
-#ifdef DEBUG_LEGION
-      valid = true;
-#endif
     }
 
     //--------------------------------------------------------------------------
