@@ -3417,7 +3417,7 @@ namespace Legion {
           sharded_view = new ShardedView(runtime->forest,
             view_did, runtime->address_space, true/*register now*/);
           // then broadcast the result out so the other nodes can grab it
-          view_did_broadcast->broadcast(view_did);
+          view_did_broadcast->broadcast(sharded_view->did);
         }
       }
     }
@@ -3812,7 +3812,7 @@ namespace Legion {
           sharded_view = new ShardedView(runtime->forest,
             view_did, runtime->address_space, true/*register now*/);
           // then broadcast the result out so the other nodes can grab it
-          did_broadcast->broadcast(view_did);
+          did_broadcast->broadcast(sharded_view->did);
         }
       }
       else if (ctx->owner_shard->shard_id == 0)
