@@ -10188,6 +10188,18 @@ function codegen.top(cx, node)
     cpu_variant:set_ast(node)
     std.register_variant(cpu_variant)
 
+    -- Mark the variant as OpenMP variant when at least one OpenMP loop exists
+    if std.config["openmp"] then
+      ast.traverse_node_postorder(
+        function(node)
+          if node:is(ast.typed.stat) and
+             node.annotations.openmp:is(ast.annotation.Demand)
+          then
+            cpu_variant:set_is_openmp(true)
+          end
+        end, node)
+    end
+
     if node.annotations.cuda:is(ast.annotation.Demand) then 
       if not cudahelper.check_cuda_available() then
         report.warn(node,

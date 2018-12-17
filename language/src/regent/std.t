@@ -3645,18 +3645,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
       local proc_types = {c.LOC_PROC, c.IO_PROC}
 
-      -- Check if this is an OpenMP task.
-      local openmp = false
-      ast.traverse_node_postorder(
-        function(node)
-          if node:is(ast.typed.stat) and
-            node.annotations.openmp:is(ast.annotation.Demand)
-          then
-            openmp = true
-          end
-        end,
-        variant:has_ast() and variant:get_ast())
-      if openmp then
+      if variant:is_openmp() then
         if std.config["openmp-strict"] then
           proc_types = {c.OMP_PROC}
         else
