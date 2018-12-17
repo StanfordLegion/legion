@@ -877,7 +877,7 @@ namespace Legion {
     inline bool LogicalView::is_deferred_view(void) const
     //--------------------------------------------------------------------------
     {
-      return (is_fill_did(did) || is_phi_did(did));
+      return (is_fill_did(did) || is_phi_did(did) || is_sharded_view(did));
     }
 
     //--------------------------------------------------------------------------
