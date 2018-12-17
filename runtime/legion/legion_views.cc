@@ -2090,7 +2090,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ShardedView::ShardedView(RegionTreeForest *forest, DistributedID did,
                              AddressSpaceID owner_space, bool register_now)
-      : DeferredView(forest, did, owner_space, register_now)
+      : DeferredView(forest, encode_sharded_did(did), owner_space, register_now)
     //--------------------------------------------------------------------------
     {
       // If we're not the owner add a reference that will be removed
