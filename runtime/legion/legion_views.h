@@ -552,8 +552,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator) = 0;
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
-      // Should never be called directly
-      virtual InnerContext* get_shard_context(void) const = 0;
     public:
       // Should never be called directly
       virtual void collect_users(const std::set<ApEvent> &term_events)
@@ -612,8 +610,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
-      virtual InnerContext* get_shard_context(void) const
-        { return NULL; }
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
@@ -686,8 +682,6 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target);
-      virtual InnerContext* get_shard_context(void) const
-        { return owner_context; }
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
@@ -714,6 +708,64 @@ namespace Legion {
     protected:
       LegionMap<LogicalView*,FieldMask>::aligned true_views;
       LegionMap<LogicalView*,FieldMask>::aligned false_views;
+    };
+
+    /**
+     * \class ShardedView
+     * A shared view is a representation of many instances all of which
+     * have the same data at the same version. This comes up mainly in
+     * control replication cases such as for inline mappings and attach 
+     * operations where we make many local copies of the same data for
+     * the same logical region. It's better to store one of these in
+     * an equivalence set instead of a bunch of seperate invidividual views.
+     */
+    class ShardedView : public DeferredView {
+    public:
+      class RemoteDecrementFunctor {
+      public:
+        RemoteDecrementFunctor(ShardedView *v, 
+            AddressSpaceID own, ReferenceMutator *m)
+          : view(v), owner(own), mutator(m) { }
+      public:
+        void apply(AddressSpaceID space) const;
+      public:
+        ShardedView *const view;
+        const AddressSpaceID owner;
+        ReferenceMutator *const mutator;
+      };
+    public:
+      ShardedView(RegionTreeForest *forest, DistributedID did,
+                  AddressSpaceID owner_space, bool register_now);
+      ShardedView(const ShardedView &rhs);
+      virtual ~ShardedView(void);
+    public:
+      ShardedView& operator=(const ShardedView &rhs);
+    public:
+      virtual void notify_active(ReferenceMutator *mutator);
+      virtual void notify_inactive(ReferenceMutator *mutator);
+    public:
+      virtual void notify_valid(ReferenceMutator *mutator);
+      virtual void notify_invalid(ReferenceMutator *mutator);
+    public:
+      virtual void send_view(AddressSpaceID target); 
+    public:
+      virtual void flatten(CopyFillAggregator &aggregator,
+                           InstanceView *dst_view, const FieldMask &src_mask,
+                           IndexSpaceExpression *expr,CopyAcrossHelper *helper);
+    public:
+      void initialize(LegionMap<DistributedID,FieldMask>::aligned &views,
+                      const InstanceSet &local_instances,
+                      std::set<RtEvent> &applied_events);
+      void unpack_view(Deserializer &derez);
+    public:
+      static void handle_send_sharded_view(Runtime *runtime,
+                      Deserializer &derez, AddressSpaceID source);
+    protected:
+      std::set<PhysicalManager*> local_instances;
+      LegionMap<DistributedID,FieldMask>::aligned global_views;
+#ifdef DEBUG_LEGION
+      bool valid;
+#endif
     };
 
     //--------------------------------------------------------------------------

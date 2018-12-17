@@ -650,6 +650,7 @@ namespace Legion {
       SEND_MATERIALIZED_VIEW,
       SEND_FILL_VIEW,
       SEND_PHI_VIEW,
+      SEND_SHARDED_VIEW,
       SEND_REDUCTION_VIEW,
       SEND_INSTANCE_MANAGER,
       SEND_REDUCTION_MANAGER,
@@ -808,6 +809,7 @@ namespace Legion {
         "Send Materialized View",                                     \
         "Send Fill View",                                             \
         "Send Phi View",                                              \
+        "Send Sharded View",                                          \
         "Send Reduction View",                                        \
         "Send Instance Manager",                                      \
         "Send Reduction Manager",                                     \
@@ -1294,6 +1296,8 @@ namespace Legion {
       COLLECTIVE_LOC_74 = 74,
       COLLECTIVE_LOC_75 = 75,
       COLLECTIVE_LOC_76 = 76,
+      COLLECTIVE_LOC_77 = 77,
+      COLLECTIVE_LOC_78 = 78,
     };
 
     // legion_types.h
@@ -1544,6 +1548,7 @@ namespace Legion {
     class MaterializedView;
     class FillView;
     class PhiView;
+    class ShardedView;
     class MappingRef;
     class InstanceRef;
     class InstanceSet;

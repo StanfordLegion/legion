@@ -1413,7 +1413,8 @@ namespace Legion {
                                    bool leaf, bool virt, Runtime *rt)
       : Collectable(), runtime(rt), context(ctx), map_id(mid), tag(t),
         leaf_region(leaf), virtual_mapped(virt), ready_event(ready), req(r), 
-        mapped(m), valid(false), trigger_on_unmap(false), made_accessor(false)
+        sharded_view(NULL), mapped(m), valid(false), trigger_on_unmap(false), 
+        made_accessor(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -1443,6 +1444,9 @@ namespace Legion {
       }
       if (!references.empty() && !context->owner_task->is_replaying())
         references.remove_valid_references(PHYSICAL_REGION_REF);
+      if ((sharded_view != NULL) && 
+          sharded_view->remove_base_resource_ref(PHYSICAL_REGION_REF))
+        delete sharded_view;
     }
 
     //--------------------------------------------------------------------------
@@ -1453,6 +1457,18 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalRegionImpl::set_sharded_view(ShardedView *view)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(sharded_view == NULL);
+      assert(view != NULL);
+#endif
+      sharded_view = view;
+      sharded_view->add_base_resource_ref(PHYSICAL_REGION_REF);
     }
 
     //--------------------------------------------------------------------------
@@ -6232,6 +6248,11 @@ namespace Legion {
           case SEND_PHI_VIEW:
             {
               runtime->handle_send_phi_view(derez, remote_address_space);
+              break;
+            }
+          case SEND_SHARDED_VIEW:
+            {
+              runtime->handle_send_sharded_view(derez, remote_address_space);
               break;
             }
           case SEND_REDUCTION_VIEW:
@@ -14822,7 +14843,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_MATERIALIZED_VIEW,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                        VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14830,7 +14851,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_FILL_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                         VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14838,7 +14859,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_PHI_VIEW,
-                                        VIEW_VIRTUAL_CHANNEL, true/*flush*/); 
+                        VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_sharded_view(AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_SHARDED_VIEW,
+                        VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/); 
     }
 
     //--------------------------------------------------------------------------
@@ -14846,7 +14875,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_VIEW,
-                                       VIEW_VIRTUAL_CHANNEL, true/*flush*/);
+                       VIEW_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14854,7 +14883,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_INSTANCE_MANAGER,
-                                       MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                    MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14862,7 +14891,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REDUCTION_MANAGER,
-                                       MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+                     MANAGER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16140,6 +16169,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhiView::handle_send_phi_view(this, derez, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_send_sharded_view(Deserializer &derez,
+                                           AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      ShardedView::handle_send_sharded_view(this, derez, source);
     }
 
     //--------------------------------------------------------------------------

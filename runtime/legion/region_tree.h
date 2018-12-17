@@ -499,6 +499,13 @@ namespace Legion {
                           PredEvent true_guard,
                           const PhysicalTraceInfo &trace_info,
                           std::set<RtEvent> &map_applied_events);
+      ApEvent overwrite_sharded(Operation *op, const unsigned index,
+                                const RegionRequirement &req,
+                                ShardedView *view, VersionInfo &version_info,
+                                const ApEvent precondition,
+                                const PhysicalTraceInfo &trace_info,
+                                std::set<RtEvent> &map_applied_events,
+                                const bool add_restriction);
       InstanceRef create_external_instance(AttachOp *attach_op,
                                 const RegionRequirement &req,
                                 const std::vector<FieldID> &field_set);

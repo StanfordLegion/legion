@@ -407,6 +407,9 @@ namespace Legion {
     public:
       inline bool created_accessor(void) const { return made_accessor; }
     public:
+      void set_sharded_view(ShardedView *view);
+      inline ShardedView* get_sharded_view(void) const { return sharded_view; }
+    public:
       void wait_until_valid(bool silence_warnings, 
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
@@ -464,6 +467,8 @@ namespace Legion {
       // Instance ref
       InstanceSet references;
       RegionRequirement req;
+      // Only used for control replication
+      ShardedView *sharded_view;
       bool mapped; // whether it is currently mapped
       bool valid; // whether it is currently valid
       // whether to trigger the termination event
@@ -2367,6 +2372,7 @@ namespace Legion {
       void send_materialized_view(AddressSpaceID target, Serializer &rez);
       void send_fill_view(AddressSpaceID target, Serializer &rez);
       void send_phi_view(AddressSpaceID target, Serializer &rez);
+      void send_sharded_view(AddressSpaceID target, Serializer &rez);
       void send_reduction_view(AddressSpaceID target, Serializer &rez);
       void send_instance_manager(AddressSpaceID target, Serializer &rez);
       void send_reduction_manager(AddressSpaceID target, Serializer &rez);
@@ -2589,6 +2595,7 @@ namespace Legion {
                                          AddressSpaceID source);
       void handle_send_fill_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_phi_view(Deserializer &derez, AddressSpaceID source);
+      void handle_send_sharded_view(Deserializer &derez, AddressSpaceID source);
       void handle_send_reduction_view(Deserializer &derez,
                                       AddressSpaceID source);
       void handle_send_instance_manager(Deserializer &derez,

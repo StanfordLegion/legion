@@ -2652,6 +2652,65 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::overwrite_sharded(Operation *op, 
+                                          const unsigned index,
+                                          const RegionRequirement &req,
+                                          ShardedView *view, 
+                                          VersionInfo &version_info,
+                                          const ApEvent precondition,
+                                          const PhysicalTraceInfo &trace_info,
+                                          std::set<RtEvent> &map_applied_events,
+                                          const bool add_restriction)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(req.handle_type == SINGULAR);
+#endif
+      RegionNode *region_node = get_node(req.region);
+      FieldMask overwrite_mask = 
+        region_node->column_source->get_field_mask(req.privilege_fields);
+      const std::set<EquivalenceSet*> &eq_sets = 
+        version_info.get_equivalence_sets();     
+      CopyFillAggregator *output_aggregator = NULL;
+      std::set<EquivalenceSet*> alt_sets;
+      std::vector<EquivalenceSet*> to_delete;
+      std::set<ApEvent> effects_events;
+      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      for (std::set<EquivalenceSet*>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        if ((*it)->overwrite_set(remote_tracker, alt_sets, op, index, view,
+                    overwrite_mask, output_aggregator, map_applied_events,
+                    PredEvent::NO_PRED_EVENT, add_restriction))
+          to_delete.push_back(*it);
+      if (remote_tracker.has_remote_sets())
+      {
+        std::set<IndexSpaceExpression*> dummy_remote;
+        const RegionUsage usage(req);
+        remote_tracker.perform_remote_overwrite(op, index, usage, NULL, 
+            view, overwrite_mask, PredEvent::NO_PRED_EVENT, precondition,
+            ApEvent::NO_AP_EVENT, add_restriction, true/*track effects*/, 
+            map_applied_events, effects_events, dummy_remote);
+      }
+      if (!alt_sets.empty())
+        version_info.update_equivalence_sets(alt_sets, to_delete);
+      if (output_aggregator != NULL)
+      {
+        const RtEvent done = 
+          output_aggregator->issue_updates(trace_info, precondition);
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+        const ApEvent result = output_aggregator->summarize(trace_info); 
+        if (result.exists())
+          effects_events.insert(result);
+        if (output_aggregator->release_guards(map_applied_events))
+          delete output_aggregator;
+      }
+      if (!effects_events.empty())
+        return Runtime::merge_events(&trace_info, effects_events);
+      return ApEvent::NO_AP_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
     InstanceRef RegionTreeForest::create_external_instance(
                              AttachOp *attach_op, const RegionRequirement &req,
                              const std::vector<FieldID> &field_set)

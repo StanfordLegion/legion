@@ -682,37 +682,33 @@ namespace Legion {
     }; 
 
     /**
-     * \class InlineMappingExchange
+     * \class ShardedMappingExchange
      * A class for exchanging the names of instances and mapping dependence
-     * events for inline mapping operations.
+     * events for sharded mapping operations.
      */
-    class InlineMappingExchange : public AllGatherCollective {
+    class ShardedMappingExchange : public AllGatherCollective {
     public:
-      InlineMappingExchange(CollectiveIndexLocation loc, ReplicateContext *ctx,
-                          ReplMapOp *op, ShardID shard_id, bool check_mappings);
-      InlineMappingExchange(const InlineMappingExchange &rhs);
-      virtual ~InlineMappingExchange(void);
+      ShardedMappingExchange(CollectiveIndexLocation loc, ReplicateContext *ctx,
+                             ShardID shard_id, bool check_mappings);
+      ShardedMappingExchange(const ShardedMappingExchange &rhs);
+      virtual ~ShardedMappingExchange(void);
     public:
-      InlineMappingExchange& operator=(const InlineMappingExchange &rhs);
+      ShardedMappingExchange& operator=(const ShardedMappingExchange &rhs);
     public:
       virtual void pack_collective_stage(Serializer &rez, int stage) const;
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     public:
-      void initiate_exchange(RtEvent local_mapped_precondition,
-                             const InstanceSet &mappings);
-      RtEvent complete_exchange(const InstanceSet &mappings);
+      void initiate_exchange(const InstanceSet &mappings,
+                             const std::vector<InstanceView*> &views);
+      void complete_exchange(Operation *op, ShardedView *sharded_view,
+                             const InstanceSet &mappings,
+                             std::set<RtEvent> &map_applied_events);
     public:
-      ReplMapOp *const map_op;
       const ShardID shard_id;
       const bool check_mappings;
     protected:
-      mutable RtEvent local_mapped_event, prestage_event;
-      std::map<PhysicalInstance,LegionMap<ShardID,FieldMask>::aligned> mappings;
-    protected:
-      // This vector is the number of stages+1 to capture the ready
-      // event for each of the different stages as well as the event
-      // for when the entire collective is done
-      mutable std::vector<std::set<RtEvent> > local_preconditions;
+      std::map<DistributedID,LegionMap<ShardID,FieldMask>::aligned> mappings;
+      LegionMap<DistributedID,FieldMask>::aligned global_views;
     };
 
     /**
@@ -1290,8 +1286,9 @@ namespace Legion {
       virtual void trigger_mapping(void); 
     protected:
       RtBarrier inline_barrier;
-      RtUserEvent repl_mapping_applied;
-      InlineMappingExchange *exchange; 
+      ShardedMappingExchange *exchange; 
+      ValueBroadcast<DistributedID> *view_did_broadcast;
+      ShardedView *sharded_view;
     };
 
     /**
@@ -1316,6 +1313,13 @@ namespace Legion {
       virtual void trigger_mapping(void);
     protected:
       RtBarrier resource_barrier;
+      RtUserEvent repl_mapping_applied;
+      InstanceRef external_instance;
+      ShardedMappingExchange *exchange; 
+      ValueBroadcast<DistributedID> *did_broadcast;
+      ShardedView *sharded_view;
+      RtEvent all_mapped_event;
+      bool exchange_complete;
     };
 
     /**
@@ -1343,7 +1347,6 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
     public:
       RtBarrier resource_barrier;
-      ValueExchange<DistributedID> *value_exchange;
     };
 
     /**
