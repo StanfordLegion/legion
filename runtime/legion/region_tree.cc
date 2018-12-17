@@ -2666,6 +2666,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
+      if (IS_NO_ACCESS(req) || req.privilege_fields.empty())
+        return ApEvent::NO_AP_EVENT;
       RegionNode *region_node = get_node(req.region);
       FieldMask overwrite_mask = 
         region_node->column_source->get_field_mask(req.privilege_fields);
@@ -2740,7 +2742,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();     
       RegionNode *region_node = get_node(req.region);
