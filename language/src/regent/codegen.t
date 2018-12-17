@@ -804,7 +804,7 @@ end
 local value = {}
 value.__index = value
 
-function values.value(node, value_expr, value_type, field_path)
+function values.value(node, value_expr, value_type, field_path, centered)
   if not ast.is_node(node) then
     error("value requires an AST node", 2)
   end
@@ -821,12 +821,17 @@ function values.value(node, value_expr, value_type, field_path)
     error("value requires a valid field_path", 2)
   end
 
+  if centered == nil then
+    centered = false
+  end
+
   return setmetatable(
     {
       node = node,
       expr = value_expr,
       value_type = value_type,
       field_path = field_path,
+      centered = centered,
     },
     value)
 end
@@ -862,7 +867,7 @@ function value:__get_field(cx, node, value_type, field_name)
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", "__ptr", field_name))
   else
     return self:new(
-      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
+      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name), self.centered)
   end
 end
 
@@ -963,7 +968,7 @@ ref.__index = ref
 local aref = setmetatable({}, { __index = value })
 aref.__index = aref
 
-function values.ref(node, value_expr, value_type, field_path)
+function values.ref(node, value_expr, value_type, field_path, centered)
   if not terralib.types.istype(value_type) or
     not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
@@ -974,11 +979,11 @@ function values.ref(node, value_expr, value_type, field_path)
   else
     meta = ref
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), meta)
+  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), meta)
 end
 
-function ref:new(node, value_expr, value_type, field_path)
-  return values.ref(node, value_expr, value_type, field_path)
+function ref:new(node, value_expr, value_type, field_path, centered)
+  return values.ref(node, value_expr, value_type, field_path, centered)
 end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
@@ -1333,6 +1338,14 @@ function ref:reduce(cx, value, op, expr_type)
              terralib.attrstore(&[field_value],
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
+           end
+         elseif cx.variant:is_openmp() and not self.centered then
+           return quote
+             [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+           end
+         elseif cx.variant:is_cuda() and not self.centered then
+           return quote
+             [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
            end
          else
            return quote
@@ -2379,7 +2392,7 @@ function codegen.expr_index_access(cx, node)
         index.actions,
         `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
     end
-    return values.ref(node, pointer, pointer_type)
+    return values.ref(node, pointer, pointer_type, nil, std.is_bounded_type(index_type))
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, node, index, expr_type)
@@ -7056,7 +7069,10 @@ function codegen.expr_deref(cx, node)
     return values.rawptr(node, value, value_type)
   elseif std.is_bounded_type(value_type) then
     assert(value_type:is_ptr())
-    return values.ref(node, value, value_type)
+    -- TODO: The access might not be centered when the loop body casts
+    --       an index value to a bounded type, although here we blindly
+    --       consider pointer dereferences as centered.
+    return values.ref(node, value, value_type, nil, true)
   elseif std.is_vptr(value_type) then
     return values.vref(node, value, value_type)
   else

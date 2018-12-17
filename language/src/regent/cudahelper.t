@@ -308,7 +308,7 @@ local terra cas_uint32(address : &uint32, compare : uint32, value : uint32)
 end
 cas_uint32:setinlined(true)
 
-local function generate_atomic(op, typ)
+function cudahelper.generate_atomic_update(op, typ)
   if op == "+" and typ == float then
     return terralib.intrinsic("llvm.nvvm.atomic.load.add.f32.p0f32",
                               {&float,float} -> {float})
@@ -486,7 +486,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
         barrier()
         [reduction_tree]
         if [tid] == 0 then
-          [generate_atomic(red_op, red_var.type)](
+          [cudahelper.generate_atomic_update(red_op, red_var.type)](
             &[device_ptr][bid % [GLOBAL_RED_BUFFER] ], [shared_mem_ptr][ [tid] ])
         end
       end
