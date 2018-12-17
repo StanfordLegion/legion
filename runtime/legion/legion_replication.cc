@@ -3582,7 +3582,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             get_logging_name(), unique_op_id,
 #endif
-            false/*track effects*/);
+            false/*track effects*/, false/*check initialized*/);
         // If we have a write then we make a sharded view and 
         // then shard 0 will do the overwrite
         if (is_write)
