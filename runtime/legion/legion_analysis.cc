@@ -7490,7 +7490,7 @@ namespace Legion {
         // can send the actual copy of our subsets, otherwise we'll
         // fall through and just report an empty copy of our subsets
         if ((disjoint_partition_refinement == NULL) &&
-            (unrefined_remainder == NULL))
+            (unrefined_remainder == NULL) && pending_refinements.empty())
         {
           Serializer rez;
           {

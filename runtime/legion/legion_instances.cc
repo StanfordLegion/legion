@@ -690,8 +690,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (is_owner())
         assert(instance.exists());
-      // Should not have any gc events
-      assert(gc_events.empty());
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
