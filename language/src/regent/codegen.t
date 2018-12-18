@@ -804,7 +804,7 @@ end
 local value = {}
 value.__index = value
 
-function values.value(node, value_expr, value_type, field_path)
+function values.value(node, value_expr, value_type, field_path, centered)
   if not ast.is_node(node) then
     error("value requires an AST node", 2)
   end
@@ -821,12 +821,17 @@ function values.value(node, value_expr, value_type, field_path)
     error("value requires a valid field_path", 2)
   end
 
+  if centered == nil then
+    centered = false
+  end
+
   return setmetatable(
     {
       node = node,
       expr = value_expr,
       value_type = value_type,
       field_path = field_path,
+      centered = centered,
     },
     value)
 end
@@ -862,7 +867,7 @@ function value:__get_field(cx, node, value_type, field_name)
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", "__ptr", field_name))
   else
     return self:new(
-      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
+      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name), self.centered)
   end
 end
 
@@ -963,7 +968,7 @@ ref.__index = ref
 local aref = setmetatable({}, { __index = value })
 aref.__index = aref
 
-function values.ref(node, value_expr, value_type, field_path)
+function values.ref(node, value_expr, value_type, field_path, centered)
   if not terralib.types.istype(value_type) or
     not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
@@ -974,11 +979,11 @@ function values.ref(node, value_expr, value_type, field_path)
   else
     meta = ref
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), meta)
+  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), meta)
 end
 
-function ref:new(node, value_expr, value_type, field_path)
-  return values.ref(node, value_expr, value_type, field_path)
+function ref:new(node, value_expr, value_type, field_path, centered)
+  return values.ref(node, value_expr, value_type, field_path, centered)
 end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
@@ -1334,6 +1339,14 @@ function ref:reduce(cx, value, op, expr_type)
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
+         elseif cx.variant:is_openmp() and not self.centered then
+           return quote
+             [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+           end
+         elseif cx.variant:is_cuda() and not self.centered then
+           return quote
+             [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+           end
          else
            return quote
              [field_value] = [std.quote_binary_op(
@@ -1371,7 +1384,7 @@ function ref:get_index(cx, node, index, result_type)
   end
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
-  return values.rawref(node, result, &result_type, data.newtuple())
+  return values.rawref(node, result, &result_type, data.newtuple(), self.centered)
 end
 
 function aref:__ref(cx, index)
@@ -1843,11 +1856,16 @@ end
 -- equivalent to a pointer rvalue which has been dereferenced. Note
 -- that value_type is still the pointer type, not the reference
 -- type.
-function values.rawref(node, value_expr, value_type, field_path)
+function values.rawref(node, value_expr, value_type, field_path, centered)
   if not terralib.types.istype(value_type) or not value_type:ispointer() then
     error("rawref requires a pointer type, got " .. tostring(value_type), 2)
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path), rawref)
+  -- TODO: This is safe only when the parallelizability checker rejects
+  --       CUDA demanded tasks that try to reduce to an arbitrary array in a loop
+  if centered == nil then
+    centered = true
+  end
+  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), rawref)
 end
 
 function rawref:new(node, value_expr, value_type, field_path)
@@ -1888,33 +1906,53 @@ function rawref:reduce(cx, value, op)
   local ref_type = std.get_field_path(self.value_type.type, self.field_path)
   local value_type = std.as_read(value.value_type)
 
-  local reduce = ast.typed.expr.Binary {
-    op = op,
-    lhs = ast.typed.expr.Internal {
-      value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
-      expr_type = ref_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    rhs = ast.typed.expr.Internal {
-      value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
-      expr_type = value_type,
-      annotations = ast.default_annotations(),
-      span = ast.trivial_span(),
-    },
-    expr_type = ref_type,
-    annotations = ast.default_annotations(),
-    span = ast.trivial_span(),
-  }
-
-  local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
-
   local actions = quote
     [value_expr.actions];
     [ref_expr.actions];
-    [reduce_expr.actions];
-    [cleanup];
-    [ref_expr.value] = [reduce_expr.value]
+  end
+
+  local fold_op = reduction_fold[op]
+
+  if cx.variant:is_openmp() and not self.centered then
+    actions = quote
+      [actions];
+      [openmphelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  elseif cx.variant:is_cuda() and not self.centered then
+    actions = quote
+      [actions];
+      [cudahelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
+      [cleanup];
+    end
+  else
+    local reduce = ast.typed.expr.Binary {
+      op = op,
+      lhs = ast.typed.expr.Internal {
+        value = values.value(self.node, expr.just(quote end, ref_expr.value), ref_type),
+        expr_type = ref_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      rhs = ast.typed.expr.Internal {
+        value = values.value(value.node, expr.just(quote end, value_expr.value), value_type),
+        expr_type = value_type,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
+      },
+      expr_type = ref_type,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
+    }
+
+    local reduce_expr = codegen.expr(cx, reduce):read(cx, ref_type)
+
+    actions = quote
+      [actions];
+      [reduce_expr.actions];
+      [cleanup];
+      [ref_expr.value] = [reduce_expr.value]
+    end
   end
   return expr.just(actions, quote end)
 end
@@ -2379,7 +2417,7 @@ function codegen.expr_index_access(cx, node)
         index.actions,
         `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
     end
-    return values.ref(node, pointer, pointer_type)
+    return values.ref(node, pointer, pointer_type, nil, std.is_bounded_type(index_type))
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, node, index, expr_type)
@@ -7056,7 +7094,10 @@ function codegen.expr_deref(cx, node)
     return values.rawptr(node, value, value_type)
   elseif std.is_bounded_type(value_type) then
     assert(value_type:is_ptr())
-    return values.ref(node, value, value_type)
+    -- TODO: The access might not be centered when the loop body casts
+    --       an index value to a bounded type, although here we blindly
+    --       consider pointer dereferences as centered.
+    return values.ref(node, value, value_type, nil, true)
   elseif std.is_vptr(value_type) then
     return values.vref(node, value, value_type)
   else
@@ -10187,6 +10228,18 @@ function codegen.top(cx, node)
     local cpu_variant = task:get_primary_variant()
     cpu_variant:set_ast(node)
     std.register_variant(cpu_variant)
+
+    -- Mark the variant as OpenMP variant when at least one OpenMP loop exists
+    if std.config["openmp"] then
+      ast.traverse_node_postorder(
+        function(node)
+          if node:is(ast.typed.stat) and
+             node.annotations.openmp:is(ast.annotation.Demand)
+          then
+            cpu_variant:set_is_openmp(true)
+          end
+        end, node)
+    end
 
     if node.annotations.cuda:is(ast.annotation.Demand) then 
       if not cudahelper.check_cuda_available() then

@@ -17798,9 +17798,14 @@ namespace Legion {
     Future Runtime::help_create_future(Operation *op /*= NULL*/)
     //--------------------------------------------------------------------------
     {
-      return Future(new FutureImpl(this, true/*register*/,
-                                   get_available_distributed_id(),
-                                   address_space, op));
+      if ((op == NULL) && (implicit_context != NULL))
+        return Future(new FutureImpl(this, true/*register*/,
+                                 get_available_distributed_id(),
+                                 address_space, implicit_context->owner_task));
+      else
+        return Future(new FutureImpl(this, true/*register*/,
+                                     get_available_distributed_id(),
+                                     address_space, op));
     }
 
     //--------------------------------------------------------------------------
