@@ -2350,6 +2350,59 @@ namespace Legion {
       __CUDA_HD__
       inline void operator<<=(typename REDOP::RHS val);
     };
+
+    /**
+     * \class DeferredBuffer
+     * A deferred buffer is a local instance that can be made inside of a
+     * task that will live just for lifetime of the task without needing to
+     * be associated with a logical region. The runtime will automatically 
+     * reclaim the memory associated with it after the task is done. The task 
+     * must specify the kind of memory to use and the runtime will pick a
+     * specific memory of that kind associated with current processor on
+     * which the task is executing. Users can provide an optional 
+     * initialization value for the buffer. Users must guarantee that no
+     * instances of the DeferredBuffer object live past the end of the
+     * execution of a task. The user must also guarantee that DefferedBuffer
+     * objects are not returned as the result of the task.
+     */
+    template<typename T, int DIM, typename COORD_T = coord_t, 
+#ifdef BOUNDS_CHECKS
+             bool CHECK_BOUNDS = true>
+#else
+             bool CHECK_BOUNDS = false>
+#endif
+    class DeferredBuffer {
+    public:
+      DeferredBuffer(Memory::Kind kind, 
+                     const Domain &bounds,
+                     const T *initial_value = NULL);
+      DeferredBuffer(Memory::Kind kind, 
+                     IndexSpace bounds,
+                     const T *initial_value = NULL);
+      DeferredBuffer(const Rect<DIM,COORD_T> &bounds, 
+                     Memory::Kind kind,
+                     const T *initial_value = NULL);
+      DeferredBuffer(IndexSpaceT<DIM,COORD_T> bounds, 
+                     Memory::Kind kind,
+                     const T *initial_value = NULL);
+    public:
+      __CUDA_HD__
+      inline T read(const Point<DIM,COORD_T> &p) const;
+      __CUDA_HD__
+      inline void write(const Point<DIM,COORD_T> &p, T value) const;
+      __CUDA_HD__
+      inline T* ptr(const Point<DIM,COORD_T> &p) const;
+      __CUDA_HD__
+      inline T* ptr(const Rect<DIM,COORD_T> &r) const; // must be dense
+      __CUDA_HD__
+      inline T* ptr(const Rect<DIM,COORD_T> &r, size_t strides[DIM]) const;
+    protected:
+      Realm::RegionInstance instance;
+      Realm::AffineAccessor<T,DIM,COORD_T> accessor;
+#ifdef BOUNDS_CHECKS
+      DomainT<DIM,COORD_T> bounds;
+#endif
+    };
  
     //==========================================================================
     //                      Software Coherence Classes
