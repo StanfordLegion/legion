@@ -5445,6 +5445,7 @@ namespace Legion {
           reduc_views.push_back(reduc_view);
           if (ready.exists() && !ready.has_triggered())
           {
+            deferred_reference_events.insert(ready);
             if (deferred_references == NULL)
               deferred_references = new std::map<LogicalView*,unsigned>();
             std::map<LogicalView*,unsigned>::iterator finder = 
@@ -5476,6 +5477,7 @@ namespace Legion {
           restricted_instances.insert(inst_view, mask);
           if (ready.exists() && !ready.has_triggered())
           {
+            deferred_reference_events.insert(ready);
             if (deferred_references == NULL)
               deferred_references = new std::map<LogicalView*,unsigned>();
             std::map<LogicalView*,unsigned>::iterator finder = 
