@@ -4271,6 +4271,8 @@ namespace Legion {
           // Check that the index spaces intersect
           IndexSpaceExpression *overlap = 
             runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+          if (overlap->is_empty())
+            continue;
           (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
               src_index, dst_index, dst_usage, src_mask, src_instances, 
               dst_instances, src_views, dst_views, overlap, across_aggregator,
@@ -4295,6 +4297,8 @@ namespace Legion {
           // Check that the index spaces intersect
           IndexSpaceExpression *overlap = 
             runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+          if (overlap->is_empty())
+            continue;
           (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
                                      src_index, dst_index, dst_usage, 
                                      src_mask, src_instances, dst_instances,
@@ -6218,6 +6222,8 @@ namespace Legion {
         {
           IndexSpaceExpression *subset_overlap = 
             runtime->forest->intersect_index_spaces((*it)->set_expr, overlap);
+          if (subset_overlap->is_empty())
+            continue;
           (*it)->issue_across_copies(remote_tracker, alt_sets, op, src_index, 
               dst_index, usage, src_mask, source_instances, target_instances, 
               source_views, target_views, subset_overlap, aggregator, 
