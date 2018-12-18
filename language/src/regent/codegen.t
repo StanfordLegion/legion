@@ -1860,6 +1860,11 @@ function values.rawref(node, value_expr, value_type, field_path, centered)
   if not terralib.types.istype(value_type) or not value_type:ispointer() then
     error("rawref requires a pointer type, got " .. tostring(value_type), 2)
   end
+  -- TODO: This is safe only when the parallelizability checker rejects
+  --       CUDA demanded tasks that try to reduce to an arbitrary array in a loop
+  if centered == nil then
+    centered = true
+  end
   return setmetatable(values.value(node, value_expr, value_type, field_path, centered), rawref)
 end
 
