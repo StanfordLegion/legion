@@ -12,6 +12,7 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local base = require("regent/std_base")
 local std = require("regent/std")
 
 local omp = {}
@@ -59,6 +60,87 @@ end
 
 -- TODO: This might not be the right size in platforms other than x86
 omp.CACHE_LINE_SIZE = 64
+
+local FAST_ATOMICS = {
+  ["+"] = "add",
+  ["-"] = "sub",
+}
+
+omp.generate_atomic_update = terralib.memoize(function(op, typ)
+  -- Build a C wrapper to use atomic intrinsics in LLVM
+  local atomic_update = nil
+  local op_name = nil
+  for idx = 1, #base.reduction_ops do
+    if base.reduction_ops[idx].op == op then
+      op_name = base.reduction_ops[idx].name
+      break
+    end
+  end
+  assert(op_name ~= nil)
+  -- Integer types
+  if typ:isintegral() then
+    local ctype = typ.cachedcstring or typ:cstring()
+    assert(ctype ~= nil)
+    -- If there is a native support for the operation, use it directly
+    if FAST_ATOMICS[op] ~= nil then
+      local fun_name = string.format("__atomic_update_%s_%s", op_name, ctype)
+      local C = terralib.includecstring(string.format([[
+        #include <stdint.h>
+        void %s(%s *address, %s val) {
+          __sync_fetch_and_%s(address, val);
+        }
+      ]], fun_name, ctype, ctype, FAST_ATOMICS[op]))
+      terra atomic_update(address : &typ, val : typ)
+        [ C[fun_name] ](address, val)
+      end
+    else
+      local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
+      local C = terralib.includecstring(string.format([[
+        #include <stdint.h>
+        %s %s(%s *address, %s old, %s new) {
+          return __sync_val_compare_and_swap(address, old, new);
+        }
+      ]], ctype, fun_name, ctype, ctype, ctype))
+      terra atomic_update(address : &typ, val : typ)
+        var success = false
+        while not success do
+          var old = @address
+          var new = [std.quote_binary_op(op, old, val)]
+          var res = [ C[fun_name] ](address, old, new)
+          success = res == old
+        end
+      end
+    end
+  else
+    local size = terralib.sizeof(typ) * 8
+    local cas_type = _G["uint" .. tostring(size)]
+    local ctype = typ.cachedcstring or typ:cstring()
+    local cas_ctype = cas_type.cachedcstring or cas_type:cstring()
+    local fun_name = string.format("__compare_and_swap_%s_%s", op_name, ctype)
+    local C = terralib.includecstring(string.format([[
+      #include <stdint.h>
+      %s %s(%s *address, %s old, %s new) {
+        return __sync_val_compare_and_swap(address, old, new);
+      }
+    ]], cas_ctype, fun_name, cas_ctype, cas_ctype, cas_ctype))
+    terra atomic_update(address : &typ, val : typ)
+      var success = false
+      while not success do
+        var old = @address
+        var new = [std.quote_binary_op(op, old, val)]
+
+        var address_b : &cas_type = [&cas_type](address)
+        var old_b : &cas_type = [&cas_type](&old)
+        var new_b : &cas_type = [&cas_type](&new)
+        var res : cas_type = [ C[fun_name] ](address_b, @old_b, @new_b)
+        success = res == @old_b
+      end
+    end
+  end
+  assert(atomic_update ~= nil)
+  atomic_update:setinlined(true)
+  return atomic_update
+end)
 
 function omp.generate_preamble_structured(rect, idx, start_idx, end_idx)
   return quote

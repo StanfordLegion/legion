@@ -13367,6 +13367,10 @@ namespace Legion {
               requirement.privilege_fields.end(); it++)
           LegionSpy::log_mapping_decision(unique_op_id, 0/*idx*/, 
                                           *it, ready_event);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, ApEvent::NO_AP_EVENT,
+                                        completion_event);
+#endif
       }
       return result;
     }
@@ -13781,6 +13785,15 @@ namespace Legion {
           Runtime::merge_events(&trace_info, detach_event, effects_done);
       else if (effects_done.exists())
         detach_event = effects_done;
+      if (runtime->legion_spy_enabled)
+      {
+        runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
+                                              requirement, references);
+#ifdef LEGION_SPY
+        LegionSpy::log_operation_events(unique_op_id, detach_event,
+                                        completion_event);
+#endif
+      }
       // Also tell the runtime to detach the external instance from memory
       // This has to be done before we can consider this mapped
       RtEvent detached_event = manager->detach_external_instance();

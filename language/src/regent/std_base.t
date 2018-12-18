@@ -827,6 +827,14 @@ function base.variant:is_cuda()
   return self.cuda
 end
 
+function base.variant:set_is_openmp(openmp)
+  self.openmp = openmp
+end
+
+function base.variant:is_openmp()
+  return self.openmp
+end
+
 function base.variant:set_is_external(external)
   self.external = external
 end
@@ -1018,6 +1026,7 @@ do
       untyped_ast = false,
       definition = false,
       cuda = false,
+      openmp = false,
       external = false,
       inline = false,
       cudakernels = false,

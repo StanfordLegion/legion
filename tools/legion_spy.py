@@ -2967,18 +2967,18 @@ class LogicalRegion(object):
             return result
         return field_point_dict[key]
 
-    def initialize_verification_state(self, depth, field, inst, point_set=None):
+    def initialize_verification_state(self, depth, field, inst, restricted, point_set=None):
         if point_set is None:
             # First get the point set
-            self.initialize_verification_state(depth, field, inst, self.get_point_set())
+            self.initialize_verification_state(depth, field, inst, restricted, self.get_point_set())
         elif self.parent:
             # Recurse up the tree to the root
-            self.parent.parent.initialize_verification_state(depth, field, inst, point_set)
+            self.parent.parent.initialize_verification_state(depth, field, inst, restricted, point_set)
         else:
             # Then do the actual work 
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
-                state.initialize_verification_state(inst)
+                state.initialize_verification_state(inst, restricted)
 
     def compute_current_version_numbers(self, depth, field, op, tree, point_set = None):
         if point_set is None:
@@ -3009,6 +3009,40 @@ class LogicalRegion(object):
             for point in point_set.iterator():
                 state = self.get_verification_state(depth, field, point)
                 if not state.perform_fill_verification(op, req):
+                    return False
+            return True
+
+    def add_restriction(self, depth, field, op, req, inst, perform_checks, point_set=None):
+        if point_set is None:
+            # First get the point set
+            return self.add_restriction(depth, field, op, req, inst,
+                                        perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.add_restriction(depth, field, op, req, inst,
+                                                      perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.add_restriction(op, req, inst):
+                    return False
+            return True
+
+    def remove_restriction(self, depth, field, op, req, inst, perform_checks, point_set=None):
+        if point_set is None:
+            # First get the point set
+            return self.remove_restriction(depth, field, op, req, inst, 
+                                           perform_checks, self.get_point_set())
+        elif self.parent:
+            # Recurse up the tree to the root
+            return self.parent.parent.remove_restriction(depth, field, op, req, inst,
+                                                         perform_checks, point_set)
+        else:
+            # Do the actual work
+            for point in point_set.iterator():
+                state = self.get_verification_state(depth, field, point)
+                if not state.remove_restriction(op, req, inst):
                     return False
             return True
 
@@ -4005,201 +4039,6 @@ class LogicalState(object):
             self.current_redop = 0 # no more reductions in the current list
         return True
 
-class Restriction(object):
-    __slots__ = ['node', 'field', 'inst', 'acquires']
-    def __init__(self, node, field, inst):
-        assert not inst.is_virtual()
-        self.node = node
-        self.field = field 
-        self.inst = inst
-        self.acquires = None
-
-    def find_restrictions(self, node, field, req):
-        # If the tree IDs are different then we are done
-        if self.node.tree_id != node.tree_id:
-            return False
-        # If the fields aren't the same then we are done
-        if field is not self.field:
-            return False
-        # If the two index spaces are not aliased we are done
-        if not self.node.intersects(node):
-            return False
-        # See if we have any acquires that make this alright
-        if self.acquires:
-            for acquire in self.acquires:
-                # See if the acquire has any internal restrictions
-                if acquire.find_restrictions(node, field, req):
-                    return True
-                # Otherwise check to see if the acquire dominates
-                # If it does then there is no restriction here
-                if acquire.node.dominates(node):
-                    return False
-        # If we make it here, then we are restricted
-        if not req.restricted_fields:
-            req.restricted_fields = dict()
-        assert self.field not in req.restricted_fields
-        req.restricted_fields[self.field] = self.inst
-        return True
-
-    def add_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.dominates(node):
-            if self.node.intersects(node):
-                print("ERROR: Illegal partial acquire")
-                if self.node.state.assert_on_error:
-                    assert False
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.add_acquisition(node, field):
-                    return True
-        else:
-            self.acquires = list()
-        self.acquires.append(Acquisition(node, field))
-        return True
-
-    def remove_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.matches(node, field):
-                    self.acquires.remove(acquire)
-                    return True
-                if acquire.remove_acquisition(node, field):
-                    return True
-        return False
-
-    def add_restrict(self, node, field, inst):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.add_restrict(node, field, inst):
-                    return True
-        # Interference if we get here
-        print("ERROR: Interfering restrictions performed")
-        if self.node.state.assert_on_error:
-            assert False
-        return False
-
-    def remove_restrict(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if self.acquires:
-            for acquire in self.acquires:
-                if acquire.remove_restrict(node, field):
-                    return True
-        return False
-
-    def matches(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        # If we have any outstanding acquires, we can't match
-        if self.acquires:
-            return False
-        if node is self.node and field is self.field:
-            return True
-        return False
-
-class Acquisition(object):
-    __slots__ = ['node', 'field', 'restrictions'] 
-    def __init__(self, node, field):
-        self.node = node
-        self.field = field
-        self.restrictions = None
-
-    def find_restrictions(self, node, field, req):
-        # Better be the same fields at this point
-        assert field is self.field
-        # Check to see if it is restricted below
-        # If it is then we cannot be acquired
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.find_restrictions(node, field, req):
-                    return True
-        return False
-
-    def add_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.intersects(node):
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.add_acquisition(node, field):
-                    return True
-        # Interference if we get here
-        print("ERROR: Interfering acquires performed")
-        if self.node.state.assert_on_error:
-            assert False
-        return False
-
-    def remove_acquisition(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.remove_acquisition(node, field):
-                    return True
-        return False
-
-    def add_restrict(self, node, field, inst):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        if not self.node.dominates(node):
-            if self.node.intersects(node):
-                print("ERROR: Illegal partial restriction")
-                if self.node.state.assert_on_error:
-                    assert False
-            return False
-        if self.restrictions:
-            for restrict in self.restrictions:
-                if restrict.add_restrict(node, field, inst):
-                    return True
-        else:
-            self.restrictions = list()
-        self.restrictions.append(Restriction(node, field, inst))
-
-    def remove_restrict(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-
-    def matches(self, node, field):
-        if self.node.tree_id != node.tree_id:
-            return False
-        if field is not self.field:
-            return False
-        # If we have any outstanding restrictions, we can't match 
-        if self.restrictions:
-            return False
-        if node is self.node and field is self.field:
-            return True
-        return False
-
 class DataflowTraverser(object):
     def __init__(self, state, dst_depth, dst_field, dst_req, dst_inst,
                  op, src_req, src_version, dst_version, error_str):
@@ -4609,7 +4448,8 @@ class DataflowTraverser(object):
 class EquivalenceSet(object):
     __slots__ = ['tree', 'depth', 'field', 'point', 'valid_instances', 
                  'previous_instances', 'pending_reductions', 
-                 'pending_fill', 'fill_op', 'version_number']
+                 'pending_fill', 'fill_op', 'version_number',
+                 'restricted_inst']
     def __init__(self, tree, depth, field, point):
         self.tree = tree
         self.depth = depth
@@ -4623,6 +4463,7 @@ class EquivalenceSet(object):
         self.pending_fill = False 
         self.fill_op = None
         self.version_number = 0
+        self.restricted_inst = None
         
     def is_initialized(self):
         return self.version_number > 0
@@ -4634,10 +4475,13 @@ class EquivalenceSet(object):
         self.previous_instances = set()
         self.valid_instances = set()
         self.pending_reductions = list()
+        # Doesn't change restricted inst
 
-    def initialize_verification_state(self, inst):
+    def initialize_verification_state(self, inst, restricted):
         self.valid_instances.add(inst)
         self.version_number = 1
+        if restricted:
+            self.restricted_inst = inst
 
     def perform_fill_verification(self, op, req):
         # Fills clear everything out so we are just done
@@ -4645,6 +4489,19 @@ class EquivalenceSet(object):
         self.pending_fill = True
         assert op.kind == FILL_OP_KIND
         self.fill_op = op
+        return True
+
+    def add_restriction(self, op, req, inst):
+        assert inst in self.valid_instances
+        self.reset()
+        self.valid_instances.add(inst)
+        self.restricted_inst = inst
+        return True
+
+    def remove_restriction(self, op, req, filter_inst):
+        self.restricted_inst = None
+        if filter_inst is not None and filter_inst in self.valid_instances:
+            self.valid_instances.remove(filter_inst)
         return True
 
     def perform_physical_verification(self, op, req, inst, perform_checks, 
@@ -4787,30 +4644,27 @@ class EquivalenceSet(object):
         # Record ourselves as a user for this instance
         inst.add_verification_user(self.depth, self.field, self.point, 
                                    op, req, self.version_number)
-        restricted = True if req.restricted_fields and \
-            self.field in req.restricted_fields else False
         # If we are restricted and we're not read-only we have to issue
         # copies back to the restricted instance
-        if restricted and req.priv != READ_ONLY:
-            restricted_inst = req.restricted_fields[self.field]
-            if inst is not restricted_inst:
+        if self.restricted_inst is not None:
+            if inst is not self.restricted_inst and req.priv != READ_ONLY:
                 error_str = "restricted region requirement "+\
                         str(req.index)+" of "+str(op)
                 # We need to issue a copy or a reduction back to the 
                 # restricted instance in order to have the proper semantics
                 if inst.redop != 0:
                     # Have to perform a reduction back
-                    if not self.issue_update_reductions(restricted_inst, op, req,
+                    if not self.issue_update_reductions(self.restricted_inst, op, req,
                                                         perform_checks, error_str, True):
                         return False
                 else:
                     # Perform a normal copy back
-                    if not self.issue_update_copies(restricted_inst, op, req, 
+                    if not self.issue_update_copies(self.restricted_inst, op, req, 
                                                     perform_checks, error_str, True):
                         return False
-                # Restrictions always overwrite everything when they are done
-                self.reset()
-                self.valid_instances.add(restricted_inst)
+            # Restrictions always overwrite everything when they are done
+            self.reset()
+            self.valid_instances.add(self.restricted_inst)
         return True
 
     def perform_copy_across_verification(self, op, redop, perform_checks,
@@ -4940,7 +4794,7 @@ class EquivalenceSet(object):
 class Requirement(object):
     __slots__ = ['state', 'index', 'is_reg', 'index_node', 'field_space', 'tid',
                  'logical_node', 'priv', 'coher', 'redop', 'fields', 'parent',
-                 'projection_function', 'restricted_fields']
+                 'projection_function']
     def __init__(self, state, index, is_reg, index_node, field_space, 
                  tid, logical_node, priv, coher, redop, parent):
         self.state = state
@@ -4956,8 +4810,6 @@ class Requirement(object):
         self.parent = parent
         self.fields = list()
         self.projection_function = None
-        # Computed during analysis
-        self.restricted_fields = None
 
     def print_requirement(self):
         if self.is_reg:
@@ -5474,7 +5326,9 @@ class Operation(object):
                             else:
                                 # If we have aliased region requirements
                                 # then they shouldn't interfere with each other
-                                assert self.eq_privileges[key] == req.priv 
+                                # However, some privileges can appear to interfere
+                                # for projection requirements which ultimately
+                                assert self.eq_privileges[key] >= req.priv 
         return self.eq_privileges
 
     def get_logical_reachable(self, reachable, forward):
@@ -5773,7 +5627,6 @@ class Operation(object):
         assert not not path
         # See if we are restricted in any way
         assert self.context
-        self.context.check_restricted_coherence(self, req)
         # Now do the traversal for each of the fields
         for field in req.fields:
             # See if we have any aliased fields in future region requirements
@@ -5911,33 +5764,6 @@ class Operation(object):
         for idx in range(0,len(self.reqs)):
             if not self.analyze_logical_requirement(idx, perform_checks):
                 return False
-        # Perform any updates to the restricted state for our context 
-        if not self.update_context_restrictions():
-            return False
-        return True
-
-    def update_context_restrictions(self):
-        assert self.context is not None
-        # See if our operation had any bearing on the restricted
-        # properties of the enclosing context
-        if self.kind == ACQUIRE_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.add_acquisition(self.reqs[0]):
-                return False
-        elif self.kind == RELEASE_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.remove_acquisition(self.reqs[0]):
-                return False
-        elif self.kind == ATTACH_OP_KIND:
-            assert 0 in self.reqs
-            assert 0 in self.mappings
-            if not self.context.add_restriction(self.reqs[0],
-                                                self.mappings[0]):
-                return False
-        elif self.kind == DETACH_OP_KIND:
-            assert 0 in self.reqs
-            if not self.context.remove_restriction(self.reqs[0]):
-                return False
         return True
 
     def has_mapping_dependence(self, req, prev_op, prev_req, dtype, field):
@@ -6042,15 +5868,9 @@ class Operation(object):
         return True
 
     def find_mapping(self, index):
-        assert index in self.mappings
-        # Tell our context that we are using these instances, this is 
-        # necessary for handling virtual mappings correctly
-        result = self.mappings[index]
-        assert self.context is not None
-        for fid,inst in result.iteritems():
-            if inst.is_virtual():
-                continue
-        return result
+        if self.mappings is None or index not in self.mappings:
+            return None
+        return self.mappings[index]
 
     def check_for_spurious_realm_ops(self, perform_checks):
         if not perform_checks:
@@ -6094,10 +5914,8 @@ class Operation(object):
         src_mappings = self.find_mapping(src_req.index)
         dst_mappings = self.find_mapping(dst_req.index)
         assert self.context
-        src_depth = self.context.find_enclosing_context_depth(src_req, 
-                                            src_req.restricted_fields)
-        dst_depth = self.context.find_enclosing_context_depth(dst_req,
-                                            dst_req.restricted_fields)
+        src_depth = self.context.find_enclosing_context_depth(src_req, src_mappings) 
+        dst_depth = self.context.find_enclosing_context_depth(dst_req, dst_mappings)
         assert len(src_req.fields) == len(dst_req.fields)
         for fidx in range(len(src_req.fields)):
             src_field = src_req.fields[fidx]
@@ -6156,16 +5974,46 @@ class Operation(object):
 
     def verify_fill_requirement(self, index, req, perform_checks):
         assert self.context
-        depth = self.context.find_enclosing_context_depth(req, req.restricted_fields)
+        mappings = self.find_mapping(index)
+        depth = self.context.find_enclosing_context_depth(req, mappings)
         for field in req.fields:
             if not req.logical_node.perform_fill_verification(depth, field, self, req):
                 return False
             # If this field is restricted, we effectively have to fill it
             # now to get the proper semantics of seeing updates right away
-            if req.restricted_fields and field in req.restricted_fields:
+            if mappings is not None and field in mappings:
                 if not req.logical_node.perform_physical_verification(depth, field,
-                        self, req, req.restricted_fields[field], perform_checks, False):
+                        self, req, mappings[field], perform_checks, False):
                     return False
+        return True
+
+    def add_restriction(self, index, req, perform_checks):
+        assert self.context
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        for field in req.fields:
+            inst = mappings[field.fid]
+            assert not inst.is_virtual()
+            if not req.logical_node.add_restriction(depth, field, self, req, 
+                                                    inst, perform_checks):
+                return False
+        return True
+
+    def remove_restriction(self, index, req, perform_checks):
+        assert self.context
+        assert index in self.mappings
+        mappings = self.mappings[index]
+        depth = self.context.find_enclosing_context_depth(req, mappings)
+        perform_filter = self.kind == DETACH_OP_KIND
+        for field in req.fields:
+            if perform_filter:
+                inst = mappings[field.fid]
+            else:
+                inst = None
+            if not req.logical_node.remove_restriction(depth, field, self, req, 
+                                                       inst, perform_checks):
+                return False
         return True
 
     def verify_physical_requirement(self, index, req, perform_checks):
@@ -6219,7 +6067,7 @@ class Operation(object):
                 return False
         return True
 
-    def perform_op_physical_verification(self, perform_checks, need_restrict_analysis):
+    def perform_op_physical_verification(self, perform_checks):
         # If we were predicated false, then there is nothing to do
         if not self.predicate_result:
             return True
@@ -6234,25 +6082,15 @@ class Operation(object):
             depth = self.context.get_depth()
             for idx in range(depth):
                 prefix += '  '
-            # Since we have a context, see if we have to do our restriction analysis
-            if need_restrict_analysis:
-                if self.reqs is not None:
-                    for idx in range(0,len(self.reqs)):
-                        self.context.check_restricted_coherence(self, self.reqs[idx])
-                # Do our updates to the restricted set
-                if not self.update_context_restrictions():
-                    return False
         # If we are an index space task, only do our points
         if self.kind == INDEX_TASK_KIND:
             for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
-                if not point.op.perform_op_physical_verification(perform_checks,
-                                                                 need_restrict_analysis):
+                if not point.op.perform_op_physical_verification(perform_checks):
                     return False
             return True
         elif self.points: # Handle other index space operations too
             for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks,
-                                                              need_restrict_analysis):
+                if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
         if perform_checks:
@@ -6266,8 +6104,7 @@ class Operation(object):
             # Check to see if this is an index copy
             if self.points:
                 for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks, 
-                                                                  need_restrict_analysis):
+                    if not point.perform_op_physical_verification(perform_checks): 
                         return False
                 return True
             # Compute our version numbers first
@@ -6283,8 +6120,7 @@ class Operation(object):
             # Check to see if this is an index fill
             if self.points:
                 for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                    if not point.perform_op_physical_verification(perform_checks,
-                                                                  need_restrict_analysis):
+                    if not point.perform_op_physical_verification(perform_checks):
                         return False
                 return True
             # Compute our version numbers first
@@ -6295,8 +6131,7 @@ class Operation(object):
         elif self.kind == DEP_PART_OP_KIND and self.points:
             # Index partition operation
             for point in sorted(self.points.itervalues(), key=lambda x: x.uid):
-                if not point.perform_op_physical_verification(perform_checks,
-                                                              need_restrict_analysis):
+                if not point.perform_op_physical_verification(perform_checks):
                     return False
             return True
         elif self.kind == DELETION_OP_KIND:
@@ -6339,7 +6174,17 @@ class Operation(object):
                 for index,req in self.reqs.iteritems():
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False
-            if self.kind == SINGLE_TASK_KIND:
+            # Add any restrictions for different kinds of ops
+            if self.kind == RELEASE_OP_KIND or self.kind == ATTACH_OP_KIND:
+                for index,req in self.reqs.iteritems():
+                    if not self.add_restriction(index, req, perform_checks):
+                        return False
+            elif self.kind == ACQUIRE_OP_KIND or self.kind == DETACH_OP_KIND:
+                for index,req in self.reqs.iteritems():
+                    if not self.remove_restriction(index, req, perform_checks):
+                        return False
+                return True
+            elif self.kind == SINGLE_TASK_KIND:
                 # We now need to do the registration for our region
                 # requirements since we didn't do it as part of the 
                 # normal physical analysis
@@ -6350,8 +6195,7 @@ class Operation(object):
                             return False
                 # If we are not a leaf task, go down the task tree
                 if self.task is not None:
-                    if not self.task.perform_task_physical_verification(perform_checks,
-                                                                need_restrict_analysis):
+                    if not self.task.perform_task_physical_verification(perform_checks):
                         return False
         return self.check_for_spurious_realm_ops(perform_checks)
 
@@ -6557,10 +6401,6 @@ class Operation(object):
             return False
         if self.kind is DELETION_OP_KIND:
             return False
-        if self.kind is ATTACH_OP_KIND:
-            return False
-        if self.kind is DETACH_OP_KIND:
-            return False
         return True
 
     def print_incoming_event_edges(self, printer):
@@ -6663,10 +6503,9 @@ class ProjectionFunction(object):
 
 class Task(object):
     __slots__ = ['state', 'op', 'point', 'operations', 'depth', 
-                 'current_fence', 'restrictions', 'dumb_acquisitions', 
-                 'used_instances', 'virtual_indexes', 'processor', 'priority', 
-                 'premappings', 'postmappings', 'tunables', 'operation_indexes', 
-                 'close_indexes', 'variant', 'replicants', 'shard']
+                 'current_fence', 'used_instances', 'virtual_indexes', 'processor', 
+                 'priority', 'premappings', 'postmappings', 'tunables', 
+                 'operation_indexes', 'close_indexes', 'variant', 'replicants', 'shard']
                   # If you add a field here, you must update the merge method
     def __init__(self, state, op):
         self.state = state
@@ -6676,8 +6515,6 @@ class Task(object):
         self.operations = list()
         self.depth = None
         self.current_fence = None
-        self.restrictions = None
-        self.dumb_acquisitions = None
         self.used_instances = None
         self.virtual_indexes = None
         self.processor = None
@@ -6847,21 +6684,6 @@ class Task(object):
         print('Performing logical dependence analysis for %s...' % str(self))
         if self.op.state.verbose:
             print('  Analyzing %d operations...' % len(self.operations))
-        # See if we have any restrictions that we need to care about
-        if self.op.reqs:
-            for idx,req in self.op.reqs.iteritems():
-                if (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
-                    req.coher == SIMULTANEOUS: 
-                    assert idx in self.op.mappings
-                    mapping = self.op.mappings[idx]
-                    # Add a restriction for all the fields 
-                    if not self.restrictions:
-                        self.restrictions = list()
-                    for field in req.fields:
-                        assert field.fid in mapping 
-                        inst = mapping[field.fid]
-                        self.restrictions.append(
-                            Restriction(req.logical_node, field, inst))
         # Iterate over all the operations in order and
         # have them perform their analysis
         success = True
@@ -6871,124 +6693,9 @@ class Task(object):
                 break
         # Reset the logical state when we are done
         self.op.state.reset_logical_state()
-        # We can clear this out now since we don't need them anymore
-        self.restrictions = None 
-        self.dumb_acquisitions = None
         print("Pass" if success else "FAIL")
         return success
 
-    def check_restricted_coherence(self, op, req):
-        # If we have no restrictions, nothing to worry about
-        if not self.restrictions: 
-            return
-        # Requirements that are read-only can never be restricted
-        if req.priv == READ_ONLY:
-            return
-        # Otherwise iterate through the restrictions and
-        # find any restrictions we have
-        for restrict in self.restrictions:
-            for field in req.fields:
-                if restrict.find_restrictions(req.logical_node, field, req):
-                    # If we found restrictions then we know we are done
-                    break
-                if restrict.find_restrictions(req.logical_node, field, req):
-                    assert field in req.restricted_fields
-                    # Can break out of the inner loop here
-                    # and go on to the next field
-                    break
-
-    def add_acquisition(self, req):
-        if not self.restrictions:
-            print("WARNING: Unnecessary acquire in "+str(self)+
-                  " with no restrictions")
-            if not self.dumb_acquisitions:
-                self.dumb_acquisitions = list()
-            for field in req.fields:
-                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
-        for field in req.fields:
-            # Try to add it to any of the existing restrictions
-            success = False
-            for restrict in self.restrictions:
-                if restrict.add_acquisition(req.logical_node, field):
-                    success = True
-                    break
-            if not success:
-                print("WARNING: Unnecessary acquire in "+str(self))
-                if not self.dumb_acquisitions:
-                    self.dumb_acquisitions = list()
-                self.dumb_acquisitions.append(Acquisition(req.logical_node, field))
-        return True
-
-    def remove_acquisition(self, req):
-        for field in req.fields:
-            success = False
-            if self.restrictions:
-                for restrict in self.restrictions:
-                    if restrict.remove_acquisition(req.logical_node, field):
-                        success = True
-                        break
-            if not success and self.dumb_acquisitions:
-                for acquire in self.dumb_acquisitions:
-                    if acquire.matches(req.logical_node, field):
-                        success = True
-                        self.dumb_acquisitions.remove(acquire)
-                        break
-                    if acquire.remove_acquisition(req.logical_node, field):
-                        success = True
-                        break
-            if not success:
-                print("ERROR: Invalid release operation")
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
-        return True
-
-    def add_restriction(self, req, mapping):
-        for field in req.fields:
-            assert field.fid in mapping
-            inst = mapping[field.fid]
-            assert not inst.is_virtual()
-            if self.restrictions:
-                # Try to add it to any existing trees
-                success = False
-                if self.restrictions:
-                    for restrict in self.restrictions:
-                        if restrict.add_restrict(req.logical_node, field, inst):
-                            success = True
-                            break
-                if success:
-                    continue
-            else:
-                self.restrictions = list()
-            # If we make it here, add a new restriction
-            self.restrictions.append(
-                Restriction(req.logical_node, field, inst))
-        return True
-
-    def remove_restriction(self, req):
-        for field in req.fields:
-            success = False
-            if self.restrictions:
-                for restrict in self.restrictions:
-                    if restrict.matches(req.logical_node, field):
-                        success = True 
-                        self.restrictions.remove(restrict)
-                        break
-                    if restrict.remove_restrict(req.logical_node, field):
-                        success = True
-                        break
-            if not success and self.dumb_acquisitions:
-                for acquire in self.dumb_acquisitions:
-                    if acquire.remove_restrict(req.logical_node, field):
-                        success = True
-                        break
-            if not success:
-                print("ERROR: Illegal detach with no matching restriction")
-                if self.op.state.assert_on_error:
-                    assert False
-                return False
-        return True
-    
     def perform_logical_sanity_analysis(self):
         # Run the old version of the checks that
         # is more of a sanity check on our algorithm that
@@ -7065,7 +6772,7 @@ class Task(object):
         # up the task tree so just give it depth zero
         return 0
 
-    def perform_task_physical_verification(self, perform_checks, need_restrict_analysis):
+    def perform_task_physical_verification(self, perform_checks):
         if not self.operations:
             if not self.replicants:
                 return True
@@ -7084,21 +6791,17 @@ class Task(object):
                 assert idx in task.op.mappings
                 mappings = task.op.mappings[idx]
                 # If we are doing restricted analysis then add any restrictions
-                add_restrictions = need_restrict_analysis and \
+                add_restrictions = \
                         (req.priv == READ_WRITE or req.priv == READ_ONLY) and \
                         req.coher == SIMULTANEOUS
-                if add_restrictions and not self.restrictions:
-                    self.restrictions = list()
                 for field in req.fields:
                     assert field.fid in mappings
                     inst = mappings[field.fid]
                     if inst.is_virtual():
                         assert not add_restrictions # Better not be virtual if restricted
                         continue
-                    req.logical_node.initialize_verification_state(depth, field, inst)
-                    if add_restrictions:
-                        self.restrictions.append(
-                                Restriction(req.logical_node, field, inst))
+                    req.logical_node.initialize_verification_state(depth, field, inst,
+                                                                   add_restrictions)
             if self.replicants:
                 # Control replicated path
                 for shard in self.replicants.shards.itervalues():
@@ -7121,7 +6824,7 @@ class Task(object):
             for idx in range(num_ops):
                 for shard in self.replicants.shards.itervalues():
                     op = shard.operations[idx]
-                    if not op.perform_op_physical_verification(perform_checks, need_restrict_analysis):
+                    if not op.perform_op_physical_verification(perform_checks):
                         success = False
                         break
                 if not success:
@@ -7129,7 +6832,7 @@ class Task(object):
         else:
             # Normal path
             for op in self.operations:
-                if not op.perform_op_physical_verification(perform_checks, need_restrict_analysis):
+                if not op.perform_op_physical_verification(perform_checks):
                     success = False
                     break
         # Reset any physical user lists at our depth
@@ -10702,7 +10405,7 @@ class State(object):
                     return False 
         return True
 
-    def perform_physical_analysis(self, perform_checks, sanity_checks, need_restrict_analysis):
+    def perform_physical_analysis(self, perform_checks, sanity_checks):
         assert self.top_level_uid is not None
         top_task = self.get_task(self.top_level_uid)
         if perform_checks:
@@ -10712,7 +10415,7 @@ class State(object):
             print(("Performing physical emulation analysis "+
                    "for %s (UID %d)...") % (str(top_task),top_task.op.uid))
         # Perform the physical analysis on all the operations in program order
-        if not top_task.perform_task_physical_verification(perform_checks, need_restrict_analysis):
+        if not top_task.perform_task_physical_verification(perform_checks):
             print("FAIL")
             return
         print("Pass")
@@ -11413,7 +11116,6 @@ def main(temp_dir):
     # If we are doing logical checks or the user asked for the dataflow
     # graph but we don't have any logical data then perform the logical analysis
     need_logical = dataflow_graphs and not state.detailed_logging 
-    need_restrict_analysis = True 
     if logical_checks or need_logical:
         if need_logical:
             print("INFO: No logical dependence data was found so we are running "+
@@ -11421,8 +11123,6 @@ def main(temp_dir):
                   "should compute. These are not the actual dataflow graphs computed.")
         print("Performing logical analysis...")
         state.perform_logical_analysis(logical_checks, sanity_checks)
-        # No longer need to do restriction analysis if we do it during logical
-        need_restrict_analysis = False
     # If we are doing physical checks or the user asked for the event
     # graph but we don't have any logical data then perform the physical analysis
     need_physical = event_graphs and not state.detailed_logging 
@@ -11439,8 +11139,7 @@ def main(temp_dir):
         else:
             # Doing verification so we still need the equivalence class graphs
             state.compute_equivalence_graphs()
-        state.perform_physical_analysis(physical_checks, sanity_checks, 
-                                        need_restrict_analysis)
+        state.perform_physical_analysis(physical_checks, sanity_checks) 
         # If we generated the graph for printing, then simplify it 
         if need_physical and simplify_graphs:
             state.simplify_physical_graph(need_cycle_check=False)

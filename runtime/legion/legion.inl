@@ -5801,6 +5801,697 @@ namespace Legion {
       REDOP::fold<EXCLUSIVE>(this->accessor[Point<1,coord_t>(0)], value);
     }
 
+#ifdef BOUNDS_CHECKS
+    // DeferredBuffer without bounds checks
+    template<typename FT, int N, typename T> 
+    class DeferredBuffer<FT,N,T,false> {
+    public:
+      inline DeferredBuffer(Memory::Kind kind, 
+                            const Domain &bounds,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(Memory::Kind kind, 
+                            IndexSpace bounds,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(const Rect<N,T> &bounds, 
+                            Memory::Kind kind,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
+                            Memory::Kind kind,
+                            const FT *initial_value = NULL);
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T> &p) const;
+      __CUDA_HD__
+      inline void write(const Point<N,T> &p, FT value) const;
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T> &p) const;
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T> &r) const; // must be dense
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
+    protected:
+      Realm::RegionInstance instance;
+      Realm::AffineAccessor<FT,N,T> accessor;
+    };
+#else
+    // DeferredBuffer with bounds checks
+    template<typename FT, int N, typename T> 
+    class DeferredBuffer<FT,N,T,true> {
+    public:
+      inline DeferredBuffer(Memory::Kind kind, 
+                            const Domain &bounds,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(Memory::Kind kind, 
+                            IndexSpace bounds,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(const Rect<N,T> &bounds, 
+                            Memory::Kind kind,
+                            const FT *initial_value = NULL);
+      inline DeferredBuffer(IndexSpaceT<N,T> bounds, 
+                            Memory::Kind kind,
+                            const FT *initial_value = NULL);
+    public:
+      __CUDA_HD__
+      inline FT read(const Point<N,T> &p) const;
+      __CUDA_HD__
+      inline void write(const Point<N,T> &p, FT value) const;
+      __CUDA_HD__
+      inline FT* ptr(const Point<N,T> &p) const;
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T> &r) const; // must be dense
+      __CUDA_HD__
+      inline FT* ptr(const Rect<N,T> &r, size_t strides[N]) const;
+    protected:
+      Realm::RegionInstance instance;
+      Realm::AffineAccessor<FT,N,T> accessor;
+      DomainT<N,T> bounds;
+    };
+#endif
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      const DomainT<N,T> bounds = space;
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      Runtime *runtime = Runtime::get_runtime();
+      const DomainT<N,T> bounds = 
+        runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    } 
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+                             const FT *initial_value /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      const DomainT<N,T> bounds(rect);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      Runtime *runtime = Runtime::get_runtime();
+      const DomainT<N,T> bounds = runtime->get_index_space_domain<N,T>(space);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              > __CUDA_HD__
+    inline FT DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif
+              >::read(const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+      return accessor.read(p);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline void DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif
+              >::write(const Point<N,T> &p,
+                                                    FT value) const
+    //--------------------------------------------------------------------------
+    {
+      accessor.write(p, value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif
+              >::ptr(const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+      return accessor.ptr(p);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif   
+              >::ptr(const Rect<N,T> &r) const
+    //--------------------------------------------------------------------------
+    {
+      if (!accessor.is_dense_arbitrary(r))
+      {
+#ifdef __CUDA_ARCH__
+        printf(
+            "ERROR: Illegal request for pointer of non-dense rectangle\n");
+        assert(false);
+#else
+        fprintf(stderr, 
+            "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+      }
+      return accessor.ptr(r);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB 
+#endif
+            > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              false 
+#else
+              CB
+#endif          
+            >::ptr(const Rect<N,T> &r, size_t strides[N]) const
+    //--------------------------------------------------------------------------
+    {
+      for (int i = 0; i < N; i++)
+        strides[i] = accessor.strides[i] / sizeof(FT);
+      return accessor.ptr(r.lo);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB 
+#else
+            true
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const Domain &space,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      bounds = space;
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                  memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(Memory::Kind kind, const IndexSpace space,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      Runtime *runtime = Runtime::get_runtime();
+      bounds = runtime->get_index_space_domain<N,T>(IndexSpaceT<N,T>(space));
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    } 
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB
+#else
+            true
+#endif
+           >::DeferredBuffer(const Rect<N,T> &rect, Memory::Kind kind,
+                             const FT *initial_value /*= NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      bounds = DomainT<N,T>(rect);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB 
+#else
+            true
+#endif
+           >::DeferredBuffer(const IndexSpaceT<N,T> space, Memory::Kind kind,
+                             const FT *initial_value/* = NULL*/)
+    //--------------------------------------------------------------------------
+    {
+      // Construct an instance of the right size in the corresponding memory
+      Machine machine = Realm::Machine::get_machine();
+      Machine::MemoryQuery finder(machine);
+      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        assert(false);
+      }
+      const Realm::Memory memory = finder.first();
+      Runtime *runtime = Runtime::get_runtime();
+      bounds = runtime->get_index_space_domain<N,T>(space);
+      const std::vector<size_t> field_sizes(1,sizeof(FT));
+      Realm::ProfilingRequestSet no_requests; 
+      Internal::LgEvent wait_on(Realm::RegionInstance::create_instance(instance,
+                memory, bounds, field_sizes, 0/*blocing factor*/, no_requests));
+      if (initial_value != NULL)
+      {
+        std::vector<Realm::CopySrcDstField> dsts(1);
+        dsts[0].set_field(instance, 0/*field id*/, sizeof(FT));
+        wait_on = Internal::LgEvent(bounds.fill(dsts, no_requests, 
+                            initial_value, sizeof(FT), wait_on));
+      }
+      // Delete the instance when the currently executing task is done
+      instance.destroy(Processor::get_current_finish_event());
+      if (wait_on.exists())
+        wait_on.wait();
+      // We can make the accessor
+      accessor = Realm::AffineAccessor<FT,N,T>(instance, 0/*field id*/);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              > __CUDA_HD__
+    inline FT DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB
+#else
+              true 
+#endif
+              >::read(const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(p));
+#else
+      assert(bounds.contains(p));
+#endif
+      return accessor.read(p);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline void DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB 
+#else
+              true
+#endif
+              >::write(const Point<N,T> &p,
+                                                    FT value) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(p));
+#else
+      assert(bounds.contains(p));
+#endif
+      accessor.write(p, value);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB 
+#else
+              true
+#endif
+              >::ptr(const Point<N,T> &p) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(p));
+#else
+      assert(bounds.contains(p));
+#endif
+      return accessor.ptr(p);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB 
+#endif
+              > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB 
+#else
+              true
+#endif   
+              >::ptr(const Rect<N,T> &r) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(r));
+#else
+      assert(bounds.contains_all(r));
+#endif
+      if (!accessor.is_dense_arbitrary(r))
+      {
+#ifdef __CUDA_ARCH__
+        printf(
+            "ERROR: Illegal request for pointer of non-dense rectangle\n");
+        assert(false);
+#else
+        fprintf(stderr, 
+            "ERROR: Illegal request for pointer of non-dense rectangle\n");
+#ifdef DEBUG_LEGION
+        assert(false);
+#endif
+        exit(ERROR_NON_DENSE_RECTANGLE);
+#endif
+      }
+      return accessor.ptr(r);
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB 
+#endif
+            > __CUDA_HD__
+    inline FT* DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+              CB 
+#else
+              true
+#endif          
+            >::ptr(const Rect<N,T> &r, size_t strides[N]) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef __CUDA_ARCH__
+      assert(bounds.bounds.contains(r));
+#else
+      assert(bounds.contains_all(r));
+#endif
+      for (int i = 0; i < N; i++)
+        strides[i] = accessor.strides[i] / sizeof(FT);
+      return accessor.ptr(r.lo);
+    }
+
     //--------------------------------------------------------------------------
     inline IndexSpace& IndexSpace::operator=(const IndexSpace &rhs)
     //--------------------------------------------------------------------------
