@@ -7954,10 +7954,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartNode::RemoteDisjointnessFunctor::RemoteDisjointnessFunctor(
+                        Serializer &r, Runtime *rt, ShardMapping *shard_mapping)
+      : rez(r), runtime(rt)
+    //--------------------------------------------------------------------------
+    {
+      if (shard_mapping != NULL)
+      {
+        for (unsigned idx = 0; idx < shard_mapping->size(); idx++)
+          skip_shard_spaces.insert((*shard_mapping)[idx]);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::RemoteDisjointnessFunctor::apply(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      if (target != runtime->address_space)
+      if ((target != runtime->address_space) && 
+          (skip_shard_spaces.empty() ||
+           (skip_shard_spaces.find(target) == skip_shard_spaces.end())))
         runtime->send_index_partition_disjoint_update(target, rez);
     }
 
@@ -7984,7 +7999,7 @@ namespace Legion {
                 break;
               }
             }
-            if (disjoint)
+            if (!disjoint)
               break;
           }
         }
@@ -8022,7 +8037,9 @@ namespace Legion {
           // We have to send notifications before any other remote
           // requests can record themselves so we need to do it 
           // while we are holding the lock
-          if (has_remote_instances())
+          if (has_remote_instances() && 
+              ((shard_mapping == NULL) || 
+               (count_remote_instances() > shard_mapping->size())))
           {
             Serializer rez;
             {
@@ -8030,7 +8047,8 @@ namespace Legion {
               rez.serialize(handle);
               rez.serialize<bool>(disjoint);
             }
-            RemoteDisjointnessFunctor functor(rez, context->runtime);
+            RemoteDisjointnessFunctor functor(rez, 
+                  context->runtime, shard_mapping);
             map_over_remote_instances(functor);
           }
         }

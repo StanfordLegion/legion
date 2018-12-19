@@ -372,6 +372,7 @@ namespace Legion {
                                    bool need_lock = true);
     public:
       inline bool has_remote_instances(void) const;
+      inline size_t count_remote_instances(void) const;
       template<typename FUNCTOR>
       inline void map_over_remote_instances(FUNCTOR &functor);
     public:
@@ -530,6 +531,14 @@ namespace Legion {
     {
       AutoLock gc(gc_lock,1,false/*exclusive*/);
       return !remote_instances.empty();
+    }
+
+    //--------------------------------------------------------------------------
+    inline size_t DistributedCollectable::count_remote_instances(void) const
+    //--------------------------------------------------------------------------
+    {
+      AutoLock gc(gc_lock,1,false/*exclusive*/);
+      return remote_instances.size();
     }
 
     //--------------------------------------------------------------------------

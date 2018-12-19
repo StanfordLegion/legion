@@ -2258,13 +2258,13 @@ namespace Legion {
       };
       class RemoteDisjointnessFunctor {
       public:
-        RemoteDisjointnessFunctor(Serializer &r, Runtime *rt)
-          : rez(r), runtime(rt) { }
+        RemoteDisjointnessFunctor(Serializer &r, Runtime *rt, ShardMapping *m);
       public:
         void apply(AddressSpaceID target);
       public:
         Serializer &rez;
         Runtime *const runtime;
+        std::set<AddressSpaceID> skip_shard_spaces;
       };
       class DestructionFunctor {
       public:
