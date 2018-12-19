@@ -5794,6 +5794,11 @@ namespace Legion {
               runtime->handle_index_partition_child_response(derez);
               break;
             }
+          case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
+            {
+              runtime->handle_index_partition_disjoint_update(derez);
+              break;
+            }
           case SEND_FIELD_SPACE_NODE:
             {
               runtime->handle_field_space_node(derez, remote_address_space);
@@ -13464,6 +13469,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                                SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
+                                INDEX_SPACE_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14655,6 +14671,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_child_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_disjoint_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_disjoint_update(forest, derez);
     }
 
     //--------------------------------------------------------------------------

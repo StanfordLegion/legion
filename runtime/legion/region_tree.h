@@ -1504,6 +1504,16 @@ namespace Legion {
         const RtUserEvent to_trigger;
         const AddressSpaceID source;
       };
+      class RemoteDisjointnessFunctor {
+      public:
+        RemoteDisjointnessFunctor(Serializer &r, Runtime *rt)
+          : rez(r), runtime(rt) { }
+      public:
+        void apply(AddressSpaceID target);
+      public:
+        Serializer &rez;
+        Runtime *const runtime;
+      };
       class DestructionFunctor {
       public:
         DestructionFunctor(IndexPartNode *n, ReferenceMutator *m)
@@ -1568,6 +1578,8 @@ namespace Legion {
       void record_disjointness(bool disjoint,
                                const LegionColor c1, const LegionColor c2);
       bool is_complete(bool from_app = false);
+      void record_remote_disjoint_ready(RtUserEvent ready);
+      void record_remote_disjoint_result(const bool disjoint_result);
     public:
       void add_instance(PartitionNode *inst);
       bool has_instance(RegionTreeID tid);
@@ -1615,6 +1627,8 @@ namespace Legion {
           RegionTreeForest *forest, Deserializer &derez, AddressSpaceID source);
       static void defer_node_child_request(const void *args);
       static void handle_node_child_response(Deserializer &derez);
+      static void handle_node_disjoint_update(RegionTreeForest *forest,
+                                              Deserializer &derez);
       static void handle_notification(RegionTreeForest *context, 
                                       Deserializer &derez);
     public:
@@ -1641,7 +1655,9 @@ namespace Legion {
     protected:
       // Support for pending child spaces that still need to be computed
       std::map<LegionColor,ApUserEvent> pending_children;
-    }; 
+      // Support for remote disjoint events being stored
+      RtUserEvent remote_disjoint_ready;
+    };
 
     /**
      * \class IndexPartNodeT
