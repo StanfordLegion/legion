@@ -264,6 +264,7 @@ namespace Legion {
           LEGION_DISTRIBUTED_HELP_ENCODE(did, FUTURE_DC), 
           own_space, register_now),
         producer_op(o), op_gen((o == NULL) ? 0 : o->get_generation()),
+        producer_depth((o == NULL) ? -1 : o->get_context()->get_depth()),
 #ifdef LEGION_SPY
         producer_uid((o == NULL) ? 0 : o->get_unique_op_id()),
 #endif
@@ -281,7 +282,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureImpl::FutureImpl(const FutureImpl &rhs)
-      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0)
+      : DistributedCollectable(NULL, 0, 0), producer_op(NULL), op_gen(0),
+        producer_depth(0)
 #ifdef LEGION_SPY
         , producer_uid(0)
 #endif
@@ -565,7 +567,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (producer_op != NULL)
-        consumer_op->register_dependence(producer_op, op_gen);
+      {
+        // Only record dependences on things from the same context
+        // We know futures can never flow up the task tree so the
+        // only way they have the same depth is if they are from 
+        // the same parent context
+        TaskContext *context = consumer_op->get_context();
+        const int consumer_depth = context->get_depth();
+#ifdef DEBUG_LEGION
+        assert(consumer_depth >= producer_depth);
+#endif
+        if (consumer_depth == producer_depth)
+        {
+          consumer_op->register_dependence(producer_op, op_gen);
+#ifdef LEGION_SPY
+          LegionSpy::log_mapping_dependence(
+              context->get_unique_id(), producer_uid, 0,
+              consumer_op->get_unique_op_id(), 0, TRUE_DEPENDENCE);
+#endif
+        }
+      }
 #ifdef DEBUG_LEGION
       else
         assert(!empty); // better not be empty if it doesn't have an op
@@ -918,7 +939,7 @@ namespace Legion {
         else if (allow_empty)
           return Future();
         else
-          return runtime->help_create_future();
+          return runtime->help_create_future(op);
       }
     }
 
@@ -17800,8 +17821,8 @@ namespace Legion {
     {
       if ((op == NULL) && (implicit_context != NULL))
         return Future(new FutureImpl(this, true/*register*/,
-                                 get_available_distributed_id(),
-                                 address_space, implicit_context->owner_task));
+                                   get_available_distributed_id(),
+                                   address_space,implicit_context->owner_task));
       else
         return Future(new FutureImpl(this, true/*register*/,
                                      get_available_distributed_id(),

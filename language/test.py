@@ -262,7 +262,7 @@ class Counter:
         self.passed = 0
         self.failed = 0
 
-def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_python, short, extra_flags):
+def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp, use_cuda, use_python, short, extra_flags):
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
@@ -328,6 +328,11 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          (os.path.join('tests', 'openmp', 'run_pass'),
          )),
     ]
+    cuda = [
+        ('run_pass', (test_run_pass, ([] + extra_flags, {})),
+         (os.path.join('tests', 'cuda', 'run_pass'),
+         )),
+    ]
     py_env = {
         'PYTHONPATH': ':'.join(
             os.environ.get('PYTHONPATH', '').split(':') + [
@@ -357,11 +362,13 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         result.extend(hdf5)
     if use_openmp:
         result.extend(openmp)
+    if use_cuda:
+        result.extend(cuda)
     if use_python:
         result.extend(python)
     return result
 
-def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, python, extra_flags, verbose, quiet,
+def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, cuda, python, extra_flags, verbose, quiet,
                   only_patterns, skip_patterns, timelimit, short):
     thread_pool = multiprocessing.Pool(thread_count)
     results = []
@@ -371,7 +378,7 @@ def run_all_tests(thread_count, debug, run, spy, prof, hdf5, openmp, python, ext
     py_exe_path = detect_python_interpreter()
 
     # Run tests asynchronously.
-    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, python, short, extra_flags)
+    tests = get_test_specs(legion_dir, run, spy, prof, hdf5, openmp, cuda, python, short, extra_flags)
     for test_name, test_fn, test_dirs in tests:
         test_paths = []
         for test_dir in test_dirs:
@@ -504,6 +511,10 @@ def test_driver(argv):
                         action='store_true',
                         help='run OpenMP tests',
                         dest='openmp')
+    parser.add_argument('--cuda',
+                        action='store_true',
+                        help='run CUDA tests',
+                        dest='cuda')
     parser.add_argument('--python',
                         action='store_true',
                         help='run Python tests',
@@ -550,6 +561,7 @@ def test_driver(argv):
         args.prof,
         args.hdf5,
         args.openmp,
+        args.cuda,
         args.python,
         args.extra_flags,
         args.verbose,

@@ -8499,12 +8499,6 @@ namespace Legion {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
-#ifdef LEGION_SPY
-        if (it->impl->producer_op != NULL)
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
-              get_unique_op_id(), 0, TRUE_DEPENDENCE);
-#endif
       }
     }
 
