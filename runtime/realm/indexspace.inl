@@ -671,10 +671,69 @@ namespace Realm {
     fill_data.indirect = 0;
   }
 
+  inline CopySrcDstField::CopySrcDstField(const CopySrcDstField& copy_from)
+    : inst(copy_from.inst)
+    , field_id(copy_from.field_id)
+    , size(copy_from.size)
+    , redop_id(copy_from.redop_id)
+    , red_fold(copy_from.red_fold)
+    , serdez_id(copy_from.serdez_id)
+    , subfield_offset(copy_from.subfield_offset)
+    , indirect_index(copy_from.indirect_index)
+  {
+    // we know there's a fill value if the field ID is -1
+    if(copy_from.field_id == FieldID(-1)) {
+      if(size <= MAX_DIRECT_SIZE) {
+	// copy whole buffer to make sure indirect is initialized too
+	memcpy(fill_data.direct, copy_from.fill_data.direct, MAX_DIRECT_SIZE);
+      } else {
+	if(copy_from.fill_data.indirect) {
+	  fill_data.indirect = malloc(size);
+	  memcpy(fill_data.indirect, copy_from.fill_data.indirect, size);
+	} else
+	  fill_data.indirect = 0;
+      }
+    } else
+      fill_data.indirect = 0;
+  }
+
+  inline CopySrcDstField& CopySrcDstField::operator=(const CopySrcDstField& copy_from)
+  {
+    if((field_id != FieldID(-1)) && (size > MAX_DIRECT_SIZE) && fill_data.indirect)
+      free(fill_data.indirect);
+
+    inst = copy_from.inst;
+    field_id = copy_from.field_id;
+    size = copy_from.size;
+    redop_id = copy_from.redop_id;
+    red_fold = copy_from.red_fold;
+    serdez_id = copy_from.serdez_id;
+    subfield_offset = copy_from.subfield_offset;
+    indirect_index = copy_from.indirect_index;
+
+    // we know there's a fill value if the field ID is -1
+    if(copy_from.field_id == FieldID(-1)) {
+      if(size <= MAX_DIRECT_SIZE) {
+	// copy whole buffer to make sure indirect is initialized too
+	memcpy(fill_data.direct, copy_from.fill_data.direct, MAX_DIRECT_SIZE);
+      } else {
+	if(copy_from.fill_data.indirect) {
+	  fill_data.indirect = malloc(size);
+	  memcpy(fill_data.indirect, copy_from.fill_data.indirect, size);
+	} else
+	  fill_data.indirect = 0;
+      }
+    } else
+      fill_data.indirect = 0;
+
+    return *this;
+  }
+
   inline CopySrcDstField::~CopySrcDstField(void)
   {
-    if((size > MAX_DIRECT_SIZE) && fill_data.indirect)
+    if((field_id == FieldID(-1)) && (size > MAX_DIRECT_SIZE)) {
       free(fill_data.indirect);
+    }
   }
 
   inline CopySrcDstField &CopySrcDstField::set_field(RegionInstance _inst,
@@ -730,6 +789,57 @@ namespace Realm {
   inline CopySrcDstField &CopySrcDstField::set_fill(T value)
   {
     return set_fill(&value, sizeof(T));
+  }
+
+  template <typename S>
+  inline bool serialize(S& s, const CopySrcDstField& v)
+  {
+    if(!((s << v.inst) &&
+	 (s << v.field_id) &&
+	 (s << v.size) &&
+	 (s << v.redop_id) &&
+	 (s << v.red_fold) &&
+	 (s << v.serdez_id) &&
+	 (s << v.subfield_offset) &&
+	 (s << v.indirect_index))) return false;
+
+    // we know there's a fill value if the field ID is -1
+    if(v.field_id == FieldID(-1)) {
+      if(!s.append_bytes(((v.size <= CopySrcDstField::MAX_DIRECT_SIZE) ?
+			    v.fill_data.direct :
+			    v.fill_data.indirect),
+			 v.size))
+	return false;
+    }
+
+    return true;
+  }
+
+  template <typename S>
+  inline bool deserialize(S& s, CopySrcDstField& v)
+  {
+    if(!((s >> v.inst) &&
+	 (s >> v.field_id) &&
+	 (s >> v.size) &&
+	 (s >> v.redop_id) &&
+	 (s >> v.red_fold) &&
+	 (s >> v.serdez_id) &&
+	 (s >> v.subfield_offset) &&
+	 (s >> v.indirect_index))) return false;
+
+    // we know there's a fill value if the field ID is -1
+    if(v.field_id == FieldID(-1)) {
+      if(v.size <= CopySrcDstField::MAX_DIRECT_SIZE) {
+	if(!s.extract_bytes(v.fill_data.direct, v.size))
+	  return false;
+      } else {
+	v.fill_data.indirect = malloc(v.size);
+	if(!s.extract_bytes(v.fill_data.indirect, v.size))
+	  return false;
+      }
+    }
+
+    return true;
   }
 
 
