@@ -692,7 +692,8 @@ namespace Realm {
 	} else
 	  fill_data.indirect = 0;
       }
-    }
+    } else
+      fill_data.indirect = 0;
   }
 
   inline CopySrcDstField::~CopySrcDstField(void)
