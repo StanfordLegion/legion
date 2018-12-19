@@ -14433,7 +14433,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                        MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14442,7 +14442,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_RESPONSE,
-                      DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+                       MAPPER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
