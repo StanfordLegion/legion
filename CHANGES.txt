@@ -6,8 +6,15 @@ Version 18.12.0 (December ??, 2018)
     - More assorted bug fixes
     - Minor performance improvements in logging and accessor code
     - Handle signals on an alternate stack for better debugging/backtraces
+  * Regent
+    - Added a new built-in complex type
+    - Experimental support for building with PUC Lua
+    - Multiple fixes to CUDA code generation, vectorization,
+        auto-parallelization, and mapping optimization
+    - Better error messages for __demand(__leaf) and so on
   * Python
     - Use PyGILState for threading for compatibility with modules (e.g. numpy)
+    - Support for calling tasks written in Regent
 
 Version 18.09.0 (September 19, 2018)
   * Legion
