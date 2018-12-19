@@ -50,6 +50,7 @@
 #include "realm/serialize.h"
 
 TYPE_IS_SERIALIZABLE(Realm::OffsetsAndSize);
+TYPE_IS_SERIALIZABLE(Realm::CopySrcDstField);
 
 namespace Realm {
 
