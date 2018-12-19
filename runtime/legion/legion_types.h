@@ -2208,7 +2208,17 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     // Need a custom version of these for Legion Spy to track instance events
-    struct CopySrcDstField : public Realm::CopySrcDstField {
+    class CopySrcDstField : public Realm::CopySrcDstField {
+    public:
+      CopySrcDstField(void) : Realm::CopySrcDstField() { }
+      CopySrcDstField(const CopySrcDstField &rhs)
+        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
+      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
+      { 
+        Realm::CopySrcDstField::operator = (rhs); 
+        inst_event = rhs.inst_event; 
+        return *this; 
+      }
     public:
       ApEvent inst_event;
     };
