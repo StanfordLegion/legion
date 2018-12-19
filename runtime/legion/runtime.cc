@@ -9612,62 +9612,62 @@ namespace Legion {
         {
           switch (kind)
           {
-            case GLOBAL_MEM:
+	    case Memory::GLOBAL_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "GASNet");
                 break;
               }
-            case SYSTEM_MEM:
+	    case Memory::SYSTEM_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "System");
                 break;
               }
-            case REGDMA_MEM:
+	    case Memory::REGDMA_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Registered");
                 break;
               }
-            case SOCKET_MEM:
+	    case Memory::SOCKET_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "NUMA");
                 break;
               }
-            case Z_COPY_MEM:
+	    case Memory::Z_COPY_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Zero-Copy");
                 break;
               }
-            case GPU_FB_MEM:
+	    case Memory::GPU_FB_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Framebuffer");
                 break;
               }
-            case DISK_MEM:
+	    case Memory::DISK_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Disk");
                 break;
               }
-            case HDF_MEM:
+	    case Memory::HDF_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "HDF");
                 break;
               }
-            case FILE_MEM:
+	    case Memory::FILE_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "File");
                 break;
               }
-            case LEVEL3_CACHE:
+	    case Memory::LEVEL3_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L3");
                 break;
               }
-            case LEVEL2_CACHE:
+	    case Memory::LEVEL2_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L2");
                 break;
               }
-            case LEVEL1_CACHE:
+	    case Memory::LEVEL1_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L1");
                 break;
