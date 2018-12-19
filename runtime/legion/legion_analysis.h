@@ -420,6 +420,41 @@ namespace Legion {
     template<int DIM>
     class KDNode : public KDTree {
     public:
+      struct Line {
+      public:
+        Line(void)
+          : value(0), index(0), start(false) { }
+        Line(coord_t val, unsigned idx, bool st)
+          : value(val), index(idx), start(st) { }
+      public:
+        inline bool operator<(const Line &rhs) const
+        {
+          if (value < rhs.value)
+            return true;
+          if (value > rhs.value)
+            return false;
+          if (index < rhs.index)
+            return true;
+          if (index > rhs.index)
+            return false;
+          return start < rhs.start;
+        }
+        inline bool operator==(const Line &rhs) const
+        {
+          if (value != rhs.value)
+            return false;
+          if (index != rhs.index)
+            return false;
+          if (start != rhs.start)
+            return false;
+          return true;
+        }
+      public:
+        coord_t value;
+        unsigned index;
+        bool start;
+      };
+    public:
       KDNode(IndexSpaceExpression *expr, Runtime *runtime, 
              int refinement_dim, int last_changed_dim = -1); 
       KDNode(const Rect<DIM> &rect, Runtime *runtime,

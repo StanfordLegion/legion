@@ -1589,39 +1589,35 @@ namespace Legion {
       {
         // Sort the start and end of each equivalence set bounding rectangle
         // along the splitting dimension
-        std::map<std::pair<coord_t,unsigned/*index*/>,bool/*start*/> lines;
+        std::set<Line> lines;
         for (unsigned idx = 0; idx < subsets.size(); idx++)
         {
-          const std::pair<coord_t,unsigned> start_key(
-              subset_bounds[idx].lo[refinement_dim],idx);
-          lines[start_key] = true;
-          const std::pair<coord_t,unsigned> stop_key(
-              subset_bounds[idx].hi[refinement_dim],idx);
-          lines[stop_key] = false;
+          lines.insert(Line(subset_bounds[idx].lo[refinement_dim],idx,true));
+          lines.insert(Line(subset_bounds[idx].hi[refinement_dim],idx,false));
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
         std::map<coord_t,unsigned> left_inclusive, right_inclusive;
         unsigned count = 0;
-        for (std::map<std::pair<coord_t,unsigned>,bool>::const_iterator it =
-              lines.begin(); it != lines.end(); it++)
+        for (typename std::set<Line>::const_iterator it = lines.begin();
+              it != lines.end(); it++)
         {
           // Only increment for new rectangles
-          if (it->second)
+          if (it->start)
             count++;
           // Always record the count for all splits
-          left_inclusive[it->first.first] = count;
+          left_inclusive[it->value] = count;
         }
         count = 0;
-        for (std::map<std::pair<coord_t,unsigned>,bool>::const_reverse_iterator
-              it = lines.rbegin(); it != lines.rend(); it++)
+        for (typename std::set<Line>::const_reverse_iterator it = 
+              lines.rbegin(); it != lines.rend(); it++)
         {
           // End of rectangles are the beginning in this direction
-          if (!it->second)
+          if (!it->start)
             count++;
           // Always record the count for all splits
-          right_inclusive[it->first.first] = count;
+          right_inclusive[it->value] = count;
         }
 #ifdef DEBUG_LEGION
         assert(left_inclusive.size() == right_inclusive.size());
@@ -1731,7 +1727,6 @@ namespace Legion {
         std::set<EquivalenceSet*> children;
         children.insert(left_set.begin(), left_set.end());
         children.insert(right_set.begin(), right_set.end());
-        // Put the new sets back in the subsets
         subsets.clear();
         subsets.insert(subsets.end(), children.begin(), children.end());
         return true;
