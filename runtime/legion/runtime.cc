@@ -5407,14 +5407,17 @@ namespace Legion {
       assert(sending_buffer != NULL);
       assert(receiving_buffer != NULL);
 #endif
+      // Use a dummy implicit provenance at the front for the message
+      // to comply with the requirements of the meta-task handler which
+      // expects this before the task ID. We'll actually have individual
+      // implicit provenances that will override this when handling the
+      // messages so we can just set this to zero.
+      *((UniqueID*)sending_buffer) = 0;
+      sending_index = sizeof(UniqueID);
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
-      sending_index = sizeof(LgTaskID);
-      // We pack a dummy entry for provenance here as we store it
-      // separately for each message
-      *((UniqueID*)(((char*)sending_buffer)+sending_index)) = 0;
-      sending_index += sizeof(UniqueID);
+      *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
+      sending_index += sizeof(LgTaskID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -5534,7 +5537,7 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(LgTaskID) + sizeof(UniqueID) + 
+      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) + 
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
@@ -19660,12 +19663,12 @@ namespace Legion {
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
       const char *data = (const char*)args;
-      LgTaskID tid = *((const LgTaskID*)data);
-      data += sizeof(tid);
-      arglen -= sizeof(tid);
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+      LgTaskID tid = *((const LgTaskID*)data);
+      data += sizeof(tid);
+      arglen -= sizeof(tid);
       switch (tid)
       {
         case LG_SCHEDULER_ID:

@@ -1366,13 +1366,12 @@ namespace Legion {
     template<typename T>
     struct LgTaskArgs {
     public:
-      //LgTaskArgs(void)
-      //  : lg_task_id(T::TASK_ID), provenance(implicit_provenance) { }
       LgTaskArgs(::legion_unique_id_t uid)
-        : lg_task_id(T::TASK_ID), provenance(uid) { }
+        : provenance(uid), lg_task_id(T::TASK_ID) { }
     public:
-      const LgTaskID lg_task_id;
+      // In this order for alignment reasons
       const ::legion_unique_id_t provenance;
+      const LgTaskID lg_task_id;
     };
     
     // legion_trace.h
