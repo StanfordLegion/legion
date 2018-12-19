@@ -6781,7 +6781,7 @@ namespace Legion {
     {
       AutoLock n_lock(node_lock,1,false/*exclusive*/);
       return color_map.size();
-    }
+    } 
 
     //--------------------------------------------------------------------------
     bool IndexSpaceNode::are_disjoint(const LegionColor c1, 
@@ -7025,7 +7025,6 @@ namespace Legion {
       if (!has_remote_instance(target))
       {
         AutoLock n_lock(node_lock);
-        if (!has_remote_instance(target))
         {
           Serializer rez;
           {
@@ -7955,6 +7954,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void IndexPartNode::RemoteDisjointnessFunctor::apply(AddressSpaceID target)
+    //--------------------------------------------------------------------------
+    {
+      if (target != runtime->address_space)
+        runtime->send_index_partition_disjoint_update(target, rez);
+    }
+
+    //--------------------------------------------------------------------------
     void IndexPartNode::compute_disjointness(ValueBroadcast<bool> *collective,
                                              bool owner)
     //--------------------------------------------------------------------------
@@ -7972,8 +7979,13 @@ namespace Legion {
                   (c2 < max_linearized_color); c2++)
             {
               if (!are_disjoint(c1, c2, true/*force compute*/))
+              {
                 disjoint = false;
+                break;
+              }
             }
+            if (disjoint)
+              break;
           }
         }
         else
@@ -7989,8 +8001,37 @@ namespace Legion {
               if (!color_space->contains_color(c2))
                 continue;
               if (!are_disjoint(c1, c2, true/*force compute*/))
+              {
                 disjoint = false;
+                break;
+              }
             }
+            if (!disjoint)
+              break;
+          }
+        }
+        // Make sure the write of disjoint propagates before 
+        // we do the trigger of the event
+        __sync_synchronize();
+        {
+          AutoLock n_lock(node_lock);
+#ifdef DEBUG_LEGION
+          assert(disjoint_ready.exists());
+#endif
+          disjoint_ready = RtEvent::NO_RT_EVENT;
+          // We have to send notifications before any other remote
+          // requests can record themselves so we need to do it 
+          // while we are holding the lock
+          if (has_remote_instances())
+          {
+            Serializer rez;
+            {
+              RezCheck z(rez);
+              rez.serialize(handle);
+              rez.serialize<bool>(disjoint);
+            }
+            RemoteDisjointnessFunctor functor(rez, context->runtime);
+            map_over_remote_instances(functor);
           }
         }
         // If we have a disjointness barrier, then signal the result
@@ -8018,7 +8059,9 @@ namespace Legion {
     bool IndexPartNode::is_disjoint(bool app_query)
     //--------------------------------------------------------------------------
     {
-      if (!disjoint_ready.has_triggered())
+      // Assuming 64-bit reads/write are atomic operations here
+      // since we're not using the lock to protect these reads
+      if (disjoint_ready.exists() && !disjoint_ready.has_triggered())
         disjoint_ready.wait();
       return disjoint;
     }
@@ -8204,6 +8247,29 @@ namespace Legion {
           union_expr = parent;
       }
       return const_cast<IndexSpaceExpression*>(union_expr);
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::record_remote_disjoint_ready(RtUserEvent ready)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(ready.exists());
+      assert(!remote_disjoint_ready.exists());
+#endif
+      remote_disjoint_ready = ready;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndexPartNode::record_remote_disjoint_result(const bool result)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_disjoint_ready.exists());
+#endif
+      disjoint = result;
+      __sync_synchronize();
+      Runtime::trigger_event(remote_disjoint_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -8516,9 +8582,13 @@ namespace Legion {
       std::map<LegionColor,IndexSpaceNode*> valid_copy;
       if (!has_remote_instance(target))
       {
-        // Make sure we know if this is disjoint or not yet
-        bool disjoint_result = is_disjoint();
         AutoLock n_lock(node_lock);
+        // Check to see if we have computed the disjointness result
+        // If not we'll record that we need to do it and then when it 
+        // is computed we'll send out the result to all the remote copies
+        const bool has_disjoint = 
+          (!disjoint_ready.exists() || disjoint_ready.has_triggered());
+        const bool disjoint_result = has_disjoint ? is_disjoint() : false;
         if (!has_remote_instance(target))
         {
           Serializer rez;
@@ -8529,6 +8599,7 @@ namespace Legion {
             rez.serialize(parent->handle); 
             rez.serialize(color_space->handle);
             rez.serialize(color);
+            rez.serialize<bool>(has_disjoint);
             rez.serialize<bool>(disjoint_result);
             if (has_complete)
             {
@@ -8581,7 +8652,8 @@ namespace Legion {
       derez.deserialize(color_space);
       LegionColor color;
       derez.deserialize(color);
-      bool disjoint;
+      bool has_disjoint, disjoint;
+      derez.deserialize(has_disjoint);
       derez.deserialize(disjoint);
       int complete;
       derez.deserialize(complete);
@@ -8605,9 +8677,16 @@ namespace Legion {
       assert(parent_node != NULL);
       assert(color_space_node != NULL);
 #endif
-      IndexPartNode *node = context->create_node(handle, parent_node, 
-                               color_space_node, color, disjoint, complete,
-                               did, ready_event, partial_pending, mapping);
+      RtUserEvent dis_ready;
+      if (!has_disjoint)
+        dis_ready = Runtime::create_rt_user_event();
+      IndexPartNode *node = has_disjoint ? 
+        context->create_node(handle, parent_node, color_space_node, color, 
+               disjoint, complete, did, ready_event, partial_pending, mapping) :
+        context->create_node(handle, parent_node, color_space_node, color,
+               dis_ready, complete, did, ready_event, partial_pending, mapping);
+      if (!has_disjoint)
+        node->record_remote_disjoint_ready(dis_ready);
 #ifdef DEBUG_LEGION
       assert(node != NULL);
 #endif
@@ -8722,6 +8801,20 @@ namespace Legion {
       derez.deserialize(to_trigger);
       (*target) = handle;
       Runtime::trigger_event(to_trigger);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void IndexPartNode::handle_node_disjoint_update(
+                                  RegionTreeForest *forest, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexPartition handle;
+      derez.deserialize(handle);
+      bool disjoint_result;
+      derez.deserialize(disjoint_result);
+      IndexPartNode *node = forest->get_node(handle);
+      node->record_remote_disjoint_result(disjoint_result);
     }
 
     //--------------------------------------------------------------------------

@@ -614,6 +614,7 @@ namespace Legion {
       SEND_INDEX_PARTITION_RETURN,
       SEND_INDEX_PARTITION_CHILD_REQUEST,
       SEND_INDEX_PARTITION_CHILD_RESPONSE,
+      SEND_INDEX_PARTITION_DISJOINT_UPDATE,
       SEND_FIELD_SPACE_NODE,
       SEND_FIELD_SPACE_REQUEST,
       SEND_FIELD_SPACE_RETURN,
@@ -773,6 +774,7 @@ namespace Legion {
         "Send Index Partition Return",                                \
         "Send Index Partition Child Request",                         \
         "Send Index Partition Child Response",                        \
+        "Send Index Partition Disjoint Update",                       \
         "Send Field Space Node",                                      \
         "Send Field Space Request",                                   \
         "Send Field Space Return",                                    \
@@ -1472,10 +1474,11 @@ namespace Legion {
     struct LgTaskArgs {
     public:
       LgTaskArgs(::legion_unique_id_t uid)
-        : lg_task_id(T::TASK_ID), provenance(uid) { }
+        : provenance(uid), lg_task_id(T::TASK_ID) { }
     public:
-      const LgTaskID lg_task_id;
+      // In this order for alignment reasons
       const ::legion_unique_id_t provenance;
+      const LgTaskID lg_task_id;
     };
     
     // legion_trace.h
@@ -2422,7 +2425,17 @@ namespace Legion {
 
 #ifdef LEGION_SPY
     // Need a custom version of these for Legion Spy to track instance events
-    struct CopySrcDstField : public Realm::CopySrcDstField {
+    class CopySrcDstField : public Realm::CopySrcDstField {
+    public:
+      CopySrcDstField(void) : Realm::CopySrcDstField() { }
+      CopySrcDstField(const CopySrcDstField &rhs)
+        : Realm::CopySrcDstField(rhs) { inst_event = rhs.inst_event; }
+      inline CopySrcDstField& operator=(const CopySrcDstField &rhs)
+      { 
+        Realm::CopySrcDstField::operator = (rhs); 
+        inst_event = rhs.inst_event; 
+        return *this; 
+      }
     public:
       ApEvent inst_event;
     };

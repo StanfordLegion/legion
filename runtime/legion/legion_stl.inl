@@ -65,7 +65,7 @@ namespace Legion {
     inline std::tuple<Us ...>
     deserialize_(const void *buffer, phantom<>, std::tuple<Us ...> &&us)
     {
-      return us;
+      return std::move(us);
     }
 
     template<typename T1, typename ... Ts, typename ... Us>

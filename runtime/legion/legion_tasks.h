@@ -227,13 +227,13 @@ namespace Legion {
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
       virtual void set_context_index(unsigned index);
-      virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
       inline bool is_origin_mapped(void) const { return map_origin; }
       inline bool is_replicated(void) const { return replicate; }
+      int get_depth(void) const;
     public:
       void set_current_proc(Processor current);
       inline void set_origin_mapped(bool origin) { map_origin = origin; }

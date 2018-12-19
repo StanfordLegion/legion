@@ -42,7 +42,7 @@ namespace Legion {
         TaskContext *const ctx;
       };
     public:
-      TaskContext(Runtime *runtime, TaskOp *owner,
+      TaskContext(Runtime *runtime, TaskOp *owner, int depth,
                   const std::vector<RegionRequirement> &reqs);
       TaskContext(const TaskContext &rhs);
       virtual ~TaskContext(void);
@@ -66,12 +66,12 @@ namespace Legion {
         { return !created_requirements.empty(); }
       inline TaskOp* get_owner_task(void) const { return owner_task; }
       inline bool is_priority_mutable(void) const { return mutable_priority; }
+      inline int get_depth(void) const { return depth; }
     public:
       // Interface for task contexts
       virtual RegionTreeContext get_context(void) const = 0;
       virtual ContextID get_context_id(void) const = 0;
       virtual UniqueID get_context_uid(void) const;
-      virtual int get_depth(void) const;
       virtual Task* get_task(void); 
       virtual TaskContext* find_parent_context(void);
       virtual void pack_remote_context(Serializer &rez, 
@@ -549,6 +549,7 @@ namespace Legion {
       friend class SingleTask;
     protected:
       mutable LocalLock                         privilege_lock;
+      int                                       depth;
       // Application tasks can manipulate these next two data
       // structures by creating regions and fields, make sure you are
       // holding the operation lock when you are accessing them
@@ -721,7 +722,7 @@ namespace Legion {
         bool ancestor;
       };
     public:
-      InnerContext(Runtime *runtime, TaskOp *owner, bool full_inner,
+      InnerContext(Runtime *runtime, TaskOp *owner, int depth, bool full_inner,
                    const std::vector<RegionRequirement> &reqs,
                    const std::vector<unsigned> &parent_indexes,
                    const std::vector<bool> &virt_mapped,
@@ -738,7 +739,6 @@ namespace Legion {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
       virtual UniqueID get_context_uid(void) const;
-      virtual int get_depth(void) const;
       virtual bool is_inner_context(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
@@ -1229,7 +1229,6 @@ namespace Legion {
     public:
       TopLevelContext& operator=(const TopLevelContext &rhs);
     public:
-      virtual int get_depth(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate = false);
       virtual TaskContext* find_parent_context(void);
@@ -1294,7 +1293,7 @@ namespace Legion {
         DistributedID did;
       };
     public:
-      ReplicateContext(Runtime *runtime, ShardTask *owner, bool full_inner,
+      ReplicateContext(Runtime *runtime, ShardTask *owner,int d,bool full_inner,
                        const std::vector<RegionRequirement> &reqs,
                        const std::vector<unsigned> &parent_indexes,
                        const std::vector<bool> &virt_mapped,
@@ -1647,10 +1646,10 @@ namespace Legion {
     public:
       RemoteTask& operator=(const RemoteTask &rhs);
     public:
+      virtual int get_depth(void) const;
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const; 
       virtual void set_context_index(unsigned index);
-      virtual int get_depth(void) const;
       virtual const char* get_task_name(void) const;
       virtual bool has_trace(void) const;
     public:
@@ -1707,7 +1706,6 @@ namespace Legion {
     public:
       RemoteContext& operator=(const RemoteContext &rhs);
     public:
-      virtual int get_depth(void) const;
       virtual Task* get_task(void);
       virtual void unpack_remote_context(Deserializer &derez,
                                          std::set<RtEvent> &preconditions);
@@ -1747,7 +1745,6 @@ namespace Legion {
       TaskContext *parent_ctx;
       ShardManager *shard_manager; // if we're lucky and one is already here
     protected:
-      int depth;
       ApEvent remote_completion_event;
       bool top_level_context;
       RemoteTask remote_task;
@@ -2110,7 +2107,6 @@ namespace Legion {
       virtual RegionTreeContext get_context(void) const;
       virtual ContextID get_context_id(void) const;
       virtual UniqueID get_context_uid(void) const;
-      virtual int get_depth(void) const;
       virtual void pack_remote_context(Serializer &rez, 
           AddressSpaceID target, bool replicate);
       virtual bool attempt_children_complete(void);
