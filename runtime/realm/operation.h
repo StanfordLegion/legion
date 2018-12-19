@@ -175,6 +175,21 @@ namespace Realm {
 #endif
   };
 
+  struct CancelOperationMessage {
+    struct RequestArgs : public BaseMedium {
+      Event finish_event;
+    };
+
+    static void handle_request(RequestArgs args, const void *data, size_t datalen);
+
+    typedef ActiveMessageMediumNoReply<CANCEL_OPERATION_MSGID,
+				       RequestArgs,
+				       handle_request> Message;
+
+    static void send_request(NodeID target, Event finish_event,
+			     const void *reason_data, size_t reason_size);
+  };
+
 };
 
 #include "realm/operation.inl"

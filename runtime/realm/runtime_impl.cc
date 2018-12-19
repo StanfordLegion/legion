@@ -1343,6 +1343,7 @@ namespace Realm {
       MemStorageAllocResponse::Message::add_handler_entries("Memory Storage Alloc Response");
       MemStorageReleaseRequest::Message::add_handler_entries("Memory Storage Release Request");
       MemStorageReleaseResponse::Message::add_handler_entries("Memory Storage Release Response");
+      CancelOperationMessage::Message::add_handler_entries("Cancel Operation AM");
       //TestMessage::add_handler_entries("Test AM");
       //TestMessage2::add_handler_entries("Test 2 AM");
 
