@@ -9045,7 +9045,7 @@ namespace Legion {
                                                   IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      return IndexSpaceT<DIM,T>(get_parent_index_space(IndexPartiiton(handle)));
+      return IndexSpaceT<DIM,T>(get_parent_index_space(IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------
