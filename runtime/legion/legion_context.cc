@@ -30,9 +30,9 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    TaskContext::TaskContext(Runtime *rt, TaskOp *owner,
+    TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
                              const std::vector<RegionRequirement> &reqs)
-      : runtime(rt), owner_task(owner), regions(reqs),
+      : runtime(rt), owner_task(owner), regions(reqs), depth(d),
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
         overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -43,7 +43,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TaskContext::TaskContext(const TaskContext &rhs)
-      : runtime(NULL), owner_task(NULL), regions(rhs.regions)
+      : runtime(NULL), owner_task(NULL), regions(rhs.regions), depth(-1)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -82,13 +82,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner_task->get_unique_op_id();
-    }
-
-    //--------------------------------------------------------------------------
-    int TaskContext::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_task->get_depth();
     }
 
     //--------------------------------------------------------------------------
@@ -1898,12 +1891,12 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    InnerContext::InnerContext(Runtime *rt, TaskOp *owner, bool full_inner,
+    InnerContext::InnerContext(Runtime *rt, TaskOp *owner,int d,bool full_inner,
                                const std::vector<RegionRequirement> &reqs,
                                const std::vector<unsigned> &parent_indexes,
                                const std::vector<bool> &virt_mapped,
                                UniqueID uid, bool remote)
-      : TaskContext(rt, owner, reqs), 
+      : TaskContext(rt, owner, d, reqs),
         tree_context(rt->allocate_region_tree_context()), context_uid(uid), 
         remote_context(remote), full_inner_context(full_inner),
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
@@ -1951,7 +1944,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext::InnerContext(const InnerContext &rhs)
-      : TaskContext(NULL, NULL, rhs.regions), tree_context(rhs.tree_context),
+      : TaskContext(NULL, NULL, 0, rhs.regions), tree_context(rhs.tree_context),
         context_uid(0), remote_context(false), full_inner_context(false),
         parent_req_indexes(rhs.parent_req_indexes), 
         virtual_mapped(rhs.virtual_mapped)
@@ -2059,13 +2052,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return context_uid;
-    }
-
-    //--------------------------------------------------------------------------
-    int InnerContext::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_task->get_depth();
     }
 
     //--------------------------------------------------------------------------
@@ -2231,8 +2217,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(owner_task != NULL);
 #endif
-      rez.serialize<bool>(false); // not the top-level context
-      int depth = get_depth();
       rez.serialize(depth);
       // See if we need to pack up base task information
       owner_task->pack_external_task(rez, target);
@@ -6942,7 +6926,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(Runtime *rt, UniqueID ctx_id)
-      : InnerContext(rt, NULL, false/*full inner*/, dummy_requirements, 
+      : InnerContext(rt, NULL, -1, false/*full inner*/, dummy_requirements, 
                      dummy_indexes, dummy_mapped, ctx_id)
     //--------------------------------------------------------------------------
     {
@@ -6950,7 +6934,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     TopLevelContext::TopLevelContext(const TopLevelContext &rhs)
-      : InnerContext(NULL, NULL, false,
+      : InnerContext(NULL, NULL, -1, false,
                      dummy_requirements, dummy_indexes, dummy_mapped, 0)
     //--------------------------------------------------------------------------
     {
@@ -6974,18 +6958,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int TopLevelContext::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return -1;
-    }
-
-    //--------------------------------------------------------------------------
     void TopLevelContext::pack_remote_context(Serializer &rez, 
                                               AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      rez.serialize<bool>(true); // top level context, all we need to pack
+      rez.serialize(depth);
     }
 
     //--------------------------------------------------------------------------
@@ -7148,6 +7125,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    int RemoteTask::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner->get_depth();
+    }
+
+    //--------------------------------------------------------------------------
     UniqueID RemoteTask::get_unique_id(void) const
     //--------------------------------------------------------------------------
     {
@@ -7169,13 +7153,6 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    int RemoteTask::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner->get_depth();
-    }
-
-    //--------------------------------------------------------------------------
     const char* RemoteTask::get_task_name(void) const
     //--------------------------------------------------------------------------
     {
@@ -7196,10 +7173,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(Runtime *rt, UniqueID context_uid)
-      : InnerContext(rt, NULL, false/*full inner*/, remote_task.regions, 
+      : InnerContext(rt, NULL, -1, false/*full inner*/, remote_task.regions, 
           local_parent_req_indexes, local_virtual_mapped, 
           context_uid, true/*remote*/),
-        parent_ctx(NULL), depth(-1), top_level_context(false), 
+        parent_ctx(NULL), top_level_context(false), 
         remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -7207,7 +7184,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteContext::RemoteContext(const RemoteContext &rhs)
-      : InnerContext(NULL, NULL, false, rhs.regions, local_parent_req_indexes,
+      : InnerContext(NULL, NULL, 0, false, rhs.regions,local_parent_req_indexes,
           local_virtual_mapped, 0, true), remote_task(RemoteTask(this))
     //--------------------------------------------------------------------------
     {
@@ -7249,13 +7226,6 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    int RemoteContext::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return depth;
     }
 
     //--------------------------------------------------------------------------
@@ -7581,11 +7551,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REMOTE_UNPACK_CONTEXT_CALL);
-      derez.deserialize(top_level_context);
+      derez.deserialize(depth);
+      top_level_context = (depth < 0);
       // If we're the top-level context then we're already done
       if (top_level_context)
         return;
-      derez.deserialize(depth);
       WrapperReferenceMutator mutator(preconditions);
       remote_task.unpack_external_task(derez, runtime, &mutator);
       local_parent_req_indexes.resize(remote_task.regions.size()); 
@@ -7799,14 +7769,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(Runtime *rt, TaskOp *owner)
-      : TaskContext(rt, owner, owner->regions)
+      : TaskContext(rt, owner, owner->get_depth(), owner->regions)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     LeafContext::LeafContext(const LeafContext &rhs)
-      : TaskContext(NULL, NULL, rhs.regions)
+      : TaskContext(NULL, NULL, 0, rhs.regions)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9104,7 +9074,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(Runtime *rt, TaskContext *enc, TaskOp *child)
-      : TaskContext(rt, child, child->regions), 
+      : TaskContext(rt, child, enc->get_depth(), child->regions), 
         enclosing(enc), inline_task(child)
     //--------------------------------------------------------------------------
     {
@@ -9135,7 +9105,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InlineContext::InlineContext(const InlineContext &rhs)
-      : TaskContext(NULL, NULL, rhs.regions), enclosing(NULL), inline_task(NULL)
+      : TaskContext(NULL, NULL, 0, rhs.regions), 
+        enclosing(NULL), inline_task(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -9176,13 +9147,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return owner_task->get_unique_id();
-    }
-
-    //--------------------------------------------------------------------------
-    int InlineContext::get_depth(void) const
-    //--------------------------------------------------------------------------
-    {
-      return owner_task->get_depth();
     }
 
     //--------------------------------------------------------------------------

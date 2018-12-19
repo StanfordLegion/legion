@@ -727,7 +727,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
-      return (parent_ctx->get_depth() + 1);
+      return parent_ctx->get_depth() + 1;
     }
 
     //--------------------------------------------------------------------------
@@ -3913,8 +3913,8 @@ namespace Legion {
         if (!variant->is_leaf() || has_virtual_instances())
         {
           InnerContext *inner_ctx = new InnerContext(runtime, this, 
-              variant->is_inner(), regions, parent_req_indexes, 
-              virtual_mapped, unique_op_id);
+              get_depth(), variant->is_inner(), regions, 
+              parent_req_indexes, virtual_mapped, unique_op_id);
           if (mapper == NULL)
             mapper = runtime->find_mapper(current_proc, map_id);
           inner_ctx->configure_context(mapper, task_priority);
@@ -4988,24 +4988,9 @@ namespace Legion {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
-#ifdef LEGION_SPY
-        if (it->impl->producer_op != NULL)
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
-              get_unique_id(), 0, TRUE_DEPENDENCE);
-#endif
       }
       if (predicate_false_future.impl != NULL)
-      {
         predicate_false_future.impl->register_dependence(this);
-#ifdef LEGION_SPY
-        if (predicate_false_future.impl->producer_op != NULL)
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), 
-              predicate_false_future.impl->producer_uid, 0,
-              get_unique_id(), 0, TRUE_DEPENDENCE);
-#endif
-      }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       restrict_infos.resize(regions.size());
@@ -7013,24 +6998,9 @@ namespace Legion {
         assert(it->impl != NULL);
 #endif
         it->impl->register_dependence(this);
-#ifdef LEGION_SPY
-        if (it->impl->producer_op != NULL)
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), it->impl->producer_uid, 0,
-              get_unique_id(), 0, TRUE_DEPENDENCE);
-#endif
       }
       if (predicate_false_future.impl != NULL)
-      {
         predicate_false_future.impl->register_dependence(this);
-#ifdef LEGION_SPY
-        if (predicate_false_future.impl->producer_op != NULL)
-          LegionSpy::log_mapping_dependence(
-              parent_ctx->get_unique_id(), 
-              predicate_false_future.impl->producer_uid, 0,
-              get_unique_id(), 0, TRUE_DEPENDENCE);
-#endif
-      }
       // Also have to register any dependences on our predicate
       register_predicate_dependence();
       version_infos.resize(regions.size());
