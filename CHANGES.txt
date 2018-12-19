@@ -1,6 +1,14 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version 18.12.0 (December ??, 2018)
+  * Realm
+    - More assorted bug fixes
+    - Minor performance improvements in logging and accessor code
+    - Handle signals on an alternate stack for better debugging/backtraces
+  * Python
+    - Use PyGILState for threading for compatibility with modules (e.g. numpy)
+
 Version 18.09.0 (September 19, 2018)
   * Legion
     - Support for physical tracing, which can provide up to 7x improvement in
