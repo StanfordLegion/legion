@@ -5412,14 +5412,17 @@ namespace Legion {
       assert(sending_buffer != NULL);
       assert(receiving_buffer != NULL);
 #endif
+      // Use a dummy implicit provenance at the front for the message
+      // to comply with the requirements of the meta-task handler which
+      // expects this before the task ID. We'll actually have individual
+      // implicit provenances that will override this when handling the
+      // messages so we can just set this to zero.
+      *((UniqueID*)sending_buffer) = 0;
+      sending_index = sizeof(UniqueID);
       // Set up the buffer for sending the first batch of messages
       // Only need to write the processor once
-      *((LgTaskID*)sending_buffer) = LG_MESSAGE_ID;
-      sending_index = sizeof(LgTaskID);
-      // We pack a dummy entry for provenance here as we store it
-      // separately for each message
-      *((UniqueID*)(((char*)sending_buffer)+sending_index)) = 0;
-      sending_index += sizeof(UniqueID);
+      *((LgTaskID*)(((char*)sending_buffer)+sending_index))= LG_MESSAGE_ID;
+      sending_index += sizeof(LgTaskID);
       *((AddressSpaceID*)
           (((char*)sending_buffer)+sending_index)) = local_address_space;
       sending_index += sizeof(local_address_space);
@@ -5539,7 +5542,7 @@ namespace Legion {
         partial = false;
       }
       // Save the header and the number of messages into the buffer
-      const size_t base_size = sizeof(LgTaskID) + sizeof(UniqueID) + 
+      const size_t base_size = sizeof(UniqueID) + sizeof(LgTaskID) + 
         sizeof(AddressSpaceID) + sizeof(VirtualChannelKind);
       *((MessageHeader*)(sending_buffer + base_size)) = header;
       *((unsigned*)(sending_buffer + base_size + sizeof(header))) = 
@@ -5810,6 +5813,11 @@ namespace Legion {
           case SEND_INDEX_PARTITION_CHILD_RESPONSE:
             {
               runtime->handle_index_partition_child_response(derez);
+              break;
+            }
+          case SEND_INDEX_PARTITION_DISJOINT_UPDATE:
+            {
+              runtime->handle_index_partition_disjoint_update(derez);
               break;
             }
           case SEND_FIELD_SPACE_NODE:
@@ -9540,62 +9548,62 @@ namespace Legion {
         {
           switch (kind)
           {
-            case GLOBAL_MEM:
+	    case Memory::GLOBAL_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "GASNet");
                 break;
               }
-            case SYSTEM_MEM:
+	    case Memory::SYSTEM_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "System");
                 break;
               }
-            case REGDMA_MEM:
+	    case Memory::REGDMA_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Registered");
                 break;
               }
-            case SOCKET_MEM:
+	    case Memory::SOCKET_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "NUMA");
                 break;
               }
-            case Z_COPY_MEM:
+	    case Memory::Z_COPY_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Zero-Copy");
                 break;
               }
-            case GPU_FB_MEM:
+	    case Memory::GPU_FB_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Framebuffer");
                 break;
               }
-            case DISK_MEM:
+	    case Memory::DISK_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "Disk");
                 break;
               }
-            case HDF_MEM:
+	    case Memory::HDF_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "HDF");
                 break;
               }
-            case FILE_MEM:
+	    case Memory::FILE_MEM:
               {
                 LegionSpy::log_memory_kind(kind, "File");
                 break;
               }
-            case LEVEL3_CACHE:
+	    case Memory::LEVEL3_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L3");
                 break;
               }
-            case LEVEL2_CACHE:
+	    case Memory::LEVEL2_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L2");
                 break;
               }
-            case LEVEL1_CACHE:
+	    case Memory::LEVEL1_CACHE:
               {
                 LegionSpy::log_memory_kind(kind, "L1");
                 break;
@@ -13420,6 +13428,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_index_partition_disjoint_update(AddressSpaceID target,
+                                                       Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+                                SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
+                                INDEX_SPACE_VIRTUAL_CHANNEL, 
+                                true/*flush*/, true/*response*/); 
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_field_space_node(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -14665,6 +14684,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       IndexPartNode::handle_node_child_response(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_index_partition_disjoint_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode::handle_node_disjoint_update(forest, derez);
     }
 
     //--------------------------------------------------------------------------
@@ -19593,12 +19619,12 @@ namespace Legion {
       // up to the highest level to ensure that they drain once they begin
       Processor::set_current_task_priority(LG_RUNNING_PRIORITY);
       const char *data = (const char*)args;
-      LgTaskID tid = *((const LgTaskID*)data);
-      data += sizeof(tid);
-      arglen -= sizeof(tid);
       implicit_provenance = *((const UniqueID*)data);
       data += sizeof(implicit_provenance);
       arglen -= sizeof(implicit_provenance);
+      LgTaskID tid = *((const LgTaskID*)data);
+      data += sizeof(tid);
+      arglen -= sizeof(tid);
       switch (tid)
       {
         case LG_SCHEDULER_ID:

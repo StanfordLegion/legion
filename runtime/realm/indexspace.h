@@ -53,6 +53,8 @@ namespace Realm {
   struct CopySrcDstField {
   public:
     CopySrcDstField(void);
+    CopySrcDstField(const CopySrcDstField& copy_from);
+    CopySrcDstField& operator=(const CopySrcDstField& copy_from);
     ~CopySrcDstField(void);
     CopySrcDstField &set_field(RegionInstance _inst, FieldID _field_id,
 			       size_t _size, size_t _subfield_offset = 0);

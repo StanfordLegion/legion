@@ -41,31 +41,31 @@ void find_processors(Processor &first_cpu, Processor &first_gpu)
     Processor::Kind kind = it->kind();  
     switch (kind)
     {
-      case LOC_PROC:
+      case Processor::LOC_PROC:
         {
           if (!first_cpu.exists())
             first_cpu = *it;
           printf("CPU Processor " IDFMT "\n", it->id);
           break;
         }
-      case TOC_PROC:
+      case Processor::TOC_PROC:
         {
           if (!first_gpu.exists())
             first_gpu = *it;
           printf("GPU Processor " IDFMT "\n", it->id);
           break;
         }
-      case UTIL_PROC:
+      case Processor::UTIL_PROC:
         {
           printf("Utility Processor " IDFMT "\n", it->id);
           break;
         }
-      case IO_PROC:
+      case Processor::IO_PROC:
         {
           printf("I/O Processor " IDFMT "\n", it->id);
           break;
         }
-      case PROC_GROUP:
+      case Processor::PROC_GROUP:
         {
           printf("Processor Group " IDFMT "\n", it->id);
           break;
