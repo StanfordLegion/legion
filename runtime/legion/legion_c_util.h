@@ -48,6 +48,10 @@ namespace Legion {
       typedef RectInDomainIterator<2,coord_t>  RectInDomainIterator2D;
       typedef RectInDomainIterator<3,coord_t>  RectInDomainIterator3D;
 
+      typedef DeferredBuffer<char,1> DeferredBufferChar1D;
+      typedef DeferredBuffer<char,2> DeferredBufferChar2D;
+      typedef DeferredBuffer<char,3> DeferredBufferChar3D;
+
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
 // but it's pretty annoying to get this macro to handle all the cases right
@@ -89,6 +93,9 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
+      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_1d_t, DeferredBufferChar1D *);
+      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_2d_t, DeferredBufferChar2D *);
+      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_3d_t, DeferredBufferChar3D *);
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexTaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
