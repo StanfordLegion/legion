@@ -2930,6 +2930,13 @@ function type_check.expr_binary(cx, node)
                   tostring(rhs_type))
     end
     expr_type = bool
+  elseif std.is_ispace(lhs_type) and std.is_ispace(rhs_type) then
+    if not (node.op == "&" or node.op == "|")  then
+      report.error(node.rhs, "operator " .. tostring(node.op) ..
+                  " not supported on " .. tostring(lhs_type) .. " and " ..
+                  tostring(rhs_type))
+    end
+    expr_type = std.ispace(lhs_type.index_type)
   else
     if node.op == "&" or node.op == "|" then
       report.error(node.rhs, "operator " .. tostring(node.op) ..
