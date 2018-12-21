@@ -4859,12 +4859,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      if (update_guards.empty())
+        return;
 #ifdef DEBUG_LEGION
+      // Put this assertion after the test above in case we were migrated
       assert((eq_state == MAPPING_STATE) || 
              (eq_state == PENDING_REFINED_STATE));
 #endif
-      if (update_guards.empty())
-        return;
       FieldMaskSet<CopyFillAggregator>::iterator finder = 
         update_guards.find(aggregator);
       if (finder == update_guards.end())
