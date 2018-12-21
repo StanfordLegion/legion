@@ -320,7 +320,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
     cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
         cwd=miniaero_dir)
-    for test in ['3D_Sod' #, '3D_Sod_2nd_Order'
+    for test in ['3D_Sod', '3D_Sod_2nd_Order'
                  # These tests take a long time so skip them by default.
                  # , 'FlatPlate', 'Ramp'
                 ]:
