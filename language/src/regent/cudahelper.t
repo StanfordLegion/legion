@@ -411,14 +411,13 @@ function cudahelper.generate_reduction_preamble(reductions)
       [preamble];
       var [device_ptr] = [&red_var.type](nil)
       do
-        var r = RuntimeAPI.cudaMalloc([&&opaque](&[device_ptr]),
-                                      [sizeof(red_var.type) * GLOBAL_RED_BUFFER])
-        assert([r] == 0 and [device_ptr] ~= [&red_var.type](nil), "cudaMalloc failed")
-        var v : (red_var.type)[GLOBAL_RED_BUFFER]
-        for i = 0, GLOBAL_RED_BUFFER do v[i] = [init] end
-        RuntimeAPI.cudaMemcpy([device_ptr], [&opaque]([&red_var.type](v)),
-                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
-                              RuntimeAPI.cudaMemcpyHostToDevice)
+        var bounds : C.legion_rect_1d_t
+        bounds.lo.x[0] = 0
+        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER]
+        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.Z_COPY_MEM, [&int8](nil))
+        [device_ptr] =
+          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+        for i = 0, GLOBAL_RED_BUFFER do [device_ptr][i] = [init] end
       end
     end
     device_ptrs:insert(device_ptr)
@@ -506,16 +505,11 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
     postamble = quote
       [postamble]
       do
-        var v : (red_var.type)[GLOBAL_RED_BUFFER]
-        RuntimeAPI.cudaMemcpy([&opaque]([&red_var.type](v)), [device_ptr],
-                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
-                              RuntimeAPI.cudaMemcpyDeviceToHost)
         var tmp : red_var.type = [init]
         for i = 0, GLOBAL_RED_BUFFER do
-          tmp = [base.quote_binary_op(red_op, tmp, `(v[i]))]
+          tmp = [base.quote_binary_op(red_op, tmp, `([device_ptr][i]))]
         end
         [red_var] = [base.quote_binary_op(red_op, red_var, tmp)]
-        RuntimeAPI.cudaFree([device_ptr])
       end
     end
   end
