@@ -5939,7 +5939,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -5988,8 +5989,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,
-            "DeferredBuffer unable to find a memory of kind %d", kind);
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6036,7 +6037,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6240,7 +6242,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6288,7 +6291,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6335,7 +6339,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
