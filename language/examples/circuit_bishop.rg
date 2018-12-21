@@ -31,9 +31,6 @@ task#update_voltages[index=$i] {
   target : $HAS_GPUS ? $GPUs[$i % $GPUs.size] : $CPUs[$i % $CPUs.size];
 }
 
-task#block_task[index=$i] {
-  target : $HAS_GPUS ? $GPUs[$i % $GPUs.size] : $CPUs[$i % $CPUs.size];
-}
 task[isa=cuda and target=$p] region {
   target : $p.memories[kind=fbmem];
 }
@@ -62,14 +59,6 @@ task#update_voltages[isa=cuda and target=$p] region#rsn {
   target : $p.memories[kind=zcmem];
 }
 
-task#block_task[isa=cuda and target=$p] region#rsn {
-  target : $p.memories[kind=zcmem];
-}
-
-task#block_task[isa=cuda and target=$p] region#rgn {
-  target : $p.memories[kind=zcmem];
-}
-
 end
 
 local c = regentlib.c
@@ -85,9 +74,9 @@ STEPS = 10000
 DELTAT = 1e-6
 
 struct Colorings {
-  privacy_map : c.legion_coloring_t,
-  private_node_map : c.legion_coloring_t,
-  shared_node_map : c.legion_coloring_t,
+  privacy_map : c.legion_point_coloring_t,
+  private_node_map : c.legion_point_coloring_t,
+  shared_node_map : c.legion_point_coloring_t,
 }
 
 struct Config {
@@ -493,24 +482,11 @@ do
   end
 end
 
-__demand(__cuda)
-task block_task(rpn : region(node),
-                rsn : region(node),
-                rgn : region(node),
-                rw : region(wire(rpn, rsn, rgn))) : int64
-where reads(rpn, rsn, rgn), reads writes(rw) do
-  return [int64](c.legion_get_current_time_in_micros())
-end
-
-terra wait_for(x : int)
-  return x
-end
-
 terra create_colorings(conf : Config)
   var coloring : Colorings
-  coloring.privacy_map = c.legion_coloring_create()
-  coloring.private_node_map = c.legion_coloring_create()
-  coloring.shared_node_map = c.legion_coloring_create()
+  coloring.privacy_map = c.legion_point_coloring_create()
+  coloring.private_node_map = c.legion_point_coloring_create()
+  coloring.shared_node_map = c.legion_point_coloring_create()
   var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
   var num_shared_nodes = conf.num_pieces * conf.shared_nodes_per_piece
 
@@ -518,21 +494,21 @@ terra create_colorings(conf : Config)
     (num_circuit_nodes - num_shared_nodes) % conf.num_pieces == 0,
     "something went wrong in the arithmetic")
 
-  c.legion_coloring_add_range(coloring.privacy_map, 1,
+  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](1),
     c.legion_ptr_t { value = 0 },
     c.legion_ptr_t { value = num_shared_nodes - 1})
 
-  c.legion_coloring_add_range(coloring.privacy_map, 0,
+  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](0),
     c.legion_ptr_t { value = num_shared_nodes },
     c.legion_ptr_t { value = num_circuit_nodes - 1})
 
   var snpp = conf.shared_nodes_per_piece
   var pnpp = conf.nodes_per_piece - snpp
   for piece_id = 0, conf.num_pieces do
-    c.legion_coloring_add_range(coloring.shared_node_map, piece_id,
+    c.legion_point_coloring_add_range(coloring.shared_node_map, [ptr](piece_id),
       c.legion_ptr_t { value = piece_id * snpp },
       c.legion_ptr_t { value = (piece_id + 1) * snpp - 1})
-    c.legion_coloring_add_range(coloring.private_node_map, piece_id,
+    c.legion_point_coloring_add_range(coloring.private_node_map, [ptr](piece_id),
       c.legion_ptr_t { value = num_shared_nodes + piece_id * pnpp},
       c.legion_ptr_t { value = num_shared_nodes + (piece_id + 1) * pnpp - 1})
   end
@@ -545,22 +521,17 @@ task create_ghost_partition(conf         : Config,
 where
   reads(ghost_ranges)
 do
-  var ghost_node_map = c.legion_coloring_create()
+  var ghost_node_map = c.legion_point_coloring_create()
   var num_pieces = conf.num_pieces
-  for i = 0, num_pieces do
-    c.legion_coloring_ensure_color(ghost_node_map, i)
-  end
 
-  var idx = 0
   for range in ghost_ranges do
-    c.legion_coloring_add_range(ghost_node_map,
-      idx,
+    c.legion_point_coloring_add_range(ghost_node_map,
+      range,
       c.legion_ptr_t { value = range.first },
       c.legion_ptr_t { value = range.last })
-    idx += 1
   end
 
-  return partition(aliased, all_shared, ghost_node_map)
+  return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
 end
 
 task toplevel()
@@ -606,13 +577,13 @@ task toplevel()
   end
 
   var colorings = create_colorings(conf)
-  var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map)
+  var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
 
-  var launch_domain = ispace(int1d, num_pieces)
-  var rp_private = partition(disjoint, all_private, colorings.private_node_map)
-  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
+  var launch_domain = ispace(ptr, num_pieces)
+  var rp_private = partition(disjoint, all_private, colorings.private_node_map, launch_domain)
+  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, launch_domain)
   var rp_wires = partition(equal, all_wires, launch_domain)
 
   var ghost_ranges = region(ispace(ptr, num_pieces), ghost_range)
@@ -633,16 +604,10 @@ task toplevel()
   var steps = conf.steps
   var num_loops = conf.num_loops
 
-  var ts_start : int64 = 0x7FFFFFFFFFFFFFFFL
-  var ts_stop : int64 = 0
-
-  for i = 0, num_pieces do
-    ts_start min= block_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-  end
-
-  __demand(__spmd)
+  __fence(__execution, __block)
+  var ts_start = c.legion_get_current_time_in_micros()
+  __demand(__spmd, __trace)
   for j = 0, num_loops do
-    regentlib.c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
     for i = 0, num_pieces do
       calculate_new_currents(steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
@@ -652,15 +617,12 @@ task toplevel()
     for i = 0, num_pieces do
       update_voltages(rp_private[i], rp_shared[i])
     end
-    regentlib.c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
-
-  for i = 0, num_pieces do
-    ts_stop max= block_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-  end
+  __fence(__execution, __block)
+  var ts_end = c.legion_get_current_time_in_micros()
 
   do
-    var sim_time : double = 1e-6 * (ts_stop - ts_start)
+    var sim_time : double = 1e-6 * (ts_end - ts_start)
     c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
 
     -- Compute the floating point operations per second

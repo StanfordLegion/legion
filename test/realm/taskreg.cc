@@ -209,8 +209,11 @@ int main(int argc, char **argv)
     .first();
   assert(p.exists());
 
-  Event e1 = p.register_task(TOP_LEVEL_TASK, CodeDescriptor(top_level_task),
-			     ProfilingRequestSet());
+  Event e1 = Processor::register_task_by_kind(p.kind(),
+					      false /*!global*/,
+					      TOP_LEVEL_TASK,
+					      CodeDescriptor(top_level_task),
+					      ProfilingRequestSet());
 
   // collective launch of a single task - everybody gets the same finish event
   Event e2 = rt.collective_spawn(p, TOP_LEVEL_TASK, 0, 0, e1);

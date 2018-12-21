@@ -336,7 +336,8 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id());
         }
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
+      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
+          !runtime->separate_runtime_instances)
         Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
@@ -368,7 +369,8 @@ namespace Legion {
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
+      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
+          !runtime->separate_runtime_instances)
         Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
