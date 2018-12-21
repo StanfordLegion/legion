@@ -398,6 +398,17 @@ end
 function inline_tasks.stat_assignment_or_reduce(node)
   local inlined_any = false
   local actions = terralib.newlist()
+  local new_lhs = node.lhs:map(function(lh)
+    local new_lh, inlined, lh_actions = inline_tasks.expr(lh)
+    if inlined then
+      assert(new_lh ~= nil)
+      inlined_any = true
+      actions:insertall(lh_actions)
+      return new_lh
+    else
+      return lh
+    end
+  end)
   local new_rhs = node.rhs:map(function(rh)
     local new_rh, inlined, rh_actions = inline_tasks.expr(rh)
     if inlined then
@@ -412,7 +423,10 @@ function inline_tasks.stat_assignment_or_reduce(node)
   if inlined_any then
     local stats = terralib.newlist { preserve_task_call(node) }
     stats:insertall(actions)
-    stats:insert(node { rhs = new_rhs })
+    stats:insert(node {
+      lhs = new_lhs,
+      rhs = new_rhs,
+    })
     return stats
   else
     return node
