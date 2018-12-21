@@ -75,10 +75,9 @@ STEPS = 10000
 DELTAT = 1e-6
 
 struct Colorings {
-  privacy_map : c.legion_coloring_t,
-  private_node_map : c.legion_coloring_t,
-  shared_node_map : c.legion_coloring_t,
-  --ghost_node_map : c.legion_coloring_t,
+  privacy_map : c.legion_point_coloring_t,
+  private_node_map : c.legion_point_coloring_t,
+  shared_node_map : c.legion_point_coloring_t,
 }
 
 struct Config {
@@ -209,63 +208,6 @@ do
     node.node_voltage = 2 * drand48() - 1.0
   end
 end
-
---task init_wires(piece_id    : int,
---                conf        : Config,
---                rls         : region(int),
---                rn_all      : region(node),
---                rn          : region(node),
---                rw          : region(wire(rn, rn, rn_all)))
---where
---  reads writes(rw, rls)
---do
---  var piece_shared_nodes : &uint =
---    [&uint](c.malloc([sizeof(uint)] * conf.num_pieces))
---  for i = 0, conf.num_pieces do piece_shared_nodes[i] = 0 end
---
---  var npp = conf.nodes_per_piece
---  var ptr_offset = piece_id * npp
---
---  for wire in rw do
---    wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
---    wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
---    wire.resistance = drand48() * 10.0 + 1.0
---
---    -- Keep inductance on the order of 1e-3 * dt to avoid resonance problems
---    wire.inductance = (drand48() + 0.1) * DELTAT * 1e-3
---    wire.wire_cap = drand48() * 0.1
---
---    var in_node = ptr_offset + [uint](drand48() * npp)
---    wire.in_ptr = dynamic_cast(ptr(node, rn, rn), [ptr](in_node))
---    regentlib.assert(not isnull(wire.in_ptr),
---      "picked an invalid random pointer")
---
---    var out_node = 0
---    if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
---      out_node = ptr_offset + [uint](drand48() * npp)
---    else
---      -- pick a random other piece and a node from there
---      var pp = [uint](drand48() * (conf.num_pieces - 1))
---      if pp >= piece_id then pp += 1 end
---
---      -- pick an arbitrary node, except that if it's one that didn't used to be shared, make the
---      -- sequentially next pointer shared instead so that each node's shared pointers stay compact
---      var idx = [uint](drand48() * npp)
---      if idx >= piece_shared_nodes[pp] then
---        idx = piece_shared_nodes[pp]
---        piece_shared_nodes[pp] = piece_shared_nodes[pp] + 1
---      end
---      out_node = pp * npp + idx
---    end
---    wire.out_ptr = dynamic_cast(ptr(node, rn, rn, rn_all), [ptr](out_node))
---  end
---  var idx = 0
---  for ls in rls do
---    @ls = piece_shared_nodes[idx]
---    idx += 1
---  end
---  c.free(piece_shared_nodes)
---end
 
 task init_wires(spiece_id  : int,
                 conf       : Config,
@@ -401,19 +343,6 @@ do
   c.free(alread_picked)
 end
 
---task init_piece(piece_id    : int,
---                conf        : Config,
---                rls         : region(int),
---                rn_all      : region(node),
---                rn          : region(node),
---                rw          : region(wire(rn, rn, rn_all)))
---where
---  reads writes(rls, rn, rw)
---do
---  init_nodes(rn)
---  init_wires(piece_id, conf, rls, rn_all, rn, rw)
---end
-
 task init_piece(spiece_id   : int,
                 conf        : Config,
                 rgr         : region(ghost_range),
@@ -428,79 +357,6 @@ do
   init_nodes(rsn)
   init_wires(spiece_id, conf, rgr, rpn, rsn, all_shared, rw)
 end
-
---task create_colorings(num_pieces      : int,
---                      nodes_per_piece : int,
---                      last_shared     : region(int))
---where
---  reads(last_shared)
---do
---  var coloring : Colorings
---  coloring.privacy_map = c.legion_coloring_create()
---  coloring.private_node_map = c.legion_coloring_create()
---  coloring.shared_node_map = c.legion_coloring_create()
---  coloring.ghost_node_map = c.legion_coloring_create()
---
---  c.legion_coloring_ensure_color(coloring.privacy_map, 0)
---  c.legion_coloring_ensure_color(coloring.privacy_map, 1)
---
---  var max_last_shared : &int =
---    [&int](c.malloc([sizeof(int)] * num_pieces))
---  for i = 0, num_pieces do
---    max_last_shared[i] = 0
---    c.legion_coloring_ensure_color(coloring.private_node_map, i)
---    c.legion_coloring_ensure_color(coloring.shared_node_map, i)
---    c.legion_coloring_ensure_color(coloring.ghost_node_map, i)
---  end
---
---  var idx = 0
---  for ls in last_shared do
---    max_last_shared[idx % num_pieces] =
---      max(max_last_shared[idx % num_pieces], @ls)
---
---    var piece_id = idx / num_pieces
---    var offset = (idx % num_pieces) * nodes_per_piece
---    var first_shared = offset
---    var last_shared = offset + @ls - 1
---    if piece_id ~= (idx % num_pieces) and last_shared >= first_shared then
---      c.legion_coloring_add_range(coloring.ghost_node_map,
---        piece_id,
---        c.legion_ptr_t { value = first_shared },
---        c.legion_ptr_t { value = last_shared })
---    end
---    idx = idx + 1
---  end
---
---  for i = 0, num_pieces do
---    var offset = i * nodes_per_piece
---    var first_shared = offset
---    var last_shared = offset + max_last_shared[i] - 1
---    var first_private = last_shared + 1
---    var last_private = offset + nodes_per_piece - 1
---
---    if last_shared >= first_shared then
---      c.legion_coloring_add_range(coloring.privacy_map, 1,
---        c.legion_ptr_t { value = first_shared },
---        c.legion_ptr_t { value = last_shared })
---      c.legion_coloring_add_range(coloring.shared_node_map,
---        i,
---        c.legion_ptr_t { value = first_shared },
---        c.legion_ptr_t { value = last_shared })
---    end
---
---    if last_private >= first_private then
---      c.legion_coloring_add_range(coloring.privacy_map, 0,
---        c.legion_ptr_t { value = first_private },
---        c.legion_ptr_t { value = last_private })
---      c.legion_coloring_add_range(coloring.private_node_map,
---        i,
---        c.legion_ptr_t { value = first_private },
---        c.legion_ptr_t { value = last_private })
---    end
---  end
---
---  return coloring
---end
 
 task init_pointers(rpn : region(node),
                    rsn : region(node),
@@ -654,18 +510,6 @@ do
   end
 end
 
-task dummy(rpn : region(node),
-           rsn : region(node),
-           rgn : region(node),
-           rw : region(wire(rpn, rsn, rgn)))
-where reads(rpn, rw) do
-  return 1
-end
-
-terra wait_for(x : int)
-  return x
-end
-
 task dump_task(rpn : region(node),
                rsn : region(node),
                rgn : region(node),
@@ -701,9 +545,9 @@ end
 
 terra create_colorings(conf : Config)
   var coloring : Colorings
-  coloring.privacy_map = c.legion_coloring_create()
-  coloring.private_node_map = c.legion_coloring_create()
-  coloring.shared_node_map = c.legion_coloring_create()
+  coloring.privacy_map = c.legion_point_coloring_create()
+  coloring.private_node_map = c.legion_point_coloring_create()
+  coloring.shared_node_map = c.legion_point_coloring_create()
   var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
   var num_shared_nodes = conf.num_pieces * conf.shared_nodes_per_piece
 
@@ -711,11 +555,11 @@ terra create_colorings(conf : Config)
     (num_circuit_nodes - num_shared_nodes) % conf.num_pieces == 0,
     "something went wrong in the arithmetic")
 
-  c.legion_coloring_add_range(coloring.privacy_map, 1,
+  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](1),
     c.legion_ptr_t { value = 0 },
     c.legion_ptr_t { value = num_shared_nodes - 1})
 
-  c.legion_coloring_add_range(coloring.privacy_map, 0,
+  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](0),
     c.legion_ptr_t { value = num_shared_nodes },
     c.legion_ptr_t { value = num_circuit_nodes - 1})
 
@@ -724,10 +568,10 @@ terra create_colorings(conf : Config)
   var snpp = conf.shared_nodes_per_piece
   var pnpp = conf.nodes_per_piece - snpp
   for spiece_id = 0, num_superpieces do
-    c.legion_coloring_add_range(coloring.shared_node_map, spiece_id,
+    c.legion_point_coloring_add_range(coloring.shared_node_map, [ptr](spiece_id),
       c.legion_ptr_t { value = spiece_id * snpp * pps },
       c.legion_ptr_t { value = (spiece_id + 1) * snpp * pps - 1})
-    c.legion_coloring_add_range(coloring.private_node_map, spiece_id,
+    c.legion_point_coloring_add_range(coloring.private_node_map, [ptr](spiece_id),
       c.legion_ptr_t { value = num_shared_nodes + spiece_id * pnpp * pps},
       c.legion_ptr_t { value = num_shared_nodes + (spiece_id + 1) * pnpp * pps - 1})
   end
@@ -740,22 +584,17 @@ task create_ghost_partition(conf         : Config,
 where
   reads(ghost_ranges)
 do
-  var ghost_node_map = c.legion_coloring_create()
+  var ghost_node_map = c.legion_point_coloring_create()
   var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
-  for i = 0, num_superpieces do
-    c.legion_coloring_ensure_color(ghost_node_map, i)
-  end
 
-  var idx = 0
   for range in ghost_ranges do
-    c.legion_coloring_add_range(ghost_node_map,
-      idx,
+    c.legion_point_coloring_add_range(ghost_node_map,
+      range,
       c.legion_ptr_t { value = range.first },
       c.legion_ptr_t { value = range.last })
-    idx += 1
   end
 
-  return partition(aliased, all_shared, ghost_node_map)
+  return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
 end
 
 task toplevel()
@@ -806,13 +645,13 @@ task toplevel()
   end
 
   var colorings = create_colorings(conf)
-  var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map)
+  var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
 
-  var launch_domain = ispace(int1d, num_superpieces)
-  var rp_private = partition(disjoint, all_private, colorings.private_node_map)
-  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
+  var launch_domain = ispace(ptr, num_superpieces)
+  var rp_private = partition(disjoint, all_private, colorings.private_node_map, launch_domain)
+  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, launch_domain)
   var rp_wires = partition(equal, all_wires, launch_domain)
 
   var ghost_ranges = region(ispace(ptr, num_superpieces), ghost_range)
@@ -828,40 +667,6 @@ task toplevel()
 
   var rp_ghost = create_ghost_partition(conf, all_shared, ghost_ranges)
 
-  --var last_shared = region(ispace(ptr, num_pieces * num_pieces), int)
-
-  --var rp_nodes = partition(equal, all_nodes, launch_domain)
-  --var rp_wires = partition(equal, all_wires, launch_domain)
-  --var rp_last_shared = partition(equal, last_shared, launch_domain)
-
-  --var duplicate_coloring = c.legion_coloring_create()
-  --for i = 0, num_pieces do
-  --  c.legion_coloring_add_range(duplicate_coloring, i,
-  --    c.legion_ptr_t { value = 0 },
-  --    c.legion_ptr_t { value = num_circuit_nodes - 1 })
-  --end
-  --var rp_duplicate = partition(aliased, all_nodes, duplicate_coloring)
-  --c.legion_coloring_destroy(duplicate_coloring)
-
-  ----__demand(__spmd)
-  --for j = 0, 1 do
-  --  __demand(__parallel)
-  --  for i = 0, num_pieces do
-  --    init_piece(i, conf, rp_last_shared[i], rp_duplicate[i], rp_nodes[i], rp_wires[i])
-  --  end
-  --end
-
-  --var colorings = create_colorings(num_pieces, conf.nodes_per_piece, last_shared)
-
-  --var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map)
-  --var all_private = rp_all_nodes[0]
-  --var all_shared = rp_all_nodes[1]
-  --var rp_private = partition(disjoint, all_private, colorings.private_node_map)
-  --var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map)
-  --var rp_ghost = partition(aliased, all_shared, colorings.ghost_node_map)
-
-  --var rp_all_wires = partition(disjoint, all_wires, colorings.wire_owner_map)
-
   __demand(__spmd)
   for j = 0, 1 do
     for i = 0, num_superpieces do
@@ -869,49 +674,29 @@ task toplevel()
     end
   end
 
-  -- -- Force all previous tasks to complete before continuing.
-  -- do
-  --   var _ = 0
-  --   for i = 0, conf.num_pieces do
-  --     _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_all_wires[i])
-  --   end
-  --   wait_for(_)
-  -- end
-
   c.printf("Starting main simulation loop\n")
-  var ts_start = c.legion_get_current_time_in_micros()
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
+
+  __fence(__execution, __block)
+  var ts_start = c.legion_get_current_time_in_micros()
   __demand(__spmd, __trace)
   for j = 0, num_loops do
-    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
-
-    --__demand(__parallel)
     for i = 0, num_superpieces do
       calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    --__demand(__parallel)
     for i = 0, num_superpieces do
       distribute_charge(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
-    --__demand(__parallel)
     for i = 0, num_superpieces do
       update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
     end
-
-    -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
   end
-  -- Force all previous tasks to complete before continuing.
-  --do
-  --  var _ = 0
-  --  for i = 0, conf.num_pieces do
-  --    _ += dummy(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-  --  end
-  --  wait_for(_)
-  --end
+  __fence(__execution, __block)
   var ts_end = c.legion_get_current_time_in_micros()
+
   if simulation_success then
     c.printf("SUCCESS!\n")
   else
@@ -938,11 +723,6 @@ task toplevel()
     c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
   end
   c.printf("simulation complete - destroying regions\n")
-  --if conf.dump_values then
-  --  for i = 0, conf.num_pieces do
-  --    dump_task(rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
-  --  end
-  --end
 end
 
 if os.getenv('SAVEOBJ') == '1' then

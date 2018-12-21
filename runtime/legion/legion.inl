@@ -5939,7 +5939,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -5988,7 +5989,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6035,7 +6037,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6239,7 +6242,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6287,7 +6291,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -6334,7 +6339,8 @@ namespace Legion {
       finder.only_kind(kind);
       if (finder.count() == 0)
       {
-        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d");
+        fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
+                kind);
         assert(false);
       }
       const Realm::Memory memory = finder.first();
@@ -9047,7 +9053,7 @@ namespace Legion {
                                                   IndexPartitionT<DIM,T> handle)
     //--------------------------------------------------------------------------
     {
-      return IndexSpaceT<DIM,T>(get_parent_index_space(IndexPartiiton(handle)));
+      return IndexSpaceT<DIM,T>(get_parent_index_space(IndexPartition(handle)));
     }
 
     //--------------------------------------------------------------------------

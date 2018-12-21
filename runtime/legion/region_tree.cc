@@ -1887,7 +1887,7 @@ namespace Legion {
       // are valid for all the different equivalence classes
       const std::set<EquivalenceSet*> &eq_sets = 
         version_info.get_equivalence_sets();
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       const std::vector<LogicalRegion> to_meet(1, req.region); 
       std::set<RtEvent> dummy_ready;
       if (IS_REDUCE(req))
@@ -2000,7 +2000,7 @@ namespace Legion {
       std::set<RtEvent> guard_events;
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       if (!IS_DISCARD(usage) && !IS_SIMULT(usage) && check_initialized)
       {
         FieldMask initialized(user_mask);
@@ -2251,7 +2251,7 @@ namespace Legion {
         version_info.get_equivalence_sets();
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->acquire_restrictions(remote_tracker, alt_sets, op, 
@@ -2331,7 +2331,7 @@ namespace Legion {
         version_info.get_equivalence_sets();
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       CopyFillAggregator *release_aggregator = NULL;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
@@ -2452,7 +2452,7 @@ namespace Legion {
       }
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       CopyFillAggregator *across_aggregator = NULL;
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;
@@ -2617,7 +2617,7 @@ namespace Legion {
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       std::set<ApEvent> effects_events;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->overwrite_set(remote_tracker, alt_sets, op, index, fill_view,
@@ -2751,7 +2751,7 @@ namespace Legion {
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       std::set<ApEvent> effects_events;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->overwrite_set(remote_tracker, alt_sets, attach_op, index, 
@@ -2816,7 +2816,7 @@ namespace Legion {
                                                trace_info);
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
-      RemoteEqTracker remote_tracker(runtime->address_space, runtime);
+      RemoteEqTracker remote_tracker(runtime);
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
         if ((*it)->filter_set(remote_tracker, alt_sets, detach_op, local_view,

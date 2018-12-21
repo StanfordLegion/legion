@@ -1196,7 +1196,8 @@ function ref:__ref(cx, expr_type)
         local field_type, base_pointer, stride, field_path = unpack(field)
         local vec
         if std.type_eq(field_type, std.ptr) then
-          vec = expr_type.impl_type
+          assert(std.is_vptr(expr_type))
+          vec = expr_type.vec_type
         else
           vec = vector(field_type, std.as_read(expr_type).N)
         end
@@ -1233,6 +1234,9 @@ function ref:read(cx, expr_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
            end
+           if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
+            result = `([result].value)
+           end
            return quote
              [result] = terralib.attrload(&[field_value], {align = [align]})
            end
@@ -1261,7 +1265,6 @@ function ref:write(cx, value, expr_type)
            result = `([result].[field_name])
          end
          if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
-           field_value = `([field_value].value)
            result = `([result].__ptr.value)
          end
          if expr_type and
@@ -7047,6 +7050,36 @@ function codegen.expr_binary(cx, node)
       span = node.span,
     }
     return codegen.expr(cx, call)
+  elseif std.is_ispace(expr_type) then
+    local ispace_op = nil
+
+    if node.op == "&" then
+      ispace_op = c.legion_index_space_intersection
+    elseif node.op == "|" then
+      ispace_op = c.legion_index_space_union
+    else
+      assert(false, "unreachable")
+    end
+
+    local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
+    local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
+    local result = terralib.newsymbol(expr_type)
+    local actions = quote
+      [lhs.actions];
+      [rhs.actions];
+      [emit_debuginfo(node)]
+      var [result]
+      do
+        var args : c.legion_index_space_t[2]
+        args[0] = [lhs.value].impl
+        args[1] = [rhs.value].impl
+        [result] = [expr_type] { impl = [ispace_op]([cx.runtime], [cx.context], args, 2) }
+      end
+    end
+    return values.value(
+      node,
+      expr.just(actions, result),
+      expr_type)
   else
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)

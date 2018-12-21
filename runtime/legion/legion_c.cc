@@ -62,6 +62,9 @@ typedef AffineTransform<2,3,coord_t> AffineTransform2x3;
 typedef AffineTransform<3,1,coord_t> AffineTransform3x1;
 typedef AffineTransform<3,2,coord_t> AffineTransform3x2;
 typedef AffineTransform<3,3,coord_t> AffineTransform3x3;
+typedef DeferredBuffer<char,1> DeferredBufferChar1D;
+typedef DeferredBuffer<char,2> DeferredBufferChar2D;
+typedef DeferredBuffer<char,3> DeferredBufferChar3D;
 
 // -----------------------------------------------------------------------
 // Pointer Operations
@@ -2551,6 +2554,103 @@ legion_future_map_get_future(legion_future_map_t fm_,
   DomainPoint dp = CObjectWrapper::unwrap(dp_);
 
   return CObjectWrapper::wrap(new Future(fm->get_future(dp)));
+}
+
+// -----------------------------------------------------------------------
+// Deferred Buffer Operations
+// -----------------------------------------------------------------------
+
+legion_deferred_buffer_char_1d_t
+legion_deferred_buffer_char_1d_create(
+    legion_rect_1d_t bounds_,
+    legion_memory_kind_t kind_,
+    char *initial_value)
+{
+  Rect1D bounds = CObjectWrapper::unwrap(bounds_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  return CObjectWrapper::wrap(
+      new DeferredBufferChar1D(bounds, kind, initial_value));
+}
+
+char*
+legion_deferred_buffer_char_1d_ptr(
+    legion_deferred_buffer_char_1d_t buffer_,
+    legion_point_1d_t p_)
+{
+  DeferredBufferChar1D *buffer = CObjectWrapper::unwrap(buffer_);
+  Point1D p = CObjectWrapper::unwrap(p_);
+  return buffer->ptr(p);
+}
+
+void
+legion_deferred_buffer_char_1d_destroy(
+    legion_deferred_buffer_char_1d_t buffer_)
+{
+  DeferredBufferChar1D *buffer = CObjectWrapper::unwrap(buffer_);
+  delete buffer;
+}
+
+legion_deferred_buffer_char_2d_t
+legion_deferred_buffer_char_2d_create(
+    legion_rect_2d_t bounds_,
+    legion_memory_kind_t kind_,
+    char *initial_value)
+{
+  Rect2D bounds = CObjectWrapper::unwrap(bounds_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  return CObjectWrapper::wrap(
+      new DeferredBufferChar2D(bounds, kind, initial_value));
+}
+
+char*
+legion_deferred_buffer_char_2d_ptr(
+    legion_deferred_buffer_char_2d_t buffer_,
+    legion_point_2d_t p_)
+{
+  DeferredBufferChar2D *buffer = CObjectWrapper::unwrap(buffer_);
+  Point2D p = CObjectWrapper::unwrap(p_);
+  return buffer->ptr(p);
+}
+
+void
+legion_deferred_buffer_char_2d_destroy(
+    legion_deferred_buffer_char_2d_t buffer_)
+{
+  DeferredBufferChar2D *buffer = CObjectWrapper::unwrap(buffer_);
+  delete buffer;
+}
+
+legion_deferred_buffer_char_3d_t
+legion_deferred_buffer_char_3d_create(
+    legion_rect_3d_t bounds_,
+    legion_memory_kind_t kind_,
+    char *initial_value)
+{
+  Rect3D bounds = CObjectWrapper::unwrap(bounds_);
+  Memory::Kind kind = CObjectWrapper::unwrap(kind_);
+
+  return CObjectWrapper::wrap(
+      new DeferredBufferChar3D(bounds, kind, initial_value));
+}
+
+char*
+legion_deferred_buffer_char_3d_ptr(
+    legion_deferred_buffer_char_3d_t buffer_,
+    legion_point_3d_t p_)
+{
+  DeferredBufferChar3D *buffer = CObjectWrapper::unwrap(buffer_);
+  Point3D p = CObjectWrapper::unwrap(p_);
+  return buffer->ptr(p);
+}
+
+void
+legion_deferred_buffer_char_3d_destroy(
+    legion_deferred_buffer_char_3d_t buffer_)
+{
+  DeferredBufferChar3D *buffer = CObjectWrapper::unwrap(buffer_);
+  delete buffer;
 }
 
 //------------------------------------------------------------------------

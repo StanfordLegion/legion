@@ -1927,39 +1927,35 @@ namespace Legion {
       {
         // Sort the start and end of each equivalence set bounding rectangle
         // along the splitting dimension
-        std::map<std::pair<coord_t,unsigned/*index*/>,bool/*start*/> lines;
+        std::set<Line> lines;
         for (unsigned idx = 0; idx < subsets.size(); idx++)
         {
-          const std::pair<coord_t,unsigned> start_key(
-              subset_bounds[idx].lo[refinement_dim],idx);
-          lines[start_key] = true;
-          const std::pair<coord_t,unsigned> stop_key(
-              subset_bounds[idx].hi[refinement_dim],idx);
-          lines[stop_key] = false;
+          lines.insert(Line(subset_bounds[idx].lo[refinement_dim],idx,true));
+          lines.insert(Line(subset_bounds[idx].hi[refinement_dim],idx,false));
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
         std::map<coord_t,unsigned> left_inclusive, right_inclusive;
         unsigned count = 0;
-        for (std::map<std::pair<coord_t,unsigned>,bool>::const_iterator it =
-              lines.begin(); it != lines.end(); it++)
+        for (typename std::set<Line>::const_iterator it = lines.begin();
+              it != lines.end(); it++)
         {
           // Only increment for new rectangles
-          if (it->second)
+          if (it->start)
             count++;
           // Always record the count for all splits
-          left_inclusive[it->first.first] = count;
+          left_inclusive[it->value] = count;
         }
         count = 0;
-        for (std::map<std::pair<coord_t,unsigned>,bool>::const_reverse_iterator
-              it = lines.rbegin(); it != lines.rend(); it++)
+        for (typename std::set<Line>::const_reverse_iterator it = 
+              lines.rbegin(); it != lines.rend(); it++)
         {
           // End of rectangles are the beginning in this direction
-          if (!it->second)
+          if (!it->start)
             count++;
           // Always record the count for all splits
-          right_inclusive[it->first.first] = count;
+          right_inclusive[it->value] = count;
         }
 #ifdef DEBUG_LEGION
         assert(left_inclusive.size() == right_inclusive.size());
@@ -2069,7 +2065,6 @@ namespace Legion {
         std::set<EquivalenceSet*> children;
         children.insert(left_set.begin(), left_set.end());
         children.insert(right_set.begin(), right_set.end());
-        // Put the new sets back in the subsets
         subsets.clear();
         subsets.insert(subsets.end(), children.begin(), children.end());
         return true;
@@ -3270,6 +3265,13 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
+    RemoteEqTracker::RemoteEqTracker(Runtime *rt)
+      : source(rt->address_space), previous(source), runtime(rt)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     bool RemoteEqTracker::request_remote_instances(
                                               FieldMaskSet<LogicalView> &insts,
                                               const FieldMask &mask, 
@@ -3923,7 +3925,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_request_instances(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -3951,7 +3953,7 @@ namespace Legion {
 
       bool restricted = false;
       FieldMaskSet<LogicalView> valid_insts;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -3994,7 +3996,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_request_reductions(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4024,7 +4026,7 @@ namespace Legion {
 
       bool restricted = false;
       FieldMaskSet<ReductionView> reduction_insts;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -4067,7 +4069,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_updates(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4132,7 +4134,7 @@ namespace Legion {
       derez.deserialize(check_initialized);
 
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
       CopyFillAggregator *output_aggregator = NULL;
       std::set<RtEvent> guard_events;
@@ -4252,7 +4254,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_acquires(Deserializer &derez,
-                                                            Runtime *runtime)
+                                      Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4290,7 +4292,7 @@ namespace Legion {
       FieldMaskSet<InstanceView> instances;
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> acquired_events;
       PhysicalTraceInfo trace_info(op);
@@ -4365,7 +4367,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_releases(Deserializer &derez,
-                                                            Runtime *runtime)
+                                      Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4405,7 +4407,7 @@ namespace Legion {
       FieldMaskSet<InstanceView> instances;
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> released_events;
       PhysicalTraceInfo trace_info(op);
@@ -4492,7 +4494,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_copies_across(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4585,7 +4587,7 @@ namespace Legion {
       derez.deserialize(copy);
 
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       CopyFillAggregator *across_aggregator = NULL;
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;
@@ -4732,7 +4734,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_overwrites(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4789,7 +4791,7 @@ namespace Legion {
 
       CopyFillAggregator *output_aggregator = NULL;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> effects_events;
       PhysicalTraceInfo trace_info(op);
@@ -4860,7 +4862,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_filters(
-                                          Deserializer &derez, Runtime *runtime)
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -4910,7 +4912,7 @@ namespace Legion {
 
       std::set<RtEvent> map_applied_events;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, runtime);
+      RemoteEqTracker remote_tracker(source, previous, runtime);
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
@@ -4966,9 +4968,8 @@ namespace Legion {
         eq_state(is_logical_owner() ? MAPPING_STATE : 
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
-            is_owner() ? VALID_STATE : INVALID_STATE),
-        next_guard_index(1), unrefined_remainder(NULL),
-        disjoint_partition_refinement(NULL)
+            is_owner() ? VALID_STATE : INVALID_STATE),unrefined_remainder(NULL),
+        disjoint_partition_refinement(NULL), lru_index(0)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -4989,6 +4990,10 @@ namespace Legion {
       }
       if (is_logical_owner() && !is_owner())
         remote_subsets.insert(owner_space);
+      // Initialize this to the array of all local addresses since if
+      // we're using the buffer we are the logical owner space
+      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+        previous_requests[idx] = local_space;
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -5192,13 +5197,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
+      if (update_guards.empty())
+        return;
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner());
+      // Put this assertion after the test above in case we were migrated
       assert((eq_state == MAPPING_STATE) || 
              (eq_state == PENDING_REFINED_STATE));
 #endif
-      if (update_guards.empty())
-        return;
       FieldMaskSet<CopyFillAggregator>::iterator finder = 
         update_guards.find(aggregator);
       if (finder == update_guards.end())
@@ -5290,30 +5295,9 @@ namespace Legion {
           return;
         }
       }
-      // If this is not the owner node then send the request there
-      if (!is_logical_owner())
-      {
-#ifdef DEBUG_LEGION
-        assert(!deferral_event.exists());
-#endif
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(target);
-          expr->pack_expression(rez, logical_owner_space);
-          rez.serialize(handle);
-          rez.serialize(source);
-          rez.serialize(trace_done);
-        }
-        runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
-                                                        rez);
-        return;
-      }
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
 #endif
-      // At this point we're on the owner
       std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse;
       std::map<RefinementThunk*,IndexSpaceExpression*> refinements_to_traverse;
       RtEvent refinement_done;
@@ -5356,6 +5340,26 @@ namespace Legion {
             runtime->issue_runtime_meta_task(args,
                               LG_THROUGHPUT_DEFERRED_PRIORITY, eq.try_next());
           }
+          return;
+        }
+        else if (!is_logical_owner())
+        {
+          // If we're not the owner node then send the request there
+#ifdef DEBUG_LEGION
+          assert(!deferral_event.exists());
+#endif
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(target);
+            expr->pack_expression(rez, logical_owner_space);
+            rez.serialize(handle);
+            rez.serialize(source);
+            rez.serialize(trace_done);
+          }
+          runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
+                                                          rez);
           return;
         }
         else if (eq_state == REFINING_STATE)
@@ -5678,6 +5682,9 @@ namespace Legion {
     void EquivalenceSet::pack_state(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+#endif
       // Pack the valid instances
       rez.serialize<size_t>(valid_instances.size());
       if (!valid_instances.empty())
@@ -5731,7 +5738,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::unpack_state(Deserializer &derez, 
+    void EquivalenceSet::unpack_state(Deserializer &derez,
                                       ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
@@ -5742,6 +5749,8 @@ namespace Legion {
       assert(restricted_instances.empty());
       assert(version_numbers.empty());
 #endif
+      // We can unpack these data structures because we know that no one
+      // else touching them since we're not the owner
       std::set<RtEvent> deferred_reference_events;
       std::map<LogicalView*,unsigned> *deferred_references = NULL;
       size_t num_valid_insts;
@@ -5847,10 +5856,13 @@ namespace Legion {
           Runtime::merge_events(deferred_reference_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+          // Save the wait_on event as the one that is needed before
+          // anyone else can use this as the logical owner space
           RtUserEvent done_event = Runtime::create_rt_user_event();
           // This will take ownership of the deferred references
           // map and delete it when it is done with it
-          RemoteRefTaskArgs args(this, done_event, deferred_references);
+          RemoteRefTaskArgs args(this->did, done_event, 
+                                 true/*add*/, deferred_references);
           runtime->issue_runtime_meta_task(args, 
               LG_LATENCY_DEFERRED_PRIORITY, wait_on);
           mutator.record_reference_mutation_effect(done_event);
@@ -5864,6 +5876,300 @@ namespace Legion {
           delete deferred_references;
         }
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::pack_migration(Serializer &rez, RtEvent done_migration)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(subsets.empty());
+      assert(pending_refinements.empty());
+      assert(unrefined_remainder == NULL);
+      assert(disjoint_partition_refinement == NULL);
+#endif
+      std::map<LogicalView*,unsigned> *late_references = NULL;
+      // Pack the valid instances
+      rez.serialize<size_t>(valid_instances.size());
+      if (!valid_instances.empty())
+      {
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+          if (late_references == NULL)
+            late_references = new std::map<LogicalView*,unsigned>();
+          (*late_references)[it->first] = 1;
+        }
+        valid_instances.clear();
+      }
+      // Pack the reduction instances
+      rez.serialize<size_t>(reduction_instances.size());
+      if (!reduction_instances.empty())
+      {
+        for (std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              rit = reduction_instances.begin(); 
+              rit != reduction_instances.end(); rit++)
+        {
+          rez.serialize(rit->first);
+          rez.serialize<size_t>(rit->second.size());
+          for (std::vector<ReductionView*>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize((*it)->did);
+            if (late_references == NULL)
+              late_references = new std::map<LogicalView*,unsigned>();
+            (*late_references)[*it] = 1;
+          }
+        }
+        reduction_instances.clear();
+      }
+      // Pack the restricted instances
+      rez.serialize<size_t>(restricted_instances.size());  
+      if (!restricted_instances.empty())
+      {
+        rez.serialize(restricted_fields);
+        for (FieldMaskSet<InstanceView>::const_iterator it = 
+              restricted_instances.begin(); it != 
+              restricted_instances.end(); it++)
+        {
+          rez.serialize(it->first->did);
+          rez.serialize(it->second);
+          if (late_references == NULL)
+            late_references = new std::map<LogicalView*,unsigned>();
+          std::map<LogicalView*,unsigned>::iterator finder = 
+            late_references->find(it->first);
+          if (finder == late_references->end())
+            (*late_references)[it->first] = 1;
+          else
+            finder->second += 1;
+        }
+        restricted_instances.clear();
+      }
+      // Pack the version numbers
+      rez.serialize<size_t>(version_numbers.size());
+      if (!version_numbers.empty())
+      {
+        for (LegionMap<VersionID,FieldMask>::aligned::const_iterator it = 
+              version_numbers.begin(); it != version_numbers.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        version_numbers.clear();
+      }
+      // Pack events to wait on to make sure all remote guards are done
+      // before we become the new logical owner
+      rez.serialize<size_t>(update_guards.size());
+      if (!update_guards.empty())
+      {
+        for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
+              update_guards.begin(); it != update_guards.end(); it++)
+          rez.serialize(it->first->applied_event);
+        update_guards.clear();
+      }
+      rez.serialize<size_t>(remote_subsets.size());
+      if (!remote_subsets.empty())
+      {
+        for (std::set<AddressSpaceID>::const_iterator it = 
+              remote_subsets.begin(); it != remote_subsets.end(); it++)
+          rez.serialize(*it);
+        remote_subsets.clear();
+      }
+      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+        rez.serialize(previous_requests[idx]);
+      rez.serialize(lru_index);
+      if (late_references != NULL)
+      {
+        // Launch a task to remove the references once the migration is done
+        RemoteRefTaskArgs args(this->did, RtUserEvent::NO_RT_USER_EVENT,
+                               false/*add*/, late_references);
+        runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY, 
+                                         done_migration); 
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::unpack_migration(Deserializer &derez, 
+                                          ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // We can unpack these data structures because we know that no one
+      // else touching them since we're not the owner yet
+      std::set<RtEvent> deferred_reference_events;
+      std::map<LogicalView*,unsigned> deferred_references;
+      size_t num_valid_insts;
+      derez.deserialize(num_valid_insts);
+      for (unsigned idx = 0; idx < num_valid_insts; idx++)
+      {
+        DistributedID valid_did;
+        derez.deserialize(valid_did);
+        RtEvent ready;
+        LogicalView *view = 
+          runtime->find_or_request_logical_view(valid_did, ready);
+        FieldMask mask;
+        derez.deserialize(mask);
+        valid_instances.insert(view, mask);
+        if (ready.exists() && !ready.has_triggered())
+        {
+          deferred_reference_events.insert(ready);
+          deferred_references[view] = 1;
+        }
+        else
+          view->add_nested_valid_ref(did, &mutator);
+      }
+      size_t num_reduc_fields;
+      derez.deserialize(num_reduc_fields);
+      for (unsigned idx1 = 0; idx1 < num_reduc_fields; idx1++)
+      {
+        unsigned fidx;
+        derez.deserialize(fidx);
+        reduction_fields.set_bit(fidx);
+        size_t num_reduc_insts;
+        derez.deserialize(num_reduc_insts);
+        std::vector<ReductionView*> &reduc_views = reduction_instances[fidx];
+        for (unsigned idx2 = 0; idx2 < num_reduc_insts; idx2++)
+        {
+          DistributedID reduc_did;
+          derez.deserialize(reduc_did);
+          RtEvent ready;
+          LogicalView *view = 
+            runtime->find_or_request_logical_view(reduc_did, ready);
+          ReductionView *reduc_view = static_cast<ReductionView*>(view);
+          reduc_views.push_back(reduc_view);
+          if (ready.exists() && !ready.has_triggered())
+          {
+            deferred_reference_events.insert(ready);
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              deferred_references.find(view);
+            if (finder == deferred_references.end())
+              deferred_references[view] = 1;
+            else
+              finder->second++;
+          }
+          else
+            view->add_nested_valid_ref(did, &mutator);
+        }
+      }
+      size_t num_restrict_insts;
+      derez.deserialize(num_restrict_insts);
+      if (num_restrict_insts > 0)
+      {
+        derez.deserialize(restricted_fields);
+        for (unsigned idx = 0; idx < num_restrict_insts; idx++)
+        {
+          DistributedID valid_did;
+          derez.deserialize(valid_did);
+          RtEvent ready;
+          LogicalView *view = 
+            runtime->find_or_request_logical_view(valid_did, ready);
+          InstanceView *inst_view = static_cast<InstanceView*>(view);
+          FieldMask mask;
+          derez.deserialize(mask);
+          restricted_instances.insert(inst_view, mask);
+          if (ready.exists() && !ready.has_triggered())
+          {
+            deferred_reference_events.insert(ready);
+            std::map<LogicalView*,unsigned>::iterator finder = 
+              deferred_references.find(view);
+            if (finder == deferred_references.end())
+              deferred_references[view] = 1;
+            else
+              finder->second++;
+          }
+          else
+            view->add_nested_valid_ref(did, &mutator);
+        }
+      }
+      size_t num_versions;
+      derez.deserialize(num_versions);
+      for (unsigned idx = 0; idx < num_versions; idx++)
+      {
+        VersionID vid;
+        derez.deserialize(vid);
+        derez.deserialize(version_numbers[vid]);
+      }
+      size_t num_guard_events;
+      derez.deserialize(num_guard_events);
+      std::set<RtEvent> guard_preconditions;
+      for (unsigned idx = 0; idx < num_guard_events; idx++)
+      {
+        RtEvent guard_event;
+        derez.deserialize(guard_event);
+        guard_preconditions.insert(guard_event);
+      }
+      size_t num_remote_subsets;
+      derez.deserialize(num_remote_subsets);
+      for (unsigned idx = 0; idx < num_remote_subsets; idx++)
+      {
+        AddressSpaceID remote;
+        derez.deserialize(remote);
+        remote_subsets.insert(remote);
+      }
+      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+        derez.deserialize(previous_requests[idx]);
+      derez.deserialize(lru_index);
+      // Make all the events we'll need to wait on
+      RtEvent ready_for_references, guards_done;
+      if (!deferred_reference_events.empty())
+        ready_for_references = Runtime::merge_events(deferred_reference_events);
+      if (!guard_preconditions.empty())
+        guards_done = Runtime::merge_events(guard_preconditions);
+      if (ready_for_references.exists() && 
+          !ready_for_references.has_triggered())
+        ready_for_references.wait();
+      // Add our references
+      for (std::map<LogicalView*,unsigned>::const_iterator it = 
+            deferred_references.begin(); it != 
+            deferred_references.end(); it++)
+        it->first->add_nested_valid_ref(did, &mutator, it->second);
+      // Wait for all the guards to be done before we mark that
+      // we are now the new owner
+      if (guards_done.exists() && !guards_done.has_triggered())
+      {
+        // Defer the call to make this the owner until the event triggers
+        DeferMakeOwnerArgs args(this);
+        RtEvent done = runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, guards_done);
+        mutator.record_reference_mutation_effect(done);
+      }
+      else
+        make_owner();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::make_owner(void)
+    //--------------------------------------------------------------------------
+    {
+      // Now we can mark that we are the logical owner
+      AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
+#endif
+      logical_owner_space = local_space;
+      // If we were waiting for a valid copy of the subsets we now have it
+      if (eq_state == PENDING_VALID_STATE)
+      {
+#ifdef DEBUG_LEGION
+        assert(transition_event.exists()); 
+#endif
+        // We can trigger this transition event now that we have a valid
+        // copy of the subsets (we are the logical owner)
+        Runtime::trigger_event(transition_event);
+        transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
+      eq_state = MAPPING_STATE;
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::update_owner(const AddressSpaceID new_logical_owner)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock eq(eq_lock);
+      // If we are the owner then we know this update is stale so ignore it
+      if (!is_logical_owner())
+        logical_owner_space = new_logical_owner;
     }
 
     //--------------------------------------------------------------------------
@@ -6296,6 +6602,7 @@ namespace Legion {
           }
         }
       }
+      check_for_migration(remote_tracker, applied_events);
       return false;
     }
 
@@ -6345,6 +6652,78 @@ namespace Legion {
       if (!!reduce_mask)
         apply_reductions(reduce_mask, input_aggregator, guard_event,
                          op, index, false/*track events*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::check_for_migration(RemoteEqTracker &remote_tracker,
+                                             std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifndef DISABLE_EQUIVALENCE_SET_MIGRATION
+#ifdef DEBUG_LEGION
+      assert(is_logical_owner());
+      assert(subsets.empty());
+      assert(eq_state != REFINING_STATE);
+#endif
+      // If we have pending refinements then there is no point in migrating     
+      // since we're just going to refine anyway
+      if (!pending_refinements.empty())
+        return;
+      // No matter what update the previous requests data structure
+      previous_requests[lru_index++] = remote_tracker.source;
+      if (lru_index == NUM_PREVIOUS)
+        lru_index = 0;
+      bool migrated = false;
+      // If we don't agree the current owner, see if we should migrate
+      if (remote_tracker.source != logical_owner_space)
+      {
+        // Check to see if we need to do the migration to the source
+        unsigned count = 0;
+        for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+          if (previous_requests[idx] == remote_tracker.source)
+            count++;
+        // If count is >50% of previous users then we do the migration
+        // otherwise we leave it at the current location
+        if (count >= ((NUM_PREVIOUS + 1) / 2))
+        {
+          migrated = true;
+          // Update the logical owner space
+          logical_owner_space = remote_tracker.source;
+          // Add ourselves and remove the new owner from remote subsets
+          remote_subsets.insert(local_space);
+          remote_subsets.erase(logical_owner_space);
+          // We can switch our eq_state to being remote valid
+          eq_state = VALID_STATE;
+          RtUserEvent done_migration = Runtime::create_rt_user_event();
+          // Do the migration
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(done_migration);
+            pack_migration(rez, done_migration);
+          }
+          runtime->send_equivalence_set_migration(logical_owner_space, rez);
+          applied_events.insert(done_migration);
+        }
+      }
+      // If the request bounced of a stale logical owner, then send 
+      // a message to update the source with the current logical owner
+      if (!migrated && (remote_tracker.source != remote_tracker.previous) &&
+          (remote_tracker.source != local_space))
+      {
+        RtUserEvent notification_event = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+          rez.serialize(logical_owner_space);
+          rez.serialize(notification_event);
+        }
+        runtime->send_equivalence_set_owner_update(remote_tracker.source, rez);
+        applied_events.insert(notification_event);
+      }
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6413,6 +6792,7 @@ namespace Legion {
         inst_exprs[view].insert(set_expr);
       }
       restricted_fields -= acquire_mask;
+      check_for_migration(remote_tracker, applied_events);
       return false;
     }
 
@@ -6501,6 +6881,7 @@ namespace Legion {
                          RtEvent::NO_RT_EVENT, op, 0/*index*/, false/*track*/);
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
+      check_for_migration(remote_tracker, ready_events);
       return false;
     }
 
@@ -6791,6 +7172,7 @@ namespace Legion {
         assert(reduction_fields * src_mask);
 #endif
       }
+      check_for_migration(remote_tracker, applied_events);
       return false;
     }
 
@@ -6925,6 +7307,7 @@ namespace Legion {
             copy_out(restricted_overlap, view, op, index, output_aggregator);
         }
       }
+      check_for_migration(remote_tracker, ready_events);
       return false;
     }
 
@@ -7022,6 +7405,7 @@ namespace Legion {
           }
         }
       }
+      check_for_migration(remote_tracker, applied_events);
       return false;
     }
 
@@ -7810,6 +8194,21 @@ namespace Legion {
         }
         return;
       }
+      if (!is_logical_owner())
+      {
+        // If we're not the owner anymore then forward on the request
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(did);
+        }
+        runtime->send_equivalence_set_subset_request(logical_owner_space, rez);
+        return;
+      }
+      // If we arrived back at ourself after we were made the owner
+      // then there is nothing for us to do
+      if (source == local_space)
+        return;
       // If we're in the process of doing a refinement, wait for
       // that to be done before we do anything else
       if (eq_state == REFINING_STATE)
@@ -7823,7 +8222,6 @@ namespace Legion {
         return;
       }
 #ifdef DEBUG_LEGION
-      assert(is_logical_owner());
       assert(remote_subsets.find(source) == remote_subsets.end());
 #endif
       // Record the remote subsets
@@ -7893,8 +8291,16 @@ namespace Legion {
           (*it)->add_nested_resource_ref(did);
       }
       AutoLock eq(eq_lock);
+      if (is_logical_owner())
+      {
+        // If we've since been made the logical owner then there
+        // should be nothing else for us to do
 #ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
+        assert(new_subsets.empty());
+#endif
+        return;
+      }
+#ifdef DEBUG_LEGION
       assert(subsets.empty());
       assert(eq_state == PENDING_VALID_STATE);
       assert(transition_event.exists());
@@ -7939,8 +8345,14 @@ namespace Legion {
             new_subsets.begin(); it != new_subsets.end(); it++)
         (*it)->add_nested_resource_ref(did);
       AutoLock eq(eq_lock);
+      if (is_logical_owner())
+      {
 #ifdef DEBUG_LEGION
-      assert(!is_logical_owner());
+        assert(new_subsets.empty());
+#endif
+        return;
+      }
+#ifdef DEBUG_LEGION
       assert(eq_state == VALID_STATE);
       assert(!transition_event.exists());
       assert(subsets.empty());
@@ -7961,13 +8373,40 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const RemoteRefTaskArgs *rargs = (const RemoteRefTaskArgs*)args;
-      LocalReferenceMutator mutator; 
-      for (std::map<LogicalView*,unsigned>::const_iterator it = 
-            rargs->refs_to_add->begin(); it != rargs->refs_to_add->end(); it++)
-        it->first->add_nested_valid_ref(rargs->set->did, &mutator, it->second);
-      delete rargs->refs_to_add;
-      const RtEvent done_pre = mutator.get_done_event();
-      Runtime::trigger_event(rargs->done_event, done_pre);
+      if (rargs->done_event.exists())
+      {
+        LocalReferenceMutator mutator; 
+        if (rargs->add_references)
+        {
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                rargs->refs->begin(); it != rargs->refs->end(); it++)
+            it->first->add_nested_valid_ref(rargs->did, &mutator, it->second);
+        }
+        else
+        {
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                rargs->refs->begin(); it != rargs->refs->end(); it++)
+            it->first->remove_nested_valid_ref(rargs->did, &mutator,it->second);
+        }
+        const RtEvent done_pre = mutator.get_done_event();
+        Runtime::trigger_event(rargs->done_event, done_pre);
+      }
+      else
+      {
+        if (rargs->add_references)
+        {
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                rargs->refs->begin(); it != rargs->refs->end(); it++)
+            it->first->add_nested_valid_ref(rargs->did, NULL, it->second);
+        }
+        else
+        {
+          for (std::map<LogicalView*,unsigned>::const_iterator it = 
+                rargs->refs->begin(); it != rargs->refs->end(); it++)
+            it->first->remove_nested_valid_ref(rargs->did, NULL, it->second);
+        }
+      }
+      delete rargs->refs;
     }
 
     //--------------------------------------------------------------------------
@@ -7987,6 +8426,14 @@ namespace Legion {
     {
       const DeferSubsetRequestArgs *dargs = (const DeferSubsetRequestArgs*)args;
       dargs->set->process_subset_request(dargs->source, dargs->deferral);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_make_owner(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
+      dargs->set->make_owner();
     }
 
     //--------------------------------------------------------------------------
@@ -8136,6 +8583,46 @@ namespace Legion {
         ready.wait();
       target->record_equivalence_set(set);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_migration(Deserializer &derez,
+                                                     Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      RtUserEvent done;
+      derez.deserialize(done);
+
+      LocalReferenceMutator mutator; 
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->unpack_migration(derez, mutator);
+      Runtime::trigger_event(done, mutator.get_done_event());
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_owner_update(Deserializer &derez,
+                                                        Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      DistributedID did;
+      derez.deserialize(did);
+      RtEvent ready;
+      EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      AddressSpaceID new_owner;
+      derez.deserialize(new_owner);
+      RtUserEvent done;
+      derez.deserialize(done);
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      set->update_owner(new_owner);
+      Runtime::trigger_event(done);
     }
 
     //--------------------------------------------------------------------------

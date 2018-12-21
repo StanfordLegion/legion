@@ -61,6 +61,9 @@ extern "C" {
   NEW_OPAQUE_TYPE(legion_predicate_t);
   NEW_OPAQUE_TYPE(legion_future_t);
   NEW_OPAQUE_TYPE(legion_future_map_t);
+  NEW_OPAQUE_TYPE(legion_deferred_buffer_char_1d_t);
+  NEW_OPAQUE_TYPE(legion_deferred_buffer_char_2d_t);
+  NEW_OPAQUE_TYPE(legion_deferred_buffer_char_3d_t);
   NEW_OPAQUE_TYPE(legion_task_launcher_t);
   NEW_OPAQUE_TYPE(legion_index_launcher_t);
   NEW_OPAQUE_TYPE(legion_inline_launcher_t);
@@ -2263,6 +2266,88 @@ extern "C" {
   legion_future_t
   legion_future_map_get_future(legion_future_map_t handle,
                                legion_domain_point_t point);
+
+  // -----------------------------------------------------------------------
+  // Deferred Buffer Operations
+  // -----------------------------------------------------------------------
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::DeferredBuffer::DeferredBuffer()
+   */
+  legion_deferred_buffer_char_1d_t
+  legion_deferred_buffer_char_1d_create(
+      legion_rect_1d_t bounds,
+      legion_memory_kind_t kind,
+      char *initial_value);
+
+  /*
+   * @see Legion::DeferredBuffer::ptr()
+   */
+  char*
+  legion_deferred_buffer_char_1d_ptr(
+      legion_deferred_buffer_char_1d_t buffer,
+      legion_point_1d_t p);
+
+  /*
+   * @see Legion::DeferredBuffer::~DeferredBuffer()
+   */
+  void
+  legion_deferred_buffer_char_1d_destroy(
+      legion_deferred_buffer_char_1d_t buffer);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::DeferredBuffer::DeferredBuffer()
+   */
+  legion_deferred_buffer_char_2d_t
+  legion_deferred_buffer_char_2d_create(
+      legion_rect_2d_t bounds,
+      legion_memory_kind_t kind,
+      char *initial_value);
+
+  /*
+   * @see Legion::DeferredBuffer::ptr()
+   */
+  char*
+  legion_deferred_buffer_char_2d_ptr(
+      legion_deferred_buffer_char_2d_t buffer,
+      legion_point_2d_t p);
+
+  /*
+   * @see Legion::DeferredBuffer::~DeferredBuffer()
+   */
+  void
+  legion_deferred_buffer_char_2d_destroy(
+      legion_deferred_buffer_char_2d_t buffer);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::DeferredBuffer::DeferredBuffer()
+   */
+  legion_deferred_buffer_char_3d_t
+  legion_deferred_buffer_char_3d_create(
+      legion_rect_3d_t bounds,
+      legion_memory_kind_t kind,
+      char *initial_value);
+
+  /*
+   * @see Legion::DeferredBuffer::ptr()
+   */
+  char*
+  legion_deferred_buffer_char_3d_ptr(
+      legion_deferred_buffer_char_3d_t buffer,
+      legion_point_3d_t p);
+
+  /*
+   * @see Legion::DeferredBuffer::~DeferredBuffer()
+   */
+  void
+  legion_deferred_buffer_char_3d_destroy(
+      legion_deferred_buffer_char_3d_t buffer);
 
   // -----------------------------------------------------------------------
   // Task Launch Operations

@@ -224,8 +224,8 @@ def run_test_fuzzer(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
 
 def run_test_realm(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     test_dir = os.path.join(root_dir, 'test/realm')
-    cmd(['make', '-C', test_dir, 'DEBUG=0', 'USE_CUDA=0', 'USE_GASNET=0', 'clean'], env=env)
-    cmd(['make', '-C', test_dir, 'DEBUG=0', 'USE_CUDA=0', 'USE_GASNET=0', 'run_all'], env=env)
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'clean'], env=env)
+    cmd(['make', '-C', test_dir, 'DEBUG=0', 'run_all'], env=env)
 
 def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
     flags = ['-logfile', 'out_%.log']
@@ -322,7 +322,7 @@ def run_test_private(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
          'git@github.com:magnatelee/miniaero-spmd.git', miniaero_dir])
     cmd(['make', '-C', miniaero_dir, '-j', str(thread_count)], env=env,
         cwd=miniaero_dir)
-    for test in ['3D_Sod' #, '3D_Sod_2nd_Order'
+    for test in ['3D_Sod', '3D_Sod_2nd_Order'
                  # These tests take a long time so skip them by default.
                  # , 'FlatPlate', 'Ramp'
                 ]:

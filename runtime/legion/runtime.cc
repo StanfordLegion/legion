@@ -340,7 +340,8 @@ namespace Legion {
              context->get_task_name(), context->get_unique_id());
         }
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
+      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
+          !runtime->separate_runtime_instances)
         Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
@@ -372,7 +373,8 @@ namespace Legion {
              "best practices. You may notice a severe performance degradation.",
              context->get_task_name(), context->get_unique_id())
       }
-      if (producer_op != NULL && Internal::implicit_context != NULL)
+      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
+          !runtime->separate_runtime_instances)
         Internal::implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
@@ -6565,6 +6567,16 @@ namespace Legion {
               runtime->handle_equivalence_set_ray_trace_response(derez);
               break;
             }
+          case SEND_EQUIVALENCE_SET_MIGRATION:
+            {
+              runtime->handle_equivalence_set_migration(derez);
+              break;
+            }
+          case SEND_EQUIVALENCE_SET_OWNER_UPDATE:
+            {
+              runtime->handle_equivalence_set_owner_update(derez);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT:
             {
               runtime->handle_equivalence_set_remote_refinement(derez);
@@ -6572,42 +6584,50 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES:
             {
-              runtime->handle_equivalence_set_remote_request_instances(derez);
+              runtime->handle_equivalence_set_remote_request_instances(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS:
             {
-              runtime->handle_equivalence_set_remote_request_reductions(derez);
+              runtime->handle_equivalence_set_remote_request_reductions(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
             {
-              runtime->handle_equivalence_set_remote_updates(derez);
+              runtime->handle_equivalence_set_remote_updates(derez,
+                                              remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES:
             {
-              runtime->handle_equivalence_set_remote_acquires(derez);
+              runtime->handle_equivalence_set_remote_acquires(derez,
+                                              remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_RELEASES:
             {
-              runtime->handle_equivalence_set_remote_releases(derez);
+              runtime->handle_equivalence_set_remote_releases(derez,
+                                              remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS:
             {
-              runtime->handle_equivalence_set_remote_copies_across(derez);
+              runtime->handle_equivalence_set_remote_copies_across(derez,
+                                                    remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES:
             {
-              runtime->handle_equivalence_set_remote_overwrites(derez);
-              break;
+              runtime->handle_equivalence_set_remote_overwrites(derez,
+                                                remote_address_space);
+            break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_FILTERS:
             {
-              runtime->handle_equivalence_set_remote_filters(derez);
+              runtime->handle_equivalence_set_remote_filters(derez,
+                                              remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_REMOTE_INSTANCES:
@@ -15354,6 +15374,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_migration(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_EQUIVALENCE_SET_MIGRATION,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_owner_update(AddressSpaceID target,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_EQUIVALENCE_SET_OWNER_UPDATE,
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_refinement(AddressSpaceID target,
                                                          Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16671,6 +16710,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_migration(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_migration(derez, this); 
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_owner_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      EquivalenceSet::handle_owner_update(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_refinement(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
@@ -16679,61 +16732,66 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_request_instances(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_request_instances(derez, this);
+      RemoteEqTracker::handle_remote_request_instances(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_request_reductions(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_request_reductions(derez, this);
+      RemoteEqTracker::handle_remote_request_reductions(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_updates(Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_updates(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_updates(derez, this);
+      RemoteEqTracker::handle_remote_updates(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_acquires(Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_acquires(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_acquires(derez, this);
+      RemoteEqTracker::handle_remote_acquires(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_releases(Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_releases(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_releases(derez, this);
+      RemoteEqTracker::handle_remote_releases(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_copies_across(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_copies_across(derez, this);
+      RemoteEqTracker::handle_remote_copies_across(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_overwrites(Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_overwrites(Deserializer &derez,
+                                                          AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_overwrites(derez, this);
+      RemoteEqTracker::handle_remote_overwrites(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_filters(Deserializer &derez)
+    void Runtime::handle_equivalence_set_remote_filters(Deserializer &derez,
+                                                        AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_filters(derez, this);
+      RemoteEqTracker::handle_remote_filters(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -21861,6 +21919,11 @@ namespace Legion {
         case LG_DEFER_SUBSET_REQUEST_TASK_ID:
           {
             EquivalenceSet::handle_subset_request(args);
+            break;
+          }
+        case LG_DEFER_MAKE_OWNER_TASK_ID:
+          {
+            EquivalenceSet::handle_make_owner(args);
             break;
           }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
