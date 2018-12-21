@@ -3924,6 +3924,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteEqTracker::process_local_instances(
+            const FieldMaskSet<LogicalView> &views, const bool local_restricted)
+    //--------------------------------------------------------------------------
+    {
+ #ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif     
+      AutoLock r_lock(*remote_lock);
+      for (FieldMaskSet<LogicalView>::const_iterator it = 
+            views.begin(); it != views.end(); it++)
+        remote_insts->insert(it->first, it->second);
+      if (local_restricted)
+        restricted = true;
+    }
+    
+    //--------------------------------------------------------------------------
+    void RemoteEqTracker::process_local_instances(
+          const FieldMaskSet<ReductionView> &views, const bool local_restricted)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      AutoLock r_lock(*remote_lock);
+      for (FieldMaskSet<ReductionView>::const_iterator it = 
+            views.begin(); it != views.end(); it++)
+        remote_insts->insert(it->first, it->second);
+      if (local_restricted)
+        restricted = true;
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void RemoteEqTracker::handle_remote_request_instances(
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
@@ -3970,23 +4006,28 @@ namespace Legion {
                                                 ready_events, target);
       if (!valid_insts.empty())
       {
-        const RtUserEvent response_event = Runtime::create_rt_user_event();
-        Serializer rez;
+        if (source != runtime->address_space)
         {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize(response_event);
-          rez.serialize<size_t>(valid_insts.size());
-          for (FieldMaskSet<LogicalView>::const_iterator it = 
-                valid_insts.begin(); it != valid_insts.end(); it++)
+          const RtUserEvent response_event = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize(response_event);
+            rez.serialize<size_t>(valid_insts.size());
+            for (FieldMaskSet<LogicalView>::const_iterator it = 
+                  valid_insts.begin(); it != valid_insts.end(); it++)
+            {
+              rez.serialize(it->first->did);
+              rez.serialize(it->second);
+            }
+            rez.serialize<bool>(restricted);
           }
-          rez.serialize<bool>(restricted);
+          runtime->send_equivalence_set_remote_instances(source, rez);
+          ready_events.insert(response_event);
         }
-        runtime->send_equivalence_set_remote_instances(source, rez);
-        ready_events.insert(response_event);
+        else
+          target->process_local_instances(valid_insts, restricted);
       }
       if (!ready_events.empty())
         Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
@@ -4043,23 +4084,28 @@ namespace Legion {
                                                  redop, ready_events, target);
       if (!reduction_insts.empty())
       {
-        const RtUserEvent response_event = Runtime::create_rt_user_event();
-        Serializer rez;
+        if (source != runtime->address_space)
         {
-          RezCheck z(rez);
-          rez.serialize(target);
-          rez.serialize(response_event);
-          rez.serialize<size_t>(reduction_insts.size());
-          for (FieldMaskSet<ReductionView>::const_iterator it = 
-                reduction_insts.begin(); it != reduction_insts.end(); it++)
+          const RtUserEvent response_event = Runtime::create_rt_user_event();
+          Serializer rez;
           {
-            rez.serialize(it->first->did);
-            rez.serialize(it->second);
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize(response_event);
+            rez.serialize<size_t>(reduction_insts.size());
+            for (FieldMaskSet<ReductionView>::const_iterator it = 
+                  reduction_insts.begin(); it != reduction_insts.end(); it++)
+            {
+              rez.serialize(it->first->did);
+              rez.serialize(it->second);
+            }
+            rez.serialize<bool>(restricted);
           }
-          rez.serialize<bool>(restricted);
+          runtime->send_equivalence_set_remote_instances(source, rez);
+          ready_events.insert(response_event);
         }
-        runtime->send_equivalence_set_remote_instances(source, rez);
-        ready_events.insert(response_event);
+        else
+          target->process_local_instances(reduction_insts, restricted);
       }
       if (!ready_events.empty())
         Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
@@ -5924,6 +5970,7 @@ namespace Legion {
           }
         }
         reduction_instances.clear();
+        reduction_fields.clear();
       }
       // Pack the restricted instances
       rez.serialize<size_t>(restricted_instances.size());  
@@ -5946,6 +5993,7 @@ namespace Legion {
             finder->second += 1;
         }
         restricted_instances.clear();
+        restricted_fields.clear();
       }
       // Pack the version numbers
       rez.serialize<size_t>(version_numbers.size());

@@ -843,6 +843,10 @@ namespace Legion {
       void sync_remote_instances(FieldMaskSet<InstanceView> &set);
       void sync_remote_instances(FieldMaskSet<ReductionView> &set);
       void process_remote_instances(Deserializer &derez, Runtime *runtime);
+      void process_local_instances(const FieldMaskSet<LogicalView> &views,
+                                   const bool local_restricted);
+      void process_local_instances(const FieldMaskSet<ReductionView> &views,
+                                   const bool local_restricted);
     public:
       static void handle_remote_request_instances(Deserializer &derez, 
                                      Runtime *rt, AddressSpaceID previous);
