@@ -34,7 +34,7 @@ namespace Realm {
 
   inline /*static*/ bool EventImpl::add_waiter(Event needed, EventWaiter *waiter)
   {
-    return get_event_impl(needed)->add_waiter(ID(needed).event.generation, waiter);
+    return get_event_impl(needed)->add_waiter(ID(needed).event_generation(), waiter);
   }
 
 
@@ -45,21 +45,21 @@ namespace Realm {
   inline Event GenEventImpl::current_event(void) const
   {
     ID id(me);
-    id.event.generation = this->generation + 1;
+    id.event_generation() = this->generation + 1;
     return id.convert<Event>();
   }
 
   inline Event GenEventImpl::make_event(gen_t gen) const
   {
     ID id(me);
-    id.event.generation = gen;
+    id.event_generation() = gen;
     return id.convert<Event>();
   }
 
   inline /*static*/ void GenEventImpl::trigger(Event e, bool poisoned)
   {
     GenEventImpl *impl = get_genevent_impl(e);
-    impl->trigger(ID(e).event.generation, my_node_id, poisoned);
+    impl->trigger(ID(e).event_generation(), my_node_id, poisoned);
   }
 
 
@@ -70,7 +70,7 @@ namespace Realm {
   inline Barrier BarrierImpl::current_barrier(Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    id.barrier.generation = this->generation + 1;
+    id.barrier_generation() = this->generation + 1;
     Barrier b = id.convert<Barrier>();
     b.timestamp = timestamp;
     return b;
@@ -80,7 +80,7 @@ namespace Realm {
 					   Barrier::timestamp_t timestamp /*= 0*/) const
   {
     ID id(me);
-    id.barrier.generation = gen;
+    id.barrier_generation() = gen;
     Barrier b = id.convert<Barrier>();
     b.timestamp = timestamp;
     return b;

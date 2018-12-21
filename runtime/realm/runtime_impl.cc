@@ -890,8 +890,8 @@ namespace Realm {
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(id.memory.owner_node == my_node_id);
-      assert(id.memory.mem_idx == nodes[my_node_id].memories.size());
+      assert(NodeID(id.memory_owner_node()) == my_node_id);
+      assert(id.memory_mem_idx() == nodes[my_node_id].memories.size());
 
       nodes[my_node_id].memories.push_back(m);
     }
@@ -900,8 +900,8 @@ namespace Realm {
     {
       // right now expect this to always be for the current node and the next memory ID
       ID id(m->me);
-      assert(id.memory.owner_node == my_node_id);
-      assert(id.memory.mem_idx == nodes[my_node_id].ib_memories.size());
+      assert(NodeID(id.memory_owner_node()) == my_node_id);
+      assert(id.memory_mem_idx() == nodes[my_node_id].ib_memories.size());
 
       nodes[my_node_id].ib_memories.push_back(m);
     }
@@ -910,8 +910,8 @@ namespace Realm {
     {
       // right now expect this to always be for the current node and the next processor ID
       ID id(p->me);
-      assert(id.proc.owner_node == my_node_id);
-      assert(id.proc.proc_idx == nodes[my_node_id].processors.size());
+      assert(NodeID(id.proc_owner_node()) == my_node_id);
+      assert(id.proc_proc_idx() == nodes[my_node_id].processors.size());
 
       nodes[my_node_id].processors.push_back(p);
     }
@@ -1902,9 +1902,9 @@ namespace Realm {
 #endif
 
       // root node will be whoever owns the target proc
-      int root = ID(target_proc).proc.owner_node;
+      NodeID root = ID(target_proc).proc_owner_node();
 
-      if((int)my_node_id == root) {
+      if(my_node_id == root) {
 	// ROOT NODE
 
 	// step 1: receive wait_on from every node
@@ -2366,12 +2366,13 @@ namespace Realm {
       ID id(e);
       assert(id.is_event());
 
-      Node *n = &nodes[id.event.creator_node];
-      GenEventImpl *impl = n->events.lookup_entry(id.event.gen_event_idx, id.event.creator_node);
+      Node *n = &nodes[id.event_creator_node()];
+      GenEventImpl *impl = n->events.lookup_entry(id.event_gen_event_idx(),
+						  id.event_creator_node());
       {
 	ID check(impl->me);
-	assert(check.event.creator_node == id.event.creator_node);
-	assert(check.event.gen_event_idx == id.event.gen_event_idx);
+	assert(check.event_creator_node() == id.event_creator_node());
+	assert(check.event_gen_event_idx() == id.event_gen_event_idx());
       }
       return impl;
     }
@@ -2381,12 +2382,13 @@ namespace Realm {
       ID id(e);
       assert(id.is_barrier());
 
-      Node *n = &nodes[id.barrier.creator_node];
-      BarrierImpl *impl = n->barriers.lookup_entry(id.barrier.barrier_idx, id.barrier.creator_node);
+      Node *n = &nodes[id.barrier_creator_node()];
+      BarrierImpl *impl = n->barriers.lookup_entry(id.barrier_barrier_idx(),
+						   id.barrier_creator_node());
       {
 	ID check(impl->me);
-	assert(check.barrier.creator_node == id.barrier.creator_node);
-	assert(check.barrier.barrier_idx == id.barrier.barrier_idx);
+	assert(check.barrier_creator_node() == id.barrier_creator_node());
+	assert(check.barrier_barrier_idx() == id.barrier_barrier_idx());
       }
       return impl;
     }
@@ -2398,8 +2400,8 @@ namespace Realm {
 	assert(0 && "invalid index space sparsity handle");
       }
 
-      Node *n = &nodes[id.sparsity.owner_node];
-      DynamicTable<SparsityMapTableAllocator> *& m = n->sparsity_maps[id.sparsity.creator_node];
+      Node *n = &nodes[id.sparsity_owner_node()];
+      DynamicTable<SparsityMapTableAllocator> *& m = n->sparsity_maps[id.sparsity_creator_node()];
       // might need to construct this (in a lock-free way)
       if(m == 0) {
 	// construct one and try to swap it in
@@ -2407,12 +2409,12 @@ namespace Realm {
 	if(!__sync_bool_compare_and_swap(&m, 0, newm))
 	  delete newm;  // somebody else made it faster
       }
-      SparsityMapImplWrapper *impl = m->lookup_entry(id.sparsity.sparsity_idx,
-						     id.sparsity.owner_node);
+      SparsityMapImplWrapper *impl = m->lookup_entry(id.sparsity_sparsity_idx(),
+						     id.sparsity_owner_node());
       // creator node isn't always right, so try to fix it
       if(impl->me != id) {
-	if(impl->me.sparsity.creator_node == 0)
-	  impl->me.sparsity.creator_node = id.sparsity.creator_node;
+	if(impl->me.sparsity_creator_node() == 0)
+	  impl->me.sparsity_creator_node() = NodeID(id.sparsity_creator_node());
 	assert(impl->me == id);
       }
       return impl;
@@ -2421,15 +2423,16 @@ namespace Realm {
     SparsityMapImplWrapper *RuntimeImpl::get_available_sparsity_impl(NodeID target_node)
     {
       SparsityMapImplWrapper *wrap = local_sparsity_map_free_lists[target_node]->alloc_entry();
-      wrap->me.sparsity.creator_node = my_node_id;
+      wrap->me.sparsity_creator_node() = my_node_id;
       return wrap;
     }
 
     ReservationImpl *RuntimeImpl::get_lock_impl(ID id)
     {
       if(id.is_reservation()) {
-	Node *n = &nodes[id.rsrv.creator_node];
-	ReservationImpl *impl = n->reservations.lookup_entry(id.rsrv.rsrv_idx, id.rsrv.creator_node);
+	Node *n = &nodes[id.rsrv_creator_node()];
+	ReservationImpl *impl = n->reservations.lookup_entry(id.rsrv_rsrv_idx(),
+							     id.rsrv_creator_node());
 	assert(impl->me == id.convert<Reservation>());
 	return impl;
       }
@@ -2456,14 +2459,14 @@ namespace Realm {
     {
       if(id.is_memory()) {
         // support old encoding for global memory too
-	if((id.memory.owner_node > ID::MAX_NODE_ID) || (id.memory.mem_idx == ((1U << 12) - 1)))
+	if((id.memory_owner_node() > ID::MAX_NODE_ID) || (id.memory_mem_idx() == ((1U << 12) - 1)))
 	  return global_memory;
 	else
-	  return null_check(nodes[id.memory.owner_node].memories[id.memory.mem_idx]);
+	  return null_check(nodes[id.memory_owner_node()].memories[id.memory_mem_idx()]);
       }
 
       if(id.is_ib_memory()) {
-        return null_check(nodes[id.ib_memory.owner_node].ib_memories[id.ib_memory.mem_idx]);
+        return null_check(nodes[id.memory_owner_node()].ib_memories[id.memory_mem_idx()]);
       }
 #ifdef TODO
       if(id.is_allocator()) {
@@ -2476,10 +2479,10 @@ namespace Realm {
 
       if(id.is_instance()) {
         // support old encoding for global memory too
-	if((id.instance.owner_node > ID::MAX_NODE_ID) || (id.instance.mem_idx == ((1U << 12) - 1)))
+	if((id.instance_owner_node() > ID::MAX_NODE_ID) || (id.instance_mem_idx() == ((1U << 12) - 1)))
 	  return global_memory;
 	else
-	  return null_check(nodes[id.instance.owner_node].memories[id.instance.mem_idx]);
+	  return null_check(nodes[id.instance_owner_node()].memories[id.instance_mem_idx()]);
       }
 
       log_runtime.fatal() << "invalid memory handle: id=" << id;
@@ -2497,7 +2500,7 @@ namespace Realm {
 	assert(0 && "invalid processor handle");
       }
 
-      return null_check(nodes[id.proc.owner_node].processors[id.proc.proc_idx]);
+      return null_check(nodes[id.proc_owner_node()].processors[id.proc_proc_idx()]);
     }
 
     ProcessorGroup *RuntimeImpl::get_procgroup_impl(ID id)
@@ -2507,9 +2510,9 @@ namespace Realm {
 	assert(0 && "invalid processor group handle");
       }
 
-      Node *n = &nodes[id.pgroup.owner_node];
-      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup.pgroup_idx,
-							 id.pgroup.owner_node);
+      Node *n = &nodes[id.pgroup_owner_node()];
+      ProcessorGroup *impl = n->proc_groups.lookup_entry(id.pgroup_pgroup_idx(),
+							 id.pgroup_owner_node());
       assert(impl->me == id.convert<Processor>());
       return impl;
     }

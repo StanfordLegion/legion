@@ -1019,7 +1019,7 @@ namespace Realm {
   void UnionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -1189,7 +1189,7 @@ namespace Realm {
   void IntersectionMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -1430,7 +1430,7 @@ namespace Realm {
   void DifferenceMicroOp<N,T>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // execute wherever our sparsity output is
-    NodeID exec_node = ID(sparsity_output).sparsity.creator_node;
+    NodeID exec_node = ID(sparsity_output).sparsity_creator_node();
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -1516,14 +1516,14 @@ namespace Realm {
       if(rhs.dense()) {
 	target_node = my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "UNION PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
@@ -1558,7 +1558,7 @@ namespace Realm {
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
-	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	int node = ID(ops[i].sparsity).sparsity_creator_node();
 	if(node_count == 0) {
 	  node_count = 1;
 	  target_node = node;
@@ -1632,14 +1632,14 @@ namespace Realm {
       if(rhs.dense()) {
 	target_node = my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "ISECT PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe
@@ -1677,7 +1677,7 @@ namespace Realm {
     int node_count = 0;
     for(size_t i = 0; i < ops.size(); i++)
       if(!ops[i].dense()) {
-	int node = ID(ops[i].sparsity).sparsity.creator_node;
+	int node = ID(ops[i].sparsity).sparsity_creator_node();
 	if(node_count == 0) {
 	  node_count = 1;
 	  target_node = node;
@@ -1751,14 +1751,14 @@ namespace Realm {
       if(rhs.dense()) {
 	target_node = my_node_id;  // operation will be cheap anyway
       } else {
-	target_node = ID(rhs.sparsity).sparsity.creator_node;
+	target_node = ID(rhs.sparsity).sparsity_creator_node();
       }
     } else {
       if(rhs.dense()) {
-	target_node = ID(lhs.sparsity).sparsity.creator_node;
+	target_node = ID(lhs.sparsity).sparsity_creator_node();
       } else {
-	int lhs_node = ID(lhs.sparsity).sparsity.creator_node;
-	int rhs_node = ID(rhs.sparsity).sparsity.creator_node;
+	int lhs_node = ID(lhs.sparsity).sparsity_creator_node();
+	int rhs_node = ID(rhs.sparsity).sparsity_creator_node();
 	//if(lhs_node != rhs_node)
 	//  std::cout << "DIFF PICK " << lhs_node << " or " << rhs_node << "\n";
 	// if they're different, and lhs is us, choose rhs to load-balance maybe

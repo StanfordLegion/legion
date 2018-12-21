@@ -251,7 +251,7 @@ namespace Realm {
       if(precise) {
 	if(!this->entries_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -269,7 +269,7 @@ namespace Realm {
       } else {
 	if(!this->approx_valid) {
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -285,7 +285,7 @@ namespace Realm {
     }
     
     if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
+      RemoteSparsityRequestMessage::send_request(ID(me).sparsity_creator_node(), me,
 						 request_approx,
 						 request_precise);
 
@@ -302,7 +302,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::set_contributor_count(int count)
   {
-    if(ID(me).sparsity.creator_node == my_node_id) {
+    if(NodeID(ID(me).sparsity_creator_node()) == my_node_id) {
       // increment the count atomically - if it brings the total up to 0 (which covers count == 0),
       //  immediately finalize - the contributions happened before we got here
       // just increment the count atomically
@@ -311,14 +311,14 @@ namespace Realm {
 	finalize();
     } else {
       // send the contributor count to the owner node
-      SetContribCountMessage::send_request(ID(me).sparsity.creator_node, me, count);
+      SetContribCountMessage::send_request(ID(me).sparsity_creator_node(), me, count);
     }
   }
 
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_nothing(void)
   {
-    NodeID owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity_creator_node();
 
     if(owner != my_node_id) {
       // send (the lack of) data to the owner to collect
@@ -337,7 +337,7 @@ namespace Realm {
   template <int N, typename T>
   void SparsityMapImpl<N,T>::contribute_dense_rect_list(const std::vector<Rect<N,T> >& rects)
   {
-    NodeID owner = ID(me).sparsity.creator_node;
+    NodeID owner = ID(me).sparsity_creator_node();
 
     if(owner != my_node_id) {
       // send the data to the owner to collect
@@ -511,7 +511,7 @@ namespace Realm {
     }
 
     if(last) {
-      if(ID(me).sparsity.creator_node == my_node_id) {
+      if(NodeID(ID(me).sparsity_creator_node()) == my_node_id) {
 	// we're the owner, so remaining_contributor_count tracks our expected contributions
 	// count is allowed to go negative if we get contributions before we know the total expected
 	int left = __sync_sub_and_fetch(&remaining_contributor_count, 1);
@@ -547,7 +547,7 @@ namespace Realm {
 	  precise_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !precise_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !precise_requested) {
 	    request_precise = true;
 	    precise_requested = true;
 	    // also get approx while we're at it
@@ -560,7 +560,7 @@ namespace Realm {
 	  approx_waiters.push_back(uop);
 	  registered = true;
 	  // do we need to request the data?
-	  if((ID(me).sparsity.creator_node != my_node_id) && !approx_requested) {
+	  if((NodeID(ID(me).sparsity_creator_node()) != my_node_id) && !approx_requested) {
 	    request_approx = true;
 	    approx_requested = true;
 	  }
@@ -569,7 +569,8 @@ namespace Realm {
     }
 
     if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity.creator_node, me,
+      RemoteSparsityRequestMessage::send_request(ID(me).sparsity_creator_node(),
+						 me,
 						 request_approx,
 						 request_precise);
 
@@ -580,7 +581,7 @@ namespace Realm {
   void SparsityMapImpl<N,T>::remote_data_request(NodeID requestor, bool send_precise, bool send_approx)
   {
     // first sanity check - we should be the owner of the data
-    assert(ID(me).sparsity.creator_node == my_node_id);
+    assert(NodeID(ID(me).sparsity_creator_node()) == my_node_id);
 
     // take the long to determine atomically if we can send data or if we need to register as a listener
     bool reply_precise = false;
@@ -765,7 +766,7 @@ namespace Realm {
     }
 
     // now that we've got our entries nice and tidy, build a bounded approximation of them
-    if(true /*ID(me).sparsity.creator_node == my_node_id*/) {
+    if(true /*ID(me).sparsity_creator_node() == my_node_id*/) {
       assert(!this->approx_valid);
       compute_approximation(this->entries, this->approx_rects, DeppartConfig::cfg_max_rects_in_approximation);
       this->approx_valid = true;

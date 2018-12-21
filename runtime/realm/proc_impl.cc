@@ -58,7 +58,7 @@ namespace Realm {
     /*static*/ Processor Processor::create_group(const std::vector<Processor>& members)
     {
       // are we creating a local group?
-      if((members.size() == 0) || (ID(members[0]).proc.owner_node == my_node_id)) {
+      if((members.size() == 0) || (NodeID(ID(members[0]).proc_owner_node()) == my_node_id)) {
 	ProcessorGroup *grp = get_runtime()->local_proc_group_free_list->alloc_entry();
 	grp->set_group_members(members);
 #ifdef EVENT_GRAPH_TRACE
@@ -183,7 +183,7 @@ namespace Realm {
     AddressSpace Processor::address_space(void) const
     {
       ID id(*this);
-      return id.proc.owner_node;
+      return id.proc_owner_node();
     }
 
     Event Processor::register_task(TaskFuncID func_id,
@@ -220,7 +220,7 @@ namespace Realm {
       // is the target a single processor or a group?
       ID id(*this);
       if(id.is_processor()) {
-	NodeID n = id.proc.owner_node;
+	NodeID n = id.proc_owner_node();
 	if(n == my_node_id)
 	  local_procs.push_back(*this);
 	else
@@ -235,7 +235,7 @@ namespace Realm {
 	    it != members.end();
 	    it++) {
 	  Processor p = *it;
-	  NodeID n = ID(p).proc.owner_node;
+	  NodeID n = ID(p).proc_owner_node();
 	  if(n == my_node_id)
 	    local_procs.push_back(p);
 	  else
@@ -454,16 +454,16 @@ namespace Realm {
 
     void ProcessorGroup::init(Processor _me, int _owner)
     {
-      assert(ID(_me).pgroup.owner_node == (unsigned)_owner);
+      assert(NodeID(ID(_me).pgroup_owner_node()) == _owner);
 
       me = _me;
-      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup.owner_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).pgroup_owner_node());
     }
 
     void ProcessorGroup::set_group_members(const std::vector<Processor>& member_list)
     {
       // can only be performed on owner node
-      assert(ID(me).pgroup.owner_node == my_node_id);
+      assert(NodeID(ID(me).pgroup_owner_node()) == my_node_id);
       
       // can only be done once
       assert(!members_valid);
@@ -522,7 +522,7 @@ namespace Realm {
 						int priority)
     {
       // check for spawn to remote processor group
-      NodeID target = ID(me).pgroup.owner_node;
+      NodeID target = ID(me).pgroup_owner_node();
       if(target != my_node_id) {
 	log_task.debug() << "sending remote spawn request:"
 			 << " func=" << func_id
@@ -784,9 +784,9 @@ namespace Realm {
       ID id(me);
       NodeID target = 0;
       if(id.is_processor())
-	target = id.proc.owner_node;
+	target = id.proc_owner_node();
       else if(id.is_procgroup())
-	target = id.pgroup.owner_node;
+	target = id.pgroup_owner_node();
       else {
 	assert(0);
       }
