@@ -1196,7 +1196,8 @@ function ref:__ref(cx, expr_type)
         local field_type, base_pointer, stride, field_path = unpack(field)
         local vec
         if std.type_eq(field_type, std.ptr) then
-          vec = expr_type.impl_type
+          assert(std.is_vptr(expr_type))
+          vec = expr_type.vec_type
         else
           vec = vector(field_type, std.as_read(expr_type).N)
         end
@@ -1233,6 +1234,9 @@ function ref:read(cx, expr_type)
            if aligned_instances then
              align = sizeof(vector(field_type, expr_type.N))
            end
+           if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
+            result = `([result].value)
+           end
            return quote
              [result] = terralib.attrload(&[field_value], {align = [align]})
            end
@@ -1261,7 +1265,6 @@ function ref:write(cx, value, expr_type)
            result = `([result].[field_name])
          end
          if std.is_vptr(expr_type) and std.type_eq(field_type, std.ptr) then
-           field_value = `([field_value].value)
            result = `([result].__ptr.value)
          end
          if expr_type and

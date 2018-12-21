@@ -2665,6 +2665,7 @@ std.vptr = terralib.memoize(function(width, points_to_type, ...)
   st.N = width
   st.type = ptr(points_to_type, ...)
   st.impl_type = legion_vptr_t
+  st.vec_type = vec
 
   function st:bounds()
     local bounds = terralib.newlist()
