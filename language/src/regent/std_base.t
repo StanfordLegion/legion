@@ -1346,7 +1346,7 @@ function base.task:set_compile_thunk(compile_thunk)
 end
 
 function base.task:complete()
-  if not self.is_complete then
+  if not self.is_inline and not self.is_complete then
     self.is_complete = true
     if not self.compile_thunk then return end
     for _, variant in ipairs(self.variants) do
@@ -1358,6 +1358,23 @@ end
 
 function base.task:compile()
   return self:complete()
+end
+
+function base.task:set_is_inline(is_inline)
+  self.is_inline = is_inline
+end
+
+function base.task:set_optimization_thunk(optimization_thunk)
+  self.optimization_thunk = optimization_thunk
+end
+
+function base.task:optimize()
+  if self.is_inline then
+    if not self.optimization_thunk then return self end
+    self.optimization_thunk()
+    self.is_inline = false
+  end
+  return self
 end
 
 function base.task:__tostring()
@@ -1410,6 +1427,8 @@ do
       -- Compilation continuations:
       compile_thunk = false,
       is_complete = false,
+      optimization_thunk = false,
+      is_inline = false,
     }, base.task)
   end
 end

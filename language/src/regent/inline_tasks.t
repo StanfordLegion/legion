@@ -88,6 +88,11 @@ function inline_tasks.expr_call(call)
   end
 
   if not call:is(ast.specialized.expr.Call) or forbids_inlining(call) then
+    if call:is(ast.specialized.expr.Call) and std.is_task(call.fn.value) and
+       call.fn.value.is_inline
+    then
+      call.fn.value:optimize()
+    end
     return call, false
   end
 
@@ -456,6 +461,7 @@ function inline_tasks.top(node)
   if node:is(ast.specialized.top.Task) then
     if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node, node)
+      node.prototype:set_is_inline(true)
     end
     local new_node = inline_tasks.top_task(node)
     if new_node.prototype:has_primary_variant() and
