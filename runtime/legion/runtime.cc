@@ -20164,6 +20164,11 @@ namespace Legion {
             EquivalenceSet::handle_subset_request(args);
             break;
           }
+        case LG_DEFER_MAKE_OWNER_TASK_ID:
+          {
+            EquivalenceSet::handle_make_owner(args);
+            break;
+          }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_decrement(args);

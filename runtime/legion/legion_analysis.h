@@ -915,6 +915,15 @@ namespace Legion {
         const AddressSpaceID source;
         const RtEvent deferral;
       };
+      struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MAKE_OWNER_TASK_ID;
+      public:
+        DeferMakeOwnerArgs(EquivalenceSet *s)
+          : LgTaskArgs<DeferMakeOwnerArgs>(implicit_provenance), set(s) { }
+      public:
+        EquivalenceSet *const set;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -1128,12 +1137,14 @@ namespace Legion {
       void unpack_state(Deserializer &derez, ReferenceMutator &mutator); 
       void pack_migration(Serializer &rez, RtEvent done_migration);
       void unpack_migration(Deserializer &derez, ReferenceMutator &mutator);
+      void make_owner(void);
       void update_owner(const AddressSpaceID new_logical_owner);
     public:
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
       static void handle_ray_trace(const void *args);
       static void handle_subset_request(const void *args);
+      static void handle_make_owner(const void *args);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,

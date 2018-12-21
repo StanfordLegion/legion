@@ -5789,9 +5789,26 @@ namespace Legion {
       // Wait for all the guards to be done before we mark that
       // we are now the new owner
       if (guards_done.exists() && !guards_done.has_triggered())
-        guards_done.wait();
+      {
+        // Defer the call to make this the owner until the event triggers
+        DeferMakeOwnerArgs args(this);
+        RtEvent done = runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, guards_done);
+        mutator.record_reference_mutation_effect(done);
+      }
+      else
+        make_owner();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::make_owner(void)
+    //--------------------------------------------------------------------------
+    {
       // Now we can mark that we are the logical owner
       AutoLock eq(eq_lock);
+#ifdef DEBUG_LEGION
+      assert(!is_logical_owner());
+#endif
       logical_owner_space = local_space;
       // If we were waiting for a valid copy of the subsets we now have it
       if (eq_state == PENDING_VALID_STATE)
@@ -6354,7 +6371,8 @@ namespace Legion {
       }
       // If the request bounced of a stale logical owner, then send 
       // a message to update the source with the current logical owner
-      if (!migrated && (remote_tracker.source != remote_tracker.previous))
+      if (!migrated && (remote_tracker.source != remote_tracker.previous) &&
+          (remote_tracker.source != local_space))
       {
         RtUserEvent notification_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -8070,6 +8088,14 @@ namespace Legion {
     {
       const DeferSubsetRequestArgs *dargs = (const DeferSubsetRequestArgs*)args;
       dargs->set->process_subset_request(dargs->source, dargs->deferral);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_make_owner(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMakeOwnerArgs *dargs = (const DeferMakeOwnerArgs*)args;
+      dargs->set->make_owner();
     }
 
     //--------------------------------------------------------------------------
