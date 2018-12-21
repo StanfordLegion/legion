@@ -722,8 +722,9 @@ namespace Legion {
      */
     class RemoteEqTracker {
     public:
-      RemoteEqTracker(AddressSpaceID src, Runtime *rt)
-        : source(src), runtime(rt) { }
+      RemoteEqTracker(Runtime *rt);
+      RemoteEqTracker(AddressSpaceID src, AddressSpaceID prev, Runtime *rt)
+        : source(src), previous(prev), runtime(rt) { }
     public:
       inline void record_remote(AddressSpaceID owner, EquivalenceSet *set)
         { remote_sets[owner].push_back(set); } 
@@ -813,18 +814,25 @@ namespace Legion {
       void process_remote_instances(Deserializer &derez, Runtime *runtime);
     public:
       static void handle_remote_request_instances(Deserializer &derez, 
-                                                  Runtime *rt);
+                                     Runtime *rt, AddressSpaceID previous);
       static void handle_remote_request_reductions(Deserializer &derez,
-                                                   Runtime *rt);
-      static void handle_remote_updates(Deserializer &derez, Runtime *rt);
-      static void handle_remote_acquires(Deserializer &derez, Runtime *rt);
-      static void handle_remote_releases(Deserializer &derez, Runtime *rt);
-      static void handle_remote_copies_across(Deserializer &derez, Runtime *rt);
-      static void handle_remote_overwrites(Deserializer &derez, Runtime *rt);
-      static void handle_remote_filters(Deserializer &derez, Runtime *rt);
+                                     Runtime *rt, AddressSpaceID previous);
+      static void handle_remote_updates(Deserializer &derez, Runtime *rt,
+                                        AddressSpaceID previous);
+      static void handle_remote_acquires(Deserializer &derez, Runtime *rt,
+                                         AddressSpaceID previous);
+      static void handle_remote_releases(Deserializer &derez, Runtime *rt,
+                                         AddressSpaceID previous);
+      static void handle_remote_copies_across(Deserializer &derez, Runtime *rt,
+                                              AddressSpaceID previous);
+      static void handle_remote_overwrites(Deserializer &derez, Runtime *rt,
+                                           AddressSpaceID previous);
+      static void handle_remote_filters(Deserializer &derez, Runtime *rt,
+                                        AddressSpaceID previous);
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
     public:
       const AddressSpaceID source;
+      const AddressSpaceID previous;
       Runtime *const runtime;
     protected:
       std::map<AddressSpaceID,std::vector<EquivalenceSet*> > remote_sets;
@@ -864,14 +872,15 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_REF_TASK_ID;
       public:
-        RemoteRefTaskArgs(EquivalenceSet *s, RtUserEvent done,
-                          std::map<LogicalView*,unsigned> *refs)
+        RemoteRefTaskArgs(DistributedID id, RtUserEvent done, bool add,
+                          std::map<LogicalView*,unsigned> *r)
           : LgTaskArgs<RemoteRefTaskArgs>(implicit_provenance), 
-            set(s), done_event(done), refs_to_add(refs) { }
+            did(id), done_event(done), add_references(add), refs(r) { }
       public:
-        EquivalenceSet *const set;
+        const DistributedID did;
         const RtUserEvent done_event;
-        std::map<LogicalView*,unsigned> *refs_to_add;
+        const bool add_references;
+        std::map<LogicalView*,unsigned> *refs;
       };
       struct DeferRayTraceArgs : public LgTaskArgs<DeferRayTraceArgs> {
       public:
@@ -960,7 +969,8 @@ namespace Legion {
     public:
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
     public:
-      inline bool is_logical_owner(void) const 
+      // Must be called while holding the lock
+      inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
     protected:
       // Must be called while holding the lock
@@ -1020,6 +1030,8 @@ namespace Legion {
                                const FieldMask &user_mask,
                                const InstanceSet &target_instances,
                                const std::vector<InstanceView*> &target_views,
+                               std::set<RtEvent> &applied_events);
+      void check_for_migration(RemoteEqTracker &remote_tracker,
                                std::set<RtEvent> &applied_events);
     public:
       bool acquire_restrictions(RemoteEqTracker &remote_tracker,
@@ -1113,7 +1125,10 @@ namespace Legion {
       void process_subset_response(Deserializer &derez);
       void process_subset_update(Deserializer &derez);
       void pack_state(Serializer &rez) const;
-      void unpack_state(Deserializer &derez, ReferenceMutator &mutator);
+      void unpack_state(Deserializer &derez, ReferenceMutator &mutator); 
+      void pack_migration(Serializer &rez, RtEvent done_migration);
+      void unpack_migration(Deserializer &derez, ReferenceMutator &mutator);
+      void update_owner(const AddressSpaceID new_logical_owner);
     public:
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
@@ -1130,12 +1145,14 @@ namespace Legion {
       static void handle_ray_trace_request(Deserializer &derez, 
                             Runtime *runtime, AddressSpaceID source);
       static void handle_ray_trace_response(Deserializer &derez, Runtime *rt);
+      static void handle_migration(Deserializer &derez, Runtime *rt);
+      static void handle_owner_update(Deserializer &derez, Runtime *rt);
       static void handle_remote_refinement(Deserializer &derez, Runtime *rt);
     public:
       IndexSpaceExpression *const set_expr;
       IndexSpaceNode *const index_space_node; // can be NULL
-      const AddressSpaceID logical_owner_space;
     protected:
+      AddressSpaceID logical_owner_space;
       mutable LocalLock eq_lock;
     protected:
       // This is the actual physical state of the equivalence class
@@ -1161,10 +1178,6 @@ namespace Legion {
       RtUserEvent refinement_event;
       // An event to order to deferral tasks
       RtEvent next_deferral_precondition;
-      // Keep an order on all operations that attempt to acquire
-      // this equivalence class. Hopefully 64 bits is enough that
-      // we never have to reset this
-      unsigned long long next_guard_index;
     protected:
       // If we have sub sets then we track those here
       // If this data structure is not empty, everything above is invalid
@@ -1178,6 +1191,11 @@ namespace Legion {
       IndexSpaceExpression *unrefined_remainder;
       // For detecting when we are slicing a disjoint partition
       DisjointPartitionRefinement *disjoint_partition_refinement;
+    protected:
+      static const unsigned NUM_PREVIOUS = 7;
+      // Meta data for tracking when we should migrate the equivalence set
+      AddressSpaceID previous_requests[NUM_PREVIOUS]; 
+      unsigned lru_index;
     public:
       static const VersionID init_version = 1;
     };
