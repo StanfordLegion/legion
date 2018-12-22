@@ -112,6 +112,11 @@ namespace Realm {
 
     const std::vector<Rect<N,T> >& get_approx_rects(void);
 
+    // membership test between two (presumably-different) sparsity maps are not
+    //  cheap - try bounds-based checks first (see IndexSpace::overlaps)
+    bool overlaps(SparsityMapPublicImpl<N,T> *other,
+		  const Rect<N,T>& bounds, bool approx);
+
   protected:
     bool entries_valid, approx_valid;
     std::vector<SparsityMapEntry<N,T> > entries;
