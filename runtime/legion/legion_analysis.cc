@@ -6383,22 +6383,62 @@ namespace Legion {
       previous_requests[lru_index++] = remote_tracker.source;
       if (lru_index == NUM_PREVIOUS)
         lru_index = 0;
-      bool migrated = false;
+      bool migrate = false;
       // If we don't agree the current owner, see if we should migrate
       if (remote_tracker.source != logical_owner_space)
       {
-        // Check to see if we need to do the migration to the source
-        unsigned count = 0;
+        // Check two properties:
+        // 1. At least one of the last users is the current owner
+        // 2. All the previous users are the same and it's not the current owner
+        bool all_the_same = true;
+        bool has_previous_owner = false;
         for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
-          if (previous_requests[idx] == remote_tracker.source)
-            count++;
-        // If count is >50% of previous users then we do the migration
-        // otherwise we leave it at the current location
-        if (count >= ((NUM_PREVIOUS + 1) / 2))
         {
-          migrated = true;
-          // Update the logical owner space
-          logical_owner_space = remote_tracker.source;
+          if (previous_requests[idx] == logical_owner_space)
+          {
+            // We'll never migrate if one of the previous 
+            // users is still the owner
+            all_the_same = false;
+            has_previous_owner = true;
+            break;
+          }
+          else if (previous_requests[idx] != previous_requests[0])
+            all_the_same = false;
+        }
+        if (all_the_same || !has_previous_owner)
+        {
+          migrate = true;
+          if (!all_the_same)
+          {
+            // None of the previous users were from the owner so 
+            // let's move to a node with the majority of the 
+            // previous users
+            std::map<AddressSpaceID,unsigned> counts;
+            for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+            {
+              std::map<AddressSpaceID,unsigned>::iterator finder = 
+                counts.find(previous_requests[idx]);
+              if (finder == counts.end())
+                counts[previous_requests[idx]] = 1;
+              else
+                finder->second++;
+            }
+            unsigned max = 0;
+            for (std::map<AddressSpaceID,unsigned>::const_iterator it = 
+                  counts.begin(); it != counts.end(); it++)
+            {
+              if (it->second > max)
+              {
+                logical_owner_space = it->first;
+                max = it->second;
+              }
+            }
+          }
+          else // They all go to the same place
+            logical_owner_space = remote_tracker.source;
+        }
+        if (migrate)
+        {
           // Add ourselves and remove the new owner from remote subsets
           remote_subsets.insert(local_space);
           remote_subsets.erase(logical_owner_space);
@@ -6419,7 +6459,7 @@ namespace Legion {
       }
       // If the request bounced of a stale logical owner, then send 
       // a message to update the source with the current logical owner
-      if (!migrated && (remote_tracker.source != remote_tracker.previous) &&
+      if (!migrate && (remote_tracker.source != remote_tracker.previous) &&
           (remote_tracker.source != local_space))
       {
         RtUserEvent notification_event = Runtime::create_rt_user_event();
@@ -8010,19 +8050,21 @@ namespace Legion {
 #endif
         return;
       }
+      else if (eq_state == PENDING_VALID_STATE)
+      {
 #ifdef DEBUG_LEGION
-      assert(subsets.empty());
-      assert(eq_state == PENDING_VALID_STATE);
-      assert(transition_event.exists());
-      assert(!transition_event.has_triggered());
+        assert(subsets.empty());
+        assert(transition_event.exists());
+        assert(!transition_event.has_triggered());
 #endif
-      if (!new_subsets.empty()) 
-        subsets.swap(new_subsets);
-      // Update the state
-      eq_state = VALID_STATE;
-      // Trigger the transition state to wake up any waiters
-      Runtime::trigger_event(transition_event);
-      transition_event = RtUserEvent::NO_RT_USER_EVENT;
+        if (!new_subsets.empty()) 
+          subsets.swap(new_subsets);
+        // Update the state
+        eq_state = VALID_STATE;
+        // Trigger the transition state to wake up any waiters
+        Runtime::trigger_event(transition_event);
+        transition_event = RtUserEvent::NO_RT_USER_EVENT;
+      }
     }
 
     //--------------------------------------------------------------------------
