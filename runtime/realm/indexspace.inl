@@ -1160,23 +1160,24 @@ namespace Realm {
   template <int N, typename T>
   inline bool IndexSpace<N,T>::overlaps(const IndexSpace<N,T>& other) const
   {
-    if(dense()) {
-      if(other.dense()) {
-	// just test bounding boxes
-	return bounds.overlaps(other.bounds);
-      } else {
-	// have the other guy test against our bounding box
-	return other.contains_any(bounds);
-      }
-    } else {
-      if(other.dense()) {
-	return contains_any(other.bounds);
-      } else {
-	// nasty case - both sparse
-	assert(0);
-	return true;
-      }
-    }
+    // this covers the both-dense case as well as the same-sparsity-map case
+    if(sparsity == other.sparsity)
+      return bounds.overlaps(other.bounds);
+
+    // dense vs. sparse in both directions
+    if(dense())
+      return other.contains_any(bounds);
+
+    if(other.dense())
+      return contains_any(other.bounds);
+
+    // both sparse case can be expensive...
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    SparsityMapPublicImpl<N,T> *other_impl = other.sparsity.impl();
+    // overlap can only be within intersecion of bounds
+    Rect<N,T> isect = bounds.intersection(other.bounds);
+
+    return impl->overlaps(other_impl, isect, false /*!approx*/);
   }
 
   // actual number of points in index space (may be less than volume of bounding box)
@@ -1285,23 +1286,24 @@ namespace Realm {
   template <int N, typename T>
   inline bool IndexSpace<N,T>::overlaps_approx(const IndexSpace<N,T>& other) const
   {
-    if(dense()) {
-      if(other.dense()) {
-	// just test bounding boxes
-	return bounds.overlaps(other.bounds);
-      } else {
-	// have the other guy test against our bounding box
-	return other.contains_any_approx(bounds);
-      }
-    } else {
-      if(other.dense()) {
-	return contains_any_approx(other.bounds);
-      } else {
-	// nasty case - both sparse
-	assert(0);
-	return true;
-      }
-    }
+    // this covers the both-dense case as well as the same-sparsity-map case
+    if(sparsity == other.sparsity)
+      return bounds.overlaps(other.bounds);
+
+    // dense vs. sparse in both directions
+    if(dense())
+      return other.contains_any_approx(bounds);
+
+    if(other.dense())
+      return contains_any_approx(other.bounds);
+
+    // both sparse case can be expensive...
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    SparsityMapPublicImpl<N,T> *other_impl = other.sparsity.impl();
+    // overlap can only be within intersecion of bounds
+    Rect<N,T> isect = bounds.intersection(other.bounds);
+
+    return impl->overlaps(other_impl, isect, true /*approx*/);
   }
 
   // approximage number of points in index space (may be less than volume of bounding box, but larger than

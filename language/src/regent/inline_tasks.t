@@ -88,6 +88,11 @@ function inline_tasks.expr_call(call)
   end
 
   if not call:is(ast.specialized.expr.Call) or forbids_inlining(call) then
+    if call:is(ast.specialized.expr.Call) and std.is_task(call.fn.value) and
+       call.fn.value.is_inline
+    then
+      call.fn.value:optimize()
+    end
     return call, false
   end
 
@@ -393,6 +398,17 @@ end
 function inline_tasks.stat_assignment_or_reduce(node)
   local inlined_any = false
   local actions = terralib.newlist()
+  local new_lhs = node.lhs:map(function(lh)
+    local new_lh, inlined, lh_actions = inline_tasks.expr(lh)
+    if inlined then
+      assert(new_lh ~= nil)
+      inlined_any = true
+      actions:insertall(lh_actions)
+      return new_lh
+    else
+      return lh
+    end
+  end)
   local new_rhs = node.rhs:map(function(rh)
     local new_rh, inlined, rh_actions = inline_tasks.expr(rh)
     if inlined then
@@ -407,7 +423,10 @@ function inline_tasks.stat_assignment_or_reduce(node)
   if inlined_any then
     local stats = terralib.newlist { preserve_task_call(node) }
     stats:insertall(actions)
-    stats:insert(node { rhs = new_rhs })
+    stats:insert(node {
+      lhs = new_lhs,
+      rhs = new_rhs,
+    })
     return stats
   else
     return node
@@ -456,6 +475,7 @@ function inline_tasks.top(node)
   if node:is(ast.specialized.top.Task) then
     if node.annotations.inline:is(ast.annotation.Demand) then
       check_valid_inline_task(node, node)
+      node.prototype:set_is_inline(true)
     end
     local new_node = inline_tasks.top_task(node)
     if new_node.prototype:has_primary_variant() and

@@ -111,7 +111,8 @@ local function fetch_call_graph()
     if regent_std.is_task(v) then
       call_graph[k] = {}
       if v:has_primary_variant() then
-        local task_ast = v:get_primary_variant():get_ast()
+        local variant = v:get_primary_variant()
+        local task_ast = variant:has_untyped_ast() and variant:get_untyped_ast() or variant:get_ast()
         local function record_callees(node)
           if (node:is(regent_ast.specialized.expr.Call) or
               node:is(regent_ast.typed.expr.Call)) and
