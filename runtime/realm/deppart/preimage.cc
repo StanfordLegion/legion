@@ -56,7 +56,6 @@ namespace Realm {
 
   template <int N, typename T>
   template <int N2, typename T2>
-  __attribute__ ((noinline))
   Event IndexSpace<N,T>::create_subspaces_by_preimage(const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > >& field_data,
 						       const std::vector<IndexSpace<N2,T2> >& targets,
 						       std::vector<IndexSpace<N,T> >& preimages,

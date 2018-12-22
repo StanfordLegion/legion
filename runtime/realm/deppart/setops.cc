@@ -148,7 +148,6 @@ namespace Realm {
 
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_unions(const std::vector<IndexSpace<N,T> >& lhss,
 						    const std::vector<IndexSpace<N,T> >& rhss,
 						    std::vector<IndexSpace<N,T> >& results,
@@ -229,7 +228,6 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_intersections(const std::vector<IndexSpace<N,T> >& lhss,
 							   const std::vector<IndexSpace<N,T> >& rhss,
 							   std::vector<IndexSpace<N,T> >& results,
@@ -299,7 +297,6 @@ namespace Realm {
   }
 
   template <int N, typename T>
-  __attribute__ ((noinline))
   /*static*/ Event IndexSpace<N,T>::compute_differences(const std::vector<IndexSpace<N,T> >& lhss,
 							 const std::vector<IndexSpace<N,T> >& rhss,
 							 std::vector<IndexSpace<N,T> >& results,
