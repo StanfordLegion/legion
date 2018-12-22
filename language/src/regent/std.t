@@ -1503,6 +1503,14 @@ std.quote_unary_op = base.quote_unary_op
 std.quote_binary_op = base.quote_binary_op
 
 -- #####################################
+-- ## Inlie Task Helpers
+-- #################
+
+function std.is_inline_task(node)
+  return node:is(ast.typed.top.Task) and node.annotations.inline:is(ast.annotation.Demand)
+end
+
+-- #####################################
 -- ## Types
 -- #################
 
@@ -3638,6 +3646,11 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       end
     end)
 
+  -- We don't need to register tasks that are only inlined
+  local variants = data.filter(function(variant)
+    return not variant.task.is_inline
+  end, variants)
+
   local task_registrations = variants:map(
     function(variant)
       local task = variant.task
@@ -3786,7 +3799,9 @@ end
 local function make_task_wrappers()
   local task_wrappers = {}
   for _,variant in ipairs(variants) do
-    task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+    if not variant.task.is_inline then
+      task_wrappers[variant:wrapper_name()] = variant:make_wrapper()
+    end
   end
   return task_wrappers
 end

@@ -1865,7 +1865,7 @@ namespace Legion {
       size_t total_field_bytes = 0;
       for (unsigned idx = 0; idx < field_sizes.size(); idx++)
         total_field_bytes += field_sizes[idx];
-      return (total_field_bytes * instance_domain->get_volume());
+      return (total_field_bytes * instance_volume);
     }
 
     //--------------------------------------------------------------------------
@@ -2126,6 +2126,9 @@ namespace Legion {
       }
       instance_domain = (region_exprs.size() == 1) ? 
         *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
+      // This also serves to guarantee that the instance domain is
+      // valid on the local node
+      instance_volume = instance_domain->get_volume();
     }
 
     //--------------------------------------------------------------------------

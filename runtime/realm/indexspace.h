@@ -86,6 +86,7 @@ namespace Realm {
 
   template <int N, typename T = int> struct Point;
   template <int N, typename T = int> struct Rect;
+  template <int N, typename T = int> class PointInRectIterator;
   template <int M, int N, typename T = int> struct Matrix;
   template <int N, typename T = int> struct IndexSpace;
   template <int N, typename T = int> struct IndexSpaceIterator;
