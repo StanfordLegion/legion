@@ -6238,8 +6238,7 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_SUBSET_REQUEST:
             {
-              runtime->handle_equivalence_set_subset_request(derez, 
-                                              remote_address_space);
+              runtime->handle_equivalence_set_subset_request(derez); 
               break;
             }
           case SEND_EQUIVALENCE_SET_SUBSET_RESPONSE:
@@ -15380,11 +15379,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_subset_request(Deserializer &derez,
-                                                          AddressSpaceID source)
+    void Runtime::handle_equivalence_set_subset_request(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_subset_request(derez, this, source);
+      EquivalenceSet::handle_subset_request(derez, this);
     }
 
     //--------------------------------------------------------------------------

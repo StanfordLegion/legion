@@ -1162,8 +1162,7 @@ namespace Legion {
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
-      static void handle_subset_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
+      static void handle_subset_request(Deserializer &derez, Runtime *runtime);
       static void handle_subset_response(Deserializer &derez, Runtime *runtime);
       static void handle_subset_update(Deserializer &derez, Runtime *rt);
       static void handle_ray_trace_request(Deserializer &derez, 
