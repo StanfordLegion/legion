@@ -2684,11 +2684,12 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_delete;
       std::set<ApEvent> effects_events;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->overwrite_set(remote_tracker, alt_sets, op, index, view,
-                    overwrite_mask, output_aggregator, map_applied_events,
-                    PredEvent::NO_PRED_EVENT, add_restriction))
+        if ((*it)->overwrite_set(remote_tracker, alt_sets, local_space, op, 
+              index, view, overwrite_mask, output_aggregator,map_applied_events,
+              PredEvent::NO_PRED_EVENT, add_restriction))
           to_delete.push_back(*it);
       if (remote_tracker.has_remote_sets())
       {
