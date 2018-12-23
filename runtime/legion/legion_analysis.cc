@@ -7556,8 +7556,9 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(did);
+        rez.serialize(local_space);
       }
-      runtime->send_equivalence_set_subset_request(logical_owner_space,rez);
+      runtime->send_equivalence_set_subset_request(logical_owner_space, rez);
       applied.insert(transition_event);
     }
     
@@ -8329,6 +8330,7 @@ namespace Legion {
         {
           RezCheck z(rez);
           rez.serialize(did);
+          rez.serialize(source);
         }
         runtime->send_equivalence_set_subset_request(logical_owner_space, rez);
         return;
@@ -8618,7 +8620,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_subset_request(
-                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
+                                          Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -8626,6 +8628,8 @@ namespace Legion {
       derez.deserialize(did);
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
+      AddressSpaceID source;
+      derez.deserialize(source);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       set->process_subset_request(source, RtEvent::NO_RT_EVENT);

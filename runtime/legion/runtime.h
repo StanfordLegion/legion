@@ -2671,8 +2671,7 @@ namespace Legion {
                                           AddressSpaceID source);
       void handle_equivalence_set_response(Deserializer &derez,
                                            AddressSpaceID source);
-      void handle_equivalence_set_subset_request(Deserializer &derez,
-                                                 AddressSpaceID source);
+      void handle_equivalence_set_subset_request(Deserializer &derez);
       void handle_equivalence_set_subset_response(Deserializer &derez);
       void handle_equivalence_set_subset_update(Deserializer &derez);
       void handle_equivalence_set_ray_trace_request(Deserializer &derez,
