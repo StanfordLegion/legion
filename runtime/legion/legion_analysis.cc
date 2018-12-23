@@ -3266,7 +3266,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     RemoteEqTracker::RemoteEqTracker(Runtime *rt)
-      : source(rt->address_space), previous(source), runtime(rt)
+      : previous(rt->address_space), original_source(previous), runtime(rt)
     //--------------------------------------------------------------------------
     {
     }
@@ -3289,7 +3289,8 @@ namespace Legion {
         remote_insts = new FieldMaskSet<LogicalView>();
         restricted = false;
       }
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
+      for (std::map<AddressSpaceID,
+            std::vector<std::pair<EquivalenceSet*,AddressSpaceID> > >::
             const_iterator rit = remote_sets.begin(); 
             rit != remote_sets.end(); rit++)
       {
@@ -3300,11 +3301,12 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize((*it)->did);
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
+            rez.serialize(it->first->did);
           rez.serialize(mask);
           rez.serialize(target);
           rez.serialize(ready);
@@ -3346,9 +3348,9 @@ namespace Legion {
         remote_insts = new FieldMaskSet<LogicalView>();
         restricted = false;
       }
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3357,11 +3359,12 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize((*it)->did);
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
+            rez.serialize(it->first->did);
           rez.serialize(mask);
           rez.serialize(redop);
           rez.serialize(target);
@@ -3386,7 +3389,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_updates(Operation *op, unsigned index,
+    void RemoteEqTracker::perform_remote_updates(
+                                  Operation *op, unsigned index,
                                   LogicalRegion handle,
                                   const RegionUsage &usage,
                                   const FieldMask &user_mask,
@@ -3406,9 +3410,9 @@ namespace Legion {
       assert(!targets.empty());
       assert(targets.size() == views.size());
 #endif
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3420,13 +3424,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
           {
-            rez.serialize((*it)->did);
-            remote_exprs.insert((*it)->set_expr);
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+            remote_exprs.insert(it->first->set_expr);
           }
           op->pack_remote_operation(rez);
           rez.serialize(index);
@@ -3457,8 +3463,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_acquires(Operation *op, 
-                                       const unsigned index,
+    void RemoteEqTracker::perform_remote_acquires(
+                                       Operation *op, const unsigned index,
                                        const RegionUsage &usage,
                                        const FieldMask &user_mask,
                                        const ApEvent term_event,
@@ -3476,9 +3482,9 @@ namespace Legion {
         sync_events = new std::set<RtEvent>();
         remote_insts = new FieldMaskSet<LogicalView>();
       }
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3488,11 +3494,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize((*it)->did);
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
           op->pack_remote_operation(rez);
           rez.serialize(index);
           rez.serialize(usage);
@@ -3514,8 +3524,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_releases(Operation *op,
-                                       const unsigned index,
+    void RemoteEqTracker::perform_remote_releases(
+                                       Operation *op, const unsigned index,
                                        const RegionUsage &usage,
                                        const FieldMask &user_mask,
                                        const ApEvent precondition,
@@ -3534,9 +3544,9 @@ namespace Legion {
         sync_events = new std::set<RtEvent>();
         remote_insts = new FieldMaskSet<LogicalView>();
       }
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3546,11 +3556,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize((*it)->did);
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
           op->pack_remote_operation(rez);
           rez.serialize(index);
           rez.serialize(usage);
@@ -3603,9 +3617,9 @@ namespace Legion {
       assert(dst_instances.size() == dst_views.size());
       assert(src_indexes.size() == dst_indexes.size());
 #endif
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3615,13 +3629,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
           {
-            rez.serialize((*it)->did);
-            remote_exprs.insert((*it)->set_expr);
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+            remote_exprs.insert(it->first->set_expr);
           }
           op->pack_remote_operation(rez);
           rez.serialize(src_index);
@@ -3667,8 +3683,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_overwrite(Operation *op, 
-                                  const unsigned index,
+    void RemoteEqTracker::perform_remote_overwrite(
+                                  Operation *op, const unsigned index,
                                   const RegionUsage &usage,
                                   InstanceView *local_view,
                                   LogicalView *registration_view,
@@ -3686,9 +3702,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!remote_sets.empty());
 #endif
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3699,13 +3715,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
           {
-            rez.serialize((*it)->did);
-            remote_exprs.insert((*it)->set_expr);
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+            remote_exprs.insert(it->first->set_expr);
           }
           op->pack_remote_operation(rez);
           rez.serialize(index);
@@ -3740,9 +3758,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!remote_sets.empty());
 #endif
-      for (std::map<AddressSpaceID,std::vector<EquivalenceSet*> >::
-            const_iterator rit = remote_sets.begin(); 
-            rit != remote_sets.end(); rit++)
+      for (std::map<AddressSpaceID,std::vector<
+            std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
+            remote_sets.begin(); rit != remote_sets.end(); rit++)
       {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
@@ -3751,11 +3769,15 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z(rez);
-          rez.serialize(source);
+          rez.serialize(original_source);
           rez.serialize<size_t>(rit->second.size());
-          for (std::vector<EquivalenceSet*>::const_iterator it = 
-                rit->second.begin(); it != rit->second.end(); it++)
-            rez.serialize((*it)->did);
+          for (std::vector<std::pair<EquivalenceSet*,AddressSpaceID> >::
+                const_iterator it = rit->second.begin(); 
+                it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
           op->pack_remote_operation(rez);
           if (inst_view != NULL)
             rez.serialize(inst_view->did);
@@ -3989,7 +4011,7 @@ namespace Legion {
 
       bool restricted = false;
       FieldMaskSet<LogicalView> valid_insts;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -4002,7 +4024,7 @@ namespace Legion {
                                         valid_insts, request_mask))
           restricted = true;
       if (remote_tracker.has_remote_sets())
-        remote_tracker.request_remote_instances(valid_insts, request_mask,
+        remote_tracker.request_remote_instances(valid_insts, request_mask, 
                                                 ready_events, target);
       if (!valid_insts.empty())
       {
@@ -4067,7 +4089,7 @@ namespace Legion {
 
       bool restricted = false;
       FieldMaskSet<ReductionView> reduction_insts;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
@@ -4125,6 +4147,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4133,6 +4156,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
@@ -4180,7 +4204,7 @@ namespace Legion {
       derez.deserialize(check_initialized);
 
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
       CopyFillAggregator *output_aggregator = NULL;
       std::set<RtEvent> guard_events;
@@ -4198,13 +4222,13 @@ namespace Legion {
       if (!IS_DISCARD(usage) && !IS_SIMULT(usage) && check_initialized)
       {
         FieldMask initialized(user_mask);
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
+        for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         {
-          (*it)->update_set(remote_tracker, dummy_alt_sets, op, index, 
-                usage, user_mask, targets, target_views, input_aggregators, 
-                output_aggregator,map_applied_events,guard_events,&initialized);
-          local_exprs.insert((*it)->set_expr);
+          eq_sets[idx]->update_set(remote_tracker, dummy_alt_sets, sources[idx],
+              op, index, usage, user_mask, targets, target_views, 
+              input_aggregators, output_aggregator, map_applied_events,
+              guard_events, &initialized);
+          local_exprs.insert(eq_sets[idx]->set_expr);
         }
         if (user_mask != initialized)
         {
@@ -4215,13 +4239,13 @@ namespace Legion {
       }
       else
       {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
+        for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         {
-          (*it)->update_set(remote_tracker, dummy_alt_sets, op, index, usage, 
-                          user_mask, targets, target_views, input_aggregators, 
-                          output_aggregator, map_applied_events, guard_events);
-          local_exprs.insert((*it)->set_expr);
+          eq_sets[idx]->update_set(remote_tracker, dummy_alt_sets, sources[idx],
+              op, index, usage, user_mask, targets, target_views, 
+              input_aggregators, output_aggregator, map_applied_events, 
+              guard_events);
+          local_exprs.insert(eq_sets[idx]->set_expr);
         }
       }
       IndexSpaceExpression *local_expr = 
@@ -4310,6 +4334,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4318,6 +4343,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
@@ -4338,7 +4364,7 @@ namespace Legion {
       FieldMaskSet<InstanceView> instances;
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> acquired_events;
       PhysicalTraceInfo trace_info(op);
@@ -4349,10 +4375,10 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         wait_on.wait();
       }
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->acquire_restrictions(remote_tracker, dummy_alt_sets, op,
-                  user_mask, instances, inst_exprs, map_applied_events);
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        eq_sets[idx]->acquire_restrictions(remote_tracker, dummy_alt_sets,
+                                   sources[idx], op, user_mask, instances,
+                                   inst_exprs, map_applied_events);
       if (remote_tracker.has_remote_sets())
         remote_tracker.perform_remote_acquires(op, index, usage, user_mask, 
               term_event, map_applied_events, acquired_events, inst_target);
@@ -4423,6 +4449,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4431,6 +4458,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
@@ -4453,7 +4481,7 @@ namespace Legion {
       FieldMaskSet<InstanceView> instances;
       std::map<InstanceView*,std::set<IndexSpaceExpression*> > inst_exprs;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> released_events;
       PhysicalTraceInfo trace_info(op);
@@ -4465,15 +4493,15 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         wait_on.wait();
       }
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->release_restrictions(remote_tracker, dummy_alt_sets, op, 
-                                    user_mask, release_aggregator, instances,
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        eq_sets[idx]->release_restrictions(remote_tracker, dummy_alt_sets,
+                                    sources[idx], op, user_mask, 
+                                    release_aggregator, instances,
                                     inst_exprs, map_applied_events);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_releases(op, index, usage, user_mask, 
-                              precondition, term_event, map_applied_events,
-                              released_events, inst_target);
+        remote_tracker.perform_remote_releases(op, index, usage, 
+                              user_mask, precondition, term_event, 
+                              map_applied_events, released_events, inst_target);
       // Issue any release copies/fills that need to be done
       if (release_aggregator != NULL)
       {
@@ -4550,6 +4578,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4558,6 +4587,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned src_index, dst_index;
@@ -4633,7 +4663,7 @@ namespace Legion {
       derez.deserialize(copy);
 
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       CopyFillAggregator *across_aggregator = NULL;
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;
@@ -4651,16 +4681,16 @@ namespace Legion {
       }
       if (perfect)
       {
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
+        for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         {
+          EquivalenceSet *set = eq_sets[idx];
           // Check that the index spaces intersect
           IndexSpaceExpression *overlap = 
-            runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+            runtime->forest->intersect_index_spaces(set->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
-              src_index, dst_index, dst_usage, src_mask, src_instances, 
+          set->issue_across_copies(remote_tracker,dummy_alt_sets,sources[idx],
+              op, src_index, dst_index, dst_usage, src_mask, src_instances, 
               dst_instances, src_views, dst_views, overlap, across_aggregator,
               pred_guard, redop, initialized, map_applied_events);
           local_exprs.insert(overlap);
@@ -4677,16 +4707,16 @@ namespace Legion {
           manager->initialize_across_helper(across_helpers.back(), 
                                 dst_mask, src_indexes, dst_indexes);
         }
-        for (std::vector<EquivalenceSet*>::const_iterator it = 
-              eq_sets.begin(); it != eq_sets.end(); it++)
+        for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         {
+          EquivalenceSet *set = eq_sets[idx];
           // Check that the index spaces intersect
           IndexSpaceExpression *overlap = 
-            runtime->forest->intersect_index_spaces((*it)->set_expr, dst_expr);
+            runtime->forest->intersect_index_spaces(set->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(remote_tracker, dummy_alt_sets, op,
-                                     src_index, dst_index, dst_usage, 
+          set->issue_across_copies(remote_tracker, dummy_alt_sets, sources[idx],
+                                     op, src_index, dst_index, dst_usage, 
                                      src_mask, src_instances, dst_instances,
                                      src_views, dst_views, overlap, 
                                      across_aggregator, pred_guard, redop, 
@@ -4790,6 +4820,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4798,6 +4829,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       unsigned index;
@@ -4837,7 +4869,7 @@ namespace Legion {
 
       CopyFillAggregator *output_aggregator = NULL;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> effects_events;
       PhysicalTraceInfo trace_info(op);
@@ -4849,13 +4881,13 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         wait_on.wait();
       }
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
       {
-        (*it)->overwrite_set(remote_tracker, dummy_alt_sets, op, index, 
-                             registration_view,overwrite_mask,output_aggregator,
-                             map_applied_events, pred_guard, add_restriction);
-        local_exprs.insert((*it)->set_expr);
+        EquivalenceSet *set = eq_sets[idx];
+        set->overwrite_set(remote_tracker, dummy_alt_sets, 
+            sources[idx], op, index, registration_view, overwrite_mask,
+            output_aggregator, map_applied_events, pred_guard, add_restriction);
+        local_exprs.insert(set->set_expr);
       }
       IndexSpaceExpression *local_expr = 
         runtime->forest->union_index_spaces(local_exprs);
@@ -4918,6 +4950,7 @@ namespace Legion {
       derez.deserialize(num_eq_sets);
       std::set<RtEvent> ready_events;
       std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      std::vector<AddressSpaceID> sources(num_eq_sets);
       for (unsigned idx = 0; idx < num_eq_sets; idx++)
       {
         DistributedID did;
@@ -4926,6 +4959,7 @@ namespace Legion {
         eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready); 
         if (ready.exists())
           ready_events.insert(ready);
+        derez.deserialize(sources[idx]);
       }
       RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
       DistributedID view_did;
@@ -4958,17 +4992,16 @@ namespace Legion {
 
       std::set<RtEvent> map_applied_events;
       std::set<EquivalenceSet*> dummy_alt_sets;
-      RemoteEqTracker remote_tracker(source, previous, runtime);
+      RemoteEqTracker remote_tracker(previous, source, runtime);
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         wait_on.wait();
       }
-      for (std::vector<EquivalenceSet*>::const_iterator it = 
-            eq_sets.begin(); it != eq_sets.end(); it++)
-        (*it)->filter_set(remote_tracker, dummy_alt_sets, op, inst_view, 
-                          filter_mask, map_applied_events,
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        eq_sets[idx]->filter_set(remote_tracker, dummy_alt_sets, sources[idx],
+                          op, inst_view, filter_mask, map_applied_events,
                           registration_view, remove_restriction);
       if (remote_tracker.has_remote_sets())
         remote_tracker.perform_remote_filter(op, inst_view, registration_view,
@@ -6321,8 +6354,8 @@ namespace Legion {
       AutoLock eq(eq_lock,1,false/*exclusive*/);
       if (!is_logical_owner())
       {
-        remote_tracker.record_remote(logical_owner_space, 
-                                     const_cast<EquivalenceSet*>(this));
+        remote_tracker.record_remote(const_cast<EquivalenceSet*>(this), 
+                      logical_owner_space, logical_owner_space/*nop*/);
         return false;
       }
       for (FieldMaskSet<LogicalView>::const_iterator it = 
@@ -6352,8 +6385,8 @@ namespace Legion {
       AutoLock eq(eq_lock,1,false/*exclusive*/);
       if (!is_logical_owner())
       {
-        remote_tracker.record_remote(logical_owner_space, 
-                                     const_cast<EquivalenceSet*>(this));
+        remote_tracker.record_remote(const_cast<EquivalenceSet*>(this), 
+                      logical_owner_space, logical_owner_space/*nop*/);
         return false;
       }
       // Iterate over all the fields
@@ -6388,6 +6421,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool EquivalenceSet::update_set(RemoteEqTracker &remote_tracker,
                                 std::set<EquivalenceSet*> &alt_sets,
+                                const AddressSpaceID source,
                                 Operation *op, const unsigned index,
                                 const RegionUsage &usage, 
                                 const FieldMask &user_mask,
@@ -6422,7 +6456,7 @@ namespace Legion {
           request_remote_subsets(applied_events); 
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
         // Otherwise we fall through and record our subsets
@@ -6431,7 +6465,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -6439,8 +6473,8 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->update_set(remote_tracker, alt_sets, op, index,
-              usage, user_mask, target_instances, target_views, 
+          (*it)->update_set(remote_tracker, alt_sets, local_space, op, 
+              index, usage, user_mask, target_instances, target_views, 
               input_aggregators, output_aggregator, applied_events,
               guard_events, initialized, false/*original set*/);
         eq.reacquire();
@@ -6650,7 +6684,7 @@ namespace Legion {
           }
         }
       }
-      check_for_migration(remote_tracker, applied_events);
+      check_for_migration(remote_tracker, source, applied_events);
       return false;
     }
 
@@ -6704,6 +6738,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(RemoteEqTracker &remote_tracker,
+                                             const AddressSpaceID eq_source,
                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
@@ -6718,12 +6753,12 @@ namespace Legion {
       if (!pending_refinements.empty())
         return;
       // No matter what update the previous requests data structure
-      previous_requests[lru_index++] = remote_tracker.source;
+      previous_requests[lru_index++] = eq_source;
       if (lru_index == NUM_PREVIOUS)
         lru_index = 0;
       bool migrate = false;
       // If we don't agree the current owner, see if we should migrate
-      if (remote_tracker.source != logical_owner_space)
+      if (eq_source != logical_owner_space)
       {
         // Check two properties:
         // 1. At least one of the last users is the current owner
@@ -6773,7 +6808,7 @@ namespace Legion {
             }
           }
           else // They all go to the same place
-            logical_owner_space = remote_tracker.source;
+            logical_owner_space = eq_source;
         }
         if (migrate)
         {
@@ -6797,8 +6832,8 @@ namespace Legion {
       }
       // If the request bounced of a stale logical owner, then send 
       // a message to update the source with the current logical owner
-      if (!migrate && (remote_tracker.source != remote_tracker.previous) &&
-          (remote_tracker.source != local_space))
+      if (!migrate && (eq_source != remote_tracker.previous) &&
+          (eq_source != local_space))
       {
         RtUserEvent notification_event = Runtime::create_rt_user_event();
         Serializer rez;
@@ -6808,7 +6843,7 @@ namespace Legion {
           rez.serialize(logical_owner_space);
           rez.serialize(notification_event);
         }
-        runtime->send_equivalence_set_owner_update(remote_tracker.source, rez);
+        runtime->send_equivalence_set_owner_update(eq_source, rez);
         applied_events.insert(notification_event);
       }
 #endif
@@ -6817,6 +6852,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_restrictions(RemoteEqTracker &remote_tracker,
                                           std::set<EquivalenceSet*> &alt_sets,
+                                          const AddressSpaceID source,
                                           Operation *op, FieldMask acquire_mask,
                                           FieldMaskSet<InstanceView> &instances,
            std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
@@ -6840,7 +6876,7 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
       }
@@ -6848,7 +6884,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -6856,8 +6892,9 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->acquire_restrictions(remote_tracker, alt_sets, op,acquire_mask,
-                  instances, inst_exprs, applied_events, false/*original set*/);
+          (*it)->acquire_restrictions(remote_tracker, alt_sets, local_space, op,
+                                      acquire_mask, instances, inst_exprs, 
+                                      applied_events, false/*original set*/);
         eq.reacquire();
         return true;
       }
@@ -6880,13 +6917,14 @@ namespace Legion {
         inst_exprs[view].insert(set_expr);
       }
       restricted_fields -= acquire_mask;
-      check_for_migration(remote_tracker, applied_events);
+      check_for_migration(remote_tracker, source, applied_events);
       return false;
     }
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::release_restrictions(RemoteEqTracker &remote_tracker,
                                         std::set<EquivalenceSet*> &alt_sets,
+                                        const AddressSpaceID source, 
                                         Operation *op,
                                         const FieldMask &release_mask,
                                         CopyFillAggregator *&release_aggregator,
@@ -6912,7 +6950,7 @@ namespace Legion {
           request_remote_subsets(ready_events);
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
       }
@@ -6920,7 +6958,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -6928,8 +6966,8 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->release_restrictions(remote_tracker, alt_sets, op,
-              release_mask, release_aggregator, instances, inst_exprs, 
+          (*it)->release_restrictions(remote_tracker, alt_sets, local_space,
+              op, release_mask, release_aggregator, instances, inst_exprs, 
               ready_events, false/*original set*/);
         eq.reacquire();
         return true;
@@ -6969,14 +7007,14 @@ namespace Legion {
                          RtEvent::NO_RT_EVENT, op, 0/*index*/, false/*track*/);
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
-      check_for_migration(remote_tracker, ready_events);
+      check_for_migration(remote_tracker, source, ready_events);
       return false;
     }
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::issue_across_copies(RemoteEqTracker &remote_tracker,
-                std::set<EquivalenceSet*> &alt_sets, Operation *op, 
-                const unsigned src_index, const unsigned dst_index, 
+                std::set<EquivalenceSet*> &alt_sets,const AddressSpaceID source,
+                Operation *op,const unsigned src_index,const unsigned dst_index,
                 const RegionUsage &usage, const FieldMask &src_mask, 
                 const InstanceSet &source_instances,
                 const InstanceSet &target_instances,
@@ -7010,7 +7048,7 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
       }
@@ -7018,7 +7056,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -7031,10 +7069,10 @@ namespace Legion {
             runtime->forest->intersect_index_spaces((*it)->set_expr, overlap);
           if (subset_overlap->is_empty())
             continue;
-          (*it)->issue_across_copies(remote_tracker, alt_sets, op, src_index, 
-              dst_index, usage, src_mask, source_instances, target_instances, 
-              source_views, target_views, subset_overlap, aggregator, 
-              pred_guard, redop, initialized_fields, applied_events, 
+          (*it)->issue_across_copies(remote_tracker, alt_sets, local_space, op,
+              src_index, dst_index, usage, src_mask, source_instances, 
+              target_instances, source_views, target_views, subset_overlap, 
+              aggregator, pred_guard, redop, initialized_fields, applied_events,
               src_indexes, dst_indexes, across_helpers, false/*original set*/);
         }
         eq.reacquire();
@@ -7260,13 +7298,14 @@ namespace Legion {
         assert(reduction_fields * src_mask);
 #endif
       }
-      check_for_migration(remote_tracker, applied_events);
+      check_for_migration(remote_tracker, source, applied_events);
       return false;
     }
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::overwrite_set(RemoteEqTracker &remote_tracker,
                                        std::set<EquivalenceSet*> &alt_sets, 
+                                       const AddressSpaceID source,
                                        Operation *op, const unsigned index,
                                        LogicalView *view, const FieldMask &mask,
                                        CopyFillAggregator *&output_aggregator,
@@ -7292,7 +7331,7 @@ namespace Legion {
           request_remote_subsets(ready_events);
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
       }
@@ -7300,7 +7339,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -7308,9 +7347,9 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->overwrite_set(remote_tracker, alt_sets, op, index,
-              view, mask, output_aggregator, ready_events, pred_guard,
-              add_restriction, false/*original set*/);
+          (*it)->overwrite_set(remote_tracker, alt_sets, local_space, op, 
+              index, view, mask, output_aggregator, ready_events, 
+              pred_guard, add_restriction, false/*original set*/);
         eq.reacquire();
         return true;
       }
@@ -7395,13 +7434,14 @@ namespace Legion {
             copy_out(restricted_overlap, view, op, index, output_aggregator);
         }
       }
-      check_for_migration(remote_tracker, ready_events);
+      check_for_migration(remote_tracker, source, ready_events);
       return false;
     }
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::filter_set(RemoteEqTracker &remote_tracker,
                                     std::set<EquivalenceSet*> &alt_sets,
+                                    const AddressSpaceID source,
                                     Operation *op, InstanceView *inst_view, 
                                     const FieldMask &mask,
                                     std::set<RtEvent> &applied_events,
@@ -7426,7 +7466,7 @@ namespace Legion {
           request_remote_subsets(applied_events);
         if (subsets.empty())
         {
-          remote_tracker.record_remote(logical_owner_space, this);
+          remote_tracker.record_remote(this, logical_owner_space, source);
           return false;
         }
       }
@@ -7434,7 +7474,7 @@ namespace Legion {
       // the sub equivalence sets to try
       if (is_refined())
       {
-        check_for_unrefined_remainder(eq, remote_tracker.source);
+        check_for_unrefined_remainder(eq, remote_tracker.original_source);
         std::vector<EquivalenceSet*> subsets_copy(subsets); 
         eq.release();
         // Remove ourselves if we recursed
@@ -7442,8 +7482,8 @@ namespace Legion {
           alt_sets.erase(this);
         for (std::vector<EquivalenceSet*>::const_iterator it = 
               subsets_copy.begin(); it != subsets_copy.end(); it++) 
-          (*it)->filter_set(remote_tracker, alt_sets, op, inst_view, 
-              mask, applied_events, registration_view,
+          (*it)->filter_set(remote_tracker, alt_sets, local_space,
+              op, inst_view, mask, applied_events, registration_view,
               remove_restriction, false/*original set*/);
         eq.reacquire();
         return true;
@@ -7493,7 +7533,7 @@ namespace Legion {
           }
         }
       }
-      check_for_migration(remote_tracker, applied_events);
+      check_for_migration(remote_tracker, source, applied_events);
       return false;
     }
 

@@ -2001,12 +2001,13 @@ namespace Legion {
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       if (!IS_DISCARD(usage) && !IS_SIMULT(usage) && check_initialized)
       {
         FieldMask initialized(user_mask);
         for (std::set<EquivalenceSet*>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
-          if ((*it)->update_set(remote_tracker, alt_sets, op, index, 
+          if ((*it)->update_set(remote_tracker, alt_sets, local_space, op,index,
                 usage, user_mask, targets, target_views, input_aggregators, 
                 output_aggregator,map_applied_events,guard_events,&initialized))
             to_delete.push_back(*it);
@@ -2020,9 +2021,9 @@ namespace Legion {
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
               eq_sets.begin(); it != eq_sets.end(); it++)
-          if ((*it)->update_set(remote_tracker, alt_sets, op, index, usage, 
-                          user_mask, targets, target_views, input_aggregators, 
-                          output_aggregator, map_applied_events, guard_events))
+          if ((*it)->update_set(remote_tracker, alt_sets, local_space, op, 
+              index, usage, user_mask, targets, target_views, input_aggregators,
+              output_aggregator, map_applied_events, guard_events))
             to_delete.push_back(*it);
       }
 #ifdef DEBUG_LEGION
@@ -2252,10 +2253,11 @@ namespace Legion {
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->acquire_restrictions(remote_tracker, alt_sets, op, 
-              user_mask, instances, inst_exprs, map_applied_events))
+        if ((*it)->acquire_restrictions(remote_tracker, alt_sets, local_space,
+              op, user_mask, instances, inst_exprs, map_applied_events))
           to_delete.push_back(*it);
       // Now add users for all the instances
       const RegionUsage usage(req);
@@ -2333,11 +2335,12 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_delete;
       RemoteEqTracker remote_tracker(runtime);
       CopyFillAggregator *release_aggregator = NULL;
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->release_restrictions(remote_tracker, alt_sets, op, user_mask,
-                                        release_aggregator, instances, 
-                                        inst_exprs, map_applied_events))
+        if ((*it)->release_restrictions(remote_tracker, alt_sets, local_space,
+                                  op, user_mask, release_aggregator, instances,
+                                  inst_exprs, map_applied_events))
           to_delete.push_back(*it);
       const RegionUsage usage(req);
       const UniqueID op_id = op->get_unique_op_id();
@@ -2456,6 +2459,7 @@ namespace Legion {
       CopyFillAggregator *across_aggregator = NULL;
       FieldMask initialized = src_mask;
       std::vector<CopyAcrossHelper*> across_helpers;
+      const AddressSpaceID local_space = runtime->address_space;
       if (perfect)
       {
         for (std::set<EquivalenceSet*>::const_iterator it = 
@@ -2466,8 +2470,8 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          if ((*it)->issue_across_copies(remote_tracker, alt_sets, op,
-              src_index, dst_index, usage, src_mask, src_targets, 
+          if ((*it)->issue_across_copies(remote_tracker, alt_sets, local_space,
+              op, src_index, dst_index, usage, src_mask, src_targets, 
               dst_targets, source_views, target_views, overlap, 
               across_aggregator, guard, dst_req.redop, 
               initialized, map_applied_events))
@@ -2493,8 +2497,8 @@ namespace Legion {
             intersect_index_spaces((*it)->set_expr, dst_expr);
           if (overlap->is_empty())
             continue;
-          if ((*it)->issue_across_copies(remote_tracker, alt_sets, op,
-                                     src_index, dst_index, usage, 
+          if ((*it)->issue_across_copies(remote_tracker, alt_sets, local_space,
+                                     op, src_index, dst_index, usage, 
                                      src_mask, src_targets, dst_targets,
                                      source_views, target_views, overlap, 
                                      across_aggregator, guard, dst_req.redop, 
@@ -2618,10 +2622,12 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_delete;
       std::set<ApEvent> effects_events;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->overwrite_set(remote_tracker, alt_sets, op, index, fill_view,
-                  fill_mask, output_aggregator, map_applied_events, true_guard))
+        if ((*it)->overwrite_set(remote_tracker, alt_sets, local_space, op, 
+                                 index, fill_view, fill_mask, output_aggregator,
+                                 map_applied_events, true_guard))
           to_delete.push_back(*it);
       if (remote_tracker.has_remote_sets())
       {
@@ -2752,11 +2758,12 @@ namespace Legion {
       std::vector<EquivalenceSet*> to_delete;
       std::set<ApEvent> effects_events;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->overwrite_set(remote_tracker, alt_sets, attach_op, index, 
-                      registration_view, ext_mask, dummy_aggregator, 
-                      map_applied_events, PredEvent::NO_PRED_EVENT, restricted))
+        if ((*it)->overwrite_set(remote_tracker, alt_sets, local_space, 
+              attach_op, index, registration_view, ext_mask, dummy_aggregator, 
+              map_applied_events, PredEvent::NO_PRED_EVENT, restricted))
           to_delete.push_back(*it);
       const RegionUsage usage(req);
       const ApEvent term_event = attach_op->get_completion_event();
@@ -2817,11 +2824,12 @@ namespace Legion {
       std::set<EquivalenceSet*> alt_sets;
       std::vector<EquivalenceSet*> to_delete;
       RemoteEqTracker remote_tracker(runtime);
+      const AddressSpaceID local_space = runtime->address_space;
       for (std::set<EquivalenceSet*>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
-        if ((*it)->filter_set(remote_tracker, alt_sets, detach_op, local_view,
-                              ext_mask, map_applied_events, registration_view,
-                              true/*remove restriction*/))
+        if ((*it)->filter_set(remote_tracker, alt_sets, local_space, detach_op, 
+                              local_view, ext_mask, map_applied_events, 
+                              registration_view, true/*remove restriction*/))
           to_delete.push_back(*it);
       if (remote_tracker.has_remote_sets())
         remote_tracker.perform_remote_filter(detach_op, local_view, 
