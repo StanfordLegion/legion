@@ -723,11 +723,13 @@ namespace Legion {
     class RemoteEqTracker {
     public:
       RemoteEqTracker(Runtime *rt);
-      RemoteEqTracker(AddressSpaceID src, AddressSpaceID prev, Runtime *rt)
-        : source(src), previous(prev), runtime(rt) { }
+      RemoteEqTracker(AddressSpaceID prev, AddressSpaceID original, Runtime *rt)
+        : previous(prev), original_source(original), runtime(rt) { }
     public:
-      inline void record_remote(AddressSpaceID owner, EquivalenceSet *set)
-        { remote_sets[owner].push_back(set); } 
+      inline void record_remote(EquivalenceSet *set, 
+                                AddressSpaceID owner, AddressSpaceID src)
+        { remote_sets[owner].push_back(
+            std::pair<EquivalenceSet*,AddressSpaceID>(set, src)); } 
       inline bool has_remote_sets(void) const
         { return !remote_sets.empty(); }
     public:
@@ -835,11 +837,12 @@ namespace Legion {
                                         AddressSpaceID previous);
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
     public:
-      const AddressSpaceID source;
       const AddressSpaceID previous;
+      const AddressSpaceID original_source;
       Runtime *const runtime;
     protected:
-      std::map<AddressSpaceID,std::vector<EquivalenceSet*> > remote_sets;
+      std::map<AddressSpaceID,
+        std::vector<std::pair<EquivalenceSet*,AddressSpaceID> > > remote_sets;
     protected:
       LocalLock *remote_lock;
       std::set<RtEvent> *sync_events;
@@ -1025,6 +1028,7 @@ namespace Legion {
                 ReductionOpID redop, const FieldMask &user_mask) const;
       bool update_set(RemoteEqTracker &remote_tracker,
                       std::set<EquivalenceSet*> &alt_sets,
+                      const AddressSpaceID source,
                       Operation *op, const unsigned index,
                       const RegionUsage &usage, const FieldMask &user_mask,
                       const InstanceSet &target_instances,
@@ -1045,10 +1049,12 @@ namespace Legion {
                                const std::vector<InstanceView*> &target_views,
                                std::set<RtEvent> &applied_events);
       void check_for_migration(RemoteEqTracker &remote_tracker,
+                               const AddressSpaceID source, 
                                std::set<RtEvent> &applied_events);
     public:
       bool acquire_restrictions(RemoteEqTracker &remote_tracker,
                                 std::set<EquivalenceSet*> &alt_sets,
+                                const AddressSpaceID eq_source,
                                 Operation *op, FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
           std::map<InstanceView*,std::set<IndexSpaceExpression*> > &inst_exprs,
@@ -1056,6 +1062,7 @@ namespace Legion {
                                 const bool original_set = true);
       bool release_restrictions(RemoteEqTracker &remote_tracker,
                                 std::set<EquivalenceSet*> &alt_sets,
+                                const AddressSpaceID source,
                                 Operation *op, const FieldMask &release_mask,
                                 CopyFillAggregator *&release_aggregator,
                                 FieldMaskSet<InstanceView> &instances,
@@ -1063,8 +1070,8 @@ namespace Legion {
                                 std::set<RtEvent> &ready_events,
                                 const bool original_set = true);
       bool issue_across_copies(RemoteEqTracker &remote_tracker,
-              std::set<EquivalenceSet*> &alt_sets, Operation *op, 
-              const unsigned src_index, const unsigned dst_index,
+              std::set<EquivalenceSet*> &alt_sets, const AddressSpaceID source,
+              Operation *op, const unsigned src_index, const unsigned dst_index,
               const RegionUsage &usage, const FieldMask &src_mask, 
               const InstanceSet &source_instances,
               const InstanceSet &target_instances,
@@ -1079,6 +1086,7 @@ namespace Legion {
               const bool original_set = true);
       bool overwrite_set(RemoteEqTracker &remote_tracker, 
                          std::set<EquivalenceSet*> &alt_sets, 
+                         const AddressSpaceID source,
                          Operation *op, const unsigned index, 
                          LogicalView *view, const FieldMask &mask,
                          CopyFillAggregator *&output_aggregator,
@@ -1087,7 +1095,8 @@ namespace Legion {
                          const bool add_restriction = false,
                          const bool original_set = true);
       bool filter_set(RemoteEqTracker &remote_tracker, 
-                      std::set<EquivalenceSet*> &alt_sets, Operation *op, 
+                      std::set<EquivalenceSet*> &alt_sets, 
+                      const AddressSpaceID source, Operation *op, 
                       InstanceView *inst_view, const FieldMask &mask,
                       std::set<RtEvent> &applied_events,
                       LogicalView *registration_view = NULL,
