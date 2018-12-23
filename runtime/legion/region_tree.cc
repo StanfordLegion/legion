@@ -5192,7 +5192,7 @@ namespace Legion {
       NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
       IndexSpaceExpression *result = creator.result;
       {
-        AutoLock l_lock(lookup_lock);
+        AutoLock l_lock(lookup_is_op_lock);
 #ifdef DEBUG_LEGION
         assert(remote_expressions.find(remote_expr_id) == 
                 remote_expressions.end());
