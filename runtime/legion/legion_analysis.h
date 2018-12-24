@@ -945,13 +945,14 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_SUBSET_REQUEST_TASK_ID;
       public:
-        DeferSubsetRequestArgs(EquivalenceSet *s, AddressSpaceID src, RtEvent d)
+        DeferSubsetRequestArgs(EquivalenceSet *s, 
+                               AddressSpaceID src, RtUserEvent d)
           : LgTaskArgs<DeferSubsetRequestArgs>(implicit_provenance),
             set(s), source(src), deferral(d) { }
       public:
         EquivalenceSet *const set;
         const AddressSpaceID source;
-        const RtEvent deferral;
+        const RtUserEvent deferral;
       };
       struct DeferMakeOwnerArgs : public LgTaskArgs<DeferMakeOwnerArgs> {
       public:
@@ -1174,7 +1175,7 @@ namespace Legion {
       void send_equivalence_set(AddressSpaceID target);
       void add_pending_refinement(RefinementThunk *thunk); // call with lock
       void process_subset_request(AddressSpaceID source,
-                                  RtEvent deferral_event);
+                                  RtUserEvent deferral_event);
       void process_subset_response(Deserializer &derez);
       void process_subset_update(Deserializer &derez);
       void pack_state(Serializer &rez) const;

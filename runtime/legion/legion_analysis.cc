@@ -5424,9 +5424,6 @@ namespace Legion {
         else if (!is_logical_owner())
         {
           // If we're not the owner node then send the request there
-#ifdef DEBUG_LEGION
-          assert(!deferral_event.exists());
-#endif
           Serializer rez;
           {
             RezCheck z(rez);
@@ -5439,6 +5436,9 @@ namespace Legion {
           }
           runtime->send_equivalence_set_ray_trace_request(logical_owner_space,
                                                           rez);
+          // Trigger our deferral event if we had one
+          if (deferral_event.exists())
+            Runtime::trigger_event(deferral_event);
           return;
         }
         else if (eq_state == REFINING_STATE)
@@ -8287,7 +8287,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void EquivalenceSet::process_subset_request(AddressSpaceID source,
-                                                RtEvent deferral_event)
+                                                RtUserEvent deferral_event)
     //--------------------------------------------------------------------------
     {
       AutoTryLock eq(eq_lock);
@@ -8333,12 +8333,18 @@ namespace Legion {
           rez.serialize(source);
         }
         runtime->send_equivalence_set_subset_request(logical_owner_space, rez);
+        if (deferral_event.exists())
+          Runtime::trigger_event(deferral_event);
         return;
       }
       // If we arrived back at ourself after we were made the owner
       // then there is nothing for us to do
       if (source == local_space)
+      {
+        if (deferral_event.exists())
+          Runtime::trigger_event(deferral_event);
         return;
+      }
       // If we're in the process of doing a refinement, wait for
       // that to be done before we do anything else
       if (eq_state == REFINING_STATE)
@@ -8376,6 +8382,8 @@ namespace Legion {
               rez.serialize((*it)->did);
           }
           runtime->send_equivalence_set_subset_response(source, rez);
+          if (deferral_event.exists())
+            Runtime::trigger_event(deferral_event);
           return;
         }
       }
@@ -8388,6 +8396,8 @@ namespace Legion {
         rez.serialize<size_t>(0);
       }
       runtime->send_equivalence_set_subset_response(source, rez);
+      if (deferral_event.exists())
+        Runtime::trigger_event(deferral_event);
     }
 
     //--------------------------------------------------------------------------
@@ -8632,7 +8642,7 @@ namespace Legion {
       derez.deserialize(source);
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
-      set->process_subset_request(source, RtEvent::NO_RT_EVENT);
+      set->process_subset_request(source, RtUserEvent::NO_RT_USER_EVENT);
     }
 
     //--------------------------------------------------------------------------
