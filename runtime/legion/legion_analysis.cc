@@ -3702,6 +3702,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!remote_sets.empty());
 #endif
+      WrapperReferenceMutator mutator(map_applied_events);
       for (std::map<AddressSpaceID,std::vector<
             std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
             remote_sets.begin(); rit != remote_sets.end(); rit++)
@@ -3729,9 +3730,13 @@ namespace Legion {
           rez.serialize(index);
           rez.serialize(usage);
           if (local_view != NULL)
+          {
+            local_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
             rez.serialize(local_view->did);
+          }
           else
             rez.serialize<DistributedID>(0);
+          registration_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
           rez.serialize(registration_view->did);
           rez.serialize(overwrite_mask);
           rez.serialize(pred_guard);
@@ -3758,6 +3763,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!remote_sets.empty());
 #endif
+      WrapperReferenceMutator mutator(map_applied_events);
       for (std::map<AddressSpaceID,std::vector<
             std::pair<EquivalenceSet*,AddressSpaceID> > >::const_iterator rit = 
             remote_sets.begin(); rit != remote_sets.end(); rit++)
@@ -3780,11 +3786,17 @@ namespace Legion {
           }
           op->pack_remote_operation(rez);
           if (inst_view != NULL)
+          {
+            inst_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
             rez.serialize(inst_view->did);
+          }
           else
             rez.serialize<DistributedID>(0);
           if (registration_view != NULL)
+          {
+            registration_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
             rez.serialize(registration_view->did);
+          }
           else
             rez.serialize<DistributedID>(0);
           rez.serialize(filter_mask);
@@ -4935,6 +4947,9 @@ namespace Legion {
             Runtime::merge_events(map_applied_events));
       else
         Runtime::trigger_event(applied);
+      if (local_view != NULL)
+        local_view->send_remote_valid_decrement(previous, applied);
+      registration_view->send_remote_valid_decrement(previous, applied);
       delete op;
     }
 
@@ -5012,6 +5027,10 @@ namespace Legion {
             Runtime::merge_events(map_applied_events));
       else
         Runtime::trigger_event(applied);
+      if (inst_view != NULL)
+        inst_view->send_remote_valid_decrement(previous, applied);
+      if (registration_view != NULL)
+        registration_view->send_remote_valid_decrement(previous, applied);
       delete op;
     }
 
