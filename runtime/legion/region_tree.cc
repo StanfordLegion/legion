@@ -6404,10 +6404,7 @@ namespace Legion {
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
 #endif
-      // If we're not the owner we still need to see if there is not a
-      // parent so we can log the index space expression in case we are
-      // doing a control replicated execution
-      if ((is_owner() || (par == NULL)) && ctx->runtime->legion_spy_enabled)
+      if (is_owner() && ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_expr(handle.get_id(), this->expr_id);
     }
 
