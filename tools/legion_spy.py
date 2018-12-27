@@ -194,11 +194,32 @@ def check_preconditions(preconditions, op):
             return pre
     return None
 
+# Borrowed from stack overflow 3173320
+def print_progress_bar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█'):
+    """
+    Call in a loop to create terminal progress bar
+    @params:
+        iteration   - Required  : current iteration (Int)
+        total       - Required  : total iterations (Int)
+        prefix      - Optional  : prefix string (Str)
+        suffix      - Optional  : suffix string (Str)
+        decimals    - Optional  : positive number of decimals in percent complete (Int)
+        length      - Optional  : character length of bar (Int)
+        fill        - Optional  : bar fill character (Str)
+    """
+    percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
+    filledLength = int(length * iteration // total)
+    bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\r')
+    # Print New Line on Complete
+    if iteration == total:
+        print()
+
 class Point(object):
     __slots__ = ['dim', 'vals', 'shape', 'index_set']
     def __init__(self, dim):
         self.dim = dim
-        self.vals = array.array('i', (0,)*dim)
+        self.vals = array.array('l', (0,)*dim)
         self.shape = None
         self.index_set = None
 
@@ -10098,6 +10119,7 @@ class State(object):
                 print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
+            print_progress_bar(count, len(toplogocial_sorter.postorder), length=80)
             # Create our reachability set and store it
             our_reachable = NodeSet(total_nodes)
             reachable[src] = our_reachable
@@ -10277,6 +10299,7 @@ class State(object):
                         (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
+            print_progress_bar(count, len(postorder), length=80)
             # Create our reachability dict
             our_reachable = dict()
             reachable[src] = our_reachable
