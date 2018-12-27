@@ -156,12 +156,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceNode* RegionTreeForest::create_index_space(IndexSpace handle,
-              const void *realm_is, DistributedID did, const bool notify_remote)
+                             const void *realm_is, DistributedID did, 
+                             const bool notify_remote, IndexSpaceExprID expr_id)
     //--------------------------------------------------------------------------
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did, 
-                    ApEvent::NO_AP_EVENT, 0/*expr id*/, notify_remote);
+                    ApEvent::NO_AP_EVENT, expr_id, notify_remote);
       if (runtime->legion_spy_enabled)
         node->log_index_space_points();
       return node;
@@ -6403,7 +6404,10 @@ namespace Legion {
       log_garbage.info("GC Index Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
 #endif
-      if (is_owner() && ctx->runtime->legion_spy_enabled)
+      // If we're not the owner we still need to see if there is not a
+      // parent so we can log the index space expression in case we are
+      // doing a control replicated execution
+      if ((is_owner() || (par == NULL)) && ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_expr(handle.get_id(), this->expr_id);
     }
 

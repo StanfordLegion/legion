@@ -7500,7 +7500,7 @@ namespace Legion {
                                                         false/*notify remote*/);
         // Do our arrival on this generation, should be the last one
         ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_3);
-        collective_space.broadcast(ISBroadcast(handle, did));
+        collective_space.broadcast(ISBroadcast(handle, node->expr_id, did));
 #ifdef DEBUG_LEGION
         log_index.debug("Creating index space %x in task%s (ID %lld)", 
                         handle.id, get_task_name(), get_unique_id()); 
@@ -7551,7 +7551,7 @@ namespace Legion {
                                                     false/*notify remote*/);
         IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> collective_space(this, COLLECTIVE_LOC_4);
-        collective_space.broadcast(ISBroadcast(handle, node->did));
+        collective_space.broadcast(ISBroadcast(handle,node->expr_id,node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
         node->update_creation_set(shard_manager->get_mapping());
@@ -7602,7 +7602,7 @@ namespace Legion {
                                                  false/*notify remote*/);
         IndexSpaceNode *node = forest->get_node(handle);
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_5);
-        space_collective.broadcast(ISBroadcast(handle, node->did));
+        space_collective.broadcast(ISBroadcast(handle,node->expr_id,node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
         node->update_creation_set(shard_manager->get_mapping());
@@ -7650,7 +7650,7 @@ namespace Legion {
                                                    false/*notify remote*/);
         IndexSpaceNode *node = forest->get_node(handle); 
         ValueBroadcast<ISBroadcast> space_collective(this, COLLECTIVE_LOC_6);
-        space_collective.broadcast(ISBroadcast(handle, node->did));
+        space_collective.broadcast(ISBroadcast(handle,node->expr_id,node->did));
         // Wait for the creation to finish
         creation_barrier.wait();
         node->update_creation_set(shard_manager->get_mapping());

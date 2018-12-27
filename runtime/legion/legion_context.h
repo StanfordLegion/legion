@@ -1270,10 +1270,12 @@ namespace Legion {
       };
       struct ISBroadcast {
       public:
-        ISBroadcast(void) : did(0) { }
-        ISBroadcast(IndexSpace h, DistributedID d) : handle(h), did(d) { }
+        ISBroadcast(void) : expr_id(0), did(0) { }
+        ISBroadcast(IndexSpace h, IndexSpaceExprID e, DistributedID d)
+          : handle(h), expr_id(e), did(d) { }
       public:
         IndexSpace handle;
+        IndexSpaceExprID expr_id;
         DistributedID did;
       };
       struct IPBroadcast {

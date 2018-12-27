@@ -121,7 +121,8 @@ namespace Legion {
       IndexSpaceNode* create_index_space(IndexSpace handle, 
                               const void *realm_is,
                               DistributedID did, 
-                              const bool notify_remote = true);
+                              const bool notify_remote = true,
+                              IndexSpaceExprID expr_id = 0);
       IndexSpace find_or_create_union_space(InnerContext *ctx,
                               const std::vector<IndexSpace> &sources,
                               const bool notify_remote = true);
