@@ -195,7 +195,7 @@ def check_preconditions(preconditions, op):
     return None
 
 # Borrowed from stack overflow 3173320
-def print_progress_bar (iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█'):
+def print_progress_bar(iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█'):
     """
     Call in a loop to create terminal progress bar
     @params:
@@ -9946,7 +9946,7 @@ class State(object):
                 point.shape = shape
                 point.index_set = index_set
                 point_value += 1
-                print_progress_bar(point_value, total_sets, prefix='Dim '+str(dim)+': ',length=80)
+                print_progress_bar(point_value, total_sets, prefix='Dim '+str(dim)+':',length=50)
                 for index in index_set:
                     index.add_refined_point(point)
         print('Done')
@@ -10121,7 +10121,7 @@ class State(object):
                 print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, total_nodes, length=80)
+            print_progress_bar(count, total_nodes, length=50)
             # Create our reachability set and store it
             our_reachable = NodeSet(total_nodes)
             reachable[src] = our_reachable
@@ -10301,7 +10301,7 @@ class State(object):
                         (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, total_nodes, length=80)
+            print_progress_bar(count, total_nodes, length=50)
             # Create our reachability dict
             our_reachable = dict()
             reachable[src] = our_reachable
