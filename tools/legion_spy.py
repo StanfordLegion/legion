@@ -9798,14 +9798,16 @@ class State(object):
         for space in self.index_spaces.itervalues():
             if space.parent is None:
                 space.compute_reduced_shapes(dim_sets)            
-        for index_sets in dim_sets.itervalues():
+        for dim,index_sets in dim_sets.iteritems():
             point_value = 0
+            total_sets = len(index_sets)
             for shape,index_set in index_sets.iteritems():
                 point = Point(1)
                 point.vals[0] = point_value
                 point.shape = shape
                 point.index_set = index_set
                 point_value += 1
+                print_progress_bar(point_value, total_sets, prefix='Dim '+str(dim)+': ',length=80)
                 for index in index_set:
                     index.add_refined_point(point)
         print('Done')
@@ -9976,7 +9978,7 @@ class State(object):
                 print('Simplifying node %s %d of %d' % (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, len(toplogocial_sorter.postorder), length=80)
+            print_progress_bar(count, total_nodes, length=80)
             # Create our reachability set and store it
             our_reachable = NodeSet(total_nodes)
             reachable[src] = our_reachable
@@ -10156,7 +10158,7 @@ class State(object):
                         (str(src), count, total_nodes)) 
             index_map[src] = count
             count += 1
-            print_progress_bar(count, len(postorder), length=80)
+            print_progress_bar(count, total_nodes, length=80)
             # Create our reachability dict
             our_reachable = dict()
             reachable[src] = our_reachable
