@@ -7523,7 +7523,7 @@ namespace Legion {
         assert(handle.exists());
 #endif
         forest->create_index_space(handle, realm_is, value.did,
-                                   false/*notify remote*/);
+                                   false/*notify remote*/, value.expr_id);
         // Arrive on the creation barrier
         Runtime::phase_barrier_arrive(creation_barrier, 1/*count*/);
       }
