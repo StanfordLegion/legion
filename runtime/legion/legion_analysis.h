@@ -609,8 +609,6 @@ namespace Legion {
     public:
       CopyFillAggregator& operator=(const CopyFillAggregator &rhs);
     public:
-      size_t count_updates(void) const;
-    public:
       virtual void record_updates(InstanceView *dst_view, 
                           const FieldMaskSet<LogicalView> &src_views,
                           const FieldMask &src_mask,
@@ -667,6 +665,13 @@ namespace Legion {
                         const bool has_dst_preconditions);
       void release_guarded_sets(void);
     public:
+      inline void clear_update_fields(void) 
+        { update_fields.clear(); } 
+      inline bool has_update_fields(void) const 
+        { return !!update_fields; }
+      inline const FieldMask& get_update_fields(void) const 
+        { return update_fields; }
+    public:
       static void handle_aggregation(const void *args);
       static void handle_deletion(const void *args);
     public:
@@ -679,6 +684,7 @@ namespace Legion {
       const RtUserEvent applied_event; // for when our effects are done
       const bool track_events;
     protected:
+      FieldMask update_fields;
       LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned sources; 
       std::vector</*vector over reduction epochs*/
         LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned> reductions;

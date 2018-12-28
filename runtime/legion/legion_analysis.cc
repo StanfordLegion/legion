@@ -1913,22 +1913,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    size_t CopyFillAggregator::count_updates(void) const
-    //--------------------------------------------------------------------------
-    {
-      size_t result = 0;
-      for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-            const_iterator it = sources.begin(); it != sources.end(); it++)
-        result += it->second.size();
-      for (unsigned idx = 0; idx < reductions.size(); idx++)
-        for (LegionMap<InstanceView*,FieldMaskSet<Update> >::aligned::
-              const_iterator it = reductions[idx].begin(); it !=
-              reductions[idx].end(); it++)
-          result += it->second.size();
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
     void CopyFillAggregator::record_updates(InstanceView *dst_view, 
                                     const FieldMaskSet<LogicalView> &src_views,
                                     const FieldMask &src_mask,
@@ -1942,6 +1926,7 @@ namespace Legion {
       assert(!src_views.empty());
       assert(!expr->is_empty());
 #endif
+      update_fields |= src_mask;
       FieldMaskSet<Update> &updates = sources[dst_view];
       record_view(dst_view);
       if (src_views.size() == 1)
@@ -2139,6 +2124,7 @@ namespace Legion {
       assert(!!fill_mask);
       assert(!expr->is_empty());
 #endif
+      update_fields |= fill_mask;
       record_view(src_view);
       FillUpdate *update = new FillUpdate(src_view, fill_mask, expr, helper); 
       if (helper == NULL)
@@ -2160,6 +2146,7 @@ namespace Legion {
       assert(!src_views.empty());
       assert(!expr->is_empty());
 #endif 
+      update_fields.set_bit(src_fidx);
       record_view(dst_view);
       for (std::vector<ReductionView*>::const_iterator it = 
             src_views.begin(); it != src_views.end(); it++)
@@ -6254,17 +6241,19 @@ namespace Legion {
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
             input_aggregators.find(guard_event);
           if (finder != input_aggregators.end())
+          {
             input_aggregator = finder->second;
+            if (input_aggregator != NULL)
+              input_aggregator->clear_update_fields();
+          }
           // Use this to see if any new updates are recorded
-          const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
-            input_aggregator->count_updates();
           update_set_internal(input_aggregator, guard_event, op, index,
                               usage, guard_mask, target_instances, 
                               target_views, applied_events);
           // If we did any updates record ourselves as the new guard here
           if ((input_aggregator != NULL) && 
               ((finder == input_aggregators.end()) ||
-               (initial_updates != input_aggregator->count_updates())))
+               input_aggregator->has_update_fields()))
           {
             if (finder == input_aggregators.end())
             {
@@ -6277,11 +6266,13 @@ namespace Legion {
             // Record this as a guard for later operations
             to_add.resize(to_add.size() + 1);
             std::pair<CopyFillAggregator*,FieldMask> &back = to_add.back();
+            const FieldMask &update_mask = 
+              input_aggregator->get_update_fields();
             back.first = input_aggregator;
-            back.second = guard_mask;
+            back.second = update_mask;
             input_aggregator->record_guard_set(this);
             // Remove the current guard since it doesn't matter anymore
-            it.filter(guard_mask);
+            it.filter(update_mask);
             if (!it->second)
               to_delete.push_back(it->first);
           }
@@ -6310,20 +6301,23 @@ namespace Legion {
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
             input_aggregators.find(RtEvent::NO_RT_EVENT);
           if (finder != input_aggregators.end())
+          {
             input_aggregator = finder->second;
-          const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
-            input_aggregator->count_updates();
+            if (input_aggregator != NULL)
+              input_aggregator->clear_update_fields();
+          }
           update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, op, index,
                               usage, remainder_mask, target_instances, 
                               target_views, applied_events);
           // If we made the input aggregator then store it
           if ((input_aggregator != NULL) && 
               ((finder == input_aggregators.end()) ||
-               (initial_updates != input_aggregator->count_updates())))
+               input_aggregator->has_update_fields()))
           {
             input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
             // Record this as a guard for later operations
-            update_guards.insert(input_aggregator, remainder_mask);
+            update_guards.insert(input_aggregator, 
+                input_aggregator->get_update_fields());
             input_aggregator->record_guard_set(this);
           }
         }
@@ -6337,9 +6331,11 @@ namespace Legion {
         std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
           input_aggregators.find(RtEvent::NO_RT_EVENT);
         if (finder != input_aggregators.end())
+        {
           input_aggregator = finder->second;
-        const size_t initial_updates = (input_aggregator == NULL) ? 0 : 
-            input_aggregator->count_updates();
+          if (input_aggregator != NULL)
+            input_aggregator->clear_update_fields();
+        }
         update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, op, index,
             usage, user_mask, target_instances, target_views, applied_events);
         if (IS_WRITE(usage))
@@ -6354,13 +6350,14 @@ namespace Legion {
         // If we made the input aggregator then store it
         if ((input_aggregator != NULL) && 
             ((finder == input_aggregators.end()) ||
-             (initial_updates != input_aggregator->count_updates())))
+             input_aggregator->has_update_fields()))
         {
           input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
           // Record this as a guard for later operations
           if (IS_READ_ONLY(usage))
           {
-            update_guards.insert(input_aggregator, user_mask);
+            update_guards.insert(input_aggregator, 
+                input_aggregator->get_update_fields());
             input_aggregator->record_guard_set(this);
           }
         }
@@ -7716,58 +7713,56 @@ namespace Legion {
         }
         if (pending_refinements.empty())
         {
-          // If we have too many subsets refine them 
-          if ((unrefined_remainder == NULL) &&
-              (disjoint_partition_refinement == NULL) && 
-              (subsets.size() > LEGION_MAX_BVH_FANOUT))
-          {
-            KDTree *tree = NULL;
-            switch (set_expr->get_num_dims())
-            {
-              case 1:
-                {
-                  tree = new KDNode<1>(set_expr, runtime, 0/*dim*/);
-                  break;
-                }
-              case 2:
-                {
-                  tree = new KDNode<2>(set_expr, runtime, 0/*dim*/);
-                  break;
-                }
-              case 3:
-                {
-                  tree = new KDNode<3>(set_expr, runtime, 0/*dim*/);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            // Refine the tree to make the new subsets
-            std::vector<EquivalenceSet*> new_subsets(subsets);
-            if (tree->refine(new_subsets))
-            {
-              // Add new references
-              for (std::vector<EquivalenceSet*>::const_iterator it =
-                    new_subsets.begin(); it != new_subsets.end(); it++)
-                (*it)->add_nested_resource_ref(did);
-              // Remove old references
-              for (std::vector<EquivalenceSet*>::const_iterator it = 
-                    subsets.begin(); it != subsets.end(); it++)
-                if ((*it)->remove_nested_resource_ref(did))
-                  delete (*it);
-              // Swap the two sets since we only care about the new one
-              subsets.swap(new_subsets);
-            }
-            // Clean up the tree
-            delete tree;
-          }
           // Check to see if we no longer have any more refeinements
           // to perform. If not, then we need to clear our data structures
           // and remove any valid references that we might be holding
           if ((unrefined_remainder == NULL) &&
               (disjoint_partition_refinement == NULL))
           {
-            // If we're doing refining then send updates to any
+            // If we have too many subsets refine them 
+            if (subsets.size() > LEGION_MAX_BVH_FANOUT)
+            {
+              KDTree *tree = NULL;
+              switch (set_expr->get_num_dims())
+              {
+                case 1:
+                  {
+                    tree = new KDNode<1>(set_expr, runtime, 0/*dim*/);
+                    break;
+                  }
+                case 2:
+                  {
+                    tree = new KDNode<2>(set_expr, runtime, 0/*dim*/);
+                    break;
+                  }
+                case 3:
+                  {
+                    tree = new KDNode<3>(set_expr, runtime, 0/*dim*/);
+                    break;
+                  }
+                default:
+                  assert(false);
+              }
+              // Refine the tree to make the new subsets
+              std::vector<EquivalenceSet*> new_subsets(subsets);
+              if (tree->refine(new_subsets))
+              {
+                // Add new references
+                for (std::vector<EquivalenceSet*>::const_iterator it =
+                      new_subsets.begin(); it != new_subsets.end(); it++)
+                  (*it)->add_nested_resource_ref(did);
+                // Remove old references
+                for (std::vector<EquivalenceSet*>::const_iterator it = 
+                      subsets.begin(); it != subsets.end(); it++)
+                  if ((*it)->remove_nested_resource_ref(did))
+                    delete (*it);
+                // Swap the two sets since we only care about the new one
+                subsets.swap(new_subsets);
+              }
+              // Clean up the tree
+              delete tree;
+            }
+            // If we're done refining then send updates to any
             // remote sets informing them of the complete set of subsets
             std::set<RtEvent> remote_subsets_informed;
             if (!remote_subsets.empty())
