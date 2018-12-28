@@ -514,7 +514,8 @@ namespace Legion {
      * then merges them together into the biggest possible copies
      * that can be issued together.
      */
-    class CopyFillAggregator : public WrapperReferenceMutator {
+    class CopyFillAggregator : public WrapperReferenceMutator,
+                               public LegionHeapify<CopyFillAggregator> {
     public:
       struct CopyFillAggregation : public LgTaskArgs<CopyFillAggregation> {
       public:
