@@ -5294,11 +5294,9 @@ namespace Legion {
       if (finder == update_guards.end())
         return;
       update_guards.erase(finder);
-      if (update_guards.empty() && (eq_state == PENDING_REFINED_STATE))
+      if (update_guards.empty() && (eq_state == PENDING_REFINED_STATE) && 
+          transition_event.exists())
       {
-#ifdef DEBUG_LEGION
-        assert(transition_event.exists());
-#endif
         Runtime::trigger_event(transition_event);
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
       }
