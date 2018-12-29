@@ -430,33 +430,122 @@ cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   return kernel_id
 end)
 
+cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
+  local value = base.reduction_op_init[op][type]
+  local op_name = data.filter(function(tuple) return tuple.op == op end,
+    base.reduction_ops)[1].name
+  local kernel_id = internal_kernel_id
+  internal_kernel_id = internal_kernel_id - 1
+  local kernel_name =
+    INTERNAL_KERNEL_PREFIX .. "__red__" .. tostring(type) ..
+    "__" .. tostring(op_name) .. "__"
+
+  local tid = terralib.newsymbol(c.size_t, "tid")
+  local input = terralib.newsymbol(&type, "input")
+  local result = terralib.newsymbol(&type, "result")
+  local shared_mem_ptr = cudalib.sharedmemory(type, THREAD_BLOCK_SIZE)
+
+  local shared_mem_init = `([input][ [tid] ])
+  for i = 1, (GLOBAL_RED_BUFFER / THREAD_BLOCK_SIZE) - 1 do
+    shared_mem_init =
+      base.quote_binary_op(op, shared_mem_init,
+                           `([input][ [tid] + [i * THREAD_BLOCK_SIZE] ]))
+  end
+  local terra red([input], [result])
+    var [tid] = tid_x()
+    [shared_mem_ptr][ [tid] ] = [shared_mem_init]
+    barrier()
+    [cudahelper.generate_reduction_tree(tid, shared_mem_ptr, op)]
+    barrier()
+    if [tid] == 0 then [result][0] = [shared_mem_ptr][ [tid] ] end
+  end
+
+  red:setname(kernel_name)
+  internal_kernels[kernel_id] = {
+    name = kernel_name,
+    kernel = red,
+  }
+  return kernel_id
+end)
+
 function cudahelper.generate_reduction_preamble(reductions)
   local preamble = quote end
   local device_ptrs = terralib.newlist()
   local device_ptrs_map = {}
+  local host_ptrs_map = {}
 
   for red_var, red_op in pairs(reductions) do
     local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
+    local host_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
     local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
     local init_args = terralib.newlist({device_ptr})
     preamble = quote
       [preamble];
       var [device_ptr] = [&red_var.type](nil)
+      var [host_ptr] = [&red_var.type](nil)
       do
         var bounds : C.legion_rect_1d_t
         bounds.lo.x[0] = 0
-        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER]
+        bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER - 1]
         var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
           [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
         [cudahelper.codegen_kernel_call(init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
+      do
+        var bounds : C.legion_rect_1d_t
+        bounds.lo.x[0] = 0
+        bounds.hi.x[0] = [sizeof(red_var.type) - 1]
+        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.Z_COPY_MEM, [&int8](nil))
+        [host_ptr] =
+          [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
+      end
     end
     device_ptrs:insert(device_ptr)
     device_ptrs_map[device_ptr] = red_var
+    host_ptrs_map[device_ptr] = host_ptr
   end
 
-  return device_ptrs, device_ptrs_map, preamble
+  return device_ptrs, device_ptrs_map, host_ptrs_map, preamble
+end
+
+function cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
+  local reduction_tree = quote end
+  local step = THREAD_BLOCK_SIZE
+  while step > 64 do
+    step = step / 2
+    reduction_tree = quote
+      [reduction_tree]
+      if [tid] < step then
+        var v = [base.quote_binary_op(red_op,
+                                      `([shared_mem_ptr][ [tid] ]),
+                                      `([shared_mem_ptr][ [tid] + [step] ]))]
+
+        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+      end
+      barrier()
+    end
+  end
+  local unrolled_reductions = terralib.newlist()
+  while step > 1 do
+    step = step / 2
+    unrolled_reductions:insert(quote
+      do
+        var v = [base.quote_binary_op(red_op,
+                                      `([shared_mem_ptr][ [tid] ]),
+                                      `([shared_mem_ptr][ [tid] + [step] ]))]
+        terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
+      end
+      barrier()
+    end)
+  end
+  reduction_tree = quote
+    [reduction_tree]
+    if [tid] < 32 then
+      [unrolled_reductions]
+    end
+  end
+  return reduction_tree
 end
 
 function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
@@ -474,41 +563,7 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
     end
 
     local tid = terralib.newsymbol(c.size_t, "tid")
-    local reduction_tree = quote end
-    local step = THREAD_BLOCK_SIZE
-    while step > 64 do
-      step = step / 2
-      reduction_tree = quote
-        [reduction_tree]
-        if [tid] < step then
-          var v = [base.quote_binary_op(red_op,
-                                            `([shared_mem_ptr][ [tid] ]),
-                                            `([shared_mem_ptr][ [tid] + [step] ]))]
-
-          terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
-        end
-        barrier()
-      end
-    end
-    local unrolled_reductions = terralib.newlist()
-    while step > 1 do
-      step = step / 2
-      unrolled_reductions:insert(quote
-        do
-          var v = [base.quote_binary_op(red_op,
-                                            `([shared_mem_ptr][ [tid] ]),
-                                            `([shared_mem_ptr][ [tid] + [step] ]))]
-          terralib.attrstore(&[shared_mem_ptr][ [tid] ], v, { isvolatile = true })
-        end
-        barrier()
-      end)
-    end
-    reduction_tree = quote
-      [reduction_tree]
-      if [tid] < 32 then
-        [unrolled_reductions]
-      end
-    end
+    local reduction_tree = cudahelper.generate_reduction_tree(tid, shared_mem_ptr, red_op)
     postamble = quote
       do
         var [tid] = tid_x()
@@ -526,30 +581,37 @@ function cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
   return preamble, postamble
 end
 
-function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
-  local postamble = nil
+function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+  local postamble = quote end
   for device_ptr, red_var in pairs(device_ptrs_map) do
     local red_op = reductions[red_var]
-    local init = base.reduction_op_init[red_op][red_var.type]
-    if postamble == nil then
-      postamble = quote RuntimeAPI.cudaDeviceSynchronize() end
-    end
+    local red_kernel_id = cudahelper.generate_buffer_reduction_kernel(red_var.type, red_op)
+    local host_ptr = host_ptrs_map[device_ptr]
+    local red_args = terralib.newlist({device_ptr, host_ptr})
+    local shared_mem_size = terralib.sizeof(red_var.type) * THREAD_BLOCK_SIZE
     postamble = quote
-      [postamble]
-      do
-        var tmp : red_var.type = [init]
-        var v : (red_var.type)[GLOBAL_RED_BUFFER]
-        RuntimeAPI.cudaMemcpy([&opaque]([&red_var.type](v)), [device_ptr],
-                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
-                              RuntimeAPI.cudaMemcpyDeviceToHost)
-        for i = 0, GLOBAL_RED_BUFFER do
-          tmp = [base.quote_binary_op(red_op, tmp, `(v[i]))]
-        end
-        [red_var] = [base.quote_binary_op(red_op, red_var, tmp)]
-      end
+      [postamble];
+      [cudahelper.codegen_kernel_call(red_kernel_id, THREAD_BLOCK_SIZE, red_args, shared_mem_size, true)]
     end
   end
-  if postamble == nil then postamble = quote end end
+
+  local needs_sync = true
+  for device_ptr, red_var in pairs(device_ptrs_map) do
+    if needs_sync then
+      postamble = quote
+        [postamble];
+        RuntimeAPI.cudaDeviceSynchronize()
+      end
+      needs_sync = false
+    end
+    local red_op = reductions[red_var]
+    local host_ptr = host_ptrs_map[device_ptr]
+    postamble = quote
+      [postamble];
+      [red_var] = [base.quote_binary_op(red_op, red_var, `([host_ptr][0]))]
+    end
+  end
+
   return postamble
 end
 
