@@ -910,15 +910,25 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
     public:
+      enum ReqType {
+        SRC_REQ = 0,
+        DST_REQ = 1,
+        GATHER_REQ = 2,
+        SCATTER_REQ = 3,
+      };
+    public:
       struct DeferredCopyAcross : public LgTaskArgs<DeferredCopyAcross> {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COPY_ACROSS_TASK_ID;
       public:
         DeferredCopyAcross(CopyOp *op, unsigned idx, ApEvent pre, ApUserEvent d,
-                 PredEvent g, RtUserEvent a, InstanceSet *src, InstanceSet *dst)
+                           PredEvent g, RtUserEvent a, 
+                           InstanceSet *src, InstanceSet *dst,
+                           InstanceSet *gather, InstanceSet *scatter)
           : LgTaskArgs<DeferredCopyAcross>(op->get_unique_op_id()), copy(op),
             index(idx), precondition(pre), done(d), guard(g), applied(a),
-            src_targets(src), dst_targets(dst) { }
+            src_targets(src), dst_targets(dst), gather_targets(gather),
+            scatter_targets(scatter) { }
       public:
         CopyOp *const copy;
         const unsigned index;
@@ -928,6 +938,8 @@ namespace Legion {
         const RtUserEvent applied;
         InstanceSet *const src_targets;
         InstanceSet *const dst_targets;
+        InstanceSet *const gather_targets;
+        InstanceSet *const scatter_targets;
       };
     public:
       CopyOp(Runtime *rt);
@@ -959,6 +971,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual ApEvent exchange_indirect_records(ApEvent local_done,
+          const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       virtual bool query_speculate(bool &value, bool &mapping_only);
       virtual void resolve_true(bool speculated, bool launched);
@@ -986,6 +1002,8 @@ namespace Legion {
                                const PredEvent predication_guard,
                                const InstanceSet &src_targets,
                                const InstanceSet &dst_targets,
+                               const InstanceSet *gather_targets,
+                               const InstanceSet *scatter_targets,
                                const PhysicalTraceInfo &trace_info,
                                std::set<RtEvent> &applied_conditions);
     public:
@@ -999,7 +1017,9 @@ namespace Legion {
                       const PhysicalTraceInfo *info) const;
       virtual void complete_replay(ApEvent copy_complete_event);
     protected:
-      template<bool IS_SRC>
+      template<ReqType REQ_TYPE>
+      static const char* get_req_type_name(void);
+      template<ReqType REQ_TYPE>
       int perform_conversion(unsigned idx, const RegionRequirement &req,
                              std::vector<MappingInstance> &output,
                              InstanceSet &targets, bool is_reduce = false);
@@ -1072,6 +1092,10 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
+      virtual ApEvent exchange_indirect_records(ApEvent local_done,
+          const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       void handle_point_commit(RtEvent point_committed);
 #ifdef DEBUG_LEGION
@@ -1081,6 +1105,14 @@ namespace Legion {
       IndexSpace                    launch_space;
     protected:
       std::vector<PointCopyOp*>     points;
+      LegionVector<IndirectRecord>::aligned src_records;
+      LegionVector<IndirectRecord>::aligned dst_records;
+      std::set<ApEvent>             src_exchange_events;
+      std::set<ApEvent>             dst_exchange_events;
+      ApEvent                       src_merged;
+      ApEvent                       dst_merged;
+      RtUserEvent                   src_exchanged;
+      RtUserEvent                   dst_exchanged;
       unsigned                      points_committed;
       bool                          commit_request;
       std::set<RtEvent>             commit_preconditions;
@@ -1118,6 +1150,10 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
+      virtual ApEvent exchange_indirect_records(ApEvent local_done,
+          const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;

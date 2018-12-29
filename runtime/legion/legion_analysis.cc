@@ -6490,6 +6490,8 @@ namespace Legion {
       // Don't report uninitialized warnings for empty equivalence classes
       if ((initialized != NULL) && !set_expr->is_empty())
         *initialized &= valid_instances.get_valid_mask();
+      if (output_aggregator != NULL)
+        output_aggregator->clear_update_fields();
       if (IS_REDUCE(usage))
       {
         // Reduction-only
@@ -6692,13 +6694,20 @@ namespace Legion {
         {
           input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
           // Record this as a guard for later operations
-          if (IS_READ_ONLY(usage))
-          {
-            update_guards.insert(input_aggregator, 
-                input_aggregator->get_update_fields());
-            input_aggregator->record_guard_set(this);
-          }
+          update_guards.insert(input_aggregator, 
+              input_aggregator->get_update_fields());
+          input_aggregator->record_guard_set(this);
         }
+      }
+      if ((output_aggregator != NULL) && 
+          output_aggregator->has_update_fields())
+      {
+        // No need to store this with any fields since it is an output
+        // aggregator. We're just recording it to prevent refinements
+        // until it is done with its updates.
+        const FieldMask empty_mask;
+        update_guards.insert(output_aggregator, empty_mask);
+        output_aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, applied_events);
       return false;
@@ -7007,6 +7016,8 @@ namespace Legion {
           instances.insert(view, overlap);
         inst_exprs[view].insert(set_expr);
       }
+      if (release_aggregator != NULL)
+        release_aggregator->clear_update_fields();
       // Issue the updates
       issue_update_copies_and_fills(release_aggregator, RtEvent::NO_RT_EVENT,
                                     op, 0/*index*/, false/*track*/,release_mask,
@@ -7023,6 +7034,16 @@ namespace Legion {
                          RtEvent::NO_RT_EVENT, op, 0/*index*/, false/*track*/);
       // Add the fields back to the restricted ones
       restricted_fields |= release_mask;
+      if ((release_aggregator != NULL) && 
+          release_aggregator->has_update_fields())
+      {
+        // No need to store this with any fields since it is an output
+        // aggregator. We're just recording it to prevent refinements
+        // until it is done with its updates.
+        const FieldMask empty_mask;
+        update_guards.insert(release_aggregator, empty_mask);
+        release_aggregator->record_guard_set(this);
+      }
       check_for_migration(remote_tracker, source, ready_events);
       return false;
     }
@@ -7096,6 +7117,8 @@ namespace Legion {
       }
       // Check for any uninitialized fields
       initialized_fields &= valid_instances.get_valid_mask();
+      if (aggregator != NULL)
+        aggregator->clear_update_fields();
       if (pred_guard.exists())
         assert(false);
       if (across_helpers != NULL)
@@ -7314,6 +7337,16 @@ namespace Legion {
         assert(reduction_fields * src_mask);
 #endif
       }
+      if ((aggregator != NULL) &&
+          aggregator->has_update_fields())
+      {
+        // No need to store this with any fields since it is an output
+        // aggregator. We're just recording it to prevent refinements
+        // until it is done with its updates.
+        const FieldMask empty_mask;
+        update_guards.insert(aggregator, empty_mask);
+        aggregator->record_guard_set(this);
+      }
       check_for_migration(remote_tracker, source, applied_events);
       return false;
     }
@@ -7369,6 +7402,8 @@ namespace Legion {
         eq.reacquire();
         return true;
       }
+      if (output_aggregator != NULL)
+        output_aggregator->clear_update_fields();
       // Two different cases here depending on whether we have a precidate 
       if (pred_guard.exists())
       {
@@ -7449,6 +7484,16 @@ namespace Legion {
           if (!!restricted_overlap)
             copy_out(restricted_overlap, view, op, index, output_aggregator);
         }
+      }
+      if ((output_aggregator != NULL) &&
+          output_aggregator->has_update_fields())
+      {
+        // No need to store this with any fields since it is an output
+        // aggregator. We're just recording it to prevent refinements
+        // until it is done with its updates.
+        const FieldMask empty_mask;
+        update_guards.insert(output_aggregator, empty_mask);
+        output_aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, ready_events);
       return false;
@@ -8017,7 +8062,7 @@ namespace Legion {
           assert(eq_state == PENDING_REFINED_STATE);
 #endif
           // First we need to spin until we know that there are
-          // no more acquires done for this equivalence set
+          // no more updates being done for this equivalence set
           while (!update_guards.empty())
           {
             // If there are any mapping guards then defer ourselves

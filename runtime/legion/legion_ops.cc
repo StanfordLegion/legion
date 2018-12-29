@@ -3649,6 +3649,10 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(this);
       std::vector<InstanceSet> valid_src_instances(src_requirements.size());
       std::vector<InstanceSet> valid_dst_instances(dst_requirements.size());
+      std::vector<InstanceSet> valid_gather_instances(
+                                          src_indirect_requirements.size());
+      std::vector<InstanceSet> valid_scatter_instances(
+                                          dst_indirect_requirements.size());
       Mapper::MapCopyInput input;
       Mapper::MapCopyOutput output;
       input.src_instances.resize(src_requirements.size());
@@ -3695,6 +3699,40 @@ namespace Legion {
           if (is_reduce_req)
             dst_requirements[idx].privilege = REDUCE;
         }
+        if (!src_indirect_requirements.empty())
+        {
+          const unsigned offset = 
+            src_requirements.size() + dst_requirements.size();
+          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          {
+            InstanceSet &valid_instances = valid_gather_instances[idx];
+            runtime->forest->physical_premap_region(this, offset+idx, 
+                                                src_indirect_requirements[idx],
+                                                gather_versions[idx],
+                                                valid_instances);
+            // Convert these to the valid set of mapping instances
+            // No need to filter for copies
+            prepare_for_mapping(valid_instances, 
+                                input.src_indirect_instances[idx]);
+          }
+        }
+        if (!dst_indirect_requirements.empty())
+        {
+          const unsigned offset = src_requirements.size() + 
+            dst_requirements.size() + src_indirect_requirements.size();
+          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          {
+            InstanceSet &valid_instances = valid_scatter_instances[idx];
+            runtime->forest->physical_premap_region(this, offset+idx, 
+                                                dst_indirect_requirements[idx],
+                                                scatter_versions[idx],
+                                                valid_instances);
+            // Convert these to the valid set of mapping instances
+            // No need to filter for copies
+            prepare_for_mapping(valid_instances, 
+                                input.dst_indirect_instances[idx]);
+          }
+        }
       }
       // Now we can ask the mapper what to do 
       mapper->invoke_map_copy(this, &input, &output);
@@ -3714,7 +3752,7 @@ namespace Legion {
         (!atomic_locks.empty() || !arrive_barriers.empty());
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        InstanceSet src_targets, dst_targets;
+        InstanceSet src_targets, dst_targets, gather_targets, scatter_targets;
         // The common case 
         int src_composite = -1;
         // Make a user event for when this copy across is done
@@ -3729,13 +3767,12 @@ namespace Legion {
 #endif
           tpl->record_create_ap_user_event(local_completion, this);
         }
-
         // Do the conversion and check for errors
         src_composite = 
-          perform_conversion<true/*src*/>(idx, src_requirements[idx],
-                                          output.src_instances[idx],
-                                          src_targets,
-                                          IS_REDUCE(dst_requirements[idx]));
+          perform_conversion<SRC_REQ>(idx, src_requirements[idx],
+                                      output.src_instances[idx],
+                                      src_targets,
+                                      IS_REDUCE(dst_requirements[idx]));
         if (runtime->legion_spy_enabled)
           runtime->forest->log_mapping_decision(unique_op_id, idx, 
                                                 src_requirements[idx],
@@ -3789,9 +3826,8 @@ namespace Legion {
         const bool is_reduce_req = IS_REDUCE(dst_requirements[idx]);
         if (is_reduce_req)
           dst_requirements[idx].privilege = READ_WRITE;
-        perform_conversion<false/*src*/>(idx, dst_requirements[idx],
-                                         output.dst_instances[idx],
-                                         dst_targets);
+        perform_conversion<DST_REQ>(idx, dst_requirements[idx],
+                                    output.dst_instances[idx], dst_targets);
         // Now do the registration
         const size_t dst_idx = src_requirements.size() + idx;
         set_mapping_state(dst_idx);
@@ -3799,7 +3835,7 @@ namespace Legion {
           runtime->forest->physical_perform_updates_and_registration(
                                                 dst_requirements[idx],
                                                 dst_versions[idx], this, 
-                                                idx + src_requirements.size(),
+                                                dst_idx,
                                                 local_init_precondition,
                                                 local_completion,
                                                 dst_targets,
@@ -3813,11 +3849,73 @@ namespace Legion {
         if (effects_done.exists())
           copy_complete_events.insert(effects_done);
         if (runtime->legion_spy_enabled)
-          runtime->forest->log_mapping_decision(unique_op_id, 
-             idx + src_requirements.size(), dst_requirements[idx], dst_targets);
+          runtime->forest->log_mapping_decision(unique_op_id, dst_idx, 
+                                  dst_requirements[idx], dst_targets);
         // Switch the privileges back when we are done
         if (is_reduce_req)
           dst_requirements[idx].privilege = REDUCE; 
+        if (idx < src_indirect_requirements.size())
+        {
+          std::vector<MappingInstance> gather_instances(1,
+                                        output.src_indirect_instances[idx]);
+          perform_conversion<GATHER_REQ>(idx, src_indirect_requirements[idx],
+                                         gather_instances, gather_targets);
+          // Now do the registration
+          const size_t gather_idx = src_requirements.size() + 
+            dst_requirements.size() + idx;
+          set_mapping_state(gather_idx);
+          ApEvent effects_done = 
+            runtime->forest->physical_perform_updates_and_registration(
+                                                src_indirect_requirements[idx],
+                                                gather_versions[idx], this, 
+                                                gather_idx,
+                                                local_init_precondition,
+                                                local_completion,
+                                                gather_targets,
+                                                trace_info,
+                                                local_applied_events,
+#ifdef DEBUG_LEGION
+                                                get_logging_name(),
+                                                unique_op_id,
+#endif
+                                                track_effects);
+          if (effects_done.exists())
+            copy_complete_events.insert(effects_done);
+          if (runtime->legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, 
+               gather_idx, src_indirect_requirements[idx], gather_targets);
+        }
+        if (idx < dst_indirect_requirements.size())
+        {
+          std::vector<MappingInstance> scatter_instances(1,
+                                        output.dst_indirect_instances[idx]);
+          perform_conversion<SCATTER_REQ>(idx, dst_indirect_requirements[idx],
+                                          scatter_instances, scatter_targets);
+          // Now do the registration
+          const size_t scatter_idx = src_requirements.size() + 
+            dst_requirements.size() + src_indirect_requirements.size() + idx;
+          set_mapping_state(scatter_idx);
+          ApEvent effects_done = 
+            runtime->forest->physical_perform_updates_and_registration(
+                                                dst_indirect_requirements[idx],
+                                                scatter_versions[idx], this, 
+                                                scatter_idx,
+                                                local_init_precondition,
+                                                local_completion,
+                                                scatter_targets,
+                                                trace_info,
+                                                local_applied_events,
+#ifdef DEBUG_LEGION
+                                                get_logging_name(),
+                                                unique_op_id,
+#endif
+                                                track_effects);
+          if (effects_done.exists())
+            copy_complete_events.insert(effects_done);
+          if (runtime->legion_spy_enabled)
+            runtime->forest->log_mapping_decision(unique_op_id, 
+               scatter_idx, dst_indirect_requirements[idx], scatter_targets);
+        }
         // If we made it here, we passed all our error-checking so
         // now we can issue the copy/reduce across operation
         // If we have local completion events then we need to make
@@ -3829,10 +3927,23 @@ namespace Legion {
           deferred_src->swap(src_targets);
           InstanceSet *deferred_dst = new InstanceSet();
           deferred_dst->swap(dst_targets);
+          InstanceSet *deferred_gather = NULL;
+          if (!gather_targets.empty())
+          {
+            deferred_gather = new InstanceSet();
+            deferred_gather->swap(gather_targets);
+          }
+          InstanceSet *deferred_scatter = NULL;
+          if (!scatter_targets.empty())
+          {
+            deferred_scatter = new InstanceSet();
+            deferred_scatter->swap(scatter_targets);
+          }
           RtUserEvent deferred_applied = Runtime::create_rt_user_event();
           DeferredCopyAcross args(this, idx, local_init_precondition,
                                   local_completion, predication_guard,
-                                  deferred_applied, deferred_src, deferred_dst);
+                                  deferred_applied, deferred_src, deferred_dst,
+                                  deferred_gather, deferred_scatter);
           const RtEvent pre = Runtime::merge_events(local_applied_events);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, pre); 
@@ -3841,6 +3952,8 @@ namespace Legion {
         else
           perform_copy_across(idx, local_init_precondition, local_completion,
                               predication_guard, src_targets, dst_targets, 
+                              gather_targets.empty() ? NULL : &gather_targets,
+                              scatter_targets.empty() ? NULL : &scatter_targets,
                               trace_info, map_applied_conditions);
       }
       ApEvent copy_complete_event = 
@@ -3889,27 +4002,62 @@ namespace Legion {
                                      const PredEvent predication_guard,
                                      const InstanceSet &src_targets,
                                      const InstanceSet &dst_targets,
+                                     const InstanceSet *gather_targets,
+                                     const InstanceSet *scatter_targets,
                                      const PhysicalTraceInfo &trace_info,
                                      std::set<RtEvent> &applied_conditions)
     //--------------------------------------------------------------------------
     {
       // Trigger our local completion event contingent upon 
       // the copy/reduce across being done
-      ApEvent across_done = 
-        runtime->forest->copy_across( 
-                              src_requirements[index], dst_requirements[index],
+      ApEvent copy_done;
+      LegionVector<IndirectRecord>::aligned src_records, dst_records;
+      ApUserEvent indirect_done;
+      if (gather_targets != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(gather_targets->size() == 1);
+#endif
+        indirect_done = Runtime::create_ap_user_event();
+        copy_done = exchange_indirect_records(indirect_done, trace_info,
+            src_targets, src_requirements[index].region.get_index_space(), 
+            src_records, true/*sources*/);
+      }
+      if (scatter_targets != NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(scatter_targets->size() == 1);
+#endif
+        if (!indirect_done.exists())
+          indirect_done = Runtime::create_ap_user_event();
+        // It's alright to overwrite this, it will the same as it was
+        // from the gather case if this is a full-on indirection
+        copy_done = exchange_indirect_records(indirect_done, trace_info,
+            dst_targets, dst_requirements[index].region.get_index_space(),
+            dst_records, false/*sources*/);
+      }
+      if ((gather_targets != NULL) || (scatter_targets != NULL))
+      {
+        // We have at least one indirection to handle
+        assert(false);
+        // Trigger the indirect_done event once everything is applied
+        //Runtime::trigger_event(indirect_done, local_done);
+      }
+      else // Normal copy
+        copy_done = runtime->forest->copy_across( 
+                              src_requirements[index],dst_requirements[index],
                               src_versions[index], dst_versions[index],
                               src_targets, dst_targets, this, index, 
                               index + src_requirements.size(),
                               local_init_precondition, predication_guard, 
                               trace_info, applied_conditions);
-      Runtime::trigger_event(local_completion, across_done);
+      Runtime::trigger_event(local_completion, copy_done);
       if (is_recording())
       {
 #ifdef DEBUG_LEGION
         assert(tpl != NULL && tpl->is_recording());
 #endif
-        tpl->record_trigger_event(local_completion, across_done);
+        tpl->record_trigger_event(local_completion, copy_done);
       }
 #ifdef DEBUG_LEGION
       dump_physical_state(&src_requirements[index], index);
@@ -3927,7 +4075,9 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(dargs->copy);
       dargs->copy->perform_copy_across(dargs->index, dargs->precondition,
                             dargs->done, dargs->guard, *dargs->src_targets, 
-                            *dargs->dst_targets, trace_info,applied_conditions);
+                            *dargs->dst_targets, dargs->gather_targets,
+                            dargs->scatter_targets, trace_info, 
+                            applied_conditions);
       if (!applied_conditions.empty())
         Runtime::trigger_event(dargs->applied, 
             Runtime::merge_events(applied_conditions));
@@ -3935,6 +4085,10 @@ namespace Legion {
         Runtime::trigger_event(dargs->applied);
       delete dargs->src_targets;
       delete dargs->dst_targets;
+      if (dargs->gather_targets != NULL)
+        delete dargs->gather_targets;
+      if (dargs->scatter_targets != NULL)
+        delete dargs->scatter_targets;
     }
 
     //--------------------------------------------------------------------------
@@ -3962,6 +4116,22 @@ namespace Legion {
                     actual_idx2, is_src2 ? "source" : "destination",
                     unique_op_id, parent_ctx->get_task_name(),
                     parent_ctx->get_unique_id())
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent CopyOp::exchange_indirect_records(ApEvent local_done,
+             const PhysicalTraceInfo &trace_info,
+             const InstanceSet &insts, const IndexSpace space,
+             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < insts.size(); idx++)
+      {
+        const InstanceRef &ref = insts[idx];
+        records.push_back(IndirectRecord(ref.get_valid_fields(),
+              ref.get_manager()->get_instance(), ref.get_ready_event(), space));
+      }
+      return local_done;
     }
 
     //--------------------------------------------------------------------------
@@ -4399,7 +4569,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool IS_SRC>
+    template<CopyOp::ReqType REQ_TYPE>
+    /*static*/ const char* CopyOp::get_req_type_name(void)
+    //--------------------------------------------------------------------------
+    {
+      const char *req_type_names[4] = {
+        "source", "destination", "source indirect", "destination indirect",
+      };
+      return req_type_names[REQ_TYPE];
+    }
+
+    //--------------------------------------------------------------------------
+    template<CopyOp::ReqType REQ_TYPE>
     int CopyOp::perform_conversion(unsigned idx, const RegionRequirement &req,
                                    std::vector<MappingInstance> &output,
                                    InstanceSet &targets, bool is_reduce)
@@ -4420,7 +4601,7 @@ namespace Legion {
                       "for explicit region-to_region copy in task %s (ID %lld) "
                       "but the logical region for this requirement is from "
                       "region tree %d.", mapper->get_mapper_name(), 
-                      bad_tree, IS_SRC ? "source" : "destination",idx,
+                      bad_tree, get_req_type_name<REQ_TYPE>(), idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id(),
                       req.region.get_tree_id())
       if (!missing_fields.empty())
@@ -4461,7 +4642,7 @@ namespace Legion {
                           "have detected this. Please update the mapper to "
                           "abide by proper mapping conventions.",
                           mapper->get_mapper_name(), 
-                          IS_SRC ? "source" : "destination", idx,
+                          get_req_type_name<REQ_TYPE>(), idx,
                           parent_ctx->get_task_name(),
                           parent_ctx->get_unique_id())
         }
@@ -4472,32 +4653,33 @@ namespace Legion {
                         "region copy in task %s (ID %lld) in 'map_copy' call. "
                         "You may experience undefined behavior as a "
                         "consequence.", mapper->get_mapper_name(),
-                        IS_SRC ? "source" : "destination", idx,
+                        get_req_type_name<REQ_TYPE>(), idx,
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id());
       }
       // Destination is not allowed to have composite instances
-      if (!IS_SRC && (composite_idx >= 0))
+      if ((REQ_TYPE != SRC_REQ) && (composite_idx >= 0))
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper requested the creation of a "
-                      "virtual instance for destination region requiremnt "
+                      "virtual instance for %s region requiremnt "
                       "%d. Only source region requirements are permitted to "
                       "be virtual instances for explicit region-to-region "
                       "copy operations. Operation was issued in task %s "
-                      "(ID %lld).", mapper->get_mapper_name(), idx,
+                      "(ID %lld).", mapper->get_mapper_name(), 
+                      get_req_type_name<REQ_TYPE>(), idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
-      if (IS_SRC && (composite_idx >= 0) && is_reduce)
+      if ((REQ_TYPE != DST_REQ) && (composite_idx >= 0) && is_reduce)
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper requested the creation of a "
-                      "virtual instance for the source requirement %d of "
+                      "virtual instance for the %s requirement %d of "
                       "an explicit region-to-region reduction. Only real "
                       "physical instances are permitted to be sources of "
                       "explicit region-to-region reductions. Operation was "
                       "issued in task %s (ID %lld).", mapper->get_mapper_name(),
-                      idx, parent_ctx->get_task_name(), 
-                      parent_ctx->get_unique_id())
+                      get_req_type_name<REQ_TYPE>(), idx, 
+                      parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       if (runtime->unsafe_mapper)
         return composite_idx;
       std::vector<LogicalRegion> regions_to_check(1, req.region);
@@ -4515,7 +4697,7 @@ namespace Legion {
                         "the logical region requirement. The copy operation "
                         "was issued in task %s (ID %lld).",
                         mapper->get_mapper_name(), 
-                        IS_SRC ? "source" : "destination", idx,
+                        get_req_type_name<REQ_TYPE>(), idx, 
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
       }
@@ -4523,7 +4705,7 @@ namespace Legion {
       // to be true for all kinds of explicit copies including reductions
       for (unsigned idx = 0; idx < targets.size(); idx++)
       {
-        if (IS_SRC && (int(idx) == composite_idx))
+        if ((REQ_TYPE == SRC_REQ) && (int(idx) == composite_idx))
           continue;
         if (!targets[idx].get_manager()->is_instance_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -4532,7 +4714,7 @@ namespace Legion {
                         "specialized instance as the target for %s "
                         "region requirement %d of an explicit copy operation "
                         "in task %s (ID %lld).", mapper->get_mapper_name(),
-                        IS_SRC ? "source" : "destination", idx, 
+                        get_req_type_name<REQ_TYPE>(), idx,
                         parent_ctx->get_task_name(), 
                         parent_ctx->get_unique_id())
       }
@@ -4893,6 +5075,8 @@ namespace Legion {
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
       launch_space = IndexSpace::NO_SPACE;
+      src_exchanged = RtUserEvent::NO_RT_USER_EVENT;
+      dst_exchanged = RtUserEvent::NO_RT_USER_EVENT;
       points_committed = 0;
       commit_request = false;
     }
@@ -4916,6 +5100,10 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      src_records.clear();
+      dst_records.clear();
+      src_exchange_events.clear();
+      dst_exchange_events.clear();
       commit_preconditions.clear();
     }
 
@@ -5304,6 +5492,79 @@ namespace Legion {
 #endif
     }
 
+    //--------------------------------------------------------------------------
+    ApEvent IndexCopyOp::exchange_indirect_records(ApEvent local_done,
+             const PhysicalTraceInfo &trace_info,
+             const InstanceSet &insts, const IndexSpace space,
+             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(local_done.exists());
+#endif
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
+      {
+        // Take the lock and record our sets and instances
+        AutoLock o_lock(op_lock);
+        if (sources)
+        {
+          for (unsigned idx = 0; idx < insts.size(); idx++)
+          {
+            const InstanceRef &ref = insts[idx];
+            src_records.push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), 
+                  ref.get_ready_event(), space));
+          }
+          src_exchange_events.insert(local_done);
+          if (!src_exchanged.exists())
+            src_exchanged = Runtime::create_rt_user_event();
+          if (src_exchange_events.size() == points.size())
+            to_trigger = src_exchanged;
+          else
+            wait_on = src_exchanged;
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < insts.size(); idx++)
+          {
+            const InstanceRef &ref = insts[idx];
+            dst_records.push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), 
+                  ref.get_ready_event(), space));
+          }
+          dst_exchange_events.insert(local_done);
+          if (!dst_exchanged.exists())
+            dst_exchanged = Runtime::create_rt_user_event();
+          if (dst_exchange_events.size() == points.size())
+            to_trigger = dst_exchanged;
+          else
+            wait_on = dst_exchanged;
+        }
+      }
+      if (to_trigger.exists())
+      {
+        if (sources)
+          src_merged = Runtime::merge_events(&trace_info, src_exchange_events);
+        else
+          dst_merged = Runtime::merge_events(&trace_info, dst_exchange_events);
+        Runtime::trigger_event(to_trigger);
+      }
+      else if (!wait_on.has_triggered())
+        wait_on.wait();
+      // Once we wake up we can copy out the results
+      if (sources)
+      {
+        records = src_records;
+        return src_merged;
+      }
+      else
+      {
+        records = dst_records;
+        return dst_merged;
+      }
+    }
+
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void IndexCopyOp::check_point_requirements(void)
@@ -5599,6 +5860,18 @@ namespace Legion {
       // Don't commit this operation until we've reported our profiling
       // Out index owner will deactivate the operation
       commit_operation(false/*deactivate*/, profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PointCopyOp::exchange_indirect_records(ApEvent local_done,
+             const PhysicalTraceInfo &trace_info,
+             const InstanceSet &insts, const IndexSpace space,
+             LegionVector<IndirectRecord>::aligned &records, const bool sources)
+    //--------------------------------------------------------------------------
+    {
+      // Exchange via the owner
+      return owner->exchange_indirect_records(local_done, trace_info, insts, 
+                                              space, records, sources);
     }
 
     //--------------------------------------------------------------------------
