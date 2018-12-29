@@ -5889,6 +5889,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -5937,6 +5939,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -5987,6 +5991,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6035,6 +6041,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6192,6 +6200,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6240,6 +6250,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6289,6 +6301,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6337,6 +6351,8 @@ namespace Legion {
       Machine::MemoryQuery finder(machine);
       finder.has_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() > 1)
+        finder.best_affinity_to(Processor::get_executing_processor());
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
