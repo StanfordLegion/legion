@@ -3758,6 +3758,10 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
         end
       end
     end)
+    for k, v in pairs(cudahelper.get_internal_kernels()) do
+      assert(all_kernels[k] == nil)
+      all_kernels[k] = v
+    end
     cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 

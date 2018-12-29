@@ -14,6 +14,7 @@
 
 local base = require("regent/std_base")
 local config = require("regent/config").args()
+local data = require("common/data")
 local report = require("common/report")
 
 local cudahelper = {}
@@ -254,6 +255,7 @@ end
 local THREAD_BLOCK_SIZE = 128
 local MAX_NUM_BLOCK = 32768
 local GLOBAL_RED_BUFFER = 256
+lua_assert(GLOBAL_RED_BUFFER % THREAD_BLOCK_SIZE == 0)
 
 local tid_x   = cudalib.nvvm_read_ptx_sreg_tid_x
 local n_tid_x = cudalib.nvvm_read_ptx_sreg_ntid_x
@@ -399,6 +401,35 @@ function cudahelper.compute_reduction_buffer_size(node, reductions)
   return size
 end
 
+local internal_kernel_id = 2 ^ 30
+local internal_kernels = {}
+local INTERNAL_KERNEL_PREFIX = "__internal"
+
+function cudahelper.get_internal_kernels()
+  return internal_kernels
+end
+
+cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
+  local value = base.reduction_op_init[op][type]
+  local op_name = data.filter(function(tuple) return tuple.op == op end,
+    base.reduction_ops)[1].name
+  local kernel_id = internal_kernel_id
+  internal_kernel_id = internal_kernel_id - 1
+  local kernel_name =
+    INTERNAL_KERNEL_PREFIX .. "__init__" .. tostring(type) ..
+    "__" .. tostring(op_name) .. "__"
+  local terra init(buffer : &type)
+    var tid = tid_x() + bid_x() * n_tid_x()
+    buffer[tid] = [value]
+  end
+  init:setname(kernel_name)
+  internal_kernels[kernel_id] = {
+    name = kernel_name,
+    kernel = init,
+  }
+  return kernel_id
+end)
+
 function cudahelper.generate_reduction_preamble(reductions)
   local preamble = quote end
   local device_ptrs = terralib.newlist()
@@ -406,7 +437,8 @@ function cudahelper.generate_reduction_preamble(reductions)
 
   for red_var, red_op in pairs(reductions) do
     local device_ptr = terralib.newsymbol(&red_var.type, red_var.displayname)
-    local init = base.reduction_op_init[red_op][red_var.type]
+    local init_kernel_id = cudahelper.generate_buffer_init_kernel(red_var.type, red_op)
+    local init_args = terralib.newlist({device_ptr})
     preamble = quote
       [preamble];
       var [device_ptr] = [&red_var.type](nil)
@@ -414,10 +446,10 @@ function cudahelper.generate_reduction_preamble(reductions)
         var bounds : C.legion_rect_1d_t
         bounds.lo.x[0] = 0
         bounds.hi.x[0] = [sizeof(red_var.type) * GLOBAL_RED_BUFFER]
-        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.Z_COPY_MEM, [&int8](nil))
+        var buffer = C.legion_deferred_buffer_char_1d_create(bounds, C.GPU_FB_MEM, [&int8](nil))
         [device_ptr] =
           [&red_var.type]([&opaque](C.legion_deferred_buffer_char_1d_ptr(buffer, bounds.lo)))
-        for i = 0, GLOBAL_RED_BUFFER do [device_ptr][i] = [init] end
+        [cudahelper.codegen_kernel_call(init_kernel_id, GLOBAL_RED_BUFFER, init_args, 0, true)]
       end
     end
     device_ptrs:insert(device_ptr)
@@ -506,8 +538,12 @@ function cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
       [postamble]
       do
         var tmp : red_var.type = [init]
+        var v : (red_var.type)[GLOBAL_RED_BUFFER]
+        RuntimeAPI.cudaMemcpy([&opaque]([&red_var.type](v)), [device_ptr],
+                              [sizeof(red_var.type) * GLOBAL_RED_BUFFER],
+                              RuntimeAPI.cudaMemcpyDeviceToHost)
         for i = 0, GLOBAL_RED_BUFFER do
-          tmp = [base.quote_binary_op(red_op, tmp, `([device_ptr][i]))]
+          tmp = [base.quote_binary_op(red_op, tmp, `(v[i]))]
         end
         [red_var] = [base.quote_binary_op(red_op, red_var, tmp)]
       end
