@@ -38,6 +38,24 @@ namespace Legion {
       PhysicalInstance inst;
       size_t field_offset;
     };
+
+    /**
+     * \struct IndirectRecord
+     * A small helper calss for performing exchanges of
+     * instances for indirection copies
+     */
+    struct IndirectRecord {
+    public:
+      IndirectRecord(void) { }
+      IndirectRecord(const FieldMask &m, PhysicalInstance i,
+                     ApEvent e, IndexSpace s)
+        : fields(m), inst(i), ready_event(e), space(s) { }
+    public:
+      FieldMask fields;
+      PhysicalInstance inst;
+      ApEvent ready_event;
+      IndexSpace space;
+    };
     
     /**
      * \class RegionTreeForest
