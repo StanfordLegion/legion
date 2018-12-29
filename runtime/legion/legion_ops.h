@@ -968,8 +968,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual ApEvent exchange_indirect_records(ApEvent local_done,
-          const PhysicalTraceInfo &trace_info,
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
@@ -1084,8 +1084,8 @@ namespace Legion {
       virtual void trigger_mapping(void);
       virtual void trigger_commit(void);
       virtual void report_interfering_requirements(unsigned idx1,unsigned idx2);
-      virtual ApEvent exchange_indirect_records(ApEvent local_done,
-          const PhysicalTraceInfo &trace_info,
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
@@ -1094,20 +1094,20 @@ namespace Legion {
       void check_point_requirements(void);
 #endif
     public:
-      IndexSpace                    launch_space;
+      IndexSpace                                         launch_space;
     protected:
-      std::vector<PointCopyOp*>     points;
-      LegionVector<IndirectRecord>::aligned src_records;
-      LegionVector<IndirectRecord>::aligned dst_records;
-      std::set<ApEvent>             src_exchange_events;
-      std::set<ApEvent>             dst_exchange_events;
-      ApEvent                       src_merged;
-      ApEvent                       dst_merged;
-      RtUserEvent                   src_exchanged;
-      RtUserEvent                   dst_exchanged;
-      unsigned                      points_committed;
-      bool                          commit_request;
-      std::set<RtEvent>             commit_preconditions;
+      std::vector<PointCopyOp*>                          points;
+      std::vector<LegionVector<IndirectRecord>::aligned> src_records;
+      std::vector<LegionVector<IndirectRecord>::aligned> dst_records;
+      std::vector<std::set<ApEvent> >                    src_exchange_events;
+      std::vector<std::set<ApEvent> >                    dst_exchange_events;
+      std::vector<ApEvent>                               src_merged;
+      std::vector<ApEvent>                               dst_merged;
+      std::vector<RtUserEvent>                           src_exchanged;
+      std::vector<RtUserEvent>                           dst_exchanged;
+      unsigned                                           points_committed;
+      bool                                               commit_request;
+      std::set<RtEvent>                                  commit_preconditions;
 #ifdef DEBUG_LEGION
     protected:
       // For checking aliasing of points in debug mode only
@@ -1142,8 +1142,8 @@ namespace Legion {
       virtual void trigger_ready(void);
       // trigger_mapping same as base class
       virtual void trigger_commit(void);
-      virtual ApEvent exchange_indirect_records(ApEvent local_done,
-          const PhysicalTraceInfo &trace_info,
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
           const InstanceSet &instances, const IndexSpace space,
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:

@@ -4006,7 +4006,7 @@ namespace Legion {
         assert(gather_targets->size() == 1);
 #endif
         indirect_done = Runtime::create_ap_user_event();
-        copy_done = exchange_indirect_records(indirect_done, trace_info,
+        copy_done = exchange_indirect_records(index, indirect_done, trace_info,
             src_targets, src_requirements[index].region.get_index_space(), 
             src_records, true/*sources*/);
       }
@@ -4019,7 +4019,7 @@ namespace Legion {
           indirect_done = Runtime::create_ap_user_event();
         // It's alright to overwrite this, it will the same as it was
         // from the gather case if this is a full-on indirection
-        copy_done = exchange_indirect_records(indirect_done, trace_info,
+        copy_done = exchange_indirect_records(index, indirect_done, trace_info,
             dst_targets, dst_requirements[index].region.get_index_space(),
             dst_records, false/*sources*/);
       }
@@ -4106,8 +4106,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent CopyOp::exchange_indirect_records(ApEvent local_done,
-             const PhysicalTraceInfo &trace_info,
+    ApEvent CopyOp::exchange_indirect_records(const unsigned index,
+             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
              const InstanceSet &insts, const IndexSpace space,
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
@@ -4865,6 +4865,10 @@ namespace Legion {
             launcher.src_indirect_requirements[idx];
           src_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
+        src_records.resize(gather_size);
+        src_exchange_events.resize(gather_size);
+        src_merged.resize(gather_size);
+        src_exchanged.resize(gather_size);
       }
       if (!launcher.dst_indirect_requirements.empty())
       {
@@ -4877,6 +4881,10 @@ namespace Legion {
             launcher.dst_indirect_requirements[idx];
           dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
+        dst_records.resize(scatter_size);
+        dst_exchange_events.resize(scatter_size);
+        dst_merged.resize(scatter_size);
+        dst_exchanged.resize(scatter_size);
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -5053,8 +5061,6 @@ namespace Legion {
       activate_copy();
       index_domain = Domain::NO_DOMAIN;
       launch_space = IndexSpace::NO_SPACE;
-      src_exchanged = RtUserEvent::NO_RT_USER_EVENT;
-      dst_exchanged = RtUserEvent::NO_RT_USER_EVENT;
       points_committed = 0;
       commit_request = false;
     }
@@ -5073,6 +5079,10 @@ namespace Legion {
       dst_records.clear();
       src_exchange_events.clear();
       dst_exchange_events.clear();
+      src_merged.clear();
+      dst_merged.clear();
+      src_exchanged.clear();
+      dst_exchanged.clear();
       commit_preconditions.clear();
       // Return this operation to the runtime
       runtime->free_index_copy_op(this);
@@ -5462,8 +5472,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent IndexCopyOp::exchange_indirect_records(ApEvent local_done,
-             const PhysicalTraceInfo &trace_info,
+    ApEvent IndexCopyOp::exchange_indirect_records(const unsigned index,
+             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
              const InstanceSet &insts, const IndexSpace space,
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
@@ -5481,42 +5491,44 @@ namespace Legion {
           for (unsigned idx = 0; idx < insts.size(); idx++)
           {
             const InstanceRef &ref = insts[idx];
-            src_records.push_back(IndirectRecord(ref.get_valid_fields(),
+            src_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
                   ref.get_manager()->get_instance(), 
                   ref.get_ready_event(), space));
           }
-          src_exchange_events.insert(local_done);
-          if (!src_exchanged.exists())
-            src_exchanged = Runtime::create_rt_user_event();
-          if (src_exchange_events.size() == points.size())
-            to_trigger = src_exchanged;
+          src_exchange_events[index].insert(local_done);
+          if (!src_exchanged[index].exists())
+            src_exchanged[index] = Runtime::create_rt_user_event();
+          if (src_exchange_events[index].size() == points.size())
+            to_trigger = src_exchanged[index];
           else
-            wait_on = src_exchanged;
+            wait_on = src_exchanged[index];
         }
         else
         {
           for (unsigned idx = 0; idx < insts.size(); idx++)
           {
             const InstanceRef &ref = insts[idx];
-            dst_records.push_back(IndirectRecord(ref.get_valid_fields(),
+            dst_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
                   ref.get_manager()->get_instance(), 
                   ref.get_ready_event(), space));
           }
-          dst_exchange_events.insert(local_done);
-          if (!dst_exchanged.exists())
-            dst_exchanged = Runtime::create_rt_user_event();
-          if (dst_exchange_events.size() == points.size())
-            to_trigger = dst_exchanged;
+          dst_exchange_events[index].insert(local_done);
+          if (!dst_exchanged[index].exists())
+            dst_exchanged[index] = Runtime::create_rt_user_event();
+          if (dst_exchange_events[index].size() == points.size())
+            to_trigger = dst_exchanged[index];
           else
-            wait_on = dst_exchanged;
+            wait_on = dst_exchanged[index];
         }
       }
       if (to_trigger.exists())
       {
         if (sources)
-          src_merged = Runtime::merge_events(&trace_info, src_exchange_events);
+          src_merged[index] = 
+            Runtime::merge_events(&trace_info, src_exchange_events[index]);
         else
-          dst_merged = Runtime::merge_events(&trace_info, dst_exchange_events);
+          dst_merged[index] = 
+            Runtime::merge_events(&trace_info, dst_exchange_events[index]);
         Runtime::trigger_event(to_trigger);
       }
       else if (!wait_on.has_triggered())
@@ -5524,13 +5536,13 @@ namespace Legion {
       // Once we wake up we can copy out the results
       if (sources)
       {
-        records = src_records;
-        return src_merged;
+        records = src_records[index];
+        return src_merged[index];
       }
       else
       {
-        records = dst_records;
-        return dst_merged;
+        records = dst_records[index];
+        return dst_merged[index];
       }
     }
 
@@ -5831,15 +5843,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent PointCopyOp::exchange_indirect_records(ApEvent local_done,
-             const PhysicalTraceInfo &trace_info,
+    ApEvent PointCopyOp::exchange_indirect_records(const unsigned index,
+             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
              const InstanceSet &insts, const IndexSpace space,
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
       // Exchange via the owner
-      return owner->exchange_indirect_records(local_done, trace_info, insts, 
-                                              space, records, sources);
+      return owner->exchange_indirect_records(index, local_done, trace_info, 
+                                              insts, space, records, sources);
     }
 
     //--------------------------------------------------------------------------
