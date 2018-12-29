@@ -3053,6 +3053,25 @@ namespace Legion {
             launcher.dst_indirect_requirements[idx];
           dst_indirect_requirements[idx].flags |= NO_ACCESS_FLAG;
         }
+        if (!src_indirect_requirements.empty())
+        {
+          // Full indirections need to have the same index space
+          for (unsigned idx = 0; (idx < src_indirect_requirements.size()) &&
+                (idx < dst_indirect_requirements.size()); idx++)
+          {
+            const IndexSpace src_space = 
+              src_indirect_requirements[idx].region.get_index_space();
+            const IndexSpace dst_space = 
+              dst_indirect_requirements[idx].region.get_index_space();
+            if (src_space != dst_space)
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                  "Mismatch between source indirect and destination indirect "
+                  "index spaces for requirement %d for copy operation "
+                  "(ID %lld) in parent task %s (ID %lld)",
+                  idx, get_unique_id(), parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
+          }
+        }
       }
       grants = launcher.grants;
       // Register ourselves with all the grants
@@ -3088,7 +3107,7 @@ namespace Legion {
         if (!src_indirect_requirements.empty() && 
             (src_indirect_requirements.size() != src_requirements.size()))
           REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
-                        "Number of gather requirements (%zd) does not "
+                        "Number of source indirect requirements (%zd) does not "
                         "match number of source requirements (%zd) "
                         "for copy operation (ID %lld) with parent "
                         "task %s (ID %lld)", src_indirect_requirements.size(),
@@ -3098,8 +3117,8 @@ namespace Legion {
         if (!dst_indirect_requirements.empty() &&
             (dst_indirect_requirements.size() != src_requirements.size()))
           REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
-                        "Number of scatter requirements (%zd) does not "
-                        "match number of source requriements (%zd) "
+                        "Number of destination indirect requirements (%zd) "
+                        "does not match number of source requriements (%zd) "
                         "for copy operation ID (%lld) with parent "
                         "task %s (ID %lld)", dst_indirect_requirements.size(),
                         src_requirements.size(),
@@ -3166,17 +3185,17 @@ namespace Legion {
           {
             if (src_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy gather requirement %d for copy "
+                        "Copy source indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) has %zd privilege fields but "
-                        "gather requirements are only permitted "
+                        "source indirect requirements are only permitted "
                         "to have one privilege field.", idx,
                         get_unique_id(), parent_task->get_task_name(),
                         parent_task->get_unique_id(),
                         src_indirect_requirements[idx].privilege_fields.size())
             if (!IS_READ_ONLY(src_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy gather requirement %d for copy "
+                        "Copy source indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) must be requested with a "
                         "read-only privilege.", idx,
@@ -3193,24 +3212,24 @@ namespace Legion {
           {
             if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy scatter requirement %d for copy "
+                        "Copy destination indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) has %zd privilege fields but "
-                        "scatter requirements are only permitted "
+                        "destination indirect requirements are only permitted "
                         "to have one privilege field.", idx,
                         get_unique_id(), parent_task->get_task_name(),
                         parent_task->get_unique_id(),
                         dst_indirect_requirements[idx].privilege_fields.size())
             if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy scatter requirement %d for copy "
+                        "Copy destination indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) must be requested with a "
                         "read-only privilege.", idx,
                         get_unique_id(), parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
             check_copy_privilege(dst_indirect_requirements[idx], offset + idx);
-          }
+          } 
         }
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
         {
@@ -4919,7 +4938,7 @@ namespace Legion {
         if (!src_indirect_requirements.empty() && 
             (src_indirect_requirements.size() != src_requirements.size()))
           REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
-                        "Number of gather requirements (%zd) does not "
+                        "Number of source indirect requirements (%zd) does not "
                         "match number of source requirements (%zd) "
                         "for copy operation (ID %lld) with parent "
                         "task %s (ID %lld)", src_indirect_requirements.size(),
@@ -4928,8 +4947,8 @@ namespace Legion {
         if (!dst_indirect_requirements.empty() &&
             (dst_indirect_requirements.size() != src_requirements.size()))
           REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
-                        "Number of scatter requirements (%zd) does not "
-                        "match number of source requriements (%zd) "
+                        "Number of destination indirect requirements (%zd) "
+                        "does not match number of source requriements (%zd) "
                         "for copy operation ID (%lld) with parent "
                         "task %s (ID %lld)", dst_indirect_requirements.size(),
                         src_requirements.size(),
@@ -4997,17 +5016,17 @@ namespace Legion {
           {
             if (src_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy gather requirement %d for copy "
+                        "Copy source indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) has %zd privilege fields but "
-                        "gather requirements are only permitted "
+                        "source indirect requirements are only permitted "
                         "to have one privilege field.", idx,
                         get_unique_id(), parent_task->get_task_name(),
                         parent_task->get_unique_id(),
                         src_indirect_requirements[idx].privilege_fields.size())
             if (!IS_READ_ONLY(src_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy gather requirement %d for copy "
+                        "Copy source indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) must be requested with a "
                         "read-only privilege.", idx,
@@ -5025,17 +5044,17 @@ namespace Legion {
           {
             if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy scatter requirement %d for copy "
+                        "Copy destination indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) has %zd privilege fields but "
-                        "scatter requirements are only permitted "
+                        "destination indirect requirements are only permitted "
                         "to have one privilege field.", idx,
                         get_unique_id(), parent_task->get_task_name(),
                         parent_task->get_unique_id(),
                         dst_indirect_requirements[idx].privilege_fields.size())
             if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
               REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy scatter requirement %d for copy "
+                        "Copy destination indirect requirement %d for copy "
                         "operation (ID %lld) in parent task %s "
                         "(ID %lld) must be requested with a "
                         "read-only privilege.", idx,
@@ -5821,6 +5840,25 @@ namespace Legion {
         for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
           runtime->forest->perform_versioning_analysis(this, offset + idx, 
            dst_indirect_requirements[idx], scatter_versions[idx],preconditions);
+        if (!src_indirect_requirements.empty())
+        {
+          // Full indirections need to have the same index space
+          for (unsigned idx = 0; (idx < src_indirect_requirements.size()) &&
+                (idx < dst_indirect_requirements.size()); idx++)
+          {
+            const IndexSpace src_space = 
+              src_indirect_requirements[idx].region.get_index_space();
+            const IndexSpace dst_space = 
+              dst_indirect_requirements[idx].region.get_index_space();
+            if (src_space != dst_space)
+              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                  "Mismatch between source indirect and destination indirect "
+                  "index spaces for requirement %d for copy operation "
+                  "(ID %lld) in parent task %s (ID %lld)",
+                  idx, get_unique_id(), parent_ctx->get_task_name(),
+                  parent_ctx->get_unique_id())
+          }
+        }
       }
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
