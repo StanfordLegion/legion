@@ -5887,8 +5887,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -5935,8 +5941,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -5985,8 +5997,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6033,8 +6051,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6190,8 +6214,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6238,8 +6268,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6287,8 +6323,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 
@@ -6335,8 +6377,14 @@ namespace Legion {
       // Construct an instance of the right size in the corresponding memory
       Machine machine = Realm::Machine::get_machine();
       Machine::MemoryQuery finder(machine);
-      finder.has_affinity_to(Processor::get_executing_processor());
+      finder.best_affinity_to(Processor::get_executing_processor());
       finder.only_kind(kind);
+      if (finder.count() == 0)
+      {
+        finder = Machine::MemoryQuery(machine);
+        finder.has_affinity_to(Processor::get_executing_processor());
+        finder.only_kind(kind);
+      }
       if (finder.count() == 0)
       {
         fprintf(stderr,"DeferredBuffer unable to find a memory of kind %d", 

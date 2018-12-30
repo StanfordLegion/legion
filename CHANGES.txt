@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version 18.12.0 (December ??, 2018)
+Version 18.12.0 (December 27, 2018)
   * Realm
     - More assorted bug fixes
     - Minor performance improvements in logging and accessor code
