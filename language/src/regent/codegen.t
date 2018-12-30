@@ -8048,12 +8048,12 @@ function codegen.stat_for_list(cx, node)
     -- we will define them in the kernel
     args = data.filter(function(arg) return reductions[arg] == nil end, args)
     local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
-    local device_ptrs, device_ptrs_map, host_preamble =
+    local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
       cudahelper.generate_reduction_preamble(reductions)
     local kernel_preamble, kernel_postamble =
       cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
     local host_postamble =
-      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map)
+      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
     args:insertall(lower_bounds)
     args:insertall(counts)
     args:insertall(device_ptrs)
