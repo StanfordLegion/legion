@@ -7173,7 +7173,7 @@ namespace Legion {
       : InnerContext(rt, owner, d, full, reqs, parent_indexes, virt_mapped, 
           ctx_uid), owner_shard(owner), shard_manager(manager),
         total_shards(shard_manager->total_shards),
-        next_close_mapped_bar_index(0),
+        next_close_mapped_bar_index(0), next_indirection_bar_index(0),
         index_space_allocator_shard(0), index_partition_allocator_shard(0),
         field_space_allocator_shard(0), field_allocator_shard(0),
         logical_region_allocator_shard(0), next_available_collective_index(0)
@@ -7219,6 +7219,12 @@ namespace Legion {
             idx < close_mapped_barriers.size(); idx += total_shards)
       {
         Realm::Barrier bar = close_mapped_barriers[idx];
+        bar.destroy_barrier();
+      }
+      for (unsigned idx = owner_shard->shard_id;
+            idx < indirection_barriers.size(); idx += total_shards)
+      {
+        Realm::Barrier bar = indirection_barriers[idx];
         bar.destroy_barrier();
       }
     }
@@ -10227,7 +10233,8 @@ namespace Legion {
       copy_op->initialize(this, launcher, launch_space, 
                           false/*check privileges*/);
 #endif
-      copy_op->initialize_replication(this);
+      copy_op->initialize_replication(this, indirection_barriers,
+                                      next_indirection_bar_index);
       // Check to see if we need to do any unmappings and remappings
       // before we can issue this copy operation
       std::vector<PhysicalRegion> unmapped_regions;
@@ -10753,12 +10760,17 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Exchange close map barriers across all the shards
-      BarrierExchangeCollective mapped_collective(this,
+      BarrierExchangeCollective<RtBarrier> mapped_collective(this,
           CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
           close_mapped_barriers, COLLECTIVE_LOC_50);
       mapped_collective.exchange_barriers_async();
+      BarrierExchangeCollective<ApBarrier> indirect_collective(this,
+          CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
+          indirection_barriers, COLLECTIVE_LOC_79);
+      indirect_collective.exchange_barriers_async();
       // Wait for everything to be done
       mapped_collective.wait_for_barrier_exchange();
+      indirect_collective.wait_for_barrier_exchange();
     }
 
     //--------------------------------------------------------------------------

@@ -1370,6 +1370,19 @@ namespace Legion {
       if (sharding_collective != NULL)
         delete sharding_collective;
 #endif
+      indirection_barriers.clear();
+      if (!src_collectives.empty())
+      {
+        for (unsigned idx = 0; idx < src_collectives.size(); idx++)
+          delete src_collectives[idx];
+        src_collectives.clear();
+      }
+      if (!dst_collectives.empty())
+      {
+        for (unsigned idx = 0; idx < dst_collectives.size(); idx++)
+          delete dst_collectives[idx];
+        dst_collectives.clear();
+      }
       deactivate_index_copy();
       runtime->free_repl_index_copy_op(this);
     }
@@ -1472,6 +1485,31 @@ namespace Legion {
       // If it's empty we're done, otherwise we go back on the queue
       if (!launch_space.exists())
       {
+        // If we have indirections then we still need to participate in those
+        if (!src_indirect_requirements.empty())
+        {
+          LegionVector<IndirectRecord>::aligned empty_records;
+          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          {
+            src_collectives[idx]->exchange_records(empty_records);
+            empty_records.clear();
+          }
+        }
+        if (!dst_indirect_requirements.empty())
+        {
+          LegionVector<IndirectRecord>::aligned empty_records;
+          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          {
+            dst_collectives[idx]->exchange_records(empty_records);
+            empty_records.clear();
+          }
+        }
+        // Arrive on our indirection barriers if we have them
+        if (!indirection_barriers.empty())
+        {
+          for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
+            Runtime::phase_barrier_arrive(indirection_barriers[idx],1/*count*/);
+        }
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
@@ -1481,9 +1519,106 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx)
+    ApEvent ReplIndexCopyOp::exchange_indirect_records(const unsigned index,
+             const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+             const InstanceSet &instances, const IndexSpace space,
+             LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(local_done.exists());
+      assert(index < indirection_barriers.size());
+      assert(indirection_barriers[index].exists());
+#endif
+      RtEvent wait_on;
+      RtUserEvent to_trigger;
+      std::set<ApEvent> arrival_events;
+      {
+        // Take the lock and record our sets and instances
+        AutoLock o_lock(op_lock);
+        if (sources)
+        {
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            const InstanceRef &ref = instances[idx];
+            src_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), 
+                  ref.get_ready_event(), space));
+          }
+          src_exchange_events[index].insert(local_done);
+          if (!src_exchanged[index].exists())
+            src_exchanged[index] = Runtime::create_rt_user_event();
+          if (src_exchange_events[index].size() == points.size())
+          {
+            to_trigger = src_exchanged[index];
+            if ((index >= dst_indirect_requirements.size()) ||
+                (dst_exchange_events[index].size() == points.size()))
+            {
+              arrival_events.insert(src_exchange_events[index].begin(),
+                  src_exchange_events[index].end());
+              arrival_events.insert(dst_exchange_events[index].begin(),
+                  dst_exchange_events[index].end());
+            }
+          }
+          else
+            wait_on = src_exchanged[index];
+        }
+        else
+        {
+          for (unsigned idx = 0; idx < instances.size(); idx++)
+          {
+            const InstanceRef &ref = instances[idx];
+            dst_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), 
+                  ref.get_ready_event(), space));
+          }
+          dst_exchange_events[index].insert(local_done);
+          if (!dst_exchanged[index].exists())
+            dst_exchanged[index] = Runtime::create_rt_user_event();
+          if (dst_exchange_events[index].size() == points.size())
+          {
+            to_trigger = dst_exchanged[index];
+            if ((index >= src_indirect_requirements.size()) ||
+                (src_exchange_events[index].size() == points.size()))
+            {
+              arrival_events.insert(src_exchange_events[index].begin(),
+                  src_exchange_events[index].end());
+              arrival_events.insert(dst_exchange_events[index].begin(),
+                  dst_exchange_events[index].end());
+            }
+          }
+          else
+            wait_on = dst_exchanged[index];
+        }
+      }
+      if (to_trigger.exists())
+      {
+        // Perform the collective
+        if (sources)
+          src_collectives[index]->exchange_records(src_records[index]);
+        else
+          dst_collectives[index]->exchange_records(dst_records[index]);
+        Runtime::trigger_event(to_trigger);
+        if (!arrival_events.empty())
+          Runtime::phase_barrier_arrive(indirection_barriers[index],
+              1/*count*/, Runtime::merge_events(&trace_info, arrival_events));
+      }
+      else if (!wait_on.has_triggered())
+        wait_on.wait();
+      // Once we wake up we can copy out the results
+      if (sources)
+        records = src_records[index];
+      else
+        records = dst_records[index];
+      return indirection_barriers[index];
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplIndexCopyOp::initialize_replication(ReplicateContext *ctx,
+                          std::vector<ApBarrier> &indirection_bars, 
+                          unsigned &next_indirection_index)
+    //--------------------------------------------------------------------------
+    { 
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
@@ -1501,6 +1636,43 @@ namespace Legion {
                         parent_ctx->get_unique_id())
       }
 #endif
+      if (!src_indirect_requirements.empty())
+      {
+        src_collectives.resize(src_indirect_requirements.size());
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+          src_collectives[idx] = 
+            new IndirectRecordExchange(ctx, COLLECTIVE_LOC_80);
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        dst_collectives.resize(dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+          dst_collectives[idx] = 
+            new IndirectRecordExchange(ctx, COLLECTIVE_LOC_81);
+      }
+      if (!src_indirect_requirements.empty() || 
+          !dst_indirect_requirements.empty())
+      {
+#ifdef DEBUG_LEGION
+        assert(src_indirect_requirements.empty() ||
+               dst_indirect_requirements.empty() ||
+               (src_indirect_requirements.size() == 
+                dst_indirect_requirements.size()));
+#endif
+        indirection_barriers.resize(
+            (src_indirect_requirements.size() > 
+              dst_indirect_requirements.size()) ?
+                src_indirect_requirements.size() : 
+                dst_indirect_requirements.size());
+        for (unsigned idx = 0; idx < indirection_barriers.size(); idx++)
+        {
+          ApBarrier &next_bar = indirection_bars[next_indirection_index++]; 
+          indirection_barriers[idx] = next_bar;
+          Runtime::advance_barrier(next_bar);
+          if (next_indirection_index == indirection_bars.size())
+            next_indirection_index = 0;
+        }
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -5928,15 +6100,18 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    BarrierExchangeCollective::BarrierExchangeCollective(ReplicateContext *ctx,
-     size_t win_size, std::vector<RtBarrier> &bars, CollectiveIndexLocation loc)
+    template<typename BAR>
+    BarrierExchangeCollective<BAR>::BarrierExchangeCollective(
+        ReplicateContext *ctx, size_t win_size, 
+        typename std::vector<BAR> &bars, CollectiveIndexLocation loc)
       : AllGatherCollective(loc, ctx), window_size(win_size), barriers(bars)
     //--------------------------------------------------------------------------
     { 
     }
 
     //--------------------------------------------------------------------------
-    BarrierExchangeCollective::BarrierExchangeCollective(
+    template<typename BAR>
+    BarrierExchangeCollective<BAR>::BarrierExchangeCollective(
                                            const BarrierExchangeCollective &rhs)
       : AllGatherCollective(rhs), window_size(0), barriers(rhs.barriers)
     //--------------------------------------------------------------------------
@@ -5946,13 +6121,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    BarrierExchangeCollective::~BarrierExchangeCollective(void)
+    template<typename BAR>
+    BarrierExchangeCollective<BAR>::~BarrierExchangeCollective(void)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
-    BarrierExchangeCollective& BarrierExchangeCollective::operator=(
+    template<typename BAR>
+    BarrierExchangeCollective<BAR>& BarrierExchangeCollective<BAR>::operator=(
                                            const BarrierExchangeCollective &rhs)
     //--------------------------------------------------------------------------
     {
@@ -5962,7 +6139,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BarrierExchangeCollective::exchange_barriers_async(void)
+    template<typename BAR>
+    void BarrierExchangeCollective<BAR>::exchange_barriers_async(void)
     //--------------------------------------------------------------------------
     {
       // First make our local barriers and put them in the data structure
@@ -5975,7 +6153,7 @@ namespace Legion {
           assert(local_barriers.find(index) == local_barriers.end());
 #endif
           local_barriers[index] = 
-              RtBarrier(Realm::Barrier::create_barrier(manager->total_shards));
+              BAR(Realm::Barrier::create_barrier(manager->total_shards));
         }
       }
       // Now we can start the exchange from this shard 
@@ -5983,7 +6161,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BarrierExchangeCollective::wait_for_barrier_exchange(void)
+    template<typename BAR>
+    void BarrierExchangeCollective<BAR>::wait_for_barrier_exchange(void)
     //--------------------------------------------------------------------------
     {
       // Wait for everything to be done
@@ -5993,7 +6172,7 @@ namespace Legion {
 #endif
       // Fill in the barrier vector with the barriers we've got from everyone
       barriers.resize(window_size);
-      for (std::map<unsigned,RtBarrier>::const_iterator it = 
+      for (typename std::map<unsigned,BAR>::const_iterator it = 
             local_barriers.begin(); it != local_barriers.end(); it++)
       {
 #ifdef DEBUG_LEGION
@@ -6004,13 +6183,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BarrierExchangeCollective::pack_collective_stage(Serializer &rez, 
-                                                          int stage) const
+    template<typename BAR>
+    void BarrierExchangeCollective<BAR>::pack_collective_stage(Serializer &rez, 
+                                                               int stage) const
     //--------------------------------------------------------------------------
     {
       rez.serialize(window_size);
       rez.serialize<size_t>(local_barriers.size());
-      for (std::map<unsigned,RtBarrier>::const_iterator it = 
+      for (typename std::map<unsigned,BAR>::const_iterator it = 
             local_barriers.begin(); it != local_barriers.end(); it++)
       {
         rez.serialize(it->first);
@@ -6019,8 +6199,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void BarrierExchangeCollective::unpack_collective_stage(Deserializer &derez,
-                                                            int stage)
+    template<typename BAR>
+    void BarrierExchangeCollective<BAR>::unpack_collective_stage(
+                                                 Deserializer &derez, int stage)
     //--------------------------------------------------------------------------
     {
       size_t other_window_size;
@@ -6040,7 +6221,11 @@ namespace Legion {
         derez.deserialize(index);
         derez.deserialize(local_barriers[index]);
       }
-    }
+    } 
+
+    // Explicit instantiation of our two kinds of barriers
+    template class BarrierExchangeCollective<RtBarrier>;
+    template class BarrierExchangeCollective<ApBarrier>;
 
     /////////////////////////////////////////////////////////////
     // Shard Sync Tree 
@@ -6359,6 +6544,114 @@ namespace Legion {
           return false;
       }
       return true;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // Indirect Record Exchange
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    IndirectRecordExchange::IndirectRecordExchange(ReplicateContext *ctx,
+                                                   CollectiveIndexLocation loc)
+      : AllGatherCollective(loc, ctx)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndirectRecordExchange::IndirectRecordExchange(
+                                              const IndirectRecordExchange &rhs)
+      : AllGatherCollective(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    IndirectRecordExchange::~IndirectRecordExchange(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    IndirectRecordExchange& IndirectRecordExchange::operator=(
+                                              const IndirectRecordExchange &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void IndirectRecordExchange::exchange_records(
+                           LegionVector<IndirectRecord>::aligned &local_records)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(records.empty());
+#endif
+      for (LegionVector<IndirectRecord>::aligned::const_iterator it = 
+            local_records.begin(); it != local_records.end(); it++)
+      {
+        const IndirectKey key(it->inst, it->ready_event, it->space);
+        records[key] = it->fields;
+      }
+      perform_collective_sync();
+      local_records.resize(records.size());
+      unsigned index = 0;
+      for (LegionMap<IndirectKey,FieldMask>::aligned::const_iterator it = 
+            records.begin(); it != records.end(); it++, index++)
+      {
+        IndirectRecord &record = local_records[index];
+        record.inst = it->first.inst;
+        record.ready_event = it->first.ready_event;
+        record.space = it->first.space;
+        record.fields = it->second;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndirectRecordExchange::pack_collective_stage(Serializer &rez,
+                                                       int stage) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(records.size());
+      for (LegionMap<IndirectKey,FieldMask>::aligned::const_iterator it = 
+            records.begin(); it != records.end(); it++)
+      {
+        rez.serialize(it->first.inst);
+        rez.serialize(it->first.ready_event);
+        rez.serialize(it->first.space);
+        rez.serialize(it->second);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void IndirectRecordExchange::unpack_collective_stage(Deserializer &derez,
+                                                         int stage)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_records;
+      derez.deserialize(num_records);
+      for (unsigned idx = 0; idx < num_records; idx++)
+      {
+        IndirectKey key;
+        derez.deserialize(key.inst);
+        derez.deserialize(key.ready_event);
+        derez.deserialize(key.space);
+        LegionMap<IndirectKey,FieldMask>::aligned::iterator finder = 
+          records.find(key);
+        if (finder != records.end())
+        {
+          FieldMask mask;
+          derez.deserialize(mask);
+          finder->second |= mask;
+        }
+        else
+          derez.deserialize(records[key]);
+      }
     }
 
     /////////////////////////////////////////////////////////////

@@ -217,10 +217,11 @@ namespace Legion {
      * \class BarrierExchangeCollective
      * A class for exchanging sets of barriers between shards
      */
+    template<typename BAR>
     class BarrierExchangeCollective : public AllGatherCollective {
     public:
       BarrierExchangeCollective(ReplicateContext *ctx, size_t window_size, 
-                                std::vector<RtBarrier> &barriers,
+                                typename std::vector<BAR> &barriers,
                                 CollectiveIndexLocation loc);
       BarrierExchangeCollective(const BarrierExchangeCollective &rhs);
       virtual ~BarrierExchangeCollective(void);
@@ -234,8 +235,8 @@ namespace Legion {
       virtual void unpack_collective_stage(Deserializer &derez, int stage);
     protected:
       const size_t window_size;
-      std::vector<RtBarrier> &barriers;
-      std::map<unsigned,RtBarrier> local_barriers;
+      std::vector<BAR> &barriers;
+      std::map<unsigned,BAR> local_barriers;
     };
 
     /**
@@ -411,6 +412,60 @@ namespace Legion {
       bool validate(ShardingID value);
     protected:
       std::map<ShardID,ShardingID> results;
+    };
+
+    /**
+     * \class IndirectRecordExchange
+     * A class for doing an all-gather of indirect records for 
+     * doing gather/scatter/full-indirect copy operations.
+     */
+    class IndirectRecordExchange : public AllGatherCollective {
+    public:
+      struct IndirectKey {
+      public:
+        IndirectKey(void) { }
+        IndirectKey(PhysicalInstance i, ApEvent e, IndexSpace s)
+          : inst(i), ready_event(e), space(s) { }
+      public:
+        inline bool operator<(const IndirectKey &rhs) const 
+        {
+          if (inst.id < rhs.inst.id)
+            return true;
+          if (inst.id > rhs.inst.id)
+            return false;
+          if (ready_event.id < rhs.ready_event.id)
+            return true;
+          if (ready_event.id > rhs.ready_event.id)
+            return false;
+          return (space < rhs.space);
+        }
+        inline bool operator==(const IndirectKey &rhs) const
+        {
+          if (inst.id != rhs.inst.id)
+            return false;
+          if (ready_event.id != rhs.ready_event.id)
+            return false;
+          return (space == rhs.space);
+        }
+      public:
+        PhysicalInstance inst;
+        ApEvent ready_event;
+        IndexSpace space;
+      };
+    public:
+      IndirectRecordExchange(ReplicateContext *ctx,
+                             CollectiveIndexLocation loc);
+      IndirectRecordExchange(const IndirectRecordExchange &rhs);
+      virtual ~IndirectRecordExchange(void);
+    public:
+      IndirectRecordExchange& operator=(const IndirectRecordExchange &rhs);
+    public:
+      void exchange_records(LegionVector<IndirectRecord>::aligned &records);
+    public:
+      virtual void pack_collective_stage(Serializer &rez, int stage) const;
+      virtual void unpack_collective_stage(Deserializer &derez, int stage);
+    protected:
+      LegionMap<IndirectKey,FieldMask>::aligned records;
     };
     
     /**
@@ -942,11 +997,20 @@ namespace Legion {
       virtual void trigger_prepipeline_stage(void);
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_ready(void);
+      virtual ApEvent exchange_indirect_records(const unsigned index,
+          const ApEvent local_done, const PhysicalTraceInfo &trace_info,
+          const InstanceSet &instances, const IndexSpace space,
+          LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
-      void initialize_replication(ReplicateContext *ctx);
+      void initialize_replication(ReplicateContext *ctx,
+                                  std::vector<ApBarrier> &indirection_bars,
+                                  unsigned &next_indirection_index);
     protected:
       ShardingID sharding_functor;
       ShardingFunction *sharding_function;
+      std::vector<ApBarrier> indirection_barriers;
+      std::vector<IndirectRecordExchange*> src_collectives;
+      std::vector<IndirectRecordExchange*> dst_collectives;
 #ifdef DEBUG_LEGION
     public:
       inline void set_sharding_collective(ShardingGatherCollective *collective)

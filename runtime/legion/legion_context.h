@@ -1590,6 +1590,9 @@ namespace Legion {
       // These barriers are used to identify when close operations are mapped
       std::vector<RtBarrier>  close_mapped_barriers;
       unsigned                next_close_mapped_bar_index;
+      // These barriers are for signaling when indirect copies are done
+      std::vector<ApBarrier>  indirection_barriers;
+      unsigned                next_indirection_bar_index;
     protected:
       ShardID index_space_allocator_shard;
       ShardID index_partition_allocator_shard;

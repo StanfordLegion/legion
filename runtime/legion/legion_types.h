@@ -1306,6 +1306,9 @@ namespace Legion {
       COLLECTIVE_LOC_76 = 76,
       COLLECTIVE_LOC_77 = 77,
       COLLECTIVE_LOC_78 = 78,
+      COLLECTIVE_LOC_79 = 79,
+      COLLECTIVE_LOC_80 = 80,
+      COLLECTIVE_LOC_81 = 81,
     };
 
     // legion_types.h
@@ -1620,7 +1623,7 @@ namespace Legion {
     class ShardCollective;
     class GatherCollective;
     class AllGatherCollective;
-    class BarrierExchangeCollective;
+    template<typename T> class BarrierExchangeCollective;
     template<typename T> class ValueBroadcast;
     class CrossProductCollective;
     class ShardingGatherCollective;
