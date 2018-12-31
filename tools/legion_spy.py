@@ -6038,7 +6038,8 @@ class Operation(object):
         return True
 
     def verify_physical_requirement(self, index, req, perform_checks):
-        if req.is_no_access() or len(req.fields) == 0:
+        # We can end up with no mappings in control replicated cases
+        if req.is_no_access() or len(req.fields) == 0 or self.mappings is None:
             return True
         assert index in self.mappings
         mappings = self.mappings[index]
