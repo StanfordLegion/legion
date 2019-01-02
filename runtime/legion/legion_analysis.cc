@@ -4279,6 +4279,7 @@ namespace Legion {
       if (!guard_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(guard_events);
+#if 0
         if (wait_on.exists() && !wait_on.has_triggered())
         {
           // Defer this so we don't end up waiting on it and blocking
@@ -4301,6 +4302,9 @@ namespace Legion {
               LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
           return;
         }
+#else
+        wait_on.wait();
+#endif
       }
       // If we get here do the finish stage
       const ApEvent result = finish_remote_updates(op, index, usage, targets,
