@@ -729,6 +729,35 @@ namespace Legion {
      */
     class RemoteEqTracker {
     public:
+      struct DeferRemoteUpdateArgs : public LgTaskArgs<DeferRemoteUpdateArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_UPDATE_TASK_ID;
+      public:
+        DeferRemoteUpdateArgs(Operation *o, UniqueID uid, unsigned idx, 
+            const RegionUsage &u,InstanceSet *tar,std::vector<InstanceView*> *v,
+            IndexSpaceExpression *e, ApEvent term, std::set<RtEvent> *app_set,
+            std::set<ApEvent> *rem_set, CopyFillAggregator *ag, 
+            RtUserEvent app, ApUserEvent rem, ApUserEvent effects)
+          : LgTaskArgs<DeferRemoteUpdateArgs>(uid), op(o), index(idx), usage(u),
+            targets(tar), views(v), expr(e), term_event(term), 
+            applied_events(app_set), remote_events(rem_set), aggregator(ag),
+            applied(app), remote_ready(rem), effects_done(effects) { }
+      public:
+        Operation *const op;
+        const unsigned index;
+        const RegionUsage usage;
+        InstanceSet *const targets;
+        std::vector<InstanceView*> *views;
+        IndexSpaceExpression *const expr;
+        const ApEvent term_event;
+        std::set<RtEvent> *const applied_events;
+        std::set<ApEvent> *const remote_events;
+        CopyFillAggregator *const aggregator;
+        const RtUserEvent applied;
+        const ApUserEvent remote_ready;
+        const ApUserEvent effects_done;
+      };
+    public:
       RemoteEqTracker(Runtime *rt);
       RemoteEqTracker(AddressSpaceID prev, AddressSpaceID original, Runtime *rt)
         : previous(prev), original_source(original), runtime(rt) { }
@@ -843,6 +872,18 @@ namespace Legion {
       static void handle_remote_filters(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
+      static void handle_defer_remote_updates(const void *args);
+    protected:
+      static ApEvent finish_remote_updates(Operation *op, unsigned index,
+                                  const RegionUsage &usage,
+                                  const InstanceSet &targets,
+                                  const std::vector<InstanceView*> &views,
+                                  IndexSpaceExpression *local_expr,
+                                  ApEvent term_event,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &remote_events,
+                                  CopyFillAggregator *output_aggregator,
+                                  const PhysicalTraceInfo &trace_info);
     public:
       const AddressSpaceID previous;
       const AddressSpaceID original_source;
