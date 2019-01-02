@@ -772,6 +772,8 @@ namespace Legion {
       derez.deserialize(realm_index_space);
       derez.deserialize(realm_index_space_ready);
       derez.deserialize(origin);
+      // Call this now to prefetch the data, no need to wait on it though
+      realm_index_space.make_valid();
       // Always add a reference from our owner node that will be removed
       // when we can be deleted
       add_reference();
