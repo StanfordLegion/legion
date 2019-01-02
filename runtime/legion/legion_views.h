@@ -185,6 +185,149 @@ namespace Legion {
     };
 
     /**
+     * \class KDView
+     * A KDView is a node in a KD tree for capturing users of a physical
+     * instance. We use them for splitting apart users for different parts
+     * of the physical space on a given dimension.
+     */
+    class KDView {
+    public:
+      typedef LegionMap<ApEvent,
+                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
+      typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
+                                                              EventFieldUsers;
+      typedef FieldMaskSet<PhysicalUser> EventUsers;
+    public:
+      KDView(RegionTreeForest *ctx, IndexSpaceExpression *expr, 
+             int split_dim, int last_changed_dim = -1);
+      KDView(const KDView &rhs);
+      ~KDView(void);
+    public:
+      KDView& operator=(const KDView &rhs);
+    public:
+      void find_user_preconditions(const RegionUsage &usage,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   ApEvent term_event,
+                                   UniqueID op_id, unsigned index,
+                                   std::set<ApEvent> &preconditions,
+                                   const PhysicalTraceInfo &trace_info);
+      void find_copy_preconditions(const RegionUsage &usage,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   UniqueID op_id, unsigned index,
+                                   EventFieldExprs &preconditions,
+                                   const PhysicalTraceInfo &trace_info);
+      void add_user(const RegionUsage &usage,
+                    IndexSpaceExpression *user_expr,
+                    const FieldMask &user_mask, ApEvent term_event, 
+                    UniqueID op_id, unsigned index, bool copy_user);
+      void filter_users(const std::set<ApEvent> &to_filter);
+    protected:
+      void find_current_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      ApEvent term_event,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      std::set<ApEvent> &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                                      EventFieldUsers &filter_users,
+                                      FieldMask &observed, 
+                                      FieldMask &non_dominated,
+                                      const PhysicalTraceInfo &trace_info);
+      void find_previous_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      ApEvent term_event,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      std::set<ApEvent> &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                                      const PhysicalTraceInfo &trace_info);
+      void find_previous_filter_users(const FieldMask &dominated_mask,
+                                      IndexSpaceExpression *filter_expr,
+                                      EventFieldUsers &filter_users);
+      // More overload versions for even more precise information including
+      // the index space expressions for individual events and fields
+      void find_current_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      EventFieldExprs &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                                      EventFieldUsers &filter_events,
+                                      FieldMask &observed, 
+                                      FieldMask &non_dominated,
+                                      const PhysicalTraceInfo &trace_info);
+      void find_previous_preconditions(const RegionUsage &usage,
+                                      const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      EventFieldExprs &preconditions,
+                                      std::set<ApEvent> &dead_events,
+                                      const PhysicalTraceInfo &trace_info); 
+      template<bool COPY_USER>
+      inline bool has_local_precondition(PhysicalUser *prev_user,
+                                      const RegionUsage &next_user,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      IndexSpaceExpression *user_expr);
+      template<bool COPY_USER>
+      inline bool has_local_precondition(PhysicalUser *prev_user,
+                                      const RegionUsage &next_user,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      IndexSpaceExpression *user_expr,
+                                      IndexSpaceExpression *&overlap_expr);
+    protected:
+      void add_current_user(const RegionUsage &usage,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            ApEvent term_event, UniqueID op_id, 
+                            unsigned index, bool copy_user);
+      void filter_local_users(ApEvent term_event);
+      void filter_current_users(const EventFieldUsers &to_filter);
+      void filter_previous_users(const EventFieldUsers &to_filter);
+      bool refine_users(void);
+    public:
+      RegionTreeForest *const context;
+      IndexSpaceExpression *const kd_expr;
+      const size_t kd_volume;
+      const int split_dim;
+      const int last_changed_dim;
+    protected:
+      mutable LocalLock view_lock;
+    protected:
+      // There are three operations that are done on materialized views
+      // 1. iterate over all the users for use analysis
+      // 2. garbage collection to remove old users for an event
+      // 3. send updates for a certain set of fields
+      // The first and last both iterate over the current and previous
+      // user sets, while the second one needs to find specific events.
+      // Therefore we store the current and previous sets as maps to
+      // users indexed by events. Iterating over the maps are no worse
+      // than iterating over lists (for arbitrary insertion and deletion)
+      // and will provide fast indexing for removing items. We used to
+      // store users in current and previous epochs similar to logical
+      // analysis, but have since switched over to storing readers and
+      // writers that are not filtered as part of analysis. This let's
+      // us perform more analysis in parallel since we'll only need to
+      // hold locks in read-only mode prevent user fragmentation. It also
+      // deals better with the common case which are higher views in
+      // the view tree that less frequently filter their sub-users.
+      EventFieldUsers current_epoch_users;
+      EventFieldUsers previous_epoch_users;
+    protected:
+      KDView *left, *right;
+      // Track the number of users which have users with expressions 
+      // that are a sub expression of our kd expression. 
+      unsigned subexpr_users;
+    };
+
+    /**
      * \class MaterializedView 
      * The MaterializedView class is used for representing a given
      * logical view onto a single physical instance.
@@ -258,27 +401,7 @@ namespace Legion {
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
                                  std::set<RtEvent> &applied_events,
-                                 const PhysicalTraceInfo &trace_info);
-    protected:
-      void find_user_preconditions(const RegionUsage &usage,
-                                   IndexSpaceExpression *user_expr,
-                                   const FieldMask &user_mask,
-                                   ApEvent term_event,
-                                   UniqueID op_id, unsigned index,
-                                   std::set<ApEvent> &preconditions,
-                                   const PhysicalTraceInfo &trace_info);
-      void find_copy_preconditions(const RegionUsage &usage,
-                                   IndexSpaceExpression *user_expr,
-                                   const FieldMask &user_mask,
-                                   UniqueID op_id, unsigned index,
-                                   EventFieldExprs &preconditions,
-                                   const PhysicalTraceInfo &trace_info);
-      bool add_user(const RegionUsage &usage,
-                    IndexSpaceExpression *user_expr,
-                    const FieldMask &user_mask,
-                    ApEvent term_event, UniqueID op_id, unsigned index,
-                    bool copy_user, std::set<RtEvent> &applied_events,
-                    const PhysicalTraceInfo &trace_info);
+                                 const PhysicalTraceInfo &trace_info); 
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -288,66 +411,14 @@ namespace Legion {
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
-      void update_gc_events(const std::deque<ApEvent> &gc_events);
-    protected:
-      void add_current_user(PhysicalUser *user, ApEvent term_event,
-                            const FieldMask &user_mask);
-      void filter_local_users(ApEvent term_event);
-      void filter_current_users(const EventFieldUsers &to_filter);
-      void filter_previous_users(const EventFieldUsers &to_filter);
-    protected:
-      void find_current_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      ApEvent term_event,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      EventFieldUsers &filter_users,
-                                      FieldMask &observed, 
-                                      FieldMask &non_dominated,
-                                      const PhysicalTraceInfo &trace_info);
-      void find_previous_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      ApEvent term_event,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      std::set<ApEvent> &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      const PhysicalTraceInfo &trace_info);
-      void find_previous_filter_users(const FieldMask &dominated_mask,
-                                      IndexSpaceExpression *filter_expr,
-                                      EventFieldUsers &filter_users);
-      // More overload versions for even more precise information including
-      // the index space expressions for individual events and fields
-      void find_current_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      EventFieldExprs &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      EventFieldUsers &filter_events,
-                                      FieldMask &observed, 
-                                      FieldMask &non_dominated,
-                                      const PhysicalTraceInfo &trace_info);
-      void find_previous_preconditions(const RegionUsage &usage,
-                                      const FieldMask &user_mask,
-                                      IndexSpaceExpression *user_expr,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      EventFieldExprs &preconditions,
-                                      std::set<ApEvent> &dead_events,
-                                      const PhysicalTraceInfo &trace_info); 
-      template<bool COPY_USER>
-      inline bool has_local_precondition(PhysicalUser *prev_user,
-                                      const RegionUsage &next_user,
-                                      const UniqueID op_id,
-                                      const unsigned index,
-                                      IndexSpaceExpression *user_expr,
-                                      IndexSpaceExpression **intersect = NULL);
+      bool add_current_user(const RegionUsage &usage,
+                            IndexSpaceExpression *user_expr,
+                            const FieldMask &user_mask,
+                            ApEvent term_event, UniqueID op_id, 
+                            unsigned index, bool copy_user,
+                            std::set<RtEvent> &applied_events,
+                            const PhysicalTraceInfo &trace_info);
+      void update_gc_events(const std::deque<ApEvent> &gc_events); 
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -371,25 +442,8 @@ namespace Legion {
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
       std::map<FieldID,Reservation> atomic_reservations;
-      // There are three operations that are done on materialized views
-      // 1. iterate over all the users for use analysis
-      // 2. garbage collection to remove old users for an event
-      // 3. send updates for a certain set of fields
-      // The first and last both iterate over the current and previous
-      // user sets, while the second one needs to find specific events.
-      // Therefore we store the current and previous sets as maps to
-      // users indexed by events. Iterating over the maps are no worse
-      // that iterating over lists (for arbitrary insertion and deletion)
-      // and will provide fast indexing for removing items. We used to
-      // store users in current and previous epochs similar to logical
-      // analysis, but have since switched over to storing readers and
-      // writers that are not filtered as part of analysis. This let's
-      // us perform more analysis in parallel since we'll only need to
-      // hold locks in read-only mode prevent user fragmentation. It also
-      // deals better with the common case which are higher views in
-      // the view tree that less frequently filter their sub-users.
-      EventFieldUsers current_epoch_users;
-      EventFieldUsers previous_epoch_users;
+      // Use a KDView tree to track the current users of this instance
+      KDView *current_users; 
       // Also keep a set of events for which we have outstanding
       // garbage collection meta-tasks so we don't launch more than one
       // We need this even though we have the data structures above because
@@ -400,7 +454,7 @@ namespace Legion {
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
       // resilience or mis-speculation.
-      VersionFieldExprs current_versions;
+      //VersionFieldExprs current_versions;
     protected:
       // Useful for pruning the initial users at cleanup time
       std::set<ApEvent> initial_user_events;
@@ -890,12 +944,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<bool COPY_USER>
-    inline bool MaterializedView::has_local_precondition(PhysicalUser *user,
+    inline bool KDView::has_local_precondition(PhysicalUser *user,
                                                const RegionUsage &next_user,
                                                const UniqueID op_id,
                                                const unsigned index,
-                                               IndexSpaceExpression *user_expr,
-                                               IndexSpaceExpression **intersect)
+                                               IndexSpaceExpression *user_expr)
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost
@@ -922,13 +975,59 @@ namespace Legion {
       }
       // This is the most expensive test so we do it last
       // See if the two user expressions intersect
+      if (user->expr->expr_id == user_expr->expr_id)
+        return true;
       IndexSpaceExpression *overlap = 
         context->intersect_index_spaces(user->expr, user_expr);
       // If they don't overlap then there is no dependence
       if (overlap->check_empty())
         return false;
-      if (intersect != NULL)
-        *intersect = overlap;
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool COPY_USER>
+    inline bool KDView::has_local_precondition(PhysicalUser *user,
+                                               const RegionUsage &next_user,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               IndexSpaceExpression *user_expr,
+                                               IndexSpaceExpression *&intersect)
+    //--------------------------------------------------------------------------
+    {
+      // We order these tests in a entirely based on cost
+      // We're going to want the result of the intersect no matter what
+      if (user->expr->expr_id == user_expr->expr_id)
+        intersect = user_expr;
+      else
+        intersect = context->intersect_index_spaces(user->expr, user_expr);
+      // Different region requirements of the same operation 
+      // Copies from different region requirements though still 
+      // need to wait on each other correctly
+      if ((op_id == user->op_id) && (index != user->index) && 
+          (!COPY_USER || !user->copy_user))
+        return false;
+      // Now do a dependence test for privilege non-interference
+      DependenceType dt = check_dependence_type(user->usage, next_user);
+      switch (dt)
+      {
+        case NO_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          return false;
+        case TRUE_DEPENDENCE:
+        case ANTI_DEPENDENCE:
+          break;
+        default:
+          assert(false); // should never get here
+      }
+      // This is the most expensive test so we do it last
+      // See if the two user expressions intersect
+      // If they don't overlap then there is no dependence
+      if (intersect->expr_id == user_expr->expr_id)
+        return true;
+      if (intersect->check_empty())
+        return false;
       return true;
     }
 
