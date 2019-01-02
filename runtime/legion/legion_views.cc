@@ -339,6 +339,764 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // KDView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    KDView::KDView(RegionTreeForest *ctx, IndexSpaceExpression *exp, 
+                   int d, int last/*=-1*/)
+      : context(ctx), kd_expr(exp), kd_volume(exp->get_volume()), split_dim(d),
+        last_changed_dim(last), left(NULL), right(NULL), subexpr_users(0)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(kd_expr != NULL);
+#endif
+      kd_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    KDView::KDView(const KDView &rhs)
+      : context(rhs.context), kd_expr(rhs.kd_expr), kd_volume(rhs.kd_volume), 
+        split_dim(rhs.split_dim), last_changed_dim(rhs.last_changed_dim)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    KDView::~KDView(void)
+    //--------------------------------------------------------------------------
+    {
+      if (kd_expr->remove_expression_reference())
+        delete kd_expr;
+      if (left != NULL)
+        delete left;
+      if (right != NULL)
+        delete right;
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
+      defined(DEBUG_LEGION)
+      // Don't forget to remove the initial user if there was one
+      // before running these checks
+      assert(current_epoch_users.empty());
+      assert(previous_epoch_users.empty());
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    KDView& KDView::operator=(const KDView &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_user_preconditions(const RegionUsage &usage,
+                                         IndexSpaceExpression *user_expr,
+                                         const FieldMask &user_mask,
+                                         ApEvent term_event,
+                                         UniqueID op_id, unsigned index,
+                                         std::set<ApEvent> &preconditions,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
+      bool traverse_below = false;
+      std::set<ApEvent> dead_events;
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Perform the analysis with a read-only lock
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        if (left == NULL)
+        {
+          FieldMask observed, non_dominated;
+          find_current_preconditions(usage, user_mask, user_expr, 
+                                     term_event, op_id, index, 
+                                     preconditions, dead_events, 
+                                     current_to_filter, observed,
+                                     non_dominated, trace_info);
+          const FieldMask dominated = observed - non_dominated;
+          if (!!dominated)
+            find_previous_filter_users(dominated, user_expr,previous_to_filter);
+          const FieldMask previous_mask = user_mask - dominated;
+          if (!!previous_mask)
+            find_previous_preconditions(usage, previous_mask, user_expr,
+                                        term_event, op_id, index,
+                                        preconditions, dead_events, trace_info);
+        }
+        else
+          traverse_below = true;
+      }
+      if (traverse_below)
+      {
+        IndexSpaceExpression *left_overlap = 
+          context->intersect_index_spaces(user_expr, left->kd_expr);
+        if (!left_overlap->is_empty())
+          left->find_user_preconditions(usage, left_overlap, user_mask,
+                  term_event, op_id, index, preconditions, trace_info);
+        IndexSpaceExpression *right_overlap = 
+          context->intersect_index_spaces(user_expr, right->kd_expr);
+        if (!right_overlap->is_empty())
+          right->find_user_preconditions(usage, right_overlap, user_mask,
+                    term_event, op_id, index, preconditions, trace_info);
+      }
+      else if ((!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()) &&
+          !trace_info.recording)
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_copy_preconditions(const RegionUsage &usage,
+                                         IndexSpaceExpression *copy_expr,
+                                         const FieldMask &copy_mask,
+                                         UniqueID op_id, unsigned index,
+                                         EventFieldExprs &preconditions,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      DETAILED_PROFILER(runtime, 
+                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
+      bool traverse_below = false;
+      FieldMask filter_mask;
+      std::set<ApEvent> dead_events;
+      EventFieldUsers current_to_filter, previous_to_filter;
+      // Do the first pass with a read-only lock on the events
+      {
+        FieldMask observed, non_dominated;
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        if (left == NULL)
+        {
+          find_current_preconditions(usage, copy_mask, copy_expr, op_id, index,
+                                     preconditions, dead_events,
+                                     current_to_filter, observed,
+                                     non_dominated, trace_info);
+          const FieldMask dominated = observed - non_dominated;
+          if (!!dominated)
+            find_previous_filter_users(dominated, copy_expr,previous_to_filter);
+          const FieldMask previous_mask = copy_mask - dominated;
+          if (!!previous_mask)
+            find_previous_preconditions(usage, previous_mask, copy_expr, op_id, 
+                                index, preconditions, dead_events, trace_info);
+        }
+        else
+          traverse_below = true;
+      }
+      if (traverse_below)
+      {
+        IndexSpaceExpression *left_overlap = 
+          context->intersect_index_spaces(copy_expr, left->kd_expr);
+        if (!left_overlap->is_empty())
+          left->find_copy_preconditions(usage, left_overlap, copy_mask,
+                              op_id, index, preconditions, trace_info);
+        IndexSpaceExpression *right_overlap = 
+          context->intersect_index_spaces(copy_expr, right->kd_expr);
+        if (!right_overlap->is_empty())
+          right->find_copy_preconditions(usage, right_overlap, copy_mask,
+                                op_id, index, preconditions, trace_info);
+      }
+      else if ((!dead_events.empty() || !previous_to_filter.empty() || 
+            !current_to_filter.empty()) && !trace_info.recording)
+      {
+        // Need exclusive permissions to modify data structures
+        AutoLock v_lock(view_lock);
+        if (!dead_events.empty())
+          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
+                it != dead_events.end(); it++)
+            filter_local_users(*it); 
+        if (!previous_to_filter.empty())
+          filter_previous_users(previous_to_filter);
+        if (!current_to_filter.empty())
+          filter_current_users(current_to_filter);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::add_user(const RegionUsage &usage,
+                          IndexSpaceExpression *user_expr,
+                          const FieldMask &user_mask,
+                          ApEvent term_event, UniqueID op_id, 
+                          unsigned index, bool copy_user)
+    //--------------------------------------------------------------------------
+    {
+      // If we've already made subsets then traverse down them
+      bool traverse_below = false;
+      {
+        AutoLock v_lock(view_lock);
+        if (left == NULL)
+        {
+          // Check to see if we need to refine this into subviews
+          if (subexpr_users < LEGION_MAX_BVH_FANOUT)
+          {
+            // Try refining, if we can't refine then just do
+            if (refine_users())
+              traverse_below = true;
+            else
+              add_current_user(usage, user_expr, user_mask, term_event,
+                               op_id, index, copy_user);
+          }
+          else
+            add_current_user(usage, user_expr, user_mask, term_event,
+                             op_id, index, copy_user);
+        }
+        else
+          traverse_below = true;
+      }
+      if (traverse_below)
+      {
+        IndexSpaceExpression *left_overlap = 
+          context->intersect_index_spaces(user_expr, left->kd_expr);
+        if (!left_overlap->is_empty())
+          left->add_user(usage, left_overlap, user_mask, term_event,
+                         op_id, index, copy_user);
+        IndexSpaceExpression *right_overlap = 
+          context->intersect_index_spaces(user_expr, right->kd_expr);
+        if (!right_overlap->is_empty())
+          right->add_user(usage, right_overlap, user_mask, term_event,
+                          op_id, index, copy_user);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::add_current_user(const RegionUsage &usage,
+                                  IndexSpaceExpression *user_expr,
+                                  const FieldMask &user_mask,
+                                  ApEvent term_event, UniqueID op_id, 
+                                  unsigned index, bool copy_user)
+    //--------------------------------------------------------------------------
+    {
+      PhysicalUser *user = 
+        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
+      if (user->expr_volume < kd_volume)
+        subexpr_users++;
+      user->add_reference();
+      EventUsers &event_users = current_epoch_users[term_event];
+      EventUsers::iterator finder = event_users.find(user);
+      if (finder == event_users.end())
+        event_users.insert(user, user_mask);
+      else
+        finder.merge(user_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::filter_users(const std::set<ApEvent> &to_filter)
+    //--------------------------------------------------------------------------
+    {
+      bool traverse_below = false;
+      {
+        AutoLock v_lock(view_lock);
+        if (left == NULL)
+        {
+          for (std::set<ApEvent>::const_iterator it = 
+                to_filter.begin(); it != to_filter.end(); it++)
+            filter_local_users(*it);
+        }
+        else
+          traverse_below = true;
+      }
+      if (traverse_below)
+      {
+        left->filter_users(to_filter);
+        right->filter_users(to_filter);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::filter_local_users(ApEvent term_event) 
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      DETAILED_PROFILER(context->runtime, 
+                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
+      // Don't do this if we are in Legion Spy since we want to see
+      // all of the dependences on an instance
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+      EventFieldUsers::iterator current_finder = 
+        current_epoch_users.find(term_event);
+      if (current_finder != current_epoch_users.end())
+      {
+        for (EventUsers::const_iterator it = current_finder->second.begin();
+              it != current_finder->second.end(); it++)
+          if (it->first->remove_reference())
+          {
+            if (it->first->expr_volume < kd_volume)
+            {
+#ifdef DEBUG_LEGION
+              assert(subexpr_users > 0);
+#endif
+              subexpr_users--;
+            }
+            delete it->first;
+          }
+        current_epoch_users.erase(current_finder);
+      }
+      LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
+        previous_epoch_users.find(term_event);
+      if (previous_finder != previous_epoch_users.end())
+      {
+        for (EventUsers::const_iterator it = previous_finder->second.begin();
+              it != previous_finder->second.end(); it++)
+          if (it->first->remove_reference())
+          {
+            if (it->first->expr_volume < kd_volume)
+            {
+#ifdef DEBUG_LEGION
+              assert(subexpr_users > 0);
+#endif
+              subexpr_users--;
+            }
+            delete it->first;
+          }
+        previous_epoch_users.erase(previous_finder);
+      }
+#endif
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::filter_current_users(const EventFieldUsers &to_filter)
+    //--------------------------------------------------------------------------
+    {
+      // Lock needs to be held by caller 
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
+      {
+        EventFieldUsers::iterator event_finder = 
+          current_epoch_users.find(fit->first);
+        // If it's already been pruned out then either it was filtered
+        // because it finished or someone else moved it already, either
+        // way we don't need to do anything about it
+        if (event_finder == current_epoch_users.end())
+          continue;
+        EventFieldUsers::iterator target_finder = 
+          previous_epoch_users.find(fit->first);
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
+        {
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again, either way there is
+          // nothing for us to do here if it was already moved
+          if (finder == event_finder->second.end())
+            continue;
+          const FieldMask overlap = finder->second & it->second;
+          if (!overlap)
+            continue;
+          finder.filter(overlap);
+          bool needs_reference = true;
+          if (!finder->second)
+          {
+            // Have the reference flow back with the user
+            needs_reference = false;
+            event_finder->second.erase(finder);
+          }
+          // Now add the user to the previous set
+          if (target_finder == previous_epoch_users.end())
+          {
+            if (needs_reference)
+              it->first->add_reference();
+            previous_epoch_users[fit->first].insert(it->first, overlap);
+            target_finder = previous_epoch_users.find(fit->first);
+          }
+          else
+          {
+            finder = target_finder->second.find(it->first);
+            if (finder == target_finder->second.end())
+            {
+              if (needs_reference)
+                it->first->add_reference();
+              target_finder->second.insert(it->first, overlap);
+            }
+            else
+            {
+              finder.merge(overlap);
+              // Remove any extra references we might be trying to send back
+              if (!needs_reference && it->first->remove_reference())
+              {
+                if (it->first->expr_volume < kd_volume)
+                {
+#ifdef DEBUG_LEGION
+                  assert(subexpr_users > 0);
+#endif
+                  subexpr_users--;
+                }
+                delete it->first;
+              }
+            }
+          }
+        }
+        if (event_finder->second.empty())
+          current_epoch_users.erase(event_finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    bool KDView::refine_users(void)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: Implement this to do the refinement
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::filter_previous_users(const EventFieldUsers &to_filter)
+    //--------------------------------------------------------------------------
+    {
+      // Lock needs to be held by caller
+      for (EventFieldUsers::const_iterator fit = to_filter.begin();
+            fit != to_filter.end(); fit++)
+      {
+        EventFieldUsers::iterator event_finder = 
+          previous_epoch_users.find(fit->first);
+        // Might already have been pruned out
+        if (event_finder == previous_epoch_users.end())
+          continue;
+        for (EventUsers::const_iterator it = fit->second.begin();
+              it != fit->second.end(); it++)
+        {
+          EventUsers::iterator finder = event_finder->second.find(it->first);
+          // Might already have been pruned out again
+          if (finder == event_finder->second.end())
+            continue;
+          finder.filter(it->second);
+          if (!finder->second)
+          {
+            if (finder->first->remove_reference())
+            {
+              if (finder->first->expr_volume < kd_volume)
+              {
+#ifdef DEBUG_LEGION
+                assert(subexpr_users > 0);
+#endif
+                subexpr_users--;
+              }
+              delete finder->first;
+            }
+            event_finder->second.erase(finder);
+          }
+        }
+        if (event_finder->second.empty())
+          previous_epoch_users.erase(event_finder);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_current_preconditions(const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceExpression *user_expr,
+                                            ApEvent term_event,
+                                            const UniqueID op_id,
+                                            const unsigned index,
+                                            std::set<ApEvent> &preconditions,
+                                            std::set<ApEvent> &dead_events,
+                                            EventFieldUsers &filter_users,
+                                            FieldMask &observed,
+                                            FieldMask &non_dominated,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
+      {
+        if (cit->first == term_event)
+          continue;
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(cit->first);
+          continue;
+        }
+        if (!trace_info.recording &&
+            preconditions.find(cit->first) != preconditions.end())
+          continue;
+#endif
+        const EventUsers &event_users = cit->second;
+        const FieldMask overlap = event_users.get_valid_mask() & user_mask;
+        if (!overlap)
+          continue;
+        EventFieldUsers::iterator to_filter = filter_users.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition<false>(it->first, usage, op_id, index,
+                                            user_expr, overlap_expr))
+          {
+            observed |= user_overlap;
+            preconditions.insert(cit->first);
+            if ((overlap_expr->expr_id == it->first->expr->expr_id) ||
+                (overlap_expr->get_volume() == it->first->expr_volume))
+            {
+              if (to_filter == filter_users.end())
+              {
+                filter_users[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_users.find(cit->first);
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(to_filter->second.find(it->first) == 
+                        to_filter->second.end());
+#endif
+                to_filter->second.insert(it->first, user_overlap);
+              }
+            }
+            else
+              non_dominated |= user_overlap;
+          }
+          else if (!overlap_expr->is_empty())
+            non_dominated |= user_overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_previous_preconditions(const RegionUsage &usage,
+                                             const FieldMask &user_mask,
+                                             IndexSpaceExpression *user_expr,
+                                             ApEvent term_event,
+                                             const UniqueID op_id,
+                                             const unsigned index,
+                                             std::set<ApEvent> &preconditions,
+                                             std::set<ApEvent> &dead_events,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
+      {
+        if (pit->first == term_event)
+          continue;
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(pit->first);
+          continue;
+        }
+        if (!trace_info.recording &&
+            preconditions.find(pit->first) != preconditions.end())
+          continue;
+#endif
+        const EventUsers &event_users = pit->second;
+        if (user_mask * event_users.get_valid_mask())
+          continue;
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          if (user_mask * it->second)
+            continue;
+          if (has_local_precondition<false>(it->first, usage,
+                                            op_id, index, user_expr))
+            preconditions.insert(pit->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_current_preconditions(const RegionUsage &usage,
+                                            const FieldMask &user_mask,
+                                            IndexSpaceExpression *user_expr,
+                                            const UniqueID op_id,
+                                            const unsigned index,
+                                            EventFieldExprs &preconditions,
+                                            std::set<ApEvent> &dead_events,
+                                            EventFieldUsers &filter_events,
+                                            FieldMask &observed,
+                                            FieldMask &non_dominated,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
+            cit != current_epoch_users.end(); cit++)
+      {
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(cit->first);
+          continue;
+        }
+#endif
+        const EventUsers &event_users = cit->second;
+        FieldMask overlap = event_users.get_valid_mask() & user_mask;
+        if (!overlap)
+          continue;
+        EventFieldExprs::iterator finder = preconditions.find(cit->first);
+#ifndef LEGION_SPY
+        if (!trace_info.recording && finder != preconditions.end())
+        {
+          overlap -= finder->second.get_valid_mask();
+          if (!overlap)
+            continue;
+        }
+#endif
+        EventFieldUsers::iterator to_filter = filter_events.find(cit->first);
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = user_mask & it->second;
+          if (!user_overlap)
+            continue;
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition<true>(it->first, usage, op_id, index, 
+                                           user_expr, overlap_expr))
+          {
+            observed |= user_overlap;
+            if (finder == preconditions.end())
+            {
+              preconditions[cit->first].insert(overlap_expr, user_overlap);
+              finder = preconditions.find(cit->first);
+            }
+            else
+              finder->second.insert(overlap_expr, user_overlap);
+            if ((overlap_expr->expr_id == it->first->expr->expr_id) ||
+                (overlap_expr->get_volume() == it->first->expr_volume))
+            {
+              if (to_filter == filter_events.end())
+              {
+                filter_events[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_events.find(cit->first);
+              }
+              else
+                to_filter->second.insert(it->first, user_overlap);
+            }
+            else
+              non_dominated |= user_overlap;
+          }
+          else if (!overlap_expr->is_empty())
+            non_dominated |= user_overlap;
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_previous_preconditions(const RegionUsage &usage,
+                                             const FieldMask &user_mask,
+                                             IndexSpaceExpression *user_expr,
+                                             const UniqueID op_id,
+                                             const unsigned index,
+                                             EventFieldExprs &preconditions,
+                                             std::set<ApEvent> &dead_events,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // Caller must be holding the lock
+      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
+            previous_epoch_users.begin(); pit != 
+            previous_epoch_users.end(); pit++)
+      {
+#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
+        // We're about to do a bunch of expensive tests, 
+        // so first do something cheap to see if we can 
+        // skip all the tests.
+        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
+        {
+          dead_events.insert(pit->first);
+          continue;
+        }
+#endif
+        const EventUsers &event_users = pit->second;
+        FieldMask overlap = user_mask & event_users.get_valid_mask();
+        if (!overlap)
+          continue;
+        EventFieldExprs::iterator finder = preconditions.find(pit->first);
+#ifndef LEGION_SPY
+        if (!trace_info.recording && finder != preconditions.end())
+        {
+          overlap -= finder->second.get_valid_mask();
+          if (!overlap)
+            continue;
+        }
+#endif
+        for (EventUsers::const_iterator it = event_users.begin();
+              it != event_users.end(); it++)
+        {
+          const FieldMask user_overlap = overlap & it->second;
+          if (!user_overlap)
+            continue;
+          IndexSpaceExpression *overlap_expr = NULL;
+          if (has_local_precondition<true>(it->first, usage, op_id, index, 
+                                           user_expr, overlap_expr))
+          {
+            if (finder == preconditions.end())
+            {
+              preconditions[pit->first].insert(overlap_expr, user_overlap);
+              // Needed for when we go around the loop again
+              finder = preconditions.find(pit->first);
+            }
+            else
+              finder->second.insert(overlap_expr, user_overlap);
+          }
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::find_previous_filter_users(const FieldMask &dom_mask,
+                                            IndexSpaceExpression *filter_expr,
+                                                EventFieldUsers &filter_users)
+    //--------------------------------------------------------------------------
+    {
+      // Lock better be held by caller
+      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
+            pit != previous_epoch_users.end(); pit++)
+      {
+        FieldMask event_overlap = pit->second.get_valid_mask() & dom_mask;
+        if (!event_overlap)
+          continue;
+        EventFieldUsers::iterator to_filter = filter_users.find(pit->first);
+        for (EventUsers::const_iterator it = pit->second.begin();
+              it != pit->second.end(); it++)
+        {
+          const FieldMask user_overlap = it->second & event_overlap;
+          if (!user_overlap)
+            continue;
+          IndexSpaceExpression *expr_overlap = 
+            context->intersect_index_spaces(it->first->expr, filter_expr);
+          if (expr_overlap->is_empty())
+            continue;
+          else if (expr_overlap->get_volume() == it->first->expr_volume)
+          {
+            if (to_filter == filter_users.end())
+            {
+              filter_users[pit->first].insert(it->first, user_overlap);
+              to_filter = filter_users.find(pit->first);
+            }
+            else
+              to_filter->second.insert(it->first, user_overlap);
+          }
+        }
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // MaterializedView 
     /////////////////////////////////////////////////////////////
 
@@ -358,6 +1116,11 @@ namespace Legion {
 #endif
       // Keep the manager from being collected
       manager->add_nested_resource_ref(did);
+      if (is_logical_owner())
+        current_users = 
+          new KDView(context, manager->instance_domain, 0/*split dim*/);
+      else
+        current_users = NULL;
 #ifdef LEGION_GC
       log_garbage.info("GC Materialized View %lld %d %lld", 
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, 
@@ -395,19 +1158,15 @@ namespace Legion {
         atomic_reservations.clear();
       }
       if (!initial_user_events.empty())
-      {
-        for (std::set<ApEvent>::const_iterator it = initial_user_events.begin();
-              it != initial_user_events.end(); it++)
-          filter_local_users(*it);
-      }
+        collect_users(initial_user_events);
 #if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
       defined(DEBUG_LEGION)
       // Don't forget to remove the initial user if there was one
       // before running these checks
-      assert(current_epoch_users.empty());
-      assert(previous_epoch_users.empty());
       assert(outstanding_gc_events.empty());
 #endif
+      if (current_users != NULL)
+        delete current_users;
     }
 
     //--------------------------------------------------------------------------
@@ -491,10 +1250,8 @@ namespace Legion {
       assert(is_logical_owner());
 #endif
       // No need to take the lock since we are just initializing
-      PhysicalUser *user = 
-        new PhysicalUser(usage, user_expr, op_id, index, false/*copy*/); 
-      user->add_reference();
-      add_current_user(user, term_event, user_mask);
+      current_users->add_user(usage, user_expr, user_mask, term_event,
+                              op_id, index, false/*copy user*/); 
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor
       // will handle this case
@@ -551,11 +1308,11 @@ namespace Legion {
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
         // Find the preconditions
-        find_user_preconditions(usage, user_expr, user_mask, term_event, 
-                                op_id, index, wait_on_events, trace_info);
+        current_users->find_user_preconditions(usage, user_expr, user_mask, 
+            term_event, op_id, index, wait_on_events, trace_info);
         // Add our local user
-        const bool issue_collect = add_user(usage, user_expr, user_mask,
-          term_event, op_id, index, false/*copy*/, applied_events, trace_info);
+        const bool issue_collect = add_current_user(usage, user_expr, user_mask, 
+           term_event, op_id, index, false/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
@@ -610,9 +1367,12 @@ namespace Legion {
       else
       {
         EventFieldExprs preconditions;
+        ApEvent start_use_event = manager->get_use_event();
+        if (start_use_event.exists())
+          preconditions[start_use_event].insert(copy_expr, copy_mask);
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-        find_copy_preconditions(usage, copy_expr, copy_mask, 
-                                op_id, index, preconditions, trace_info); 
+        current_users->find_copy_preconditions(usage, copy_expr, copy_mask, 
+                                       op_id, index, preconditions, trace_info);
         // Return any preconditions we found to the aggregator
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
@@ -634,8 +1394,8 @@ namespace Legion {
       assert(is_logical_owner());
 #endif
       const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-      find_copy_preconditions(usage, copy_expr, copy_mask, 
-                              op_id, index, preconditions, trace_info);
+      current_users->find_copy_preconditions(usage, copy_expr, copy_mask, 
+                                op_id, index, preconditions, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -676,7 +1436,7 @@ namespace Legion {
       else
       {
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-        const bool issue_collect = add_user(usage, copy_expr, copy_mask,
+        const bool issue_collect = add_current_user(usage, copy_expr, copy_mask,
             term_event, op_id, index, true/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
@@ -686,152 +1446,6 @@ namespace Legion {
           defer_collect_user(term_event, &mutator);
         }
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_user_preconditions(const RegionUsage &usage,
-                                            IndexSpaceExpression *user_expr,
-                                            const FieldMask &user_mask,
-                                            ApEvent term_event,
-                                            UniqueID op_id, unsigned index,
-                                            std::set<ApEvent> &preconditions,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      std::set<ApEvent> dead_events;
-      EventFieldUsers current_to_filter, previous_to_filter;
-      // Perform the analysis with a read-only lock
-      {
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        FieldMask observed, non_dominated;
-        find_current_preconditions(usage, user_mask, user_expr, 
-                                   term_event, op_id, index, 
-                                   preconditions, dead_events, 
-                                   current_to_filter, observed,
-                                   non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, user_expr, previous_to_filter);
-        const FieldMask previous_mask = user_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(usage, previous_mask, user_expr,
-                                      term_event, op_id, index,
-                                      preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()) &&
-          !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!previous_to_filter.empty())
-          filter_previous_users(previous_to_filter);
-        if (!current_to_filter.empty())
-          filter_current_users(current_to_filter);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_copy_preconditions(const RegionUsage &usage,
-                                            IndexSpaceExpression *copy_expr,
-                                            const FieldMask &copy_mask,
-                                            UniqueID op_id, unsigned index,
-                                            EventFieldExprs &preconditions,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      DETAILED_PROFILER(runtime, 
-                        MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-      assert(preconditions.empty());
-#endif
-      ApEvent start_use_event = manager->get_use_event();
-      if (start_use_event.exists())
-        preconditions[start_use_event].insert(copy_expr, copy_mask);
-      FieldMask filter_mask;
-      std::set<ApEvent> dead_events;
-      EventFieldUsers current_to_filter, previous_to_filter;
-      // Do the first pass with a read-only lock on the events
-      {
-        FieldMask observed, non_dominated;
-        AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        find_current_preconditions(usage, copy_mask, copy_expr, op_id, index,
-                                   preconditions, dead_events,
-                                   current_to_filter, observed,
-                                   non_dominated, trace_info);
-        const FieldMask dominated = observed - non_dominated;
-        if (!!dominated)
-          find_previous_filter_users(dominated, copy_expr, previous_to_filter);
-        const FieldMask previous_mask = copy_mask - dominated;
-        if (!!previous_mask)
-          find_previous_preconditions(usage, previous_mask, copy_expr, op_id, 
-                              index, preconditions, dead_events, trace_info);
-      }
-      if ((!dead_events.empty() || !previous_to_filter.empty() || 
-            !current_to_filter.empty()) && !trace_info.recording)
-      {
-        // Need exclusive permissions to modify data structures
-        AutoLock v_lock(view_lock);
-        if (!dead_events.empty())
-          for (std::set<ApEvent>::const_iterator it = dead_events.begin();
-                it != dead_events.end(); it++)
-            filter_local_users(*it); 
-        if (!previous_to_filter.empty())
-          filter_previous_users(previous_to_filter);
-        if (!current_to_filter.empty())
-          filter_current_users(current_to_filter);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::add_user(const RegionUsage &usage,
-                                    IndexSpaceExpression *user_expr,
-                                    const FieldMask &user_mask,
-                                    ApEvent term_event, UniqueID op_id, 
-                                    unsigned index, bool copy_user,
-                                    std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(is_logical_owner());
-#endif
-      PhysicalUser *new_user = 
-        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
-      new_user->add_reference();
-      // No matter what, we retake the lock in exclusive mode so we
-      // can handle any clean-up and add our user
-      AutoLock v_lock(view_lock);
-      // Finally add our user and return if we need to issue a GC meta-task
-      add_current_user(new_user, term_event, user_mask);
-      // If we're tracing we defer adding these events until the trace
-      // capture is complete so we can get a full set of preconditions
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_outstanding_gc_event(this, term_event);
-        return false;
-      }
-      else if (outstanding_gc_events.find(term_event) == 
-                outstanding_gc_events.end())
-      {
-        outstanding_gc_events.insert(term_event);
-        return true;
-      }
-      else
-        return false;
     }
  
     //--------------------------------------------------------------------------
@@ -874,11 +1488,55 @@ namespace Legion {
     void MaterializedView::collect_users(const std::set<ApEvent> &term_events)
     //--------------------------------------------------------------------------
     {
+      std::set<ApEvent> local_term_events;
+      {
+        AutoLock v_lock(view_lock);
+        for (std::set<ApEvent>::const_iterator it = 
+              term_events.begin(); it != term_events.end(); it++)
+        {
+          std::set<ApEvent>::iterator finder = 
+            outstanding_gc_events.find(*it); 
+          if (finder == outstanding_gc_events.end())
+            continue;
+          local_term_events.insert(*it);
+          outstanding_gc_events.erase(finder);
+        }
+      }
+      if (!local_term_events.empty())
+        current_users->filter_users(local_term_events);
+    }
+
+    //--------------------------------------------------------------------------
+    bool MaterializedView::add_current_user(const RegionUsage &usage,
+                                            IndexSpaceExpression *user_expr,
+                                            const FieldMask &user_mask,
+                                            ApEvent term_event, UniqueID op_id,
+                                            unsigned index, bool copy_user,
+                                            std::set<RtEvent> &applied_events,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      current_users->add_user(usage, user_expr, user_mask, term_event,
+                              op_id, index, copy_user);
       AutoLock v_lock(view_lock);
-      // Remove any event users from the current and previous users
-      for (std::set<ApEvent>::const_iterator it = term_events.begin();
-            it != term_events.end(); it++)
-        filter_local_users(*it); 
+      // If we're tracing we defer adding these events until the trace
+      // capture is complete so we can get a full set of preconditions
+      if (trace_info.recording)
+      {
+#ifdef DEBUG_LEGION
+        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+        trace_info.tpl->record_outstanding_gc_event(this, term_event);
+        return false;
+      }
+      else if (outstanding_gc_events.find(term_event) == 
+                outstanding_gc_events.end())
+      {
+        outstanding_gc_events.insert(term_event);
+        return true;
+      }
+      else
+        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -921,469 +1579,6 @@ namespace Legion {
       for (std::deque<ApEvent>::const_iterator it = gc_events.begin();
             it != gc_events.end(); it++)
         outstanding_gc_events.insert(*it);
-    }    
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::add_current_user(PhysicalUser *user, 
-                                            ApEvent term_event,
-                                            const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      // Must be called while holding the lock
-      // Reference should already have been added
-      EventUsers &event_users = current_epoch_users[term_event];
-      EventUsers::iterator finder = event_users.find(user);
-      if (finder == event_users.end())
-        event_users.insert(user, user_mask);
-      else
-        finder.merge(user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_local_users(ApEvent term_event) 
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      DETAILED_PROFILER(context->runtime, 
-                        MATERIALIZED_VIEW_FILTER_LOCAL_USERS_CALL);
-      // Don't do this if we are in Legion Spy since we want to see
-      // all of the dependences on an instance
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-      std::set<ApEvent>::iterator event_finder = 
-        outstanding_gc_events.find(term_event); 
-      if (event_finder != outstanding_gc_events.end())
-      {
-        EventFieldUsers::iterator current_finder = 
-          current_epoch_users.find(term_event);
-        if (current_finder != current_epoch_users.end())
-        {
-          for (EventUsers::const_iterator it = current_finder->second.begin();
-                it != current_finder->second.end(); it++)
-            if (it->first->remove_reference())
-              delete it->first;
-          current_epoch_users.erase(current_finder);
-        }
-        LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
-          previous_epoch_users.find(term_event);
-        if (previous_finder != previous_epoch_users.end())
-        {
-          for (EventUsers::const_iterator it = previous_finder->second.begin();
-                it != previous_finder->second.end(); it++)
-            if (it->first->remove_reference())
-              delete it->first;
-          previous_epoch_users.erase(previous_finder);
-        }
-        outstanding_gc_events.erase(event_finder);
-      }
-#endif
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_current_users(
-                                               const EventFieldUsers &to_filter)
-    //--------------------------------------------------------------------------
-    {
-      // Lock needs to be held by caller 
-      for (EventFieldUsers::const_iterator fit = to_filter.begin();
-            fit != to_filter.end(); fit++)
-      {
-        EventFieldUsers::iterator event_finder = 
-          current_epoch_users.find(fit->first);
-        // If it's already been pruned out then either it was filtered
-        // because it finished or someone else moved it already, either
-        // way we don't need to do anything about it
-        if (event_finder == current_epoch_users.end())
-          continue;
-        EventFieldUsers::iterator target_finder = 
-          previous_epoch_users.find(fit->first);
-        for (EventUsers::const_iterator it = fit->second.begin();
-              it != fit->second.end(); it++)
-        {
-          EventUsers::iterator finder = event_finder->second.find(it->first);
-          // Might already have been pruned out again, either way there is
-          // nothing for us to do here if it was already moved
-          if (finder == event_finder->second.end())
-            continue;
-          const FieldMask overlap = finder->second & it->second;
-          if (!overlap)
-            continue;
-          finder.filter(overlap);
-          bool needs_reference = true;
-          if (!finder->second)
-          {
-            // Have the reference flow back with the user
-            needs_reference = false;
-            event_finder->second.erase(finder);
-          }
-          // Now add the user to the previous set
-          if (target_finder == previous_epoch_users.end())
-          {
-            if (needs_reference)
-              it->first->add_reference();
-            previous_epoch_users[fit->first].insert(it->first, overlap);
-            target_finder = previous_epoch_users.find(fit->first);
-          }
-          else
-          {
-            finder = target_finder->second.find(it->first);
-            if (finder == target_finder->second.end())
-            {
-              if (needs_reference)
-                it->first->add_reference();
-              target_finder->second.insert(it->first, overlap);
-            }
-            else
-            {
-              finder.merge(overlap);
-              // Remove any extra references we might be trying to send back
-              if (!needs_reference && it->first->remove_reference())
-                delete it->first;
-            }
-          }
-        }
-        if (event_finder->second.empty())
-          current_epoch_users.erase(event_finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::filter_previous_users(
-                                               const EventFieldUsers &to_filter)
-    //--------------------------------------------------------------------------
-    {
-      // Lock needs to be held by caller
-      for (EventFieldUsers::const_iterator fit = to_filter.begin();
-            fit != to_filter.end(); fit++)
-      {
-        EventFieldUsers::iterator event_finder = 
-          previous_epoch_users.find(fit->first);
-        // Might already have been pruned out
-        if (event_finder == previous_epoch_users.end())
-          continue;
-        for (EventUsers::const_iterator it = fit->second.begin();
-              it != fit->second.end(); it++)
-        {
-          EventUsers::iterator finder = event_finder->second.find(it->first);
-          // Might already have been pruned out again
-          if (finder == event_finder->second.end())
-            continue;
-          finder.filter(it->second);
-          if (!finder->second)
-          {
-            if (finder->first->remove_reference())
-              delete finder->first;
-            event_finder->second.erase(finder);
-          }
-        }
-        if (event_finder->second.empty())
-          previous_epoch_users.erase(event_finder);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_current_preconditions(
-                                               const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               ApEvent term_event,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                               EventFieldUsers &filter_users,
-                                               FieldMask &observed,
-                                               FieldMask &non_dominated,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
-            cit != current_epoch_users.end(); cit++)
-      {
-        if (cit->first == term_event)
-          continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-        if (!trace_info.recording &&
-            preconditions.find(cit->first) != preconditions.end())
-          continue;
-#endif
-        const EventUsers &event_users = cit->second;
-        const FieldMask overlap = event_users.get_valid_mask() & user_mask;
-        if (!overlap)
-          continue;
-        EventFieldUsers::iterator to_filter = filter_users.find(cit->first);
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = user_mask & it->second;
-          if (!user_overlap)
-            continue;
-          observed |= user_overlap;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<false>(it->first, usage, op_id, index,
-                                            user_expr, &overlap_expr))
-          {
-            preconditions.insert(cit->first);
-            if (overlap_expr->get_volume() == it->first->expr_volume)
-            {
-
-              if (to_filter == filter_users.end())
-              {
-                filter_users[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_users.find(cit->first);
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(to_filter->second.find(it->first) == 
-                        to_filter->second.end());
-#endif
-                to_filter->second.insert(it->first, user_overlap);
-              }
-            }
-            else
-              non_dominated |= user_overlap;
-          }
-          else
-            non_dominated |= user_overlap;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_preconditions(
-                                               const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               ApEvent term_event,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               std::set<ApEvent> &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
-            pit != previous_epoch_users.end(); pit++)
-      {
-        if (pit->first == term_event)
-          continue;
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-        if (!trace_info.recording &&
-            preconditions.find(pit->first) != preconditions.end())
-          continue;
-#endif
-        const EventUsers &event_users = pit->second;
-        if (user_mask * event_users.get_valid_mask())
-          continue;
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          if (user_mask * it->second)
-            continue;
-          if (has_local_precondition<false>(it->first, usage,
-                                            op_id, index, user_expr))
-            preconditions.insert(pit->first);
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_current_preconditions(
-                                               const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               EventFieldExprs &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                               EventFieldUsers &filter_events,
-                                               FieldMask &observed,
-                                               FieldMask &non_dominated,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (EventFieldUsers::const_iterator cit = current_epoch_users.begin(); 
-            cit != current_epoch_users.end(); cit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && cit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(cit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = cit->second;
-        FieldMask overlap = event_users.get_valid_mask() & user_mask;
-        if (!overlap)
-          continue;
-        EventFieldExprs::iterator finder = preconditions.find(cit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second.get_valid_mask();
-          if (!overlap)
-            continue;
-        }
-#endif
-        EventFieldUsers::iterator to_filter = filter_events.find(cit->first);
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = user_mask & it->second;
-          if (!user_overlap)
-            continue;
-          observed |= user_overlap;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<true>(it->first, usage, op_id, index, 
-                                           user_expr, &overlap_expr))
-          {
-            if (finder == preconditions.end())
-            {
-              preconditions[cit->first].insert(overlap_expr, user_overlap);
-              finder = preconditions.find(cit->first);
-            }
-            else
-              finder->second.insert(overlap_expr, user_overlap);
-            if (overlap_expr->get_volume() == it->first->expr_volume)
-            {
-              if (to_filter == filter_events.end())
-              {
-                filter_events[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_events.find(cit->first);
-              }
-              else
-                to_filter->second.insert(it->first, user_overlap);
-            }
-            else
-              non_dominated |= user_overlap;
-          }
-          else
-            non_dominated |= user_overlap;
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_preconditions(
-                                               const RegionUsage &usage,
-                                               const FieldMask &user_mask,
-                                               IndexSpaceExpression *user_expr,
-                                               const UniqueID op_id,
-                                               const unsigned index,
-                                               EventFieldExprs &preconditions,
-                                               std::set<ApEvent> &dead_events,
-                                            const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      // Caller must be holding the lock
-      for (LegionMap<ApEvent,EventUsers>::aligned::const_iterator pit = 
-            previous_epoch_users.begin(); pit != 
-            previous_epoch_users.end(); pit++)
-      {
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE)
-        // We're about to do a bunch of expensive tests, 
-        // so first do something cheap to see if we can 
-        // skip all the tests.
-        if (!trace_info.recording && pit->first.has_triggered_faultignorant())
-        {
-          dead_events.insert(pit->first);
-          continue;
-        }
-#endif
-        const EventUsers &event_users = pit->second;
-        FieldMask overlap = user_mask & event_users.get_valid_mask();
-        if (!overlap)
-          continue;
-        EventFieldExprs::iterator finder = preconditions.find(pit->first);
-#ifndef LEGION_SPY
-        if (!trace_info.recording && finder != preconditions.end())
-        {
-          overlap -= finder->second.get_valid_mask();
-          if (!overlap)
-            continue;
-        }
-#endif
-        for (EventUsers::const_iterator it = event_users.begin();
-              it != event_users.end(); it++)
-        {
-          const FieldMask user_overlap = overlap & it->second;
-          if (!user_overlap)
-            continue;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<true>(it->first, usage, op_id, index, 
-                                           user_expr, &overlap_expr))
-          {
-            if (finder == preconditions.end())
-            {
-              preconditions[pit->first].insert(overlap_expr, user_overlap);
-              // Needed for when we go around the loop again
-              finder = preconditions.find(pit->first);
-            }
-            else
-              finder->second.insert(overlap_expr, user_overlap);
-          }
-        }
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::find_previous_filter_users(const FieldMask &dom_mask,
-                                              IndexSpaceExpression *filter_expr,
-                                                  EventFieldUsers &filter_users)
-    //--------------------------------------------------------------------------
-    {
-      // Lock better be held by caller
-      for (EventFieldUsers::const_iterator pit = previous_epoch_users.begin(); 
-            pit != previous_epoch_users.end(); pit++)
-      {
-        FieldMask event_overlap = pit->second.get_valid_mask() & dom_mask;
-        if (!event_overlap)
-          continue;
-        EventFieldUsers::iterator to_filter = filter_users.find(pit->first);
-        for (EventUsers::const_iterator it = pit->second.begin();
-              it != pit->second.end(); it++)
-        {
-          const FieldMask user_overlap = it->second & event_overlap;
-          if (!user_overlap)
-            continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(it->first->expr, filter_expr);
-          if (expr_overlap->is_empty())
-            continue;
-          else if (expr_overlap->get_volume() == it->first->expr_volume)
-          {
-            if (to_filter == filter_users.end())
-            {
-              filter_users[pit->first].insert(it->first, user_overlap);
-              to_filter = filter_users.find(pit->first);
-            }
-            else
-              to_filter->second.insert(it->first, user_overlap);
-          }
-        }
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -2504,8 +2699,8 @@ namespace Legion {
           find_reducing_preconditions(user_mask,user_expr,op_id,wait_on_events);
         }
         // Add our local user
-        const bool issue_collect = add_user(usage, user_expr, user_mask,
-           term_event, op_id, index, false/*copy*/, applied_events, trace_info);
+        const bool issue_collect = add_user(usage, user_expr, user_mask, 
+            term_event, op_id, index, false/*copy*/, applied_events, trace_info);
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)

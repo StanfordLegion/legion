@@ -4279,31 +4279,33 @@ namespace Legion {
       if (!guard_events.empty())
       {
         const RtEvent wait_on = Runtime::merge_events(guard_events);
-        wait_on.wait();
-      }
-      if (term_event.exists() && (local_expr != NULL) && 
-          (!local_expr->is_empty()))
-      {
-        const UniqueID op_id = op->get_unique_op_id();
-        for (unsigned idx = 0; idx < targets.size(); idx++)
+        if (wait_on.exists() && !wait_on.has_triggered())
         {
-          const FieldMask &inst_mask = targets[idx].get_valid_fields();
-          ApEvent ready = target_views[idx]->register_user(usage, inst_mask, 
-            local_expr, op_id, index, term_event,map_applied_events,trace_info);
-          if (ready.exists())
-            remote_events.insert(ready);
+          // Defer this so we don't end up waiting on it and blocking
+          // the virtual channel for the handler
+          InstanceSet *copy_targets = new InstanceSet();
+          copy_targets->swap(targets);
+          std::vector<InstanceView*> *copy_views = 
+            new std::vector<InstanceView*>();
+          copy_views->swap(target_views);
+          std::set<RtEvent> *copy_applied = new std::set<RtEvent>();
+          copy_applied->swap(map_applied_events);
+          std::set<ApEvent> *copy_remote = new std::set<ApEvent>();
+          copy_remote->swap(remote_events);
+          local_expr->add_expression_reference();
+          DeferRemoteUpdateArgs args(op, op->get_unique_op_id(), index,
+              usage, copy_targets, copy_views, local_expr, term_event,
+              copy_applied, copy_remote, output_aggregator, applied,
+              remote_ready, effects_done);
+          runtime->issue_runtime_meta_task(args,
+              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+          return;
         }
       }
-      // Perform any output copies (e.g. for restriction) that need to be done
-      ApEvent result;
-      if (output_aggregator != NULL)
-      {
-        // Make sure we don't defer this
-        output_aggregator->issue_updates(trace_info, term_event);
-        result = output_aggregator->summarize(trace_info);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
-      }
+      // If we get here do the finish stage
+      const ApEvent result = finish_remote_updates(op, index, usage, targets,
+          target_views, local_expr, term_event, map_applied_events, 
+          remote_events, output_aggregator, trace_info);
       // Now hook up all our output events
       if (!remote_events.empty())
         Runtime::trigger_event(remote_ready,
@@ -4319,6 +4321,79 @@ namespace Legion {
         Runtime::trigger_event(effects_done, result);
       // We can clean up our remote operation
       delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ ApEvent RemoteEqTracker::finish_remote_updates(Operation *op, 
+                                  unsigned index,
+                                  const RegionUsage &usage,
+                                  const InstanceSet &targets,
+                                  const std::vector<InstanceView*> &views,
+                                  IndexSpaceExpression *local_expr,
+                                  ApEvent term_event,
+                                  std::set<RtEvent> &map_applied_events,
+                                  std::set<ApEvent> &remote_events,
+                                  CopyFillAggregator *output_aggregator,
+                                  const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      if (term_event.exists() && (local_expr != NULL) && 
+          (!local_expr->is_empty()))
+      {
+        const UniqueID op_id = op->get_unique_op_id();
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          const FieldMask &inst_mask = targets[idx].get_valid_fields();
+          ApEvent ready = views[idx]->register_user(usage, inst_mask,local_expr, 
+              op_id, index, term_event, map_applied_events, trace_info);
+          if (ready.exists())
+            remote_events.insert(ready);
+        }
+      }
+      // Perform any output copies (e.g. for restriction) that need to be done
+      ApEvent result;
+      if (output_aggregator != NULL)
+      {
+        // Make sure we don't defer this
+        output_aggregator->issue_updates(trace_info, term_event);
+        result = output_aggregator->summarize(trace_info);
+        if (output_aggregator->release_guards(map_applied_events))
+          delete output_aggregator;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_defer_remote_updates(
+                                                               const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoteUpdateArgs *dargs = (const DeferRemoteUpdateArgs*)args;
+      const PhysicalTraceInfo trace_info(dargs->op);
+      const ApEvent result = finish_remote_updates(dargs->op, dargs->index, 
+          dargs->usage, *(dargs->targets), *(dargs->views), dargs->expr, 
+          dargs->term_event, *(dargs->applied_events), 
+          *(dargs->remote_events), dargs->aggregator, trace_info);
+      // Now hook up all our output events
+      if (!dargs->remote_events->empty())
+        Runtime::trigger_event(dargs->remote_ready,
+            Runtime::merge_events(&trace_info, *(dargs->remote_events)));
+      else
+        Runtime::trigger_event(dargs->remote_ready);
+      if (!dargs->applied_events->empty())
+        Runtime::trigger_event(dargs->applied, 
+            Runtime::merge_events(*(dargs->applied_events)));
+      else
+        Runtime::trigger_event(dargs->applied);
+      if (dargs->effects_done.exists())
+        Runtime::trigger_event(dargs->effects_done, result);
+      delete dargs->op;
+      delete dargs->targets;
+      delete dargs->views;
+      delete dargs->applied_events;
+      delete dargs->remote_events;
+      if (dargs->expr->remove_expression_reference())
+        delete dargs->expr;
     }
 
     //--------------------------------------------------------------------------
