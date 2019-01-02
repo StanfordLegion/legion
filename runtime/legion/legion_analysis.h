@@ -124,6 +124,7 @@ namespace Legion {
     public:
       explicit PhysicalTraceInfo(Operation *op, bool initialize = true);
       PhysicalTraceInfo(Operation *op, Memoizable *memo);
+      PhysicalTraceInfo(const PhysicalTraceInfo &rhs);
     public:
       void record_merge_events(ApEvent &result, ApEvent e1, ApEvent e2) const;
       void record_merge_events(ApEvent &result, ApEvent e1, 
@@ -405,6 +406,46 @@ namespace Legion {
       GenerationID merge_close_gen;
     }; 
 
+    /**
+     * \struct KDLine
+     * A small helper struct for tracking splitting planes for 
+     * KD-tree construction
+     */
+    struct KDLine {
+    public:
+      KDLine(void)
+        : value(0), index(0), start(false) { }
+      KDLine(coord_t val, unsigned idx, bool st)
+        : value(val), index(idx), start(st) { }
+    public:
+      inline bool operator<(const KDLine &rhs) const
+      {
+        if (value < rhs.value)
+          return true;
+        if (value > rhs.value)
+          return false;
+        if (index < rhs.index)
+          return true;
+        if (index > rhs.index)
+          return false;
+        return start < rhs.start;
+      }
+      inline bool operator==(const KDLine &rhs) const
+      {
+        if (value != rhs.value)
+          return false;
+        if (index != rhs.index)
+          return false;
+        if (start != rhs.start)
+          return false;
+        return true;
+      }
+    public:
+      coord_t value;
+      unsigned index;
+      bool start;
+    };
+
     class KDTree {
     public:
       virtual ~KDTree(void) { }
@@ -420,40 +461,7 @@ namespace Legion {
     template<int DIM>
     class KDNode : public KDTree {
     public:
-      struct Line {
-      public:
-        Line(void)
-          : value(0), index(0), start(false) { }
-        Line(coord_t val, unsigned idx, bool st)
-          : value(val), index(idx), start(st) { }
-      public:
-        inline bool operator<(const Line &rhs) const
-        {
-          if (value < rhs.value)
-            return true;
-          if (value > rhs.value)
-            return false;
-          if (index < rhs.index)
-            return true;
-          if (index > rhs.index)
-            return false;
-          return start < rhs.start;
-        }
-        inline bool operator==(const Line &rhs) const
-        {
-          if (value != rhs.value)
-            return false;
-          if (index != rhs.index)
-            return false;
-          if (start != rhs.start)
-            return false;
-          return true;
-        }
-      public:
-        coord_t value;
-        unsigned index;
-        bool start;
-      };
+      
     public:
       KDNode(IndexSpaceExpression *expr, Runtime *runtime, 
              int refinement_dim, int last_changed_dim = -1); 
@@ -496,7 +504,7 @@ namespace Legion {
             aggregator(a), info(i), pre(p), has_src(src), has_dst(dst) { }
       public:
         CopyFillAggregator *const aggregator;
-        const PhysicalTraceInfo &info;
+        const PhysicalTraceInfo info;
         const ApEvent pre;
         const bool has_src;
         const bool has_dst;

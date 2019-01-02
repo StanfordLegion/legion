@@ -260,6 +260,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalTraceInfo::PhysicalTraceInfo(const PhysicalTraceInfo &rhs)
+      : op(rhs.op), tpl(rhs.tpl), recording(rhs.recording)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_merge_events(ApEvent &result,
                                                 ApEvent e1, ApEvent e2) const
     //--------------------------------------------------------------------------
@@ -1589,18 +1596,18 @@ namespace Legion {
       {
         // Sort the start and end of each equivalence set bounding rectangle
         // along the splitting dimension
-        std::set<Line> lines;
+        std::set<KDLine> lines;
         for (unsigned idx = 0; idx < subsets.size(); idx++)
         {
-          lines.insert(Line(subset_bounds[idx].lo[refinement_dim],idx,true));
-          lines.insert(Line(subset_bounds[idx].hi[refinement_dim],idx,false));
+          lines.insert(KDLine(subset_bounds[idx].lo[refinement_dim],idx,true));
+          lines.insert(KDLine(subset_bounds[idx].hi[refinement_dim],idx,false));
         }
         // Construct two lists by scanning from left-to-right and
         // from right-to-left of the number of rectangles that would
         // be inlcuded on the left or right side by each splitting plane
         std::map<coord_t,unsigned> left_inclusive, right_inclusive;
         unsigned count = 0;
-        for (typename std::set<Line>::const_iterator it = lines.begin();
+        for (typename std::set<KDLine>::const_iterator it = lines.begin();
               it != lines.end(); it++)
         {
           // Only increment for new rectangles
@@ -1610,7 +1617,7 @@ namespace Legion {
           left_inclusive[it->value] = count;
         }
         count = 0;
-        for (typename std::set<Line>::const_reverse_iterator it = 
+        for (typename std::set<KDLine>::const_reverse_iterator it = 
               lines.rbegin(); it != lines.rend(); it++)
         {
           // End of rectangles are the beginning in this direction
