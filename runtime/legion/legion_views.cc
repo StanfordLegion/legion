@@ -585,11 +585,7 @@ namespace Legion {
         subexpr_users++;
       user->add_reference();
       EventUsers &event_users = current_epoch_users[term_event];
-      EventUsers::iterator finder = event_users.find(user);
-      if (finder == event_users.end())
-        event_users.insert(user, user_mask);
-      else
-        finder.merge(user_mask);
+      event_users.insert(user, user_mask);
     }
 
     //--------------------------------------------------------------------------
