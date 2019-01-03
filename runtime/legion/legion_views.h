@@ -190,44 +190,90 @@ namespace Legion {
     };
 
     /**
+     * \class KDViewTree
+     * An interface to KDViews which may just be a top-level node 
+     * or may be an entire tree of nodes
+     */
+    class KDViewTree {
+    public:
+      typedef LegionMap<ApEvent,
+                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
+      virtual ~KDViewTree(void) { }
+    public:
+      virtual void find_user_preconditions(const RegionUsage &usage,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   ApEvent term_event,
+                                   UniqueID op_id, unsigned index,
+                                   std::set<ApEvent> &preconditions,
+                                   const PhysicalTraceInfo &trace_info) = 0;
+      virtual void find_copy_preconditions(const RegionUsage &usage,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   UniqueID op_id, unsigned index,
+                                   EventFieldExprs &preconditions,
+                                   const PhysicalTraceInfo &trace_info) = 0;
+      virtual void add_user(const RegionUsage &usage,
+                    IndexSpaceExpression *user_expr,
+                    const FieldMask &user_mask, ApEvent term_event, 
+                    UniqueID op_id, unsigned index, bool copy_user) = 0;
+    };
+
+    /**
      * \class KDView
      * A KDView is a node in a KD tree for capturing users of a physical
      * instance. We use them for splitting apart users for different parts
      * of the physical space on a given dimension.
      */
-    class KDView {
+    template<int DIM>
+    class KDView : public KDViewTree {
     public:
-      typedef LegionMap<ApEvent,
-                FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs;
       typedef LegionMap<ApEvent,FieldMaskSet<PhysicalUser> >::aligned 
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      KDView(RegionTreeForest *ctx, IndexSpaceExpression *expr, 
-             int split_dim, int last_changed_dim = -1);
+      KDView(RegionTreeForest *ctx, const Rect<DIM> &bounds);
+      KDView(RegionTreeForest *ctx, IndexSpaceExpression *expr); 
       KDView(const KDView &rhs);
       ~KDView(void);
     public:
       KDView& operator=(const KDView &rhs);
     public:
-      void find_user_preconditions(const RegionUsage &usage,
+      virtual void find_user_preconditions(const RegionUsage &usage,
                                    IndexSpaceExpression *user_expr,
                                    const FieldMask &user_mask,
                                    ApEvent term_event,
                                    UniqueID op_id, unsigned index,
                                    std::set<ApEvent> &preconditions,
                                    const PhysicalTraceInfo &trace_info);
-      void find_copy_preconditions(const RegionUsage &usage,
+      virtual void find_copy_preconditions(const RegionUsage &usage,
                                    IndexSpaceExpression *user_expr,
                                    const FieldMask &user_mask,
                                    UniqueID op_id, unsigned index,
                                    EventFieldExprs &preconditions,
                                    const PhysicalTraceInfo &trace_info);
-      void add_user(const RegionUsage &usage,
+      virtual void add_user(const RegionUsage &usage,
                     IndexSpaceExpression *user_expr,
                     const FieldMask &user_mask, ApEvent term_event, 
                     UniqueID op_id, unsigned index, bool copy_user);
-      void filter_users(const std::set<ApEvent> &to_filter);
+    public:
+      void find_local_user_preconditions(const RegionUsage &usage,
+                                   const Rect<DIM> &user_bounds,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   ApEvent term_event,
+                                   UniqueID op_id, unsigned index,
+                                   std::set<ApEvent> &preconditions,
+                                   const PhysicalTraceInfo &trace_info);
+      void find_local_copy_preconditions(const RegionUsage &usage,
+                                   const Rect<DIM> &copy_bounds,
+                                   IndexSpaceExpression *user_expr,
+                                   const FieldMask &user_mask,
+                                   UniqueID op_id, unsigned index,
+                                   EventFieldExprs &preconditions,
+                                   const PhysicalTraceInfo &trace_info);
+      void add_local_user(PhysicalUser *user, const Rect<DIM> &user_bounds,
+                          ApEvent term_event, const FieldMask &user_mask);
     protected:
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
@@ -288,21 +334,19 @@ namespace Legion {
                                       IndexSpaceExpression *user_expr,
                                       IndexSpaceExpression *&overlap_expr);
     protected:
-      void add_current_user(const RegionUsage &usage,
-                            IndexSpaceExpression *user_expr,
-                            const FieldMask &user_mask,
-                            ApEvent term_event, UniqueID op_id, 
-                            unsigned index, bool copy_user);
+      void add_current_user(PhysicalUser *user, ApEvent term_event,
+                            const FieldMask &user_mask);
+      void add_previous_user(PhysicalUser *user, ApEvent term_event,
+                             const FieldMask &user_mask);
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
       void filter_previous_users(const EventFieldUsers &to_filter);
       bool refine_users(void);
+      static Rect<DIM> get_bounds(IndexSpaceExpression *expr);
     public:
       RegionTreeForest *const context;
-      IndexSpaceExpression *const kd_expr;
+      const Rect<DIM> kd_bounds;
       const size_t kd_volume;
-      const int split_dim;
-      const int last_changed_dim;
     protected:
       mutable LocalLock view_lock;
     protected:
@@ -326,10 +370,15 @@ namespace Legion {
       EventFieldUsers current_epoch_users;
       EventFieldUsers previous_epoch_users;
     protected:
-      KDView *left, *right;
+      KDView<DIM> *left, *right;
+      // A timeout mechanism to make sure we don't retry to refine
+      // too often if we're not successful
+      size_t refinement_timeout;
+      size_t refinement_multiplier;
       // Track the number of users which have users with expressions 
       // that are a sub expression of our kd expression. 
       unsigned subexpr_users;
+      
     };
 
     /**
@@ -423,7 +472,6 @@ namespace Legion {
                             unsigned index, bool copy_user,
                             std::set<RtEvent> &applied_events,
                             const PhysicalTraceInfo &trace_info);
-      void update_gc_events(const std::deque<ApEvent> &gc_events); 
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -448,7 +496,7 @@ namespace Legion {
       // top-level view for an instance needs to track this.
       std::map<FieldID,Reservation> atomic_reservations;
       // Use a KDView tree to track the current users of this instance
-      KDView *current_users; 
+      KDViewTree *current_users; 
       // Also keep a set of events for which we have outstanding
       // garbage collection meta-tasks so we don't launch more than one
       // We need this even though we have the data structures above because
@@ -1040,8 +1088,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool COPY_USER>
-    inline bool KDView::has_local_precondition(PhysicalUser *user,
+    template<int DIM> template<bool COPY_USER>
+    inline bool KDView<DIM>::has_local_precondition(PhysicalUser *user,
                                                const RegionUsage &next_user,
                                                const UniqueID op_id,
                                                const unsigned index,
@@ -1083,8 +1131,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<bool COPY_USER>
-    inline bool KDView::has_local_precondition(PhysicalUser *user,
+    template<int DIM> template<bool COPY_USER>
+    inline bool KDView<DIM>::has_local_precondition(PhysicalUser *user,
                                                const RegionUsage &next_user,
                                                const UniqueID op_id,
                                                const unsigned index,

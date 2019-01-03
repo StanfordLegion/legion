@@ -285,11 +285,7 @@ namespace Legion {
     bool IndexSpaceOperationT<DIM,T>::check_empty(void)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      return temp.empty();
+      return (get_volume() == 0);
     }
 
     //--------------------------------------------------------------------------
@@ -776,6 +772,8 @@ namespace Legion {
       derez.deserialize(realm_index_space);
       derez.deserialize(realm_index_space_ready);
       derez.deserialize(origin);
+      // Call this now to prefetch the data, no need to wait on it though
+      realm_index_space.make_valid();
       // Always add a reference from our owner node that will be removed
       // when we can be deleted
       add_reference();
@@ -849,7 +847,7 @@ namespace Legion {
     bool RemoteExpression<DIM,T>::check_empty(void)
     //--------------------------------------------------------------------------
     {
-      return realm_index_space.empty();
+      return (get_volume() == 0);
     }
 
     //--------------------------------------------------------------------------
@@ -859,9 +857,9 @@ namespace Legion {
     {
       if (has_volume)
         return volume;
-      if (realm_index_space_ready.exists() &&
-          !realm_index_space_ready.has_triggered())
-        realm_index_space_ready.wait();
+      const RtEvent valid(realm_index_space.make_valid());
+      if (valid.exists() && !valid.has_triggered())
+        valid.wait();
       volume = realm_index_space.volume();
       __sync_synchronize();
       has_volume = true;
@@ -1022,9 +1020,6 @@ namespace Legion {
                                     const OrderingConstraint &constraint)
     //--------------------------------------------------------------------------
     {
-      if (realm_index_space_ready.exists() && 
-          !realm_index_space_ready.has_triggered())
-        realm_index_space_ready.wait();
       return create_layout_internal(realm_index_space, ilc, constraint);
     }
 
@@ -1231,11 +1226,7 @@ namespace Legion {
     bool IndexSpaceNodeT<DIM,T>::check_empty(void)
     //--------------------------------------------------------------------------
     {
-      Realm::IndexSpace<DIM,T> temp;
-      ApEvent ready = get_realm_index_space(temp, true/*tight*/);
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      return temp.empty();
+      return (get_volume() == 0);
     }
 
     //--------------------------------------------------------------------------
@@ -1544,6 +1535,10 @@ namespace Legion {
         return volume;
       Realm::IndexSpace<DIM,T> volume_space;
       get_realm_index_space(volume_space, true/*tight*/);
+      // Make sure this is local before we ask for the volume
+      const RtEvent valid(volume_space.make_valid());
+      if (valid.exists() && !valid.has_triggered())
+        valid.wait();
       volume = volume_space.volume();
       __sync_synchronize();
       has_volume = true;
