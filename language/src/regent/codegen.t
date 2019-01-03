@@ -2421,6 +2421,16 @@ function codegen.expr_index_access(cx, node)
         `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
     end
     return values.ref(node, pointer, pointer_type, nil, std.is_bounded_type(index_type))
+  elseif std.is_transform_type(value_type) then
+    local value = codegen.expr(cx, node.value):read(cx, value_type)
+    local index = codegen.expr(cx, node.index):read(cx, index_type)
+    local actions = quote
+      [value.actions];
+      [index.actions];
+      [emit_debuginfo(node)]
+    end
+    return values.rawref(node, expr.just(actions,
+          `([value].value.impl.trans[ [index].value.__ptr.x ][ [index].value.__ptr.y ])), &expr_type)
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, node, index, expr_type)

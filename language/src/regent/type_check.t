@@ -741,6 +741,19 @@ function type_check.expr_index_access(cx, node)
         span = node.span,
       }
     end
+  elseif std.is_transform_type(value_type) then
+    local expected = std.int2d
+    if not std.validate_implicit_cast(index_type, expected) then
+      report.error(node, "type mismatch: expected " .. tostring(expected) .. " but got " .. tostring(index_type))
+    end
+    index = insert_implicit_cast(index, index_type, expected)
+    return ast.typed.expr.IndexAccess {
+      value = value,
+      index = index,
+      expr_type = std.rawref(&int64),
+      annotations = node.annotations,
+      span = node.span,
+    }
   else
     -- Ask the Terra compiler to kindly tell us what type this operator returns.
     local test

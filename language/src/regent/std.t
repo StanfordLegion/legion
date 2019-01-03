@@ -1910,6 +1910,17 @@ local function validate_index_base_type(base_type)
   end
 end
 
+local function validate_transform_type(M, N)
+  assert(0 < M, "Row count for a transform type must be greater than 0")
+  assert(M <= 3, "Transform types having more than three rows are not supported yet.")
+  assert(0 < N, "Column count for a transform type must be greater than 0")
+  assert(N <= 3, "Transform types having more than three columns are not supported yet.")
+  local impl_type_name = "legion_transform_".. tostring(M) .. "x" .. tostring(N) .. "_t"
+  local impl_type = c[impl_type_name]
+  assert(impl_type ~= nil, impl_type_name .. " does not exist")
+  return impl_type
+end
+
 -- Hack: Terra uses getmetatable() in terralib.types.istype(), so
 -- setting a custom metatable on a type requires some trickery. The
 -- approach used here is to define __metatable() to return the
@@ -1925,6 +1936,36 @@ do
   index_type.__metatable = getmetatable(st)
 end
 
+std.transform = terralib.memoize(function(M, N)
+  local st = terralib.types.newstruct("transform(" .. tostring(M) .. "," ..tostring(N) .. ")")
+  local impl_type = validate_transform_type(M, N)
+  st.entries = terralib.newlist({
+      { "impl", impl_type },
+  })
+
+  st.is_transform_type = true
+  st.M = M
+  st.N = N
+  st.impl_type = impl_type
+
+  function st.metamethods.__cast(from, to, expr)
+    if std.is_transform_type(from) then
+      if std.type_eq(to, st.impl_type) then
+        return `([expr].impl)
+      elseif std.type_eq(to, c.legion_domain_transform_t) then
+        return `([expr]:to_domain_transform())
+      end
+    end
+    assert(false)
+  end
+
+  terra st:to_domain_transform()
+    return [c["legion_domain_transform_from_" .. tostring(st.M) ..
+              "x" .. tostring(st.N)]](@self)
+  end
+
+  return st
+end)
 std.rect_type = terralib.memoize(function(index_type)
   local st = terralib.types.newstruct("rect" .. tostring(index_type.dim) .. "d")
   assert(not index_type:is_opaque())
