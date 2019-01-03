@@ -9477,7 +9477,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(arglen == sizeof(InternalContext));
@@ -9534,7 +9534,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION

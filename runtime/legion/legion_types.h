@@ -1720,44 +1720,44 @@ namespace Legion {
 #define LEGION_FIELD_MASK_FIELD_ALL_ONES      0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_FIELDS > 256)
-    typedef AVXTLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 128)
-    typedef AVXBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 256)
+    typedef AVXTLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 128)
+    typedef AVXBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef SSEBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_FIELDS > 128)
-    typedef SSETLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef SSEBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 128)
+    typedef SSETLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef SSEBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_FIELDS > 128)
-    typedef PPCTLBitMask<MAX_FIELDS> FieldMask;
-#elif (MAX_FIELDS > 64)
-    typedef PPCBitMask<MAX_FIELDS> FieldMask;
+#if (LEGION_MAX_FIELDS > 128)
+    typedef PPCTLBitMask<LEGION_MAX_FIELDS> FieldMask;
+#elif (LEGION_MAX_FIELDS > 64)
+    typedef PPCBitMask<LEGION_MAX_FIELDS> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
 #else
-#if (MAX_FIELDS > 64)
-    typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+#if (LEGION_MAX_FIELDS > 64)
+    typedef TLBitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                       LEGION_FIELD_MASK_FIELD_SHIFT,
                       LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #else
-    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,MAX_FIELDS,
+    typedef BitMask<LEGION_FIELD_MASK_FIELD_TYPE,LEGION_MAX_FIELDS,
                     LEGION_FIELD_MASK_FIELD_SHIFT,
                     LEGION_FIELD_MASK_FIELD_MASK> FieldMask;
 #endif
@@ -1777,44 +1777,44 @@ namespace Legion {
 #define LEGION_NODE_MASK_NODE_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_NUM_NODES > 256)
-    typedef AVXTLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 128)
-    typedef AVXBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 256)
+    typedef AVXTLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 128)
+    typedef AVXBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_NUM_NODES > 128)
-    typedef SSETLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef SSEBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 128)
+    typedef SSETLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_NUM_NODES > 128)
-    typedef PPCTLBitMask<MAX_NUM_NODES> NodeMask;
-#elif (MAX_NUM_NODES > 64)
-    typedef PPCBitMask<MAX_NUM_NODES> NodeMask;
+#if (LEGION_MAX_NUM_NODES > 128)
+    typedef PPCTLBitMask<LEGION_MAX_NUM_NODES> NodeMask;
+#elif (LEGION_MAX_NUM_NODES > 64)
+    typedef PPCBitMask<LEGION_MAX_NUM_NODES> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
 #else
-#if (MAX_NUM_NODES > 64)
-    typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+#if (LEGION_MAX_NUM_NODES > 64)
+    typedef TLBitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                       LEGION_NODE_MASK_NODE_SHIFT,
                       LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #else
-    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,MAX_NUM_NODES,
+    typedef BitMask<LEGION_NODE_MASK_NODE_TYPE,LEGION_MAX_NUM_NODES,
                     LEGION_NODE_MASK_NODE_SHIFT,
                     LEGION_NODE_MASK_NODE_MASK> NodeMask;
 #endif
@@ -1832,44 +1832,44 @@ namespace Legion {
 #define LEGION_PROC_MASK_PROC_ALL_ONES       0xFFFFFFFFFFFFFFFF
 
 #if defined(__AVX__)
-#if (MAX_NUM_PROCS > 256)
-    typedef AVXTLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 128)
-    typedef AVXBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 256)
+    typedef AVXTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 128)
+    typedef AVXBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__SSE2__)
-#if (MAX_NUM_PROCS > 128)
-    typedef SSETLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef SSEBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 128)
+    typedef SSETLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef SSEBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #elif defined(__ALTIVEC__)
-#if (MAX_NUM_PROCS > 128)
-    typedef PPCTLBitMask<MAX_NUM_PROCS> ProcessorMask;
-#elif (MAX_NUM_PROCS > 64)
-    typedef PPCBitMask<MAX_NUM_PROCS> ProcessorMask;
+#if (LEGION_MAX_NUM_PROCS > 128)
+    typedef PPCTLBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
+#elif (LEGION_MAX_NUM_PROCS > 64)
+    typedef PPCBitMask<LEGION_MAX_NUM_PROCS> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif
 #else
-#if (MAX_NUM_PROCS > 64)
-    typedef TLBitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+#if (LEGION_MAX_NUM_PROCS > 64)
+    typedef TLBitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                       LEGION_PROC_MASK_PROC_SHIFT,
                       LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #else
-    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,MAX_NUM_PROCS,
+    typedef BitMask<LEGION_PROC_MASK_PROC_TYPE,LEGION_MAX_NUM_PROCS,
                     LEGION_PROC_MASK_PROC_SHIFT,
                     LEGION_PROC_MASK_PROC_MASK> ProcessorMask;
 #endif

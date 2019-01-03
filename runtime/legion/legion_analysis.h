@@ -68,7 +68,7 @@ namespace Legion {
       UniqueID uid;
 #endif
     public:
-      static const int TIMEOUT = DEFAULT_LOGICAL_USER_TIMEOUT;
+      static const int TIMEOUT = LEGION_DEFAULT_LOGICAL_USER_TIMEOUT;
     };
 
     /**

@@ -77,7 +77,7 @@ namespace Legion {
       if (!found_in_cache)
       {
         compressed = src_mask;
-        compress_mask<STATIC_LOG2(MAX_FIELDS)>(compressed, full_mask);
+        compress_mask<STATIC_LOG2(LEGION_MAX_FIELDS)>(compressed, full_mask);
         compressed_cache.push_back(
             std::pair<FieldMask,FieldMask>(src_mask, compressed));
       }
@@ -220,7 +220,8 @@ namespace Legion {
       if (!found_in_cache)
       {
         compressed = copy_mask;
-        compress_mask<STATIC_LOG2(MAX_FIELDS)>(compressed, allocated_fields);
+        compress_mask<STATIC_LOG2(LEGION_MAX_FIELDS)>(compressed, 
+                                                      allocated_fields);
         // Save the result in the cache, duplicates from races here are benign
         AutoLock o_lock(layout_lock);
         comp_cache[hash_key].push_back(

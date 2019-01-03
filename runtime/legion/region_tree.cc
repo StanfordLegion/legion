@@ -7828,9 +7828,9 @@ namespace Legion {
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
             "Exceeded maximum number of allocated fields for "
-                          "field space %x. Change MAX_FIELDS from %d and "
-                          "related macros at the top of legion_config.h and "
-                          "recompile.", handle.id, MAX_FIELDS)
+                          "field space %x. Change LEGION_MAX_FIELDS from %d and"
+                          " related macros at the top of legion_config.h and "
+                          "recompile.", handle.id, LEGION_MAX_FIELDS)
         index = result;
         fields[fid] = FieldInfo(size, index, serdez_id);
         if (!!remote_instances)
@@ -7911,9 +7911,9 @@ namespace Legion {
           if (result < 0)
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
-                            "field space %x. Change MAX_FIELDS from %d and "
-                            "related macros at the top of legion_config.h and "
-                            "recompile.", handle.id, MAX_FIELDS)
+                            "field space %x. Change LEGION_MAX_FIELDS from %d "
+                            "and related macros at the top of legion_config.h "
+                            "and recompile.", handle.id, LEGION_MAX_FIELDS)
           unsigned index = result;
           fields[fid] = FieldInfo(sizes[idx], index, serdez_id);
           indexes[idx] = index;
@@ -9002,7 +9002,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!!mask);
 #endif
-      char *result = (char*)malloc(MAX_FIELDS*4); 
+      char *result = (char*)malloc(LEGION_MAX_FIELDS*4); 
       bool first = true;
       for (std::map<FieldID,FieldInfo>::const_iterator it = fields.begin();
             it != fields.end(); it++)
@@ -9061,7 +9061,7 @@ namespace Legion {
       if (result >= 0)
       {
         // If we have slots for local fields then we can't use those
-        if (result >= int(MAX_FIELDS - runtime->max_local_fields))
+        if (result >= int(LEGION_MAX_FIELDS - runtime->max_local_fields))
           return -1;
         available_indexes.unset_bit(result);
       }
@@ -9135,7 +9135,7 @@ namespace Legion {
       {
         const size_t field_size = sizes[fidx];
         int chosen_index = -1;
-        unsigned global_idx = MAX_FIELDS - runtime->max_local_fields;
+        unsigned global_idx = LEGION_MAX_FIELDS - runtime->max_local_fields;
         for (unsigned local_idx = 0; 
               local_idx < local_field_infos.size(); local_idx++, global_idx++)
         {
@@ -9188,10 +9188,10 @@ namespace Legion {
       {
         // Translate back to a local field index
 #ifdef DEBUG_LEGION
-        assert(indexes[idx] >= (MAX_FIELDS - runtime->max_local_fields));
+        assert(indexes[idx] >= (LEGION_MAX_FIELDS - runtime->max_local_fields));
 #endif
         const unsigned local_index = 
-          indexes[idx] - (MAX_FIELDS - runtime->max_local_fields);
+          indexes[idx] - (LEGION_MAX_FIELDS - runtime->max_local_fields);
 #ifdef DEBUG_LEGION
         assert(local_index < local_field_infos.size());
 #endif

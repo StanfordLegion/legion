@@ -2493,7 +2493,7 @@ namespace Legion {
         total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
-      context_states.resize(DEFAULT_CONTEXTS);
+      context_states.resize(LEGION_DEFAULT_CONTEXTS);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
@@ -8905,7 +8905,7 @@ namespace Legion {
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
-        unique_field_id(MAX_APPLICATION_FIELD_ID + 
+        unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
@@ -8957,19 +8957,19 @@ namespace Legion {
 #endif
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
-                                    DEFAULT_MAPPER_SLOTS, 
+                                    LEGION_DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
                                     (replay_file != NULL));
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
         message_managers[idx] = NULL;
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
-      for (total_contexts = 0; total_contexts < DEFAULT_CONTEXTS; 
+      for (total_contexts = 0; total_contexts < LEGION_DEFAULT_CONTEXTS; 
             total_contexts++)
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
@@ -9095,7 +9095,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure we don't send anymore messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
         {
@@ -12262,7 +12262,7 @@ namespace Legion {
     /*static*/ MapperID& Runtime::get_current_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      static MapperID current_mapper_id = MAX_APPLICATION_MAPPER_ID;
+      static MapperID current_mapper_id = LEGION_MAX_APPLICATION_MAPPER_ID;
       return current_mapper_id;
     }
 
@@ -12478,7 +12478,8 @@ namespace Legion {
     /*static*/ ProjectionID& Runtime::get_current_static_projection_id(void)
     //--------------------------------------------------------------------------
     {
-      static ProjectionID current_projection_id = MAX_APPLICATION_PROJECTION_ID;
+      static ProjectionID current_projection_id = 
+        LEGION_MAX_APPLICATION_PROJECTION_ID;
       return current_projection_id;
     }
 
@@ -12900,13 +12901,14 @@ namespace Legion {
     {
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
-      if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
+      if (check_task_id && 
+          (registrar.task_id >= LEGION_MAX_APPLICATION_TASK_ID))
         REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, 
                       "Error registering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
 #endif
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
@@ -13026,7 +13028,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(sid < MAX_NUM_NODES);
+      assert(sid < LEGION_MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
       MessageManager *result = message_managers[sid];
@@ -16091,7 +16093,7 @@ namespace Legion {
         }
         unsigned next_index = processor_mapping.size();
 #ifdef DEBUG_LEGION
-        assert(next_index < MAX_NUM_PROCS);
+        assert(next_index < LEGION_MAX_NUM_PROCS);
 #endif
         processor_mapping[*it] = next_index;
         result.set_bit(next_index);
@@ -16727,7 +16729,7 @@ namespace Legion {
 #endif
       }
       // Check all our message managers for outstanding messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
           message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
@@ -18658,13 +18660,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == MAX_FIELDS);
-      LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
 #ifndef DISABLE_PARTITION_SHIM
       // Preregister any partition shim task variants we need 
@@ -18952,7 +18954,7 @@ namespace Legion {
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
       assert(config.initial_task_window_hysteresis <= 100);
-      assert(config.max_local_fields <= MAX_FIELDS);
+      assert(config.max_local_fields <= LEGION_MAX_FIELDS);
 #endif
       return config;
     }
@@ -19128,12 +19130,12 @@ namespace Legion {
         Machine::ProcessorQuery local_proc_query(machine);
         local_proc_query.local_address_space();
         // Check for exceeding the local number of processors
-        if (local_proc_query.count() > MAX_NUM_PROCS)
+        if (local_proc_query.count() > LEGION_MAX_NUM_PROCS)
           REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, 
                         "Maximum number of local processors %zd exceeds "
-                        "compile time maximum of %d.  Change the value "
-                        "in legion_config.h and recompile.",
-                        local_proc_query.count(), MAX_NUM_PROCS)
+                        "compile-time maximum of %d.  Change the value "
+                        "LEGION_MAX_NUM_PROCS in legion_config.h and recompile."
+                        , local_proc_query.count(), LEGION_MAX_NUM_PROCS)
         for (Machine::ProcessorQuery::iterator it = 
               local_proc_query.begin(); it != local_proc_query.end(); it++)
         {
@@ -19491,7 +19493,7 @@ namespace Legion {
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      static TaskID current_task_id = MAX_APPLICATION_TASK_ID;
+      static TaskID current_task_id = LEGION_MAX_APPLICATION_TASK_ID;
       return current_task_id;
     }
 
@@ -19525,8 +19527,8 @@ namespace Legion {
                       "Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
       // See if we need to pick a variant
