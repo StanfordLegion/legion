@@ -189,8 +189,7 @@ namespace Legion {
      * region including necessary information to 
      * register execution dependences on the user.
      */
-    struct PhysicalUser : public Collectable, 
-                          public LegionHeapify<PhysicalUser> {
+    struct PhysicalUser : public Collectable {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
