@@ -12,7 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- type_mismatch_partition_by_restriction5.rg:26: type mismatch: expected transform(*,1) type but got transform(2,2)
+-- fails-with:
+-- type_mismatch_partition_by_restriction5.rg:27: type mismatch: expected transform(*,1) type but got transform(2,2)
 --   var p = restrict(r, t, e, colors)
 --                  ^
 

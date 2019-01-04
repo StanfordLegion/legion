@@ -12,7 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- type_mismatch_partition_by_restriction1.rg:26: type mismatch in argument 2: expected transform type but got int32
+-- fails-with:
+-- type_mismatch_partition_by_restriction1.rg:27: type mismatch in argument 2: expected transform type but got int32
 --   var p = restrict(r, t, e, colors)
 --                  ^
 

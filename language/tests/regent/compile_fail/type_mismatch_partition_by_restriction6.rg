@@ -12,7 +12,8 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- type_mismatch_partition_by_restriction6.rg:26: type mismatch: expected rect2d type but got rect3d
+-- fails-with:
+-- type_mismatch_partition_by_restriction6.rg:27: type mismatch: expected rect2d type but got rect3d
 --   var p = restrict(r, t, e, colors)
 --                  ^
 
