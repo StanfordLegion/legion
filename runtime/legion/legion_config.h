@@ -1312,13 +1312,32 @@ typedef enum legion_dimension_kind_t {
   DIM_X = 0, // first logical index space dimension
   DIM_Y = 1, // second logical index space dimension
   DIM_Z = 2, // ...
-  DIM_F = 3, // field dimension
-  INNER_DIM_X = 4, // inner dimension for tiling X
-  OUTER_DIM_X = 5, // outer dimension for tiling X
-  INNER_DIM_Y = 6, // ...
-  OUTER_DIM_Y = 7,
-  INNER_DIM_Z = 8,
-  OUTER_DIM_Z = 9,
+  DIM_W = 3,
+  DIM_A = 4,
+  DIM_B = 5,
+  DIM_C = 6,
+  DIM_D = 7,
+  DIM_E = 8,
+  // TODO: Something for DIM 9?
+  DIM_F = 9, // field dimension
+  INNER_DIM_X = 10, // inner dimension for tiling X
+  OUTER_DIM_X = 11, // outer dimension for tiling X
+  INNER_DIM_Y = 12, // ...
+  OUTER_DIM_Y = 13,
+  INNER_DIM_Z = 14,
+  OUTER_DIM_Z = 15,
+  INNER_DIM_W = 16,
+  OUTER_DIM_W = 17,
+  INNER_DIM_A = 18,
+  OUTER_DIM_A = 19,
+  INNER_DIM_B = 20,
+  OUTER_DIM_B = 21,
+  INNER_DIM_C = 22,
+  OUTER_DIM_C = 23,
+  INNER_DIM_D = 24,
+  OUTER_DIM_D = 25,
+  INNER_DIM_E = 26,
+  OUTER_DIM_E = 27,
 } legion_dimension_kind_t;
 
 // Make all flags 1-hot encoding so we can logically-or them together
