@@ -400,6 +400,7 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(p[0]));
 	      break;
 	    }
+#if LEGION_MAX_DIM >= 2
 	    case 2: {
 	      typedef Realm::GenericAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -408,6 +409,8 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<2, Arrays::coord_t>(p[0], p[1]));
 	      break;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 3
 	    case 3: {
 	      typedef Realm::GenericAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -416,6 +419,67 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<3, Arrays::coord_t>(p[0], p[1], p[2]));
 	      break;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 4
+	    case 4: {
+	      typedef Realm::GenericAccessor<char, 4, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<4> p = dp.get_point<4>();
+	      start = acc.get_offset(Realm::Point<4, Arrays::coord_t>(p[0], p[1], p[2], p[3]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 5
+	    case 5: {
+	      typedef Realm::GenericAccessor<char, 5, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<5> p = dp.get_point<5>();
+	      start = acc.get_offset(Realm::Point<5, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 6
+	    case 6: {
+	      typedef Realm::GenericAccessor<char, 6, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<6> p = dp.get_point<6>();
+	      start = acc.get_offset(Realm::Point<6, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 7
+	    case 7: {
+	      typedef Realm::GenericAccessor<char, 7, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<7> p = dp.get_point<7>();
+	      start = acc.get_offset(Realm::Point<7, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 8
+	    case 8: {
+	      typedef Realm::GenericAccessor<char, 8, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<8> p = dp.get_point<8>();
+	      start = acc.get_offset(Realm::Point<8, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 9
+	    case 9: {
+	      typedef Realm::GenericAccessor<char, 9, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<9> p = dp.get_point<9>();
+	      start = acc.get_offset(Realm::Point<9, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]));
+	      break;
+	    }
+#endif
 	    default: assert(0);
 	    }
 	    inst.read_untyped(start + offset, dst, bytes);
@@ -440,6 +504,7 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<1, Arrays::coord_t>(p[0]));
 	      break;
 	    }
+#if LEGION_MAX_DIM >= 2
 	    case 2: {
 	      typedef Realm::GenericAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -448,6 +513,8 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<2, Arrays::coord_t>(p[0], p[1]));
 	      break;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 3
 	    case 3: {
 	      typedef Realm::GenericAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -456,6 +523,67 @@ namespace LegionRuntime {
 	      start = acc.get_offset(Realm::Point<3, Arrays::coord_t>(p[0], p[1], p[2]));
 	      break;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 4
+	    case 4: {
+	      typedef Realm::GenericAccessor<char, 4, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<4> p = dp.get_point<4>();
+	      start = acc.get_offset(Realm::Point<4, Arrays::coord_t>(p[0], p[1], p[2], p[3]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 5
+	    case 5: {
+	      typedef Realm::GenericAccessor<char, 5, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<5> p = dp.get_point<5>();
+	      start = acc.get_offset(Realm::Point<5, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 6
+	    case 6: {
+	      typedef Realm::GenericAccessor<char, 6, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<6> p = dp.get_point<6>();
+	      start = acc.get_offset(Realm::Point<6, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 7
+	    case 7: {
+	      typedef Realm::GenericAccessor<char, 7, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<7> p = dp.get_point<7>();
+	      start = acc.get_offset(Realm::Point<7, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 8
+	    case 8: {
+	      typedef Realm::GenericAccessor<char, 8, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<8> p = dp.get_point<8>();
+	      start = acc.get_offset(Realm::Point<8, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7]));
+	      break;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 9
+	    case 9: {
+	      typedef Realm::GenericAccessor<char, 9, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      Arrays::Point<9> p = dp.get_point<9>();
+	      start = acc.get_offset(Realm::Point<9, Arrays::coord_t>(p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7], p[8]));
+	      break;
+	    }
+#endif
 	    default: assert(0);
 	    }
 	    inst.write_untyped(start + offset, src, bytes);
@@ -496,6 +624,7 @@ namespace LegionRuntime {
 	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
 	      return dst;
 	    }
+#if LEGION_MAX_DIM >= 2
 	    case 2: {
 	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -505,6 +634,8 @@ namespace LegionRuntime {
 	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
 	      return dst;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 3
 	    case 3: {
 	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
 	      assert(AT::is_compatible(inst, field_id));
@@ -515,6 +646,100 @@ namespace LegionRuntime {
 	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
 	      return dst;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 4
+	    case 4: {
+	      typedef Realm::AffineAccessor<char, 4, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<4, Arrays::coord_t>(0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+              offsets[2] = ByteOffset(off_t(acc.strides[2]));
+	      offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 5
+	    case 5: {
+	      typedef Realm::AffineAccessor<char, 5, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<5, Arrays::coord_t>(0, 0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      offsets[4] = ByteOffset(off_t(acc.strides[4]));
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 6
+	    case 6: {
+	      typedef Realm::AffineAccessor<char, 6, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<6, Arrays::coord_t>(0, 0, 0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 7
+	    case 7: {
+	      typedef Realm::AffineAccessor<char, 7, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<7, Arrays::coord_t>(0, 0, 0, 0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 8
+	    case 8: {
+	      typedef Realm::AffineAccessor<char, 8, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<8, Arrays::coord_t>(0, 0, 0, 0, 0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+              offsets[7] = ByteOffset(off_t(acc.strides[7]));
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 9
+	    case 9: {
+	      typedef Realm::AffineAccessor<char, 9, Arrays::coord_t> AT;
+	      assert(AT::is_compatible(inst, field_id));
+	      AT acc(inst, field_id);
+	      char *dst = acc.ptr(Realm::Point<9, Arrays::coord_t>(0, 0, 0, 0, 0, 0, 0, 0, 0));
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+              offsets[7] = ByteOffset(off_t(acc.strides[7]));
+              offsets[8] = ByteOffset(off_t(acc.strides[8]));
+	      return dst;
+	    }
+#endif
 	    default: assert(0);
 	    }
 	    return 0;
@@ -536,6 +761,7 @@ namespace LegionRuntime {
 	      subrect = r;
 	      return dst;
 	    }
+#if LEGION_MAX_DIM >= 2
 	    case 2: {
 	      typedef Realm::AffineAccessor<char, 2, Arrays::coord_t> AT;
 	      Realm::Rect<2, Arrays::coord_t> rr;
@@ -549,6 +775,8 @@ namespace LegionRuntime {
 	      subrect = r;
 	      return dst;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 3
 	    case 3: {
 	      typedef Realm::AffineAccessor<char, 3, Arrays::coord_t> AT;
 	      Realm::Rect<3, Arrays::coord_t> rr;
@@ -563,6 +791,124 @@ namespace LegionRuntime {
 	      subrect = r;
 	      return dst;
 	    }
+#endif
+#if LEGION_MAX_DIM >= 4
+	    case 4: {
+	      typedef Realm::AffineAccessor<char, 4, Arrays::coord_t> AT;
+	      Realm::Rect<4, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<4, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3]);
+	      rr.hi = Realm::Point<4, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 5
+	    case 5: {
+	      typedef Realm::AffineAccessor<char, 5, Arrays::coord_t> AT;
+	      Realm::Rect<5, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<5, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3], r.lo.x[4]);
+	      rr.hi = Realm::Point<5, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3], r.hi.x[4]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+              offsets[4] = ByteOffset(off_t(acc.strides[4]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 6
+	    case 6: {
+	      typedef Realm::AffineAccessor<char, 6, Arrays::coord_t> AT;
+	      Realm::Rect<6, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<6, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3], r.lo.x[4], r.lo.x[5]);
+	      rr.hi = Realm::Point<6, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3], r.hi.x[4], r.hi.x[5]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+              offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 7
+	    case 7: {
+	      typedef Realm::AffineAccessor<char, 7, Arrays::coord_t> AT;
+	      Realm::Rect<7, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<7, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3], r.lo.x[4], r.lo.x[5], r.lo.x[6]);
+	      rr.hi = Realm::Point<7, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3], r.hi.x[4], r.hi.x[5], r.hi.x[6]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+              offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 8
+	    case 8: {
+	      typedef Realm::AffineAccessor<char, 8, Arrays::coord_t> AT;
+	      Realm::Rect<8, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<8, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3], r.lo.x[4], r.lo.x[5], r.lo.x[6], r.lo.x[7]);
+	      rr.hi = Realm::Point<8, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3], r.hi.x[4], r.hi.x[5], r.hi.x[6], r.hi.x[7]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+              offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+              offsets[7] = ByteOffset(off_t(acc.strides[7]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
+#if LEGION_MAX_DIM >= 9
+	    case 9: {
+	      typedef Realm::AffineAccessor<char, 9, Arrays::coord_t> AT;
+	      Realm::Rect<9, Arrays::coord_t> rr;
+	      rr.lo = Realm::Point<9, Arrays::coord_t>(r.lo.x[0], r.lo.x[1], r.lo.x[2], r.lo.x[3], r.lo.x[4], r.lo.x[5], r.lo.x[6], r.lo.x[7], r.lo.x[8]);
+	      rr.hi = Realm::Point<9, Arrays::coord_t>(r.hi.x[0], r.hi.x[1], r.hi.x[2], r.hi.x[3], r.hi.x[4], r.hi.x[5], r.hi.x[6], r.hi.x[7], r.hi.x[8]);
+	      assert(AT::is_compatible(inst, field_id, rr));
+	      AT acc(inst, field_id, rr);
+	      char *dst = acc.ptr(rr.lo);
+	      offsets[0] = ByteOffset(off_t(acc.strides[0]));
+	      offsets[1] = ByteOffset(off_t(acc.strides[1]));
+	      offsets[2] = ByteOffset(off_t(acc.strides[2]));
+              offsets[3] = ByteOffset(off_t(acc.strides[3]));
+              offsets[4] = ByteOffset(off_t(acc.strides[4]));
+              offsets[5] = ByteOffset(off_t(acc.strides[5]));
+              offsets[6] = ByteOffset(off_t(acc.strides[6]));
+              offsets[7] = ByteOffset(off_t(acc.strides[7]));
+              offsets[8] = ByteOffset(off_t(acc.strides[8]));
+	      subrect = r;
+	      return dst;
+	    }
+#endif
 	    default: assert(0);
 	    }
 	    return 0;

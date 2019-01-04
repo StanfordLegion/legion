@@ -1315,35 +1315,18 @@ namespace Legion {
 
       switch (input.domain.get_dim())
       {
-        case 1:
-          {
-            DomainT<1,coord_t> point_space = input.domain; 
-            Point<1,coord_t> num_blocks(procs.size());
-            default_decompose_points<1>(point_space, procs,
-                  num_blocks, false/*recurse*/,
-                  stealing_enabled, output.slices);
-            break;
+#define BLOCK(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> point_space = input.domain; \
+            Point<DIM,coord_t> num_blocks(procs.size()); \
+            default_decompose_points<DIM>(point_space, procs, \
+                  num_blocks, false/*recurse*/, \
+                  stealing_enabled, output.slices); \
+            break; \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> point_space = input.domain;
-            Point<2,coord_t> num_blocks =
-              default_select_num_blocks<2>(procs.size(), point_space.bounds);
-            default_decompose_points<2>(point_space, procs,
-                num_blocks, false/*recurse*/,
-                stealing_enabled, output.slices);
-            break;
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> point_space = input.domain;
-            Point<3,coord_t> num_blocks =
-              default_select_num_blocks<3>(procs.size(), point_space.bounds);
-            default_decompose_points<3>(point_space, procs,
-                num_blocks, false/*recurse*/,
-                stealing_enabled, output.slices);
-            break;
-          }
+        LEGION_FOREACH_N(BLOCK)
+#undef BLOCK
         default: // don't support other dimensions right now
           assert(false);
       }

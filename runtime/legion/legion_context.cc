@@ -3376,14 +3376,12 @@ namespace Legion {
       if (fid == AUTO_GENERATE_ID)
         fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
-      else if (fid >= MAX_APPLICATION_FIELD_ID)
+      else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
         REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
-          "Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
-                       "set in legion_config.h", get_task_name(),
-                       get_unique_id(), fid)
+           "Task %s (ID %lld) attempted to allocate a field with ID %d which "
+           "exceeds the LEGION_MAX_APPLICATION_FIELD_ID bound set in "
+           "legion_config.h", get_task_name(), get_unique_id(), fid)
 #endif
-
       if (runtime->legion_spy_enabled)
         LegionSpy::log_field_creation(space.id, fid, field_size);
 
@@ -3481,14 +3479,13 @@ namespace Legion {
         if (resulting_fields[idx] == AUTO_GENERATE_ID)
           resulting_fields[idx] = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
-        else if (resulting_fields[idx] >= MAX_APPLICATION_FIELD_ID)
+        else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
             "Task %s (ID %lld) attempted to allocate a field with "
-                         "ID %d which exceeds the MAX_APPLICATION_FIELD_ID "
-                         "bound set in legion_config.h", get_task_name(),
-                         get_unique_id(), resulting_fields[idx])
+            "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+            "bound set in legion_config.h", get_task_name(),
+            get_unique_id(), resulting_fields[idx])
 #endif
-
         if (runtime->legion_spy_enabled)
           LegionSpy::log_field_creation(space.id, 
                                         resulting_fields[idx], sizes[idx]);
@@ -5199,8 +5196,8 @@ namespace Legion {
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
-      if ((previous_completion_events.size() >= DEFAULT_MAX_TASK_WINDOW) &&
-          (op->get_operation_kind() != Operation::FENCE_OP_KIND))
+      if ((previous_completion_events.size() >= LEGION_DEFAULT_MAX_TASK_WINDOW) 
+          && (op->get_operation_kind() != Operation::FENCE_OP_KIND))
       {
         ApEvent merge = Runtime::merge_events(NULL, previous_completion_events);
         previous_completion_events.clear();
@@ -9536,11 +9533,11 @@ namespace Legion {
         if (fid == AUTO_GENERATE_ID)
           fid = runtime->get_unique_field_id();
 #ifdef DEBUG_LEGION
-        else if (fid >= MAX_APPLICATION_FIELD_ID)
+        else if (fid >= LEGION_MAX_APPLICATION_FIELD_ID)
           REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
                        "Task %s (ID %lld) attempted to allocate a field with "
-                       "ID %d which exceeds the MAX_APPLICATION_FIELD_ID bound "
-                       "set in legion_config.h", get_task_name(),
+                       "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID"
+                       " bound set in legion_config.h", get_task_name(),
                        get_unique_id(), fid)
 #endif
         forest->allocate_field(space, field_size, fid, serdez_id);
@@ -10761,11 +10758,11 @@ namespace Legion {
     {
       // Exchange close map barriers across all the shards
       BarrierExchangeCollective<RtBarrier> mapped_collective(this,
-          CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
+          LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
           close_mapped_barriers, COLLECTIVE_LOC_50);
       mapped_collective.exchange_barriers_async();
       BarrierExchangeCollective<ApBarrier> indirect_collective(this,
-          CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
+          LEGION_CONTROL_REPLICATION_COMMUNICATION_BARRIERS,
           indirection_barriers, COLLECTIVE_LOC_79);
       indirect_collective.exchange_barriers_async();
       // Wait for everything to be done

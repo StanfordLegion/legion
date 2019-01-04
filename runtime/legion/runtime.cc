@@ -2761,7 +2761,7 @@ namespace Legion {
         total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
-      context_states.resize(DEFAULT_CONTEXTS);
+      context_states.resize(LEGION_DEFAULT_CONTEXTS);
       // Find our set of visible memories
       Machine::MemoryQuery vis_mems(runtime->machine);
       vis_mems.has_affinity_to(proc);
@@ -9681,7 +9681,7 @@ namespace Legion {
         unique_index_tree_id((unique == 0) ? runtime_stride : unique),
         unique_region_tree_id((unique == 0) ? runtime_stride : unique),
         unique_operation_id((unique == 0) ? runtime_stride : unique),
-        unique_field_id(MAX_APPLICATION_FIELD_ID + 
+        unique_field_id(LEGION_MAX_APPLICATION_FIELD_ID + 
                         ((unique == 0) ? runtime_stride : unique)),
         unique_code_descriptor_id(LG_TASK_ID_AVAILABLE +
                         ((unique == 0) ? runtime_stride : unique)),
@@ -9736,19 +9736,19 @@ namespace Legion {
 #endif
         ProcessorManager *manager = new ProcessorManager(*it,
 				    (*it).kind(), this,
-                                    DEFAULT_MAPPER_SLOTS, 
+                                    LEGION_DEFAULT_MAPPER_SLOTS, 
                                     stealing_disabled,
                                     (replay_file != NULL));
         proc_managers[*it] = manager;
       }
       // Initialize the message manager array so that we can construct
       // message managers lazily as they are needed
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
         message_managers[idx] = NULL;
       
       // Make the default number of contexts
       // No need to hold the lock yet because nothing is running
-      for (total_contexts = 0; total_contexts < DEFAULT_CONTEXTS; 
+      for (total_contexts = 0; total_contexts < LEGION_DEFAULT_CONTEXTS; 
             total_contexts++)
       {
         available_contexts.push_back(RegionTreeContext(total_contexts)); 
@@ -9868,7 +9868,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Make sure we don't send anymore messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
         {
@@ -11068,24 +11068,15 @@ namespace Legion {
         // This code will only work if the color space has type coord_t
         switch (color_space.get_dim())
         {
-          case 1:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              assert(handle1.get_type_tag() == type_tag); \
+              break; \
             }
-          case 2:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<2,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
-          case 3:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<3,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -11094,24 +11085,15 @@ namespace Legion {
           IndexSpace subspace;
           switch (color_space.get_dim())
           {
-            case 1:
-              {
-                const Point<1,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const Point<DIM,coord_t> p(itr.p); \
+                subspace = get_index_subspace(handle1, &p, sizeof(p)); \
+                break; \
               }
-            case 2:
-              {
-                const Point<2,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
-            case 3:
-              {
-                const Point<3,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
@@ -11532,27 +11514,16 @@ namespace Legion {
       const IndexSpace color_space = part->color_space->handle;
       switch (NT_TemplateHelper::get_dim(color_space.get_type_tag()))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> color_index_space; \
+            forest->get_index_space_domain(color_space, &color_index_space, \
+                                           color_space.get_type_tag()); \
+            return Domain(color_index_space); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -13093,7 +13064,7 @@ namespace Legion {
     /*static*/ MapperID& Runtime::get_current_static_mapper_id(void)
     //--------------------------------------------------------------------------
     {
-      static MapperID current_mapper_id = MAX_APPLICATION_MAPPER_ID;
+      static MapperID current_mapper_id = LEGION_MAX_APPLICATION_MAPPER_ID;
       return current_mapper_id;
     }
 
@@ -13309,7 +13280,8 @@ namespace Legion {
     /*static*/ ProjectionID& Runtime::get_current_static_projection_id(void)
     //--------------------------------------------------------------------------
     {
-      static ProjectionID current_projection_id = MAX_APPLICATION_PROJECTION_ID;
+      static ProjectionID current_projection_id = 
+        LEGION_MAX_APPLICATION_PROJECTION_ID;
       return current_projection_id;
     }
 
@@ -13520,7 +13492,8 @@ namespace Legion {
     /*static*/ ShardingID& Runtime::get_current_static_sharding_id(void)
     //--------------------------------------------------------------------------
     {
-      static ShardingID current_sharding_id = MAX_APPLICATION_SHARDING_ID;
+      static ShardingID current_sharding_id = 
+        LEGION_MAX_APPLICATION_SHARDING_ID;
       return current_sharding_id;
     }
 
@@ -13942,13 +13915,14 @@ namespace Legion {
     {
       // TODO: figure out a way to make this check safe with dynamic generation
 #if 0
-      if (check_task_id && (registrar.task_id >= MAX_APPLICATION_TASK_ID))
+      if (check_task_id && 
+          (registrar.task_id >= LEGION_MAX_APPLICATION_TASK_ID))
         REPORT_LEGION_ERROR(ERROR_MAX_APPLICATION_TASK_ID_EXCEEDED, 
                       "Error registering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
 #endif
       // First find the task implementation
       TaskImpl *task_impl = find_or_create_task_impl(registrar.task_id);
@@ -14068,7 +14042,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(sid < MAX_NUM_NODES);
+      assert(sid < LEGION_MAX_NUM_NODES);
       assert(sid != address_space); // shouldn't be sending messages to ourself
 #endif
       MessageManager *result = message_managers[sid];
@@ -17410,7 +17384,7 @@ namespace Legion {
 #ifdef TRACE_ALLOCATION
       unsigned long long trace_count = 
         __sync_fetch_and_add(&allocation_tracing_count,1); 
-      if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
+      if ((trace_count % LEGION_TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
 #endif
     }
@@ -17569,7 +17543,7 @@ namespace Legion {
         }
         unsigned next_index = processor_mapping.size();
 #ifdef DEBUG_LEGION
-        assert(next_index < MAX_NUM_PROCS);
+        assert(next_index < LEGION_MAX_NUM_PROCS);
 #endif
         processor_mapping[*it] = next_index;
         result.set_bit(next_index);
@@ -17991,24 +17965,15 @@ namespace Legion {
     {
       switch (dom.get_dim())
       {
-        case 1:
-          {
-            DomainT<1,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<1,coord_t>());
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> is = dom; \
+            return find_or_create_index_launch_space(dom, &is, \
+                  NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -18172,7 +18137,7 @@ namespace Legion {
 #endif
       }
       // Check all our message managers for outstanding messages
-      for (unsigned idx = 0; idx < MAX_NUM_NODES; idx++)
+      for (unsigned idx = 0; idx < LEGION_MAX_NUM_NODES; idx++)
       {
         if (message_managers[idx] != NULL)
           message_managers[idx]->confirm_shutdown(shutdown_manager, phase_one);
@@ -20376,28 +20341,24 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Some static asserts that need to hold true for the runtime to work
-      LEGION_STATIC_ASSERT(MAX_RETURN_SIZE > 0);
-      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == MAX_FIELDS);
-      LEGION_STATIC_ASSERT(MAX_NUM_NODES > 0);
-      LEGION_STATIC_ASSERT(MAX_NUM_PROCS > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_TASK_WINDOW > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
-      LEGION_STATIC_ASSERT(DEFAULT_MAX_MESSAGE_SIZE > 0); 
+      LEGION_STATIC_ASSERT(LEGION_MAX_RETURN_SIZE > 0);
+      LEGION_STATIC_ASSERT((1 << LEGION_FIELD_LOG2) == LEGION_MAX_FIELDS);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_NODES > 0);
+      LEGION_STATIC_ASSERT(LEGION_MAX_NUM_PROCS > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_TASK_WINDOW > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE > 0);
+      LEGION_STATIC_ASSERT(LEGION_DEFAULT_MAX_MESSAGE_SIZE > 0); 
 
 #ifndef DISABLE_PARTITION_SHIM
       // Preregister any partition shim task variants we need 
-      PartitionShim::ColorPoints<1>::register_task();
-      PartitionShim::ColorPoints<2>::register_task();
-      PartitionShim::ColorPoints<3>::register_task();
-      PartitionShim::ColorRects<1,1>::register_task();
-      PartitionShim::ColorRects<1,2>::register_task();
-      PartitionShim::ColorRects<1,3>::register_task();
-      PartitionShim::ColorRects<2,1>::register_task();
-      PartitionShim::ColorRects<2,2>::register_task();
-      PartitionShim::ColorRects<2,3>::register_task();
-      PartitionShim::ColorRects<3,1>::register_task();
-      PartitionShim::ColorRects<3,2>::register_task();
-      PartitionShim::ColorRects<3,3>::register_task();
+#define COLOR_POINTS(DIM) \
+      PartitionShim::ColorPoints<DIM>::register_task();
+      LEGION_FOREACH_N(COLOR_POINTS)
+#undef COLOR_POINTS
+#define COLOR_RECTS(D1,D2) \
+      PartitionShim::ColorRects<D1,D2>::register_task();
+      LEGION_FOREACH_NN(COLOR_RECTS)
+#undef COLOR_RECTS
 #endif
 
       // Need to pass argc and argv to low-level runtime before we can record 
@@ -20670,7 +20631,7 @@ namespace Legion {
 #undef BOOL_ARG
 #ifdef DEBUG_LEGION
       assert(config.initial_task_window_hysteresis <= 100);
-      assert(config.max_local_fields <= MAX_FIELDS);
+      assert(config.max_local_fields <= LEGION_MAX_FIELDS);
 #endif
       return config;
     }
@@ -20846,12 +20807,12 @@ namespace Legion {
         Machine::ProcessorQuery local_proc_query(machine);
         local_proc_query.local_address_space();
         // Check for exceeding the local number of processors
-        if (local_proc_query.count() > MAX_NUM_PROCS)
+        if (local_proc_query.count() > LEGION_MAX_NUM_PROCS)
           REPORT_LEGION_ERROR(ERROR_MAXIMUM_PROCS_EXCEEDED, 
                         "Maximum number of local processors %zd exceeds "
-                        "compile time maximum of %d.  Change the value "
-                        "in legion_config.h and recompile.",
-                        local_proc_query.count(), MAX_NUM_PROCS)
+                        "compile-time maximum of %d.  Change the value "
+                        "LEGION_MAX_NUM_PROCS in legion_config.h and recompile."
+                        , local_proc_query.count(), LEGION_MAX_NUM_PROCS)
         for (Machine::ProcessorQuery::iterator it = 
               local_proc_query.begin(); it != local_proc_query.end(); it++)
         {
@@ -21224,7 +21185,7 @@ namespace Legion {
     /*static*/ TaskID& Runtime::get_current_static_task_id(void)
     //--------------------------------------------------------------------------
     {
-      static TaskID current_task_id = MAX_APPLICATION_TASK_ID;
+      static TaskID current_task_id = LEGION_MAX_APPLICATION_TASK_ID;
       return current_task_id;
     }
 
@@ -21258,8 +21219,8 @@ namespace Legion {
                       "Error preregistering task with ID %d. Exceeds the "
                       "statically set bounds on application task IDs of %d. "
                       "See %s in legion_config.h.", 
-                      registrar.task_id, MAX_APPLICATION_TASK_ID, 
-                      LEGION_MACRO_TO_STRING(MAX_APPLICATION_TASK_ID))
+                      registrar.task_id, LEGION_MAX_APPLICATION_TASK_ID, 
+                      LEGION_MACRO_TO_STRING(LEGION_MAX_APPLICATION_TASK_ID))
       std::deque<PendingVariantRegistration*> &pending_table = 
         get_pending_variant_table();
       // See if we need to pick a variant
@@ -21355,16 +21316,77 @@ namespace Legion {
                            "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
+#if LEGION_MAX_DIM >= 2
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                            "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 3
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                          "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
                           dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 4
+          case 4:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "4D point (%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 5
+          case 5:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "5D point (%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 6
+          case 6:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "6D point (%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 7
+          case 7:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "7D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 8
+          case 8:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "8D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 9
+          case 9:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                   "9D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7], dp.point_data[8]);
+            break;
+#endif
           default:
             assert(false);
         }

@@ -174,6 +174,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.Partition) or
     node:is(ast.typed.expr.PartitionEqual) or
     node:is(ast.typed.expr.PartitionByField) or
+    node:is(ast.typed.expr.PartitionByRestriction) or
     node:is(ast.typed.expr.Image) or
     node:is(ast.typed.expr.Preimage) or
     node:is(ast.typed.expr.CrossProduct) or
@@ -628,6 +629,19 @@ function optimize_futures.expr_partition_by_field(cx, node)
   }
 end
 
+function optimize_futures.expr_partition_by_restriction(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local transform = concretize(optimize_futures.expr(cx, node.transform))
+  local extent = concretize(optimize_futures.expr(cx, node.extent))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  return node {
+    region = region,
+    transform = transform,
+    extent = extent,
+    colors = colors,
+  }
+end
+
 function optimize_futures.expr_image(cx, node)
   local parent = concretize(optimize_futures.expr(cx, node.parent))
   local partition = concretize(optimize_futures.expr(cx, node.partition))
@@ -1005,6 +1019,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return optimize_futures.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return optimize_futures.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return optimize_futures.expr_image(cx, node)

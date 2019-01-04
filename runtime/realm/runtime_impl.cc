@@ -1248,13 +1248,6 @@ namespace Realm {
 #endif
 
       // Check that we have enough resources for the number of nodes we are using
-      if (max_node_id >= MAX_NUM_NODES)
-      {
-        fprintf(stderr,"ERROR: Launched %d nodes, but runtime is configured "
-                       "for at most %d nodes. Update the 'MAX_NUM_NODES' macro "
-                       "in legion_config.h", max_node_id+1, MAX_NUM_NODES);
-        exit(1);
-      }
       if (max_node_id > (NodeID)(ID::MAX_NODE_ID))
       {
         fprintf(stderr,"ERROR: Launched %d nodes, but low-level IDs are only "

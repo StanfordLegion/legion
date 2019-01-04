@@ -2710,33 +2710,18 @@ namespace Legion {
 #endif
       switch (partition_dim)
       {
-        case 1:
-          {
-            const Realm::Matrix<1,DIM,T> *transform = 
-              static_cast<const Realm::Matrix<1,DIM,T>*>(tran);
-            const Realm::Rect<1,T> *extent = 
-              static_cast<const Realm::Rect<1,T>*>(ext);
-            return create_by_restriction_helper<1>(partition, *transform,
-                                            *extent, shard, total_shards);
+#define DIMFUNC(D1) \
+        case D1: \
+          { \
+            const Realm::Matrix<D1,DIM,T> *transform =  \
+              static_cast<const Realm::Matrix<D1,DIM,T>*>(tran); \
+            const Realm::Rect<D1,T> *extent = \
+              static_cast<const Realm::Rect<D1,T>*>(ext); \
+            return create_by_restriction_helper<D1>(partition, *transform, \
+                                            *extent, shard, total_shards); \
           }
-        case 2:
-          {
-            const Realm::Matrix<2,DIM,T> *transform = 
-              static_cast<const Realm::Matrix<2,DIM,T>*>(tran);
-            const Realm::Rect<2,T> *extent = 
-              static_cast<const Realm::Rect<2,T>*>(ext);
-            return create_by_restriction_helper<2>(partition, *transform,
-                                            *extent, shard, total_shards);
-          }
-        case 3:
-          {
-            const Realm::Matrix<3,DIM,T> *transform = 
-              static_cast<const Realm::Matrix<3,DIM,T>*>(tran);
-            const Realm::Rect<3,T> *extent = 
-              static_cast<const Realm::Rect<3,T>*>(ext);
-            return create_by_restriction_helper<3>(partition, *transform, 
-                                            *extent, shard, total_shards);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }

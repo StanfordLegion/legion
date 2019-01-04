@@ -1360,21 +1360,14 @@ namespace Legion {
       {
         switch (manager->instance_domain->get_num_dims())
         {
-          case 1:
-            {
-              current_users = new KDView<1>(context, manager->instance_domain);
-              break;
-            }
-          case 2:
-            {
-              current_users = new KDView<2>(context, manager->instance_domain);
-              break;
-            }
-          case 3:
-            {
-              current_users = new KDView<3>(context, manager->instance_domain);
-              break;
-            }
+#define KDVIEW(DIM) \
+    case DIM: \
+      { \
+        current_users = new KDView<DIM>(context, manager->instance_domain); \
+        break; \
+      }
+          LEGION_FOREACH_N(KDVIEW)
+#undef KDVIEW
           default:
             assert(false);
         }

@@ -218,7 +218,7 @@ namespace Legion {
    */
   class DomainPoint {
   public:
-    enum { MAX_POINT_DIM = ::MAX_POINT_DIM };
+    enum { MAX_POINT_DIM = LEGION_MAX_DIM };
 
     DomainPoint(void);
     DomainPoint(coord_t index);
@@ -285,7 +285,7 @@ namespace Legion {
     typedef ::realm_id_t IDType;
     // Keep this in sync with legion_domain_max_rect_dim_t
     // in legion_config.h
-    enum { MAX_RECT_DIM = ::MAX_RECT_DIM };
+    enum { MAX_RECT_DIM = LEGION_MAX_DIM };
     Domain(void);
     Domain(const Domain& other);
     Domain(const DomainPoint &lo, const DomainPoint &hi);

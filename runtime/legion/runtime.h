@@ -1574,16 +1574,18 @@ namespace Legion {
         LegionConfiguration(void)
           : delay_start(0),
             legion_collective_radix(LEGION_COLLECTIVE_RADIX),
-            initial_task_window_size(DEFAULT_MAX_TASK_WINDOW),
-            initial_task_window_hysteresis(DEFAULT_TASK_WINDOW_HYSTERESIS),
-            initial_tasks_to_schedule(DEFAULT_MIN_TASKS_TO_SCHEDULE),
-            initial_meta_task_vector_width(DEFAULT_META_TASK_VECTOR_WIDTH),
-            max_message_size(DEFAULT_MAX_MESSAGE_SIZE),
-            gc_epoch_size(DEFAULT_GC_EPOCH_SIZE),
+            initial_task_window_size(LEGION_DEFAULT_MAX_TASK_WINDOW),
+            initial_task_window_hysteresis(
+                LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS),
+            initial_tasks_to_schedule(LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE),
+            initial_meta_task_vector_width(
+                LEGION_DEFAULT_META_TASK_VECTOR_WIDTH),
+            max_message_size(LEGION_DEFAULT_MAX_MESSAGE_SIZE),
+            gc_epoch_size(LEGION_DEFAULT_GC_EPOCH_SIZE),
             max_control_replication_contexts(
-                        DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
-            max_local_fields(DEFAULT_LOCAL_FIELDS),
-            max_replay_parallelism(DEFAULT_MAX_REPLAY_PARALLELISM),
+                        LEGION_DEFAULT_MAX_CONTROL_REPLICATION_CONTEXTS),
+            max_local_fields(LEGION_DEFAULT_LOCAL_FIELDS),
+            max_replay_parallelism(LEGION_DEFAULT_MAX_REPLAY_PARALLELISM),
             program_order_execution(false),
             dump_physical_traces(false),
             no_tracing(false),
@@ -3099,7 +3101,7 @@ namespace Legion {
       // Memory managers for all the memories we know about
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
-      MessageManager *message_managers[MAX_NUM_NODES];
+      MessageManager *message_managers[LEGION_MAX_NUM_NODES];
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:

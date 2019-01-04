@@ -337,7 +337,7 @@ class Rect(object):
                         point.vals[2] = z
                         yield point
         else:
-            assert False
+            raise NotImplementedError("Need support for more dimensions")
 
     def copy(self):
         return Rect(self.lo.copy(), self.hi.copy())
@@ -1822,8 +1822,7 @@ class Shape(object):
                         hi.vals[2] = rect.hi.vals[2]
                         to_add.append(Rect(lo,hi))
         else:
-            print('ERROR: Need support for >3 dimensions!')
-            assert False   
+            raise NotImplementedError("Need support for >3 dimensions")
 
     def __isub__(self, other):
         for orect in other.rects:
@@ -8776,12 +8775,10 @@ partition_name_pat       = re.compile(
     prefix+"Logical Partition Name (?P<iid>[0-9a-f]+) (?P<fid>[0-9]+) (?P<tid>[0-9]+) "+
            "(?P<name>[-$()\w. ]+)")
 index_space_point_pat    = re.compile(
-    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>\-?[0-9]+) "+
-            "(?P<p2>\-?[0-9]+) (?P<p3>\-?[0-9]+)")
+    prefix+"Index Space Point (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 index_space_rect_pat     = re.compile(
-    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
-           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
-           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
+    prefix+"Index Space Rect (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
+decimal_pat              = re.compile("\-?[0-9]+")
 empty_index_space_pat    = re.compile(
     prefix+"Empty Index Space (?P<uid>[0-9a-f]+)")
 index_expr_pat           = re.compile(
@@ -8886,9 +8883,7 @@ req_proj_pat            = re.compile(
     prefix+"Logical Requirement Projection (?P<uid>[0-9]+) (?P<index>[0-9]+) "+
            "(?P<pid>[0-9]+)")
 index_launch_domain_pat = re.compile(
-    prefix+"Index Launch Rect (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<lo1>\-?[0-9]+) "+
-           "(?P<lo2>\-?[0-9]+) (?P<lo3>\-?[0-9]+) (?P<hi1>\-?[0-9]+) "+
-           "(?P<hi2>\-?[0-9]+) (?P<hi3>\-?[0-9]+)")
+    prefix+"Index Launch Rect (?P<uid>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
@@ -9169,14 +9164,11 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         lo = Point(dim)
         hi = Point(dim)
-        lo.vals[0] = int(m.group('lo1'))
-        hi.vals[0] = int(m.group('hi1'))
-        if dim >= 2:
-            lo.vals[1] = int(m.group('lo2'))
-            hi.vals[1] = int(m.group('hi2'))
-            if dim >= 3:
-                lo.vals[2] = int(m.group('lo3'))
-                hi.vals[2] = int(m.group('hi3'))
+        # Get the remainder of the points
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            lo.vals[index] = int(values[2*index])
+            hi.vals[index] = int(values[2*index+1])
         op.set_launch_rect(Rect(lo, hi)) 
         return True
     m = mapping_dep_pat.match(line)
@@ -9704,11 +9696,9 @@ def parse_legion_spy_line(line, state):
         index_space = state.get_index_space(int(m.group('uid'),16)) 
         dim = int(m.group('dim'))
         point = Point(dim)
-        point.vals[0] = int(m.group('p1'))
-        if dim >= 2:
-            point.vals[1] = int(m.group('p2'))
-            if dim >= 3:
-                point.vals[2] = int(m.group('p3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            point.vals[index] = int(values[index])
         index_space.add_point(point)
         return True
     m = index_space_rect_pat.match(line)
@@ -9717,14 +9707,10 @@ def parse_legion_spy_line(line, state):
         dim = int(m.group('dim'))
         lo = Point(dim)
         hi = Point(dim)
-        lo.vals[0] = int(m.group('lo1'))
-        hi.vals[0] = int(m.group('hi1'))
-        if dim >= 2:
-            lo.vals[1] = int(m.group('lo2'))
-            hi.vals[1] = int(m.group('hi2'))
-            if dim >= 3:
-                lo.vals[2] = int(m.group('lo3'))
-                hi.vals[2] = int(m.group('hi3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            lo.vals[index] = int(values[2*index])
+            hi.vals[index] = int(values[2*index+1])
         if lo == hi:
             index_space.add_point(lo)
         else:

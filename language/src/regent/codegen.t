@@ -2421,6 +2421,25 @@ function codegen.expr_index_access(cx, node)
         `([pointer_type] { __ptr = [pointer_type.index_type] { __ptr = [point].__ptr }}))
     end
     return values.ref(node, pointer, pointer_type, nil, std.is_bounded_type(index_type))
+  elseif std.is_transform_type(value_type) then
+    local value = codegen.expr(cx, node.value):read(cx, value_type)
+    local index = codegen.expr(cx, node.index):read(cx, index_type)
+    local actions = quote
+      [value.actions];
+      [index.actions];
+      [emit_debuginfo(node)]
+    end
+    if bounds_checks then
+      actions = quote
+        [actions];
+        std.assert_error([index].value.__ptr.x >= 0 and [index].value.__ptr.x < [value_type.M],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+        std.assert_error([index].value.__ptr.y >= 0 and [index].value.__ptr.y < [value_type.N],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end
+    end
+    return values.rawref(node, expr.just(actions,
+          `([value].value.impl.trans[ [index].value.__ptr.x ][ [index].value.__ptr.y ])), &expr_type)
   else
     local index = codegen.expr(cx, node.index):read(cx)
     return codegen.expr(cx, node.value):get_index(cx, node, index, expr_type)
@@ -4319,6 +4338,45 @@ function codegen.expr_partition_by_field(cx, node)
     var [ip] = c.legion_index_partition_create_by_field(
       [cx.runtime], [cx.context], [region.value].impl, [parent_region].impl,
       field_id, [colors.value].impl, -1)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, `(partition_type { impl = [lp] }), partition_type),
+    partition_type)
+end
+
+function codegen.expr_partition_by_restriction(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local transform_type = std.as_read(node.transform.expr_type)
+  local transform = codegen.expr(cx, node.transform):read(cx)
+  local extent_type = std.as_read(node.extent.expr_type)
+  local extent = codegen.expr(cx, node.extent):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local partition_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [transform.actions];
+    [extent.actions];
+    [colors.actions];
+    [emit_debuginfo(node)]
+  end
+
+  assert(cx:has_region(region_type))
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
+    var [ip] = c.legion_index_partition_create_by_restriction(
+      [cx.runtime], [cx.context],
+      [region.value].impl.index_space,
+      [colors.value].impl,
+      [transform.value], [extent.value], c.COMPUTE_KIND, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
   end
@@ -7297,6 +7355,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return codegen.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return codegen.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return codegen.expr_image(cx, node)

@@ -855,6 +855,17 @@ function specialize.expr_partition_by_field(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_partition_by_restriction(cx, node, allow_lists)
+  return ast.specialized.expr.PartitionByRestriction {
+    region = specialize.expr(cx, node.region),
+    transform = specialize.expr(cx, node.transform),
+    extent = specialize.expr(cx, node.extent),
+    colors = specialize.expr(cx, node.colors),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr_image(cx, node, allow_lists)
   return ast.specialized.expr.Image {
     parent = specialize.expr(cx, node.parent),
@@ -1209,6 +1220,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.PartitionByField) then
     return specialize.expr_partition_by_field(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.PartitionByRestriction) then
+    return specialize.expr_partition_by_restriction(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Image) then
     return specialize.expr_image(cx, node, allow_lists)

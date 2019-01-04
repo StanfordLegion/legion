@@ -2610,27 +2610,16 @@ namespace Legion {
       IndexSpace result = IndexSpace::NO_SPACE;
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(color); \
+            result = runtime->get_index_subspace(p, &point, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(color);
-            result = runtime->get_index_subspace(p, &point,
-                NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -2657,27 +2646,16 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            result = realm_is; \
+            break; \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            result = realm_is;
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -2936,27 +2914,16 @@ namespace Legion {
       LogicalRegion result = LogicalRegion::NO_REGION;
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(color); \
+            result = runtime->get_logical_subregion_by_color(par, &point, \
+                              NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(color);
-            result = runtime->get_logical_subregion_by_color(par, &point,
-                              NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
