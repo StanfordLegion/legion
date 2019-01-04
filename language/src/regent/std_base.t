@@ -576,6 +576,10 @@ function base.types.is_rect_type(t)
   return terralib.types.istype(t) and rawget(t, "is_rect_type") or false
 end
 
+function base.types.is_transform_type(t)
+  return terralib.types.istype(t) and rawget(t, "is_transform_type") or false
+end
+
 function base.types.is_ispace(t)
   return terralib.types.istype(t) and rawget(t, "is_ispace") or false
 end

@@ -239,6 +239,7 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Partition]                  = pass_through,
   [ast.specialized.expr.PartitionEqual]             = pass_through,
   [ast.specialized.expr.PartitionByField]           = pass_through,
+  [ast.specialized.expr.PartitionByRestriction]     = pass_through,
   [ast.specialized.expr.Image]                      = pass_through,
   [ast.specialized.expr.Preimage]                   = pass_through,
   [ast.specialized.expr.CrossProduct]               = pass_through,

@@ -745,24 +745,15 @@ namespace Legion {
     {
       switch (bounds.get_dim())
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is = bounds;
-            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
-                Legion::Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is = bounds; \
+            return ctx->manager->create_index_space(ctx, bounds, &realm_is, \
+              Legion::Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is = bounds;
-            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
-                Legion::Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is = bounds;
-            return ctx->manager->create_index_space(ctx, bounds, &realm_is,
-                Legion::Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -776,39 +767,20 @@ namespace Legion {
     {
       switch (points[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Point<1,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<1,coord_t>(points[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_points)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
-          }
-        case 2:
-          {
-            std::vector<Realm::Point<2,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<2,coord_t>(points[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_points)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            std::vector<Realm::Point<3,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<3,coord_t>(points[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_points)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          std::vector<Realm::Point<DIM,coord_t> > realm_points(points.size()); \
+          for (unsigned idx = 0; idx < points.size(); idx++) \
+            realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+          DomainT<DIM,coord_t> realm_is( \
+              (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+          const Domain domain(realm_is); \
+          return ctx->manager->create_index_space(ctx, domain, &realm_is, \
+                    Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -822,39 +794,20 @@ namespace Legion {
     {
       switch (rects[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Rect<1,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_rects)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<1,coord_t>());
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+            for (unsigned idx = 0; idx < rects.size(); idx++) \
+              realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+            DomainT<DIM,coord_t> realm_is( \
+                (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+            const Domain domain(realm_is); \
+            return ctx->manager->create_index_space(ctx, domain, &realm_is, \
+                      Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
-        case 2:
-          {
-            std::vector<Realm::Rect<2,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_rects)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            std::vector<Realm::Rect<3,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_rects)));
-            const Domain domain(realm_is);
-            return ctx->manager->create_index_space(ctx, domain, &realm_is,
-                      Internal::NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }

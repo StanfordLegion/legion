@@ -28,6 +28,11 @@
 #define DISABLE_BARRIER_MIGRATION
 #endif
 
+// Control the maximum number of dimensions for Realm
+#ifndef REALM_MAX_DIM
+#define REALM_MAX_DIM 3
+#endif
+
 // if set, uses ucontext.h for user level thread switching, otherwise falls
 //  back to POSIX threads
 #if !defined(REALM_USE_NATIVE_THREADS) && !defined(__MACH__)

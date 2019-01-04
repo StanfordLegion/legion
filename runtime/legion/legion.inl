@@ -1321,65 +1321,43 @@ namespace Legion {
 
     // Special namespace for providing bounds check help for affine accessors
     namespace AffineBounds {
-      // A helper method for testing bounds for affine accessors
+      // A helper class for testing bounds for affine accessors
       // which might have a transform associated with them
       // We should never use the base version of this, only the specializations
       template<int N, typename T>
       class Tester {
       public:
-        Tester(const DomainT<N,T> b) { assert(false); }
-        Tester(const DomainT<N,T> b, const Rect<N,T> s) { assert(false); }
-        template<int M2>
-        Tester(const DomainT<M2,T> b,
-               const AffineTransform<M2,N,T> t) { assert(false); }
-        template<int M2>
-        Tester(const DomainT<M2,T> b, const Rect<N,T> s,
-               const AffineTransform<M2,N,T> t) { assert(false); }
-      public:
-        __CUDA_HD__
-        inline bool contains(const Point<N,T> &p) const 
-        { assert(false); return false; }
-        __CUDA_HD__
-        inline bool contains_all(const Rect<N,T> &r) const
-        { assert(false); return false; }
-      };
-      // Specialization for 1
-      template<typename T>
-      class Tester<1,T> {
-      public:
-        static const int MAX_M_DIMS = 3;
-      public:
         Tester(void) : M(0) { }
-        Tester(const DomainT<1,T> b) 
-          : M(1), has_source(false), has_transform(false), gpu_warning(true)
+        Tester(const DomainT<N,T> b) 
+          : M(N), has_source(false), has_transform(false), gpu_warning(true)
         { 
-          new (bounds) DomainT<1,T>(b);
+          new (bounds) DomainT<N,T>(b);
         }
-        Tester(const DomainT<1,T> b, const Rect<1,T> s)
-          : source(s), M(1), has_source(true), 
+        Tester(const DomainT<N,T> b, const Rect<N,T> s)
+          : source(s), M(N), has_source(true), 
             has_transform(false), gpu_warning(true)
         {
-          new (bounds) DomainT<1,T>(b);
+          new (bounds) DomainT<N,T>(b);
         }
         template<int M2>
         Tester(const DomainT<M2,T> b,
-               const AffineTransform<M2,1,T> t) 
+               const AffineTransform<M2,N,T> t) 
           : M(M2), has_source(false), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
+          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
           new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,1,T>(t);
+          new (transform) AffineTransform<M2,N,T>(t);
         }
         template<int M2>
-        Tester(const DomainT<M2,T> b, const Rect<1,T> s,
-               const AffineTransform<M2,1,T> t) 
+        Tester(const DomainT<M2,T> b, const Rect<N,T> s,
+               const AffineTransform<M2,N,T> t) 
           : source(s), M(M2), has_source(true), 
             has_transform(!t.is_identity()), gpu_warning(true)
         { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
+          LEGION_STATIC_ASSERT(M2 <= LEGION_MAX_DIM);
           new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,1,T>(t);
+          new (transform) AffineTransform<M2,N,T>(t);
         }
         ~Tester(void)
         {
@@ -1387,37 +1365,24 @@ namespace Legion {
           {
             case 0:
               break;
-            case 1:
-              {
-                reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<1,1,T>*>(transform)->
-                    ~AffineTransform<1,1,T>();
-                break;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT<DIM,T>(); \
+                if (has_transform) \
+                  reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
+                    ~AffineTransform<DIM,N,T>(); \
+                break; \
               }
-            case 2:
-              {
-                reinterpret_cast<DomainT<2,T>*>(bounds)->~DomainT<2,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<2,1,T>*>(transform)->
-                    ~AffineTransform<2,1,T>();
-                break;
-              }
-            case 3:
-              {
-                reinterpret_cast<DomainT<3,T>*>(bounds)->~DomainT<3,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<3,1,T>*>(transform)->
-                    ~AffineTransform<3,1,T>();
-                break;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
         }
       public:
         __CUDA_HD__
-        inline bool contains(const Point<1,T> &p) const
+        inline bool contains(const Point<N,T> &p) const
         {
           if (has_source && !source.contains(p))
             return false;
@@ -1425,66 +1390,40 @@ namespace Legion {
           if (gpu_warning)
             check_gpu_warning();
           if (!has_transfrom)
-            return reinterpret_cast<const DomainT<1,T>*>(bounds)->
+            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
               bounds.contains(p);
           switch (M)
           {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,1,T>*>(transform);
-                return b.bounds.contains(t[p]);
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const DomainT<DIM,T> &b = \
+                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
+                const AffineTransform<DIM,N,T> &t = \
+                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                return b.bounds.contains(t[p]); \
               }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,1,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,1,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
 #else
           if (!has_transform)
-            return reinterpret_cast<const DomainT<1,T>*>(bounds)->contains(p);
+            return reinterpret_cast<const DomainT<N,T>*>(bounds)->contains(p);
           switch (M)
           {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,1,T>*>(transform);
-                return b.contains(t[p]);
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const DomainT<DIM,T> &b = \
+                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
+                const AffineTransform<DIM,N,T> &t = \
+                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                return b.contains(t[p]); \
               }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,1,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,1,T>*>(transform);
-                return b.contains(t[p]);
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
@@ -1492,7 +1431,7 @@ namespace Legion {
           return false;
         }
         __CUDA_HD__
-        inline bool contains_all(const Rect<1,T> &r) const
+        inline bool contains_all(const Rect<N,T> &r) const
         {
           if (has_source && !source.contains(r))
             return false;
@@ -1500,87 +1439,49 @@ namespace Legion {
           if (gpu_warning)
             check_gpu_warning();
           if (!has_transform)
-            return reinterpret_cast<const DomainT<1,T>*>(bounds)->
+            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
               bounds.contains(r);
           // If we have a transform then we have to do each point separately
           switch (M)
           {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const DomainT<DIM,T> &b = \
+                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
+                const AffineTransform<DIM,N,T> &t = \
+                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
+                  if (!b.bounds.contains(t[*itr])) \
+                    return false; \
+                return true; \
               }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
 #else
           if (!has_transform)
-            return reinterpret_cast<const DomainT<1,T>*>(bounds)->
+            return reinterpret_cast<const DomainT<N,T>*>(bounds)->
               contains_all(r);
           // If we have a transform then we have to do each point separately
           switch (M)
           {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const DomainT<DIM,T> &b = \
+                  *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
+                const AffineTransform<DIM,N,T> &t = \
+                  *reinterpret_cast<const AffineTransform<DIM,N,T>*>(transform); \
+                for (PointInRectIterator<N,T> itr(r); itr(); itr++) \
+                  if (!b.contains(t[*itr])) \
+                    return false; \
+                return true; \
               }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,1,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,1,T>*>(transform);
-                for (PointInRectIterator<1,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
@@ -1597,21 +1498,26 @@ namespace Legion {
           {
             switch (M)
             {
-              case 1:
-                need_warning = !bounds.one.dense();
-                break;
-              case 2:
-                need_warning = !bounds.two.dense();
-                break;
-              case 3:
-                need_warning = !bounds.three.dense();
-                break;
+#define DIMFUNC(DIM) \
+              case DIM: \
+                { \
+                  const DomainT<DIM,T> &b = \
+                    *reinterpret_cast<const DomainT<DIM,T>*>(bounds); \
+                  need_warning = !b.dense(); \
+                  break; \
+                }
+              LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
               default:
                 assert(false);
             }
           }
-          else if (!bounds.one.dense())
-            need_warning = true;
+          else
+          {
+            const DomainT<N,T> &b =
+                *reinterpret_cast<const DomainT<N,T>*>(bounds);
+            need_warning = !b.dense();
+          }
           if (need_warning)
             printf("WARNING: GPU bounds check is imprecise!\n");
           gpu_warning = false;
@@ -1620,636 +1526,9 @@ namespace Legion {
       private:
         // Use unsafe buffers for these since we can't have virtual 
         // methods on the GPU for objects created on the CPU
-        char bounds[sizeof(DomainT<MAX_M_DIMS,T>)];
-        char transform[sizeof(AffineTransform<MAX_M_DIMS,1,T>)];
-        Rect<1,T> source;
-        int M;
-        bool has_source;
-        bool has_transform;
-        mutable bool gpu_warning;
-      };
-      // Specialization for 2
-      template<typename T>
-      class Tester<2,T> {
-      public:
-        static const int MAX_M_DIMS = 3;
-      public:
-        Tester(void) : M(0) { }
-        Tester(const DomainT<2,T> b) 
-          : M(2), has_source(false), has_transform(false), gpu_warning(true)
-        { 
-          new (bounds) DomainT<2,T>(b);
-        }
-        Tester(const DomainT<2,T> b, const Rect<2,T> s) 
-          : source(s), M(2), has_source(true), 
-            has_transform(false), gpu_warning(true)
-        { 
-          new (bounds) DomainT<2,T>(b);
-        }
-        template<int M2>
-        Tester(const DomainT<M2,T> b,
-               const AffineTransform<M2,2,T> t) 
-          : M(M2), has_source(false), has_transform(true), gpu_warning(true)
-        { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,2,T>(t);
-        }
-        template<int M2>
-        Tester(const DomainT<M2,T> b, const Rect<2,T> s,
-               const AffineTransform<M2,2,T> t) 
-          : source(s), M(M2), has_source(true), 
-            has_transform(true), gpu_warning(true)
-        { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,2,T>(t);
-        }
-        ~Tester(void)
-        {
-          switch (M)
-          {
-            case 0:
-              break;
-            case 1:
-              {
-                reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<1,2,T>*>(transform)->
-                    ~AffineTransform<1,2,T>();
-                break;
-              }
-            case 2:
-              {
-                reinterpret_cast<DomainT<2,T>*>(bounds)->~DomainT<2,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<2,2,T>*>(transform)->
-                    ~AffineTransform<2,2,T>();
-                break;
-              }
-            case 3:
-              {
-                reinterpret_cast<DomainT<3,T>*>(bounds)->~DomainT<3,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<3,2,T>*>(transform)->
-                    ~AffineTransform<3,2,T>();
-                break;
-              }
-            default:
-              assert(false);
-          }
-        }
-      public:
-        __CUDA_HD__
-        inline bool contains(const Point<2,T> &p) const
-        {
-          if (has_source && !source.contains(p))
-            return false;
-#ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
-          if (!has_transfrom)
-            return reinterpret_cast<const DomainT<2,T>*>(bounds)->
-              bounds.contains(p);
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,2,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,2,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,2,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            default:
-              assert(false);
-          }
-#else
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<2,T>*>(bounds)->contains(p);
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,2,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,2,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,2,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            default:
-              assert(false);
-          }
-#endif
-          return false;
-        }
-        __CUDA_HD__
-        inline bool contains_all(const Rect<2,T> &r) const
-        {
-          if (has_source && !source.contains(r))
-            return false;
-#ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<2,T>*>(bounds)->
-              bounds.contains(r);
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            default:
-              assert(false);
-          }
-#else
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<2,T>*>(bounds)->
-              contains_all(r);
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,2,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,2,T>*>(transform);
-                for (PointInRectIterator<2,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            default:
-              assert(false);
-          }
-#endif
-          return false;
-        }
-      private:
-        __CUDA_HD__
-        inline void check_gpu_warning(void) const
-        {
-#ifdef __CUDA_ARCH__
-          bool need_warning = false;
-          if (has_transform)
-          {
-            switch (M)
-            {
-              case 1:
-                need_warning = !bounds.one.dense();
-                break;
-              case 2:
-                need_warning = !bounds.two.dense();
-                break;
-              case 3:
-                need_warning = !bounds.three.dense();
-                break;
-              default:
-                assert(false);
-            }
-          }
-          else if (!bounds.one.dense())
-            need_warning = true;
-          if (need_warning)
-            printf("WARNING: GPU bounds check is imprecise!\n");
-          gpu_warning = false;
-#endif
-        }
-      private:
-        // Use unsafe buffers for these since we can't have virtual 
-        // methods on the GPU for objects created on the CPU
-        char bounds[sizeof(DomainT<MAX_M_DIMS,T>)];
-        char transform[sizeof(AffineTransform<MAX_M_DIMS,2,T>)];
-        Rect<2,T> source;
-        int M;
-        bool has_source;
-        bool has_transform;
-        mutable bool gpu_warning;
-      };
-      // Specialization for 3
-      template<typename T>
-      class Tester<3,T> {
-      public:
-        static const int MAX_M_DIMS = 3;
-      public:
-        Tester(void) : M(0) { }
-        Tester(const DomainT<3,T> b) 
-          : M(3), has_source(false), has_transform(false), gpu_warning(true)
-        { 
-          new (bounds) DomainT<3,T>(b);
-        }
-        Tester(const DomainT<3,T> b, Rect<3,T> s) 
-          : source(s), M(3), has_source(true), 
-            has_transform(false), gpu_warning(true)
-        { 
-          new (bounds) DomainT<3,T>(b);
-        }
-        template<int M2>
-        Tester(const DomainT<M2,T> b,
-               const AffineTransform<M2,3,T> t) 
-          : M(M2), has_source(false), has_transform(true), gpu_warning(true)
-        { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,3,T>(t);
-        }
-        template<int M2>
-        Tester(const DomainT<M2,T> b, const Rect<3,T> s,
-               const AffineTransform<M2,3,T> t) 
-          : source(s), M(M2), has_source(true), 
-            has_transform(true), gpu_warning(true)
-        { 
-          LEGION_STATIC_ASSERT(M2 <= MAX_M_DIMS);
-          new (bounds) DomainT<M2,T>(b);
-          new (transform) AffineTransform<M2,3,T>(t);
-        }
-        ~Tester(void)
-        {
-          switch (M)
-          {
-            case 0:
-              break;
-            case 1:
-              {
-                reinterpret_cast<DomainT<1,T>*>(bounds)->~DomainT<1,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<1,3,T>*>(transform)->
-                    ~AffineTransform<1,3,T>();
-                break;
-              }
-            case 2:
-              {
-                reinterpret_cast<DomainT<2,T>*>(bounds)->~DomainT<2,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<2,3,T>*>(transform)->
-                    ~AffineTransform<2,3,T>();
-                break;
-              }
-            case 3:
-              {
-                reinterpret_cast<DomainT<3,T>*>(bounds)->~DomainT<3,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<3,3,T>*>(transform)->
-                    ~AffineTransform<3,3,T>();
-                break;
-              }
-#if 0
-            case 4:
-              {
-                reinterpret_cast<DomainT<4,T>*>(bounds)->~DomainT<4,T>();
-                if (has_transform)
-                  reinterpret_cast<AffineTransform<4,3,T>*>(transform)->
-                    ~AffineTransform<4,3,T>();
-                break;
-              }
-#endif
-            default:
-              assert(false);
-          }
-        }
-      public:
-        __CUDA_HD__
-        inline bool contains(const Point<3,T> &p) const
-        {
-          if (has_source && !source.contains(p))
-            return false;
-#ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
-          if (!has_transfrom)
-            return reinterpret_cast<const DomainT<3,T>*>(bounds)->
-              bounds.contains(p);
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,3,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,3,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,3,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-#if 0
-            case 4:
-              {
-                const DomainT<4,T> &b = 
-                  *reinterpret_cast<const DomainT<4,T>*>(bounds);
-                const AffineTransform<4,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<4,3,T>*>(transform);
-                return b.bounds.contains(t[p]);
-              }
-#endif
-            default:
-              assert(false);
-          }
-#else
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<3,T>*>(bounds)->contains(p);
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,3,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,3,T>*>(transform);
-                return b.contains(t[p]);
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,3,T>*>(transform);
-                return b.contains(t[p]);
-              }
-#if 0
-            case 4:
-              {
-                const DomainT<4,T> &b = 
-                  *reinterpret_cast<const DomainT<4,T>*>(bounds);
-                const AffineTransform<4,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<4,3,T>*>(transform);
-                return b.contains(t[p]);
-              }
-#endif
-            default:
-              assert(false);
-          }
-#endif
-          return false;
-        }
-        __CUDA_HD__
-        inline bool contains_all(const Rect<3,T> &r) const
-        {
-          if (has_source && !source.contains(r))
-            return false;
-#ifdef __CUDA_ARCH__
-          if (gpu_warning)
-            check_gpu_warning();
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<3,T>*>(bounds)->
-              bounds.contains(r);
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-#if 0
-            case 4:
-              {
-                const DomainT<4,T> &b = 
-                  *reinterpret_cast<const DomainT<4,T>*>(bounds);
-                const AffineTransform<4,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<4,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.bounds.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-#endif
-            default:
-              assert(false);
-          }
-#else
-          if (!has_transform)
-            return reinterpret_cast<const DomainT<3,T>*>(bounds)->
-              contains_all(r);
-          // If we have a transform then we have to do each point separately
-          switch (M)
-          {
-            case 1:
-              {
-                const DomainT<1,T> &b = 
-                  *reinterpret_cast<const DomainT<1,T>*>(bounds);
-                const AffineTransform<1,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<1,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 2:
-              {
-                const DomainT<2,T> &b = 
-                  *reinterpret_cast<const DomainT<2,T>*>(bounds);
-                const AffineTransform<2,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<2,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-            case 3:
-              {
-                const DomainT<3,T> &b = 
-                  *reinterpret_cast<const DomainT<3,T>*>(bounds);
-                const AffineTransform<3,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<3,3,T>*>(transform);
-                for (PointInRectIterator<3,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-#if 0
-            case 4:
-              {
-                const DomainT<4,T> &b = 
-                  *reinterpret_cast<const DomainT<4,T>*>(bounds);
-                const AffineTransform<4,3,T> &t = 
-                  *reinterpret_cast<const AffineTransform<4,3,T>*>(transform);
-                for (PointInRectIterator<4,T> itr(r); itr(); itr++)
-                  if (!b.contains(t[*itr]))
-                    return false;
-                return true;
-              }
-#endif
-            default:
-              assert(false);
-          }
-#endif
-          return false;
-        }
-      private:
-        __CUDA_HD__
-        inline void check_gpu_warning(void) const
-        {
-#ifdef __CUDA_ARCH__
-          bool need_warning = false;
-          if (has_transform)
-          {
-            switch (M)
-            {
-              case 1:
-                need_warning = !bounds.one.dense();
-                break;
-              case 2:
-                need_warning = !bounds.two.dense();
-                break;
-              case 3:
-                need_warning = !bounds.three.dense();
-                break;
-              case 4:
-                need_warning = !bounds.four.dense();
-                break;
-              default:
-                assert(false);
-            }
-          }
-          else if (!bounds.one.dense())
-            need_warning = true;
-          if (need_warning)
-            printf("WARNING: GPU bounds check is imprecise!\n");
-          gpu_warning = false;
-#endif
-        }
-      private:
-        // Use unsafe buffers for these since we can't have virtual 
-        // methods on the GPU for objects created on the CPU
-        char bounds[sizeof(DomainT<MAX_M_DIMS,T>)];
-        char transform[sizeof(AffineTransform<MAX_M_DIMS,3,T>)];
-        Rect<3,T> source;
+        char bounds[sizeof(DomainT<LEGION_MAX_DIM,T>)];
+        char transform[sizeof(AffineTransform<LEGION_MAX_DIM,N,T>)];
+        Rect<N,T> source;
         int M;
         bool has_source;
         bool has_transform;
@@ -9477,7 +8756,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION
       assert(arglen == sizeof(InternalContext));
@@ -9534,7 +8813,7 @@ namespace Legion {
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,Future>::value));
       LEGION_STATIC_ASSERT((LegionTypeInequality<T,FutureMap>::value));
       // Assert that the return type size is within the required size
-      LEGION_STATIC_ASSERT(sizeof(T) <= MAX_RETURN_SIZE);
+      LEGION_STATIC_ASSERT(sizeof(T) <= LEGION_MAX_RETURN_SIZE);
 
       // Read the context out of the buffer
 #ifdef DEBUG_LEGION

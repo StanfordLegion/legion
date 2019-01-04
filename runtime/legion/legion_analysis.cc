@@ -1342,18 +1342,79 @@ namespace Legion {
                           color[0], mask_buffer);
               break;
             }
+#if LEGION_MAX_DIM >= 2
           case 2:
             {
               logger->log("Color (%d,%d)   Mask %s", 
                           color[0], color[1], mask_buffer);
               break;
             }
+#endif
+#if LEGION_MAX_DIM >= 3
           case 3:
             {
               logger->log("Color (%d,%d,%d)   Mask %s", 
                           color[0], color[1], color[2], mask_buffer);
               break;
             }
+#endif
+#if LEGION_MAX_DIM >= 4
+          case 4:
+            {
+              logger->log("Color (%d,%d,%d,%d)   Mask %s", 
+                          color[0], color[1], color[2], 
+                          color[3], mask_buffer);
+              break;
+            }
+#endif
+#if LEGION_MAX_DIM >= 5
+          case 5:
+            {
+              logger->log("Color (%d,%d,%d,%d,%d)   Mask %s", 
+                          color[0], color[1], color[2],
+                          color[3], color[4], mask_buffer);
+              break;
+            }
+#endif
+#if LEGION_MAX_DIM >= 6
+          case 6:
+            {
+              logger->log("Color (%d,%d,%d,%d,%d,%d)   Mask %s", 
+                          color[0], color[1], color[2], 
+                          color[3], color[4], color[5], mask_buffer);
+              break;
+            }
+#endif
+#if LEGION_MAX_DIM >= 7
+          case 7:
+            {
+              logger->log("Color (%d,%d,%d,%d,%d,%d,%d)   Mask %s", 
+                          color[0], color[1], color[2], 
+                          color[3], color[4], color[5], 
+                          color[6], mask_buffer);
+              break;
+            }
+#endif
+#if LEGION_MAX_DIM >= 8
+          case 8:
+            {
+              logger->log("Color (%d,%d,%d,%d,%d,%d,%d,%d)   Mask %s",
+                          color[0], color[1], color[2], 
+                          color[3], color[4], color[5], 
+                          color[6], color[7], mask_buffer);
+              break;
+            }
+#endif
+#if LEGION_MAX_DIM >= 9
+          case 9:
+            {
+              logger->log("Color (%d,%d,%d,%d,%d,%d,%d,%d,%d)   Mask %s",
+                          color[0], color[1], color[2], 
+                          color[3], color[4], color[5], 
+                          color[6], color[7], color[8], mask_buffer);
+              break;
+            }
+#endif
           default:
             assert(false); // implemenent more dimensions
         }

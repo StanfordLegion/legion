@@ -43,7 +43,7 @@ namespace Realm {
   //  to have to somehow know which ones to instantiate - this is controlled by the
   //  following type lists, using a bunch of helper stuff from dynamic_templates.h
 
-  typedef DynamicTemplates::IntList<1, 3> DIMCOUNTS;
+  typedef DynamicTemplates::IntList<1, REALM_MAX_DIM> DIMCOUNTS;
   typedef DynamicTemplates::TypeList<int, unsigned int, long long>::TL DIMTYPES;
   typedef DynamicTemplates::TypeList<int, bool>::TL FLDTYPES;
 

@@ -125,6 +125,7 @@ local node_allow_annotations = {
   [ast.typed.expr.Partition]                  = deny_all,
   [ast.typed.expr.PartitionEqual]             = deny_all,
   [ast.typed.expr.PartitionByField]           = deny_all,
+  [ast.typed.expr.PartitionByRestriction]     = deny_all,
   [ast.typed.expr.Image]                      = deny_all,
   [ast.typed.expr.ImageByTask]                = deny_all,
   [ast.typed.expr.Preimage]                   = deny_all,

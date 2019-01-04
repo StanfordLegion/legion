@@ -39,6 +39,7 @@ builtins.partition = std.partition
 builtins.phase_barrier = std.phase_barrier
 builtins.ptr = std.ptr
 builtins.region = std.region
+builtins.transform = std.transform
 builtins.wild = std.wild
 
 return builtins

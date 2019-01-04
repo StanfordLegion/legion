@@ -41,116 +41,270 @@
 //                                Constants
 //==========================================================================
 
+#ifndef AUTO_GENERATE_ID
 #define AUTO_GENERATE_ID   UINT_MAX
-
-#define GC_MIN_PRIORITY    INT_MIN
-#define GC_MAX_PRIORITY    INT_MAX
-
-#define GC_FIRST_PRIORITY  GC_MAX_PRIORITY
-#define GC_DEFAULT_PRIORITY 0
-#define GC_LAST_PRIORITY   (GC_MIN_PRIORITY+1)
-#define GC_NEVER_PRIORITY  GC_MIN_PRIORITY
-
-#ifndef MAX_RETURN_SIZE
-#define MAX_RETURN_SIZE    2048 // maximum return type size in bytes
+#else
+#error "legion.h requires the ability to define the macro 'AUTO_GENERATE_ID' but it has already been defined"
 #endif
 
-#ifndef MAX_FIELDS
-#define MAX_FIELDS         512 // must be a power of 2
+#ifndef GC_MIN_PRIORITY
+#define GC_MIN_PRIORITY    INT_MIN
+#else
+#error "legion.h requires the ability to define the macro 'GC_MIN_PRIORITY' but it has already been defined"
+#endif
+
+#ifndef GC_MAX_PRIORITY
+#define GC_MAX_PRIORITY    INT_MAX
+#else
+#error "legion.h requires the ability to define the macro 'GC_MAX_PRIORITY' but it has already been defined"
+#endif
+
+#ifndef GC_NEVER_PRIORITY
+#define GC_NEVER_PRIORITY  GC_MIN_PRIORITY
+#else
+#error "legion.h requires the ability to define the macro 'GC_NEVER_PRIORITY' but it has already been defined"
+#endif
+
+#ifndef GC_FIRST_PRIORITY
+#define GC_FIRST_PRIORITY  GC_MAX_PRIORITY
+#endif
+#ifndef GC_DEFAULT_PRIORITY
+#define GC_DEFAULT_PRIORITY 0
+#endif
+#ifndef GC_LAST_PRIORITY
+#define GC_LAST_PRIORITY   (GC_MIN_PRIORITY+1)
+#endif
+
+#ifndef LEGION_MAX_DIM
+#define LEGION_MAX_DIM     3 // maximum number of dimensions for index spaces
+#endif
+
+#ifndef MAX_RETURN_SIZE // For backwards compatibility
+#ifndef LEGION_MAX_RETURN_SIZE
+#define LEGION_MAX_RETURN_SIZE    2048 // maximum return type size in bytes
+#endif
+#else
+#ifndef LEGION_MAX_RETURN_SIZE
+#define LEGION_MAX_RETURN_SIZE    (MAX_RETURN_SIZE)
+#endif
+#endif
+
+#ifndef MAX_FIELDS // For backwards compatibility
+#ifndef LEGION_MAX_FIELDS
+#define LEGION_MAX_FIELDS         512 // must be a power of 2
+#endif
+#else
+#ifndef LEGION_MAX_FIELDS
+#define LEGION_MAX_FIELDS         (MAX_FIELDS)
+#endif
 #endif
 
 // Some default values
 
 // The maximum number of nodes to be run on
-#ifndef MAX_NUM_NODES
-#define MAX_NUM_NODES                   1024 // must be a power of 2
+#ifndef MAX_NUM_NODES // For backwards compatibility
+#ifndef LEGION_MAX_NUM_NODES
+#define LEGION_MAX_NUM_NODES                   1024 // must be a power of 2
+#endif
+#else
+#ifndef LEGION_MAX_NUM_NODES
+#define LEGION_MAX_NUM_NODES                   (MAX_NUM_NODES)
+#endif
 #endif
 // The maximum number of processors on a node
-#ifndef MAX_NUM_PROCS
-#define MAX_NUM_PROCS                   64 // must be a power of 2
+#ifndef MAX_NUM_PROCS // For backwards compatibility
+#ifndef LEGION_MAX_NUM_PROCS
+#define LEGION_MAX_NUM_PROCS                   64 // must be a power of 2
+#endif
+#else
+#ifndef LEGION_MAX_NUM_PROCS
+#define LEGION_MAX_NUM_PROCS                   (MAX_NUM_PROCS)
+#endif
 #endif
 // Maximum ID for an application task ID 
-#ifndef MAX_APPLICATION_TASK_ID
-#define MAX_APPLICATION_TASK_ID         (1<<20)
+#ifndef MAX_APPLICATION_TASK_ID // For backwards compatibility
+#ifndef LEGION_MAX_APPLICATION_TASK_ID
+#define LEGION_MAX_APPLICATION_TASK_ID         (1<<20)
+#endif
+#else
+#ifndef LEGION_MAX_APPLICATION_TASK_ID
+#define LEGION_MAX_APPLICATION_TASK_ID         (MAX_APPLICATION_TASK_ID)
+#endif
 #endif
 // Maximum ID for an application field ID
-#ifndef MAX_APPLICATION_FIELD_ID
-#define MAX_APPLICATION_FIELD_ID        (1<<20)
+#ifndef MAX_APPLICATION_FIELD_ID // For backwards compatibility
+#ifndef LEGION_MAX_APPLICATION_FIELD_ID
+#define LEGION_MAX_APPLICATION_FIELD_ID        (1<<20)
+#endif
+#else
+#ifndef LEGION_MAX_APPLICATION_FIELD_ID
+#define LEGION_MAX_APPLICATION_FIELD_ID        (MAX_APPLICATION_FIELD_ID)
+#endif
 #endif
 // Maximum ID for an application mapper ID
-#ifndef MAX_APPLICATION_MAPPER_ID
-#define MAX_APPLICATION_MAPPER_ID       (1<<20)
+#ifndef MAX_APPLICATION_MAPPER_ID // For backwards compatibility
+#ifndef LEGION_MAX_APPLICATION_MAPPER_ID
+#define LEGION_MAX_APPLICATION_MAPPER_ID       (1<<20)
+#endif
+#else
+#ifndef LEGION_MAX_APPLICATION_MAPPER_ID
+#define LEGION_MAX_APPLICATION_MAPPER_ID       (MAX_APPLICATION_MAPPER_ID)
+#endif
 #endif
 // Maximum ID for an application projection ID
-#ifndef MAX_APPLICATION_PROJECTION_ID
-#define MAX_APPLICATION_PROJECTION_ID   (1<<20)
+#ifndef MAX_APPLICATION_PROJECTION_ID // For backwards compatibility
+#ifndef LEGION_MAX_APPLICATION_PROJECTION_ID
+#define LEGION_MAX_APPLICATION_PROJECTION_ID   (1<<20)
+#endif
+#else
+#ifndef LEGION_MAX_APPLICATION_PROJECTION_ID
+#define LEGION_MAX_APPLICATION_PROJECTION_ID  (MAX_APPLICATION_PROJECTION_ID)
+#endif
 #endif
 // Maximum ID for an application sharding ID
-#ifndef MAX_APPLICATION_SHARDING_ID
-#define MAX_APPLICATION_SHARDING_ID     (1<<20)
+#ifndef MAX_APPLICATION_SHARDING_ID // For backwards compatibility
+#ifndef LEGION_MAX_APPLICATION_SHARDING_ID
+#define LEGION_MAX_APPLICATION_SHARDING_ID     (1<<20)
+#endif
+#else
+#ifndef LEGION_MAX_APPLICATION_SHARDING_ID
+#define LEGION_MAX_APPLICATION_SHARDING_ID    (MAX_APPLICATION_SHARDING_ID)
+#endif
 #endif
 // Default number of local fields per field space
-#ifndef DEFAULT_LOCAL_FIELDS
-#define DEFAULT_LOCAL_FIELDS            4
+#ifndef DEFAULT_LOCAL_FIELDS // For backwards compatibility
+#ifndef LEGION_DEFAULT_LOCAL_FIELDS
+#define LEGION_DEFAULT_LOCAL_FIELDS            4
+#endif
+#else
+#ifndef LEGION_DEFAULT_LOCAL_FIELDS
+#define LEGION_DEFAULT_LOCAL_FIELDS            (DEFAULT_LOCAL_FIELDS)
+#endif
 #endif
 // Default number of mapper slots
-#ifndef DEFAULT_MAPPER_SLOTS
-#define DEFAULT_MAPPER_SLOTS            8
+#ifndef DEFAULT_MAPPER_SLOTS // For backwards compatibility
+#ifndef LEGION_DEFAULT_MAPPER_SLOTS
+#define LEGION_DEFAULT_MAPPER_SLOTS            8
+#endif
+#else
+#ifndef LEGION_DEFAULT_MAPPER_SLOTS
+#define LEGION_DEFAULT_MAPPER_SLOTS            (DEFAULT_MAPPER_SLOTS)
+#endif
 #endif
 // Default number of contexts made for each runtime instance
 // Ideally this is a power of 2 (better for performance)
-#ifndef DEFAULT_CONTEXTS
-#define DEFAULT_CONTEXTS                8
+#ifndef DEFAULT_CONTEXTS // For backwards compatibility
+#ifndef LEGION_DEFAULT_CONTEXTS
+#define LEGION_DEFAULT_CONTEXTS                8
+#endif
+#else
+#ifndef LEGION_DEFAULT_CONTEXTS
+#define LEGION_DEFAULT_CONTEXTS                (DEFAULT_CONTEXTS)
+#endif
 #endif
 // Maximum number of sub-tasks per task at a time
-#ifndef DEFAULT_MAX_TASK_WINDOW
-#define DEFAULT_MAX_TASK_WINDOW         1024
+#ifndef DEFAULT_MAX_TASK_WINDOW // For backwards compatibility
+#ifndef LEGION_DEFAULT_MAX_TASK_WINDOW
+#define LEGION_DEFAULT_MAX_TASK_WINDOW         1024
+#endif
+#else
+#ifndef LEGION_DEFAULT_MAX_TASK_WINDOW
+#define LEGION_DEFAULT_MAX_TASK_WINDOW         (DEFAULT_MAX_TASK_WINDOW)
+#endif
 #endif
 // Default amount of hysteresis on the task window in the
 // form of a percentage (must be between 0 and 100)
-#ifndef DEFAULT_TASK_WINDOW_HYSTERESIS
-#define DEFAULT_TASK_WINDOW_HYSTERESIS  25
+#ifndef DEFAULT_TASK_WINDOW_HYSTERESIS // For backwards compatibility
+#ifndef LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS
+#define LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS  25
+#endif
+#else
+#ifndef LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS
+#define LEGION_DEFAULT_TASK_WINDOW_HYSTERESIS  (DEFAULT_TASK_WINDOW_HYSTERESIS)
+#endif
 #endif
 // Default number of tasks to have in flight before applying 
 // back pressure to the mapping process for a context
-#ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE
-#define DEFAULT_MIN_TASKS_TO_SCHEDULE   32
+#ifndef DEFAULT_MIN_TASKS_TO_SCHEDULE // For backwards compatibility
+#ifndef LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE
+#define LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE   32
+#endif
+#else
+#ifndef LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE
+#define LEGION_DEFAULT_MIN_TASKS_TO_SCHEDULE   (DEFAULT_MIN_TASKS_TO_SCHEDULE)
+#endif
 #endif
 // How many tasks to group together for runtime operations
-#ifndef DEFAULT_META_TASK_VECTOR_WIDTH
-#define DEFAULT_META_TASK_VECTOR_WIDTH  16
+#ifndef DEFAULT_META_TASK_VECTOR_WIDTH // For backwards compatibility
+#ifndef LEGION_DEFAULT_META_TASK_VECTOR_WIDTH
+#define LEGION_DEFAULT_META_TASK_VECTOR_WIDTH  16
+#endif
+#else
+#ifndef LEGION_DEFAULT_META_TASK_VECTOR_WIDTH
+#define LEGION_DEFAULT_META_TASK_VECTOR_WIDTH  (DEFAULT_META_TASK_VECTOR_WIDTH)
+#endif
 #endif
 // Default number of replay tasks to run in parallel
-#ifndef DEFAULT_MAX_REPLAY_PARALLELISM
-#define DEFAULT_MAX_REPLAY_PARALLELISM  2
+#ifndef DEFAULT_MAX_REPLAY_PARALLELISM // For backwards compatibility
+#ifndef LEGION_DEFAULT_MAX_REPLAY_PARALLELISM
+#define LEGION_DEFAULT_MAX_REPLAY_PARALLELISM  2
+#endif
+#else
+#ifndef LEGION_DEFAULT_MAX_REPLAY_PARALLELISM
+#define LEGION_DEFAULT_MAX_REPLAY_PARALLELISM  (DEFAULT_MAX_REPLAY_PARALLELISM)
+#endif
 #endif
 // The maximum size of active messages sent by the runtime in bytes
 // Note this value was picked based on making a tradeoff between
 // latency and bandwidth numbers on both Cray and Infiniband
 // interconnect networks.
-#ifndef DEFAULT_MAX_MESSAGE_SIZE
-#define DEFAULT_MAX_MESSAGE_SIZE        16384
+#ifndef DEFAULT_MAX_MESSAGE_SIZE // For backwards compatibility
+#ifndef LEGION_DEFAULT_MAX_MESSAGE_SIZE
+#define LEGION_DEFAULT_MAX_MESSAGE_SIZE        16384
+#endif
+#else
+#ifndef LEGION_DEFAULT_MAX_MESSAGE_SIZE
+#define LEGION_DEFAULT_MAX_MESSAGE_SIZE        (DEFAULT_MAX_MESSAGE_SIZE)
+#endif
 #endif
 // Timeout before checking for whether a logical user
 // should be pruned from the logical region tree data strucutre
 // Making the value less than or equal to zero will
 // result in checks always being performed
-#ifndef DEFAULT_LOGICAL_USER_TIMEOUT
-#define DEFAULT_LOGICAL_USER_TIMEOUT    32
+#ifndef DEFAULT_LOGICAL_USER_TIMEOUT // For backwards compatibility
+#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
+#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    32
+#endif
+#else
+#ifndef LEGION_DEFAULT_LOGICAL_USER_TIMEOUT
+#define LEGION_DEFAULT_LOGICAL_USER_TIMEOUT    (DEFAULT_LOGICAL_USER_TIMEOUT)
+#endif
 #endif
 // Number of events to place in each GC epoch
 // Large counts improve efficiency but add latency to
 // garbage collection.  Smaller count reduce efficiency
 // but improve latency of collection.
-#ifndef DEFAULT_GC_EPOCH_SIZE
-#define DEFAULT_GC_EPOCH_SIZE           64
+#ifndef DEFAULT_GC_EPOCH_SIZE // For backwards compatibility
+#ifndef LEGION_DEFAULT_GC_EPOCH_SIZE
+#define LEGION_DEFAULT_GC_EPOCH_SIZE           64
+#endif
+#else
+#ifndef LEGION_DEFAULT_GC_EPOCH_SIZE
+#define LEGION_DEFAULT_GC_EPOCH_SIZE           (DEFAULT_GC_EPOCH_SIZE)
+#endif
 #endif
 
 // Used for debugging memory leaks
 // How often tracing information is dumped
 // based on the number of scheduler invocations
-#ifndef TRACE_ALLOCATION_FREQUENCY
-#define TRACE_ALLOCATION_FREQUENCY      1024
+#ifndef TRACE_ALLOCATION_FREQUENCY // For backwards compatibility
+#ifndef LEGION_TRACE_ALLOCATION_FREQUENCY
+#define LEGION_TRACE_ALLOCATION_FREQUENCY      1024
+#endif
+#else
+#ifndef LEGION_TRACE_ALLOCATION_FREQUENCY
+#define LEGION_TRACE_ALLOCATION_FREQUENCY      (TRACE_ALLOCATION_FREQUENCY)
+#endif
 #endif
 
 // The maximum alignment guaranteed on the 
@@ -218,8 +372,9 @@
                    (x==24) ? 26 : (x==25) ? 12 : (x==26) ? 18 : (x==27) ? 6 : \
                    (x==28) ? 11 : (x==29) ? 5 : (x==30) ? 10 : 9)
 
+// log2(LEGION_MAX_FIELDS)
 #ifndef LEGION_FIELD_LOG2
-#define LEGION_FIELD_LOG2         STATIC_LOG2(MAX_FIELDS) // log2(MAX_FIELDS)
+#define LEGION_FIELD_LOG2         STATIC_LOG2(LEGION_MAX_FIELDS) 
 #endif
 
 #define LEGION_STRINGIFY(x) #x
@@ -229,6 +384,385 @@
 #define LEGION_DISTRIBUTED_ID_FILTER(x) ((x) & 0x00FFFFFFFFFFFFFFULL)
 #define LEGION_DISTRIBUTED_HELP_DECODE(x)   ((x) >> 56)
 #define LEGION_DISTRIBUTED_HELP_ENCODE(x,y) ((x) | (((long long)(y)) << 56))
+
+#if LEGION_MAX_DIM == 1
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) 
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1)
+
+#elif LEGION_MAX_DIM == 2
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(2,1) \
+  __func__(2,2)
+
+#elif LEGION_MAX_DIM == 3
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3)
+
+#elif LEGION_MAX_DIM == 4
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4)
+
+#elif LEGION_MAX_DIM == 5
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4) \
+  __func__(5)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(1,5) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(2,5) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(3,5) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4) \
+  __func__(4,5) \
+  __func__(5,1) \
+  __func__(5,2) \
+  __func__(5,3) \
+  __func__(5,4) \
+  __func__(5,5)
+
+#elif LEGION_MAX_DIM == 6
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4) \
+  __func__(5) \
+  __func__(6)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(1,5) \
+  __func__(1,6) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(2,5) \
+  __func__(2,6) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(3,5) \
+  __func__(3,6) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4) \
+  __func__(4,5) \
+  __func__(4,6) \
+  __func__(5,1) \
+  __func__(5,2) \
+  __func__(5,3) \
+  __func__(5,4) \
+  __func__(5,5) \
+  __func__(5,6) \
+  __func__(6,1) \
+  __func__(6,2) \
+  __func__(6,3) \
+  __func__(6,4) \
+  __func__(6,5) \
+  __func__(6,6)
+
+#elif LEGION_MAX_DIM == 7
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4) \
+  __func__(5) \
+  __func__(6) \
+  __func__(7)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(1,5) \
+  __func__(1,6) \
+  __func__(1,7) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(2,5) \
+  __func__(2,6) \
+  __func__(2,7) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(3,5) \
+  __func__(3,6) \
+  __func__(3,7) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4) \
+  __func__(4,5) \
+  __func__(4,6) \
+  __func__(4,7) \
+  __func__(5,1) \
+  __func__(5,2) \
+  __func__(5,3) \
+  __func__(5,4) \
+  __func__(5,5) \
+  __func__(5,6) \
+  __func__(5,7) \
+  __func__(6,1) \
+  __func__(6,2) \
+  __func__(6,3) \
+  __func__(6,4) \
+  __func__(6,5) \
+  __func__(6,6) \
+  __func__(6,7) \
+  __func__(7,1) \
+  __func__(7,2) \
+  __func__(7,3) \
+  __func__(7,4) \
+  __func__(7,5) \
+  __func__(7,6) \
+  __func__(7,7)
+
+#elif LEGION_MAX_DIM == 8
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4) \
+  __func__(5) \
+  __func__(6) \
+  __func__(7) \
+  __func__(8)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(1,5) \
+  __func__(1,6) \
+  __func__(1,7) \
+  __func__(1,8) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(2,5) \
+  __func__(2,6) \
+  __func__(2,7) \
+  __func__(2,8) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(3,5) \
+  __func__(3,6) \
+  __func__(3,7) \
+  __func__(3,8) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4) \
+  __func__(4,5) \
+  __func__(4,6) \
+  __func__(4,7) \
+  __func__(4,8) \
+  __func__(5,1) \
+  __func__(5,2) \
+  __func__(5,3) \
+  __func__(5,4) \
+  __func__(5,5) \
+  __func__(5,6) \
+  __func__(5,7) \
+  __func__(5,8) \
+  __func__(6,1) \
+  __func__(6,2) \
+  __func__(6,3) \
+  __func__(6,4) \
+  __func__(6,5) \
+  __func__(6,6) \
+  __func__(6,7) \
+  __func__(6,8) \
+  __func__(7,1) \
+  __func__(7,2) \
+  __func__(7,3) \
+  __func__(7,4) \
+  __func__(7,5) \
+  __func__(7,6) \
+  __func__(7,7) \
+  __func__(7,8) \
+  __func__(8,1) \
+  __func__(8,2) \
+  __func__(8,3) \
+  __func__(8,4) \
+  __func__(8,5) \
+  __func__(8,6) \
+  __func__(8,7) \
+  __func__(8,8)
+
+#elif LEGION_MAX_DIM == 9
+
+#define LEGION_FOREACH_N(__func__) \
+  __func__(1) \
+  __func__(2) \
+  __func__(3) \
+  __func__(4) \
+  __func__(5) \
+  __func__(6) \
+  __func__(7) \
+  __func__(8) \
+  __func__(9)
+#define LEGION_FOREACH_NN(__func__) \
+  __func__(1,1) \
+  __func__(1,2) \
+  __func__(1,3) \
+  __func__(1,4) \
+  __func__(1,5) \
+  __func__(1,6) \
+  __func__(1,7) \
+  __func__(1,8) \
+  __func__(1,9) \
+  __func__(2,1) \
+  __func__(2,2) \
+  __func__(2,3) \
+  __func__(2,4) \
+  __func__(2,5) \
+  __func__(2,6) \
+  __func__(2,7) \
+  __func__(2,8) \
+  __func__(2,9) \
+  __func__(3,1) \
+  __func__(3,2) \
+  __func__(3,3) \
+  __func__(3,4) \
+  __func__(3,5) \
+  __func__(3,6) \
+  __func__(3,7) \
+  __func__(3,8) \
+  __func__(3,9) \
+  __func__(4,1) \
+  __func__(4,2) \
+  __func__(4,3) \
+  __func__(4,4) \
+  __func__(4,5) \
+  __func__(4,6) \
+  __func__(4,7) \
+  __func__(4,8) \
+  __func__(4,9) \
+  __func__(5,1) \
+  __func__(5,2) \
+  __func__(5,3) \
+  __func__(5,4) \
+  __func__(5,5) \
+  __func__(5,6) \
+  __func__(5,7) \
+  __func__(5,8) \
+  __func__(5,9) \
+  __func__(6,1) \
+  __func__(6,2) \
+  __func__(6,3) \
+  __func__(6,4) \
+  __func__(6,5) \
+  __func__(6,6) \
+  __func__(6,7) \
+  __func__(6,8) \
+  __func__(6,9) \
+  __func__(7,1) \
+  __func__(7,2) \
+  __func__(7,3) \
+  __func__(7,4) \
+  __func__(7,5) \
+  __func__(7,6) \
+  __func__(7,7) \
+  __func__(7,8) \
+  __func__(7,9) \
+  __func__(8,1) \
+  __func__(8,2) \
+  __func__(8,3) \
+  __func__(8,4) \
+  __func__(8,5) \
+  __func__(8,6) \
+  __func__(8,7) \
+  __func__(8,8) \
+  __func__(8,9) \
+  __func__(9,1) \
+  __func__(9,2) \
+  __func__(9,3) \
+  __func__(9,4) \
+  __func__(9,5) \
+  __func__(9,6) \
+  __func__(9,7) \
+  __func__(9,8) \
+  __func__(9,9)
+
+#else
+#error "Unsupported LEGION_MAX_DIM"
+#endif
 
 // The following enums are all re-exported by
 // namespace Legion. These versions are here to facilitate the
@@ -778,13 +1312,32 @@ typedef enum legion_dimension_kind_t {
   DIM_X = 0, // first logical index space dimension
   DIM_Y = 1, // second logical index space dimension
   DIM_Z = 2, // ...
-  DIM_F = 3, // field dimension
-  INNER_DIM_X = 4, // inner dimension for tiling X
-  OUTER_DIM_X = 5, // outer dimension for tiling X
-  INNER_DIM_Y = 6, // ...
-  OUTER_DIM_Y = 7,
-  INNER_DIM_Z = 8,
-  OUTER_DIM_Z = 9,
+  DIM_W = 3,
+  DIM_A = 4,
+  DIM_B = 5,
+  DIM_C = 6,
+  DIM_D = 7,
+  DIM_E = 8,
+  // TODO: Something for DIM 9?
+  DIM_F = 9, // field dimension
+  INNER_DIM_X = 10, // inner dimension for tiling X
+  OUTER_DIM_X = 11, // outer dimension for tiling X
+  INNER_DIM_Y = 12, // ...
+  OUTER_DIM_Y = 13,
+  INNER_DIM_Z = 14,
+  OUTER_DIM_Z = 15,
+  INNER_DIM_W = 16,
+  OUTER_DIM_W = 17,
+  INNER_DIM_A = 18,
+  OUTER_DIM_A = 19,
+  INNER_DIM_B = 20,
+  OUTER_DIM_B = 21,
+  INNER_DIM_C = 22,
+  OUTER_DIM_C = 23,
+  INNER_DIM_D = 24,
+  OUTER_DIM_D = 25,
+  INNER_DIM_E = 26,
+  OUTER_DIM_E = 27,
 } legion_dimension_kind_t;
 
 // Make all flags 1-hot encoding so we can logically-or them together
@@ -855,8 +1408,8 @@ typedef enum legion_specialized_constraint_t {
 } legion_specialized_constraint_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h
-#define LEGION_MAX_POINT_DIM 3
-#define LEGION_MAX_RECT_DIM 3
+#define LEGION_MAX_POINT_DIM (LEGION_MAX_DIM)
+#define LEGION_MAX_RECT_DIM  (LEGION_MAX_DIM)
 typedef enum legion_domain_max_rect_dim_t {
   MAX_POINT_DIM = LEGION_MAX_POINT_DIM,
   MAX_RECT_DIM = LEGION_MAX_RECT_DIM,
