@@ -1010,8 +1010,8 @@ typedef enum legion_specialized_constraint_t {
 } legion_specialized_constraint_t;
 
 // Keep this in sync with Domain::MAX_RECT_DIM in legion_domain.h
-#define LEGION_MAX_POINT_DIM 3
-#define LEGION_MAX_RECT_DIM 3
+#define LEGION_MAX_POINT_DIM (LEGION_MAX_DIM)
+#define LEGION_MAX_RECT_DIM  (LEGION_MAX_DIM)
 typedef enum legion_domain_max_rect_dim_t {
   MAX_POINT_DIM = LEGION_MAX_POINT_DIM,
   MAX_RECT_DIM = LEGION_MAX_RECT_DIM,

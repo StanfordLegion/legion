@@ -175,26 +175,196 @@ namespace Legion {
       static inline void log_index_space_point(IDType handle,
                                     const Point<DIM,T> &point)
       {
-        LEGION_STATIC_ASSERT(DIM <= 3);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+#if LEGION_MAX_DIM == 1
+        log_spy.print("Index Space Point " IDFMT " %d %lld", handle,
+                      DIM, (long long)(point[0])); 
+#elif LEGION_MAX_DIM == 2
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld", handle,
+                      DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]));
+#elif LEGION_MAX_DIM == 3
         log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld", handle,
                       DIM, (long long)(point[0]), 
                       (long long)((DIM < 2) ? 0 : point[1]),
                       (long long)((DIM < 3) ? 0 : point[2]));
+#elif LEGION_MAX_DIM == 4
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld", 
+                      handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]));
+#elif LEGION_MAX_DIM == 5
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld %lld", 
+                      handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]),
+                      (long long)((DIM < 5) ? 0 : point[4]));
+#elif LEGION_MAX_DIM == 6
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld %lld "
+                      "%lld", handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]),
+                      (long long)((DIM < 5) ? 0 : point[4]),
+                      (long long)((DIM < 6) ? 0 : point[5]));
+#elif LEGION_MAX_DIM == 7
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld %lld "
+                      "%lld %lld", handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]),
+                      (long long)((DIM < 5) ? 0 : point[4]),
+                      (long long)((DIM < 6) ? 0 : point[5]),
+                      (long long)((DIM < 7) ? 0 : point[6]));
+#elif LEGION_MAX_DIM == 8
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld", handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]),
+                      (long long)((DIM < 5) ? 0 : point[4]),
+                      (long long)((DIM < 6) ? 0 : point[5]),
+                      (long long)((DIM < 7) ? 0 : point[6]),
+                      (long long)((DIM < 8) ? 0 : point[7]));
+#elif LEGION_MAX_DIM == 9
+        log_spy.print("Index Space Point " IDFMT " %d %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld", handle, DIM, (long long)(point[0]), 
+                      (long long)((DIM < 2) ? 0 : point[1]),
+                      (long long)((DIM < 3) ? 0 : point[2]),
+                      (long long)((DIM < 4) ? 0 : point[3]),
+                      (long long)((DIM < 5) ? 0 : point[4]),
+                      (long long)((DIM < 6) ? 0 : point[5]),
+                      (long long)((DIM < 7) ? 0 : point[6]),
+                      (long long)((DIM < 8) ? 0 : point[7]),
+                      (long long)((DIM < 9) ? 0 : point[8]));
+#else
+#error "Illegal LEGION_MAX_DIM"
+#endif
       }
 
       template<int DIM, typename T>
       static inline void log_index_space_rect(IDType handle, 
                                               const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= 3);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+#if LEGION_MAX_DIM == 1
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld", handle, DIM, 
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0])); 
+#elif LEGION_MAX_DIM == 2
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld", handle, DIM, 
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1])); 
+#elif LEGION_MAX_DIM == 3
         log_spy.print("Index Space Rect " IDFMT " %d "
                       "%lld %lld %lld %lld %lld %lld", handle, DIM, 
-                      (long long)(rect.lo[0]),
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
                       (long long)((DIM < 2) ? 0 : rect.lo[1]), 
-                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
-                      (long long)(rect.hi[0]), 
                       (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
                       (long long)((DIM < 3) ? 0 : rect.hi[2]));
+#elif LEGION_MAX_DIM == 4
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld", handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]));
+#elif LEGION_MAX_DIM == 5
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld", 
+                      handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]),
+                      (long long)((DIM < 5) ? 0 : rect.lo[4]),
+                      (long long)((DIM < 5) ? 0 : rect.hi[4]));
+#elif LEGION_MAX_DIM == 6
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld", handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]),
+                      (long long)((DIM < 5) ? 0 : rect.lo[4]),
+                      (long long)((DIM < 5) ? 0 : rect.hi[4]),
+                      (long long)((DIM < 6) ? 0 : rect.lo[5]),
+                      (long long)((DIM < 6) ? 0 : rect.hi[5]));
+#elif LEGION_MAX_DIM == 7
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld", handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]),
+                      (long long)((DIM < 5) ? 0 : rect.lo[4]),
+                      (long long)((DIM < 5) ? 0 : rect.hi[4]),
+                      (long long)((DIM < 6) ? 0 : rect.lo[5]),
+                      (long long)((DIM < 6) ? 0 : rect.hi[5]),
+                      (long long)((DIM < 7) ? 0 : rect.lo[6]),
+                      (long long)((DIM < 7) ? 0 : rect.hi[6]));
+#elif LEGION_MAX_DIM == 8
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld %lld %lld", handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]),
+                      (long long)((DIM < 5) ? 0 : rect.lo[4]),
+                      (long long)((DIM < 5) ? 0 : rect.hi[4]),
+                      (long long)((DIM < 6) ? 0 : rect.lo[5]),
+                      (long long)((DIM < 6) ? 0 : rect.hi[5]),
+                      (long long)((DIM < 7) ? 0 : rect.lo[6]),
+                      (long long)((DIM < 7) ? 0 : rect.hi[6]),
+                      (long long)((DIM < 8) ? 0 : rect.lo[7]),
+                      (long long)((DIM < 8) ? 0 : rect.hi[7]));
+#elif LEGION_MAX_DIM == 9
+        log_spy.print("Index Space Rect " IDFMT " %d "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld %lld %lld %lld %lld", handle, DIM,
+                      (long long)(rect.lo[0]), (long long)(rect.hi[0]), 
+                      (long long)((DIM < 2) ? 0 : rect.lo[1]), 
+                      (long long)((DIM < 2) ? 0 : rect.hi[1]), 
+                      (long long)((DIM < 3) ? 0 : rect.lo[2]), 
+                      (long long)((DIM < 3) ? 0 : rect.hi[2]),
+                      (long long)((DIM < 4) ? 0 : rect.lo[3]),
+                      (long long)((DIM < 4) ? 0 : rect.hi[3]),
+                      (long long)((DIM < 5) ? 0 : rect.lo[4]),
+                      (long long)((DIM < 5) ? 0 : rect.hi[4]),
+                      (long long)((DIM < 6) ? 0 : rect.lo[5]),
+                      (long long)((DIM < 6) ? 0 : rect.hi[5]),
+                      (long long)((DIM < 7) ? 0 : rect.lo[6]),
+                      (long long)((DIM < 7) ? 0 : rect.hi[6]),
+                      (long long)((DIM < 8) ? 0 : rect.lo[7]),
+                      (long long)((DIM < 8) ? 0 : rect.hi[7]),
+                      (long long)((DIM < 9) ? 0 : rect.lo[8]),
+                      (long long)((DIM < 9) ? 0 : rect.hi[8]));
+#else
+#error "Illegal LEGION_MAX_DIM"
+#endif
       }
 
       static inline void log_empty_index_space(IDType handle)
@@ -493,14 +663,111 @@ namespace Legion {
       static inline void log_launch_index_space_rect(UniqueID unique_id, 
                                                      const Rect<DIM,T> &rect)
       {
-        LEGION_STATIC_ASSERT(DIM <= 3);
+        LEGION_STATIC_ASSERT(DIM <= LEGION_MAX_DIM);
+#if LEGION_MAX_DIM == 1
         log_spy.print() << "Index Launch Rect " << unique_id << " "
-                        << DIM << " " << rect.lo[0]
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0];
+#elif LEGION_MAX_DIM == 2
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
                         << " " << ((DIM < 2) ? 0 : rect.lo[1])
-                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
-                        << " " << rect.hi[0]
                         << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
                         << " " << ((DIM < 3) ? 0 : rect.hi[2]);
+#elif LEGION_MAX_DIM == 3
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2]);
+#elif LEGION_MAX_DIM == 4
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3]);
+#elif LEGION_MAX_DIM == 5
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3])
+                        << " " << ((DIM < 5) ? 0 : rect.lo[4])
+                        << " " << ((DIM < 5) ? 0 : rect.hi[4]);
+#elif LEGION_MAX_DIM == 6
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3])
+                        << " " << ((DIM < 5) ? 0 : rect.lo[4])
+                        << " " << ((DIM < 5) ? 0 : rect.hi[4])
+                        << " " << ((DIM < 6) ? 0 : rect.lo[5])
+                        << " " << ((DIM < 6) ? 0 : rect.hi[5]);
+#elif LEGION_MAX_DIM == 7
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3])
+                        << " " << ((DIM < 5) ? 0 : rect.lo[4])
+                        << " " << ((DIM < 5) ? 0 : rect.hi[4])
+                        << " " << ((DIM < 6) ? 0 : rect.lo[5])
+                        << " " << ((DIM < 6) ? 0 : rect.hi[5])
+                        << " " << ((DIM < 7) ? 0 : rect.lo[6])
+                        << " " << ((DIM < 7) ? 0 : rect.hi[6]);
+#elif LEGION_MAX_DIM == 8
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3])
+                        << " " << ((DIM < 5) ? 0 : rect.lo[4])
+                        << " " << ((DIM < 5) ? 0 : rect.hi[4])
+                        << " " << ((DIM < 6) ? 0 : rect.lo[5])
+                        << " " << ((DIM < 6) ? 0 : rect.hi[5])
+                        << " " << ((DIM < 7) ? 0 : rect.lo[6])
+                        << " " << ((DIM < 7) ? 0 : rect.hi[6])
+                        << " " << ((DIM < 8) ? 0 : rect.lo[7])
+                        << " " << ((DIM < 8) ? 0 : rect.hi[7]);
+#elif LEGION_MAX_DIM == 9
+        log_spy.print() << "Index Launch Rect " << unique_id << " "
+                        << DIM << " " << rect.lo[0] << " " << rect.hi[0]
+                        << " " << ((DIM < 2) ? 0 : rect.lo[1])
+                        << " " << ((DIM < 2) ? 0 : rect.hi[1])
+                        << " " << ((DIM < 3) ? 0 : rect.lo[2])
+                        << " " << ((DIM < 3) ? 0 : rect.hi[2])
+                        << " " << ((DIM < 4) ? 0 : rect.lo[3])
+                        << " " << ((DIM < 4) ? 0 : rect.hi[3])
+                        << " " << ((DIM < 5) ? 0 : rect.lo[4])
+                        << " " << ((DIM < 5) ? 0 : rect.hi[4])
+                        << " " << ((DIM < 6) ? 0 : rect.lo[5])
+                        << " " << ((DIM < 6) ? 0 : rect.hi[5])
+                        << " " << ((DIM < 7) ? 0 : rect.lo[6])
+                        << " " << ((DIM < 7) ? 0 : rect.hi[6])
+                        << " " << ((DIM < 8) ? 0 : rect.lo[7])
+                        << " " << ((DIM < 8) ? 0 : rect.hi[7])
+                        << " " << ((DIM < 9) ? 0 : rect.lo[8])
+                        << " " << ((DIM < 9) ? 0 : rect.hi[8]);
+#else
+#error "Illegal LEGION_MAX_DIM"
+#endif
       }
 
       // Logger calls for futures

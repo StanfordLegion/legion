@@ -15671,6 +15671,7 @@ namespace Legion {
               color[0], get_depth());
             break;
           }
+#if LEGION_MAX_DIM >= 2
         case 2:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
@@ -15679,6 +15680,8 @@ namespace Legion {
               color[0], color[1], get_depth());
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
         case 3:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
@@ -15687,6 +15690,71 @@ namespace Legion {
               color[0], color[2], color[2], get_depth());
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+        case 4:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d) at "
+                        "depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], get_depth());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+        case 5:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d) "
+                        "at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], get_depth());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+        case 6:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d) "
+                        "at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], get_depth());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+        case 7:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d) "
+                        "at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], get_depth());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+        case 8:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d,%d)"
+                        " at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], get_depth());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+        case 9:
+          {
+            logger->log("Region Node (%x,%d,%d) Color "
+                        "(%d,%d,%d,%d,%d,%d,%d,%d) at depth %d", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], color[8], get_depth());
+            break;
+          }
+#endif
         default:
           assert(false);
       }
@@ -15770,12 +15838,12 @@ namespace Legion {
       {
         case 1:
           {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d (%p)",
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               color[0], logger->get_depth(), this);
             break;
           }
+#if LEGION_MAX_DIM >= 2
         case 2:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
@@ -15784,14 +15852,83 @@ namespace Legion {
               color[0], color[1], logger->get_depth(), this);
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
         case 3:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              color[0], color[1], color[2], logger->get_depth(), this);
+              color[0], color[2], color[2], logger->get_depth(), this);
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+        case 4:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d) at "
+                        "depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], logger->get_depth(),this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+        case 5:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+        case 6:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+        case 7:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+        case 8:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d,%d)"
+                        " at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+        case 9:
+          {
+            logger->log("Region Node (%x,%d,%d) Color "
+                        "(%d,%d,%d,%d,%d,%d,%d,%d) at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], color[8], 
+              logger->get_depth(), this);
+            break;
+          }
+#endif
         default:
           assert(false);
       }
@@ -15828,12 +15965,12 @@ namespace Legion {
       {
         case 1:
           {
-            logger->log("Region Node (%x,%d,%d) Color %d at "
-                        "depth %d (%p)", 
+            logger->log("Region Node (%x,%d,%d) Color %d at depth %d (%p)",
               handle.index_space.id, handle.field_space.id,handle.tree_id,
               color[0], logger->get_depth(), this);
             break;
           }
+#if LEGION_MAX_DIM >= 2
         case 2:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d) at "
@@ -15842,14 +15979,83 @@ namespace Legion {
               color[0], color[1], logger->get_depth(), this);
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
         case 3:
           {
             logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d) at "
                         "depth %d (%p)", 
               handle.index_space.id, handle.field_space.id,handle.tree_id,
-              color[0], color[1], color[2], logger->get_depth(), this);
+              color[0], color[2], color[2], logger->get_depth(), this);
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+        case 4:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d) at "
+                        "depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], logger->get_depth(),this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+        case 5:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+        case 6:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+        case 7:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d) "
+                        "at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+        case 8:
+          {
+            logger->log("Region Node (%x,%d,%d) Color (%d,%d,%d,%d,%d,%d,%d,%d)"
+                        " at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], logger->get_depth(), this);
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+        case 9:
+          {
+            logger->log("Region Node (%x,%d,%d) Color "
+                        "(%d,%d,%d,%d,%d,%d,%d,%d) at depth %d (%p)", 
+              handle.index_space.id, handle.field_space.id,handle.tree_id,
+              color[0], color[2], color[2], color[3], color[4], 
+              color[5], color[6], color[7], color[8], 
+              logger->get_depth(), this);
+            break;
+          }
+#endif
         default:
           assert(false);
       }

@@ -10180,24 +10180,15 @@ namespace Legion {
         // This code will only work if the color space has type coord_t
         switch (color_space.get_dim())
         {
-          case 1:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<1,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              TypeTag type_tag = NT_TemplateHelper::encode_tag<DIM,coord_t>(); \
+              assert(handle1.get_type_tag() == type_tag); \
+              break; \
             }
-          case 2:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<2,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
-          case 3:
-            {
-              TypeTag type_tag = NT_TemplateHelper::encode_tag<3,coord_t>();
-              assert(handle1.get_type_tag() == type_tag);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -10206,24 +10197,15 @@ namespace Legion {
           IndexSpace subspace;
           switch (color_space.get_dim())
           {
-            case 1:
-              {
-                const Point<1,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                const Point<DIM,coord_t> p(itr.p); \
+                subspace = get_index_subspace(handle1, &p, sizeof(p)); \
+                break; \
               }
-            case 2:
-              {
-                const Point<2,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
-            case 3:
-              {
-                const Point<3,coord_t> p(itr.p);
-                subspace = get_index_subspace(handle1, &p, sizeof(p));
-                break;
-              }
+            LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
             default:
               assert(false);
           }
@@ -10644,27 +10626,16 @@ namespace Legion {
       const IndexSpace color_space = part->color_space->handle;
       switch (NT_TemplateHelper::get_dim(color_space.get_type_tag()))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> color_index_space; \
+            forest->get_index_space_domain(color_space, &color_index_space, \
+                                           color_space.get_type_tag()); \
+            return Domain(color_index_space); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> color_index_space;
-            forest->get_index_space_domain(color_space, &color_index_space,
-                                           color_space.get_type_tag());
-            return Domain(color_index_space);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -15934,7 +15905,7 @@ namespace Legion {
 #ifdef TRACE_ALLOCATION
       unsigned long long trace_count = 
         __sync_fetch_and_add(&allocation_tracing_count,1); 
-      if ((trace_count % TRACE_ALLOCATION_FREQUENCY) == 0)
+      if ((trace_count % LEGION_TRACE_ALLOCATION_FREQUENCY) == 0)
         dump_allocation_info();
 #endif
     }
@@ -16512,24 +16483,15 @@ namespace Legion {
     {
       switch (dom.get_dim())
       {
-        case 1:
-          {
-            DomainT<1,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<1,coord_t>());
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> is = dom; \
+            return find_or_create_index_launch_space(dom, &is, \
+                  NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<2,coord_t>());
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> is = dom;
-            return find_or_create_index_launch_space(dom, &is,
-                  NT_TemplateHelper::encode_tag<3,coord_t>());
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -18670,18 +18632,14 @@ namespace Legion {
 
 #ifndef DISABLE_PARTITION_SHIM
       // Preregister any partition shim task variants we need 
-      PartitionShim::ColorPoints<1>::register_task();
-      PartitionShim::ColorPoints<2>::register_task();
-      PartitionShim::ColorPoints<3>::register_task();
-      PartitionShim::ColorRects<1,1>::register_task();
-      PartitionShim::ColorRects<1,2>::register_task();
-      PartitionShim::ColorRects<1,3>::register_task();
-      PartitionShim::ColorRects<2,1>::register_task();
-      PartitionShim::ColorRects<2,2>::register_task();
-      PartitionShim::ColorRects<2,3>::register_task();
-      PartitionShim::ColorRects<3,1>::register_task();
-      PartitionShim::ColorRects<3,2>::register_task();
-      PartitionShim::ColorRects<3,3>::register_task();
+#define COLOR_POINTS(DIM) \
+      PartitionShim::ColorPoints<DIM>::register_task();
+      LEGION_FOREACH_N(COLOR_POINTS)
+#undef COLOR_POINTS
+#define COLOR_RECTS(D1,D2) \
+      PartitionShim::ColorRects<D1,D2>::register_task();
+      LEGION_FOREACH_NN(COLOR_RECTS)
+#undef COLOR_RECTS
 #endif
 
       // Need to pass argc and argv to low-level runtime before we can record 
@@ -19624,16 +19582,77 @@ namespace Legion {
                            "1D point (%lld)\n", region->get_task_name(),
                             dp.point_data[0]);
             break;
+#if LEGION_MAX_DIM >= 2
           case 2:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                            "2D point (%lld,%lld)\n", region->get_task_name(),
                             dp.point_data[0], dp.point_data[1]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 3
           case 3:
             fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
                          "3D point (%lld,%lld,%lld)\n", region->get_task_name(),
                           dp.point_data[0], dp.point_data[1], dp.point_data[2]);
             break;
+#endif
+#if LEGION_MAX_DIM >= 4
+          case 4:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "4D point (%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 5
+          case 5:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "5D point (%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 6
+          case 6:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "6D point (%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 7
+          case 7:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "7D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n", 
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 8
+          case 8:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                         "8D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7]);
+            break;
+#endif
+#if LEGION_MAX_DIM >= 9
+          case 9:
+            fprintf(stderr,"BOUNDS CHECK ERROR IN TASK %s: Accessing invalid "
+                   "9D point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld,%lld)\n",
+                          region->get_task_name(),
+                          dp.point_data[0], dp.point_data[1], dp.point_data[2],
+                          dp.point_data[3], dp.point_data[4], dp.point_data[5],
+                          dp.point_data[6], dp.point_data[7], dp.point_data[8]);
+            break;
+#endif
           default:
             assert(false);
         }

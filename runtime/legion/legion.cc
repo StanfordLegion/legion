@@ -401,18 +401,14 @@ namespace Legion {
     }
 
     // Do the explicit instantiation
-    template class ColorPoints<1>;
-    template class ColorPoints<2>;
-    template class ColorPoints<3>;
-    template class ColorRects<1,1>;
-    template class ColorRects<1,2>;
-    template class ColorRects<1,3>;
-    template class ColorRects<2,1>;
-    template class ColorRects<2,2>;
-    template class ColorRects<2,3>;
-    template class ColorRects<3,1>;
-    template class ColorRects<3,2>;
-    template class ColorRects<3,3>;
+#define DIMFUNC(DIM) \
+    template class ColorPoints<DIM>;
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+#define DIMFUNC(D1,D2) \
+    template class ColorRects<D1,D2>;
+    LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
   };
 #endif // DISABLE_PARTITION_SHIM
 
@@ -425,12 +421,11 @@ namespace Legion {
     const Domain Domain::NO_DOMAIN = Domain();
 
     // Cache static type tags so we don't need to recompute them all the time
-    static const TypeTag TYPE_TAG_1D =
-      Internal::NT_TemplateHelper::encode_tag<1,coord_t>();
-    static const TypeTag TYPE_TAG_2D =
-      Internal::NT_TemplateHelper::encode_tag<2,coord_t>();
-    static const TypeTag TYPE_TAG_3D =
-      Internal::NT_TemplateHelper::encode_tag<3,coord_t>();
+#define DIMFUNC(DIM) \
+    static const TypeTag TYPE_TAG_##DIM##D = \
+      Internal::NT_TemplateHelper::encode_tag<DIM,coord_t>();
+    LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
 
     /////////////////////////////////////////////////////////////
     // Mappable 
@@ -3177,24 +3172,15 @@ namespace Legion {
     {
       switch (domain.get_dim())
       {
-        case 1:
-          {
-            Rect<1,coord_t> bounds = domain;
-            DomainT<1,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Rect<2,coord_t> bounds = domain;
-            DomainT<2,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Rect<3,coord_t> bounds = domain;
-            DomainT<3,coord_t> realm_is(bounds);
-            return create_index_space_internal(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM:                       \
+      {                             \
+        Rect<DIM,coord_t> bounds = domain; \
+        DomainT<DIM,coord_t> realm_is(bounds); \
+        return create_index_space_internal(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3217,33 +3203,18 @@ namespace Legion {
     {
       switch (points[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Point<1,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<1,coord_t>(points[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            std::vector<Realm::Point<2,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<2,coord_t>(points[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            std::vector<Realm::Point<3,coord_t> > realm_points(points.size());
-            for (unsigned idx = 0; idx < points.size(); idx++)
-              realm_points[idx] = Point<3,coord_t>(points[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_points)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        std::vector<Realm::Point<DIM,coord_t> > realm_points(points.size()); \
+        for (unsigned idx = 0; idx < points.size(); idx++) \
+          realm_points[idx] = Point<DIM,coord_t>(points[idx]); \
+        DomainT<DIM,coord_t> realm_is( \
+            (Realm::IndexSpace<DIM,coord_t>(realm_points))); \
+        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3257,33 +3228,18 @@ namespace Legion {
     {
       switch (rects[0].get_dim())
       {
-        case 1:
-          {
-            std::vector<Realm::Rect<1,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<1,coord_t>(rects[idx]);
-            DomainT<1,coord_t> realm_is(
-                (Realm::IndexSpace<1,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            std::vector<Realm::Rect<2,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<2,coord_t>(rects[idx]);
-            DomainT<2,coord_t> realm_is(
-                (Realm::IndexSpace<2,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            std::vector<Realm::Rect<3,coord_t> > realm_rects(rects.size());
-            for (unsigned idx = 0; idx < rects.size(); idx++)
-              realm_rects[idx] = Rect<3,coord_t>(rects[idx]);
-            DomainT<3,coord_t> realm_is(
-                (Realm::IndexSpace<3,coord_t>(realm_rects)));
-            return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        std::vector<Realm::Rect<DIM,coord_t> > realm_rects(rects.size()); \
+        for (unsigned idx = 0; idx < rects.size(); idx++) \
+          realm_rects[idx] = Rect<DIM,coord_t>(rects[idx]); \
+        DomainT<DIM,coord_t> realm_is( \
+            (Realm::IndexSpace<DIM,coord_t>(realm_rects))); \
+        return runtime->create_index_space(ctx, &realm_is, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3374,24 +3330,15 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_space.get_dim())
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3408,54 +3355,25 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (color_space.get_dim())
       {
-        case 1:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<1,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
-        case 2:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<2,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<2> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
-        case 3:
-          {
-            if (do_ranges)
-            {
-              PartitionShim::ColorRects<3,1> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            else
-            {
-              PartitionShim::ColorPoints<3> launcher(coloring, temp_lr,
-                                                color_fid, pointer_fid);
-              runtime->execute_task(ctx, launcher);
-            }
-            break;
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        if (do_ranges) \
+        { \
+          PartitionShim::ColorRects<DIM,1> launcher(coloring, temp_lr, \
+                                            color_fid, pointer_fid); \
+          runtime->execute_task(ctx, launcher); \
+        } \
+        else \
+        { \
+          PartitionShim::ColorPoints<DIM> launcher(coloring, temp_lr, \
+                                            color_fid, pointer_fid); \
+          runtime->execute_task(ctx, launcher); \
+        } \
+        break; \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3619,47 +3537,29 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3668,100 +3568,18 @@ namespace Legion {
                                             temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
-      switch (color_dim)
+      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
       {
-        case 1:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<1,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<1,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<1,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
+#define DIMFUNC(D1,D2) \
+        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
+          { \
+            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<2,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<2,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<2,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        case 3:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<3,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<3,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<3,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);
@@ -3811,24 +3629,15 @@ namespace Legion {
         allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3839,27 +3648,16 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
-        case 1:
-          {
-            PartitionShim::ColorRects<1,1> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 2:
-          {
-            PartitionShim::ColorRects<1,2> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 3:
-          {
-            PartitionShim::ColorRects<1,3> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
+          } 
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -3916,47 +3714,29 @@ namespace Legion {
         FieldAllocator allocator = create_field_allocator(ctx,temp_fs);
         switch (color_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<1,coord_t>), color_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Point<DIM,coord_t>), color_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<2,coord_t>), color_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Point<3,coord_t>), color_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -3965,100 +3745,18 @@ namespace Legion {
                                             temp_is, temp_fs, true);
       // Fill in the logical region with the data
       // Do this with a task launch to maintain deferred execution
-      switch (color_dim)
+      switch ((color_dim-1) * LEGION_MAX_DIM + (range_dim-1))
       {
-        case 1:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<1,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<1,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<1,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
+#define DIMFUNC(D1,D2) \
+        case ((D1-1)*LEGION_MAX_DIM+(D2-1)): \
+          { \
+            PartitionShim::ColorRects<D1,D2> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<2,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<2,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<2,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        case 3:
-          {
-            switch (range_dim)
-            {
-              case 1:
-                {
-                  PartitionShim::ColorRects<3,1> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 2:
-                {
-                  PartitionShim::ColorRects<3,2> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              case 3:
-                {
-                  PartitionShim::ColorRects<3,3> launcher(coloring,
-                      temp_lr, color_fid, range_fid);
-                  runtime->execute_task(ctx, launcher);
-                  break;
-                }
-              default:
-                assert(false);
-            }
-            break;
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
       // Make an index space for the color space, just leak it for now
       IndexSpace index_color_space = create_index_space(ctx, color_space);
@@ -4111,24 +3809,15 @@ namespace Legion {
         allocator.allocate_field(sizeof(Point<1,coord_t>), color_fid);
         switch (range_dim)
         {
-          case 1:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<1,coord_t>), range_fid);
-              break;
+#define DIMFUNC(DIM) \
+          case DIM: \
+            { \
+              allocator.allocate_field( \
+                  sizeof(Rect<DIM,coord_t>), range_fid); \
+              break; \
             }
-          case 2:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<2,coord_t>), range_fid);
-              break;
-            }
-          case 3:
-            {
-              allocator.allocate_field(
-                  sizeof(Rect<3,coord_t>), range_fid);
-              break;
-            }
+          LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
           default:
             assert(false);
         }
@@ -4139,27 +3828,16 @@ namespace Legion {
       // Do this with a task launch to maintain deferred execution
       switch (range_dim)
       {
-        case 1:
-          {
-            PartitionShim::ColorRects<1,1> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            PartitionShim::ColorRects<1,DIM> launcher(coloring, \
+                temp_lr, color_fid, range_fid); \
+            runtime->execute_task(ctx, launcher); \
+            break; \
           }
-        case 2:
-          {
-            PartitionShim::ColorRects<1,2> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
-        case 3:
-          {
-            PartitionShim::ColorRects<1,3> launcher(coloring,
-                temp_lr, color_fid, range_fid);
-            runtime->execute_task(ctx, launcher);
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4316,103 +3994,20 @@ namespace Legion {
                                                         Color color)
     //--------------------------------------------------------------------------
     {
-      switch (ext.get_dim())
+      switch ((ext.get_dim()-1) * LEGION_MAX_DIM + (tran.n-1))
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Rect<1,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<1,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<1,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<1,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<1,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
+#define DIMFUNC(D1,D2) \
+        case (D1-1)*LEGION_MAX_DIM+(D2-1): \
+          { \
+            const IndexSpaceT<D1,coord_t> parent(par); \
+            const Rect<D1,coord_t> extent(ext); \
+            const Transform<D1,D2> transform(tran); \
+            const IndexSpaceT<D2,coord_t> color_space(cs); \
+            return create_partition_by_restriction<D1,D2,coord_t>(ctx, \
+                parent, color_space, transform, extent, part_kind, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Rect<2,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<2,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<2,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<2,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<2,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Rect<3,coord_t> extent(ext);
-            switch (tran.n)
-            {
-              case 1:
-                {
-                  const Transform<3,1> transform(tran);
-                  const IndexSpaceT<1,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,1,coord_t>(ctx, 
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 2:
-                {
-                  const Transform<3,2> transform(tran);
-                  const IndexSpaceT<2,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,2,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              case 3:
-                {
-                  const Transform<3,3> transform(tran);
-                  const IndexSpaceT<3,coord_t> color_space(cs);
-                  return create_partition_by_restriction<3,3,coord_t>(ctx,
-                      parent, color_space, transform, extent, part_kind, color);
-                }
-              default:
-                assert(false);
-            }
-          }
-        default:
-          assert(false);
+        LEGION_FOREACH_NN(DIMFUNC)
+#undef DIMFUNC
       }
       return IndexPartition::NO_PART;
     }
@@ -4426,27 +4021,16 @@ namespace Legion {
     {
       switch (bf.get_dim())
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Point<1,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            const IndexSpaceT<DIM,coord_t> parent(par); \
+            const Point<DIM,coord_t> blocking_factor(bf); \
+            return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
+                                                blocking_factor, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Point<2,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Point<3,coord_t> blocking_factor(bf);
-            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
-                                                blocking_factor, color);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4463,30 +4047,17 @@ namespace Legion {
     {
       switch (bf.get_dim())
       {
-        case 1:
-          {
-            const IndexSpaceT<1,coord_t> parent(par);
-            const Point<1,coord_t> blocking_factor(bf);
-            const Point<1,coord_t> origin(orig);
-            return create_partition_by_blockify<1,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            const IndexSpaceT<DIM,coord_t> parent(par); \
+            const Point<DIM,coord_t> blocking_factor(bf); \
+            const Point<DIM,coord_t> origin(orig); \
+            return create_partition_by_blockify<DIM,coord_t>(ctx, parent, \
+                                        blocking_factor, origin, color); \
           }
-        case 2:
-          {
-            const IndexSpaceT<2,coord_t> parent(par);
-            const Point<2,coord_t> blocking_factor(bf);
-            const Point<2,coord_t> origin(orig);
-            return create_partition_by_blockify<2,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
-          }
-        case 3:
-          {
-            const IndexSpaceT<3,coord_t> parent(par);
-            const Point<3,coord_t> blocking_factor(bf);
-            const Point<3,coord_t> origin(orig);
-            return create_partition_by_blockify<3,coord_t>(ctx, parent, 
-                                        blocking_factor, origin, color);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4591,24 +4162,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_1D, handles);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->create_index_space_union(ctx, parent, &point, \
+                                             TYPE_TAG_##DIM##D, handles); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_2D, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_3D, handles);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4633,24 +4195,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_1D, handle);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->create_index_space_union(ctx, parent, &point, \
+                                               TYPE_TAG_##DIM##D, handle); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_2D, handle);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_union(ctx, parent, &point,
-                                                     TYPE_TAG_3D, handle);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4675,24 +4228,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_1D, handles);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_2D, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                          TYPE_TAG_3D, handles);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_intersection(ctx, parent, &point, \
+                                                  TYPE_TAG_##DIM##D, handles); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4717,24 +4261,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_1D, handle);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_2D, handle);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_intersection(ctx, parent, &point,
-                                                           TYPE_TAG_3D, handle);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_intersection(ctx, parent, &point, \
+                                                   TYPE_TAG_##DIM##D, handle); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4759,24 +4294,15 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_1D, initial, handles);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_2D, initial, handles);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->create_index_space_difference(ctx, parent, &point,
-                                                TYPE_TAG_3D, initial, handles);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point = color; \
+          return runtime->create_index_space_difference(ctx, parent, &point, \
+                                        TYPE_TAG_##DIM##D, initial, handles); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4870,21 +4396,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Point<DIM,coord_t> point = color; \
+        return runtime->get_index_subspace(ctx, p, &point, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4906,21 +4425,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->get_index_subspace(p, &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->get_index_subspace(p, &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4942,21 +4454,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Point<DIM,coord_t> point = color; \
+        return runtime->has_index_subspace(ctx, p, &point, TYPE_TAG_##DIM##D); \
+      }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -4969,21 +4474,14 @@ namespace Legion {
     {
       switch (color.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point = color; \
+            return runtime->has_index_subspace(p, &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point = color;
-            return runtime->has_index_subspace(p, &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5021,24 +4519,15 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (Internal::NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag); \
+            return Domain(realm_is); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(ctx, handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5052,24 +4541,15 @@ namespace Legion {
       const TypeTag type_tag = handle.get_type_tag();
       switch (Internal::NT_TemplateHelper::get_dim(type_tag))
       {
-        case 1:
-          {
-            DomainT<1,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> realm_is; \
+            runtime->get_index_space_domain(handle, &realm_is, type_tag); \
+            return Domain(realm_is); \
           }
-        case 2:
-          {
-            DomainT<2,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> realm_is;
-            runtime->get_index_space_domain(handle, &realm_is, type_tag);
-            return Domain(realm_is);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5372,27 +4852,16 @@ namespace Legion {
     {
       switch (point.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_1D))
-              return point;
-            break;
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> p(point); \
+            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_##DIM##D)) \
+              return point; \
+            break; \
           }
-        case 2:
-          {
-            Point<2,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_2D)) 
-              return point;
-            break;
-          }
-        case 3:
-          {
-            Point<3,coord_t> p(point);
-            if (runtime->safe_cast(ctx, region, &p, TYPE_TAG_3D)) 
-              return point;
-            break;
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5611,24 +5080,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->get_logical_subregion_by_color(ctx, parent,  \
+                                             &point, TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(ctx, parent, 
-                                                           &point, TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5651,24 +5111,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->get_logical_subregion_by_color(parent, &point, \
+                                                       TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->get_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5691,24 +5142,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_1D);
-          }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(ctx, parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+#define DIMFUNC(DIM) \
+      case DIM: \
+        { \
+          Point<DIM,coord_t> point(c); \
+          return runtime->has_logical_subregion_by_color(ctx, parent, &point, \
+                                                         TYPE_TAG_##DIM##D); \
+        }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }
@@ -5722,24 +5164,15 @@ namespace Legion {
     {
       switch (c.get_dim())
       {
-        case 1:
-          {
-            Point<1,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_1D);
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            Point<DIM,coord_t> point(c); \
+            return runtime->has_logical_subregion_by_color(parent, &point, \
+                                                       TYPE_TAG_##DIM##D); \
           }
-        case 2:
-          {
-            Point<2,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_2D);
-          }
-        case 3:
-          {
-            Point<3,coord_t> point(c);
-            return runtime->has_logical_subregion_by_color(parent, &point,
-                                                           TYPE_TAG_3D);
-          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
         default:
           assert(false);
       }

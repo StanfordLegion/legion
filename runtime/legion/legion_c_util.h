@@ -37,20 +37,21 @@ namespace Legion {
 
     class CObjectWrapper {
     public:
-      typedef Legion::UnsafeFieldAccessor<char,1,coord_t,
-                Realm::AffineAccessor<char,1,coord_t> >   ArrayAccessor1D;
-      typedef Legion::UnsafeFieldAccessor<char,2,coord_t,
-                Realm::AffineAccessor<char,2,coord_t> >   ArrayAccessor2D;
-      typedef Legion::UnsafeFieldAccessor<char,3,coord_t,
-                Realm::AffineAccessor<char,3,coord_t> >   ArrayAccessor3D;
+#define ARRAY_ACCESSOR(DIM) \
+      typedef Legion::UnsafeFieldAccessor<char,DIM,coord_t, \
+                Realm::AffineAccessor<char,DIM,coord_t> >   ArrayAccessor##DIM##D;
+      LEGION_FOREACH_N(ARRAY_ACCESSOR)
+#undef ARRAY_ACCESSOR
 
-      typedef RectInDomainIterator<1,coord_t>  RectInDomainIterator1D;
-      typedef RectInDomainIterator<2,coord_t>  RectInDomainIterator2D;
-      typedef RectInDomainIterator<3,coord_t>  RectInDomainIterator3D;
+#define RECT_ITERATOR(DIM) \
+      typedef RectInDomainIterator<DIM,coord_t>  RectInDomainIterator##DIM##D;
+      LEGION_FOREACH_N(RECT_ITERATOR)
+#undef RECT_ITERATOR
 
-      typedef DeferredBuffer<char,1> DeferredBufferChar1D;
-      typedef DeferredBuffer<char,2> DeferredBufferChar2D;
-      typedef DeferredBuffer<char,3> DeferredBufferChar3D;
+#define BUFFER_CHAR(DIM) \
+      typedef DeferredBuffer<char,DIM> DeferredBufferChar##DIM##D;
+      LEGION_FOREACH_N(BUFFER_CHAR)
+#undef BUFFER_CHAR
 
 #ifdef __ICC
 // icpc complains about "error #858: type qualifier on return type is meaningless"
@@ -79,9 +80,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_runtime_t, Runtime *);
       NEW_OPAQUE_WRAPPER(legion_context_t, CContext *);
       NEW_OPAQUE_WRAPPER(legion_domain_point_iterator_t, Domain::DomainPointIterator *);
-      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_1d_t, RectInDomainIterator1D *);
-      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_2d_t, RectInDomainIterator2D *);
-      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_3d_t, RectInDomainIterator3D *);
+#define RECT_ITERATOR(DIM) \
+      NEW_OPAQUE_WRAPPER(legion_rect_in_domain_iterator_##DIM##d_t, RectInDomainIterator##DIM##D *);
+      LEGION_FOREACH_N(RECT_ITERATOR)
+#undef RECT_ITERATOR
       NEW_OPAQUE_WRAPPER(legion_coloring_t, Coloring *);
       NEW_OPAQUE_WRAPPER(legion_domain_coloring_t, DomainColoring *);
       NEW_OPAQUE_WRAPPER(legion_point_coloring_t, PointColoring *);
@@ -93,9 +95,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_predicate_t, Predicate *);
       NEW_OPAQUE_WRAPPER(legion_future_t, Future *);
       NEW_OPAQUE_WRAPPER(legion_future_map_t, FutureMap *);
-      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_1d_t, DeferredBufferChar1D *);
-      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_2d_t, DeferredBufferChar2D *);
-      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_3d_t, DeferredBufferChar3D *);
+#define BUFFER_CHAR(DIM) \
+      NEW_OPAQUE_WRAPPER(legion_deferred_buffer_char_##DIM##d_t, DeferredBufferChar##DIM##D *);
+      LEGION_FOREACH_N(BUFFER_CHAR)
+#undef BUFFER_CHAR
       NEW_OPAQUE_WRAPPER(legion_task_launcher_t, TaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_index_launcher_t, IndexTaskLauncher *);
       NEW_OPAQUE_WRAPPER(legion_inline_launcher_t, InlineLauncher *);
@@ -106,9 +109,10 @@ namespace Legion {
       NEW_OPAQUE_WRAPPER(legion_attach_launcher_t, AttachLauncher *);
       NEW_OPAQUE_WRAPPER(legion_must_epoch_launcher_t, MustEpochLauncher *);
       NEW_OPAQUE_WRAPPER(legion_physical_region_t, PhysicalRegion *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_array_1d_t, ArrayAccessor1D *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_array_2d_t, ArrayAccessor2D *);
-      NEW_OPAQUE_WRAPPER(legion_accessor_array_3d_t, ArrayAccessor3D *);
+#define ACCESSOR_ARRAY(DIM) \
+      NEW_OPAQUE_WRAPPER(legion_accessor_array_##DIM##d_t, ArrayAccessor##DIM##D *);
+      LEGION_FOREACH_N(ACCESSOR_ARRAY)
+#undef ACCESSOR_ARRAY
 #ifdef __GNUC__
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
@@ -169,52 +173,42 @@ namespace Legion {
         return ptr;
       }
 
-#define NEW_POINT_WRAPPER(T_, T, DIM)                \
-      static T_ wrap(T t) {                          \
-        T_ t_;                                       \
-        for (int i = 0; i < DIM; i++)                \
-          t_.x[i] = t[i];                            \
-        return t_;                                   \
-      }                                              \
-      static T unwrap(T_ t_) {                       \
-        T t;                                         \
-        for (int i = 0; i < DIM; i++)                \
-          t[i] = t_.x[i];                            \
-        return t;                                    \
+#define NEW_POINT_WRAPPER(DIM)                                  \
+      typedef Point<DIM,coord_t> Point##DIM##D;                 \
+      static legion_point_##DIM##d_t wrap(Point##DIM##D t) {    \
+        legion_point_##DIM##d_t t_;                             \
+        for (int i = 0; i < DIM; i++)                           \
+          t_.x[i] = t[i];                                       \
+        return t_;                                              \
+      }                                                         \
+      static Point##DIM##D unwrap(legion_point_##DIM##d_t t_) { \
+        Point##DIM##D t;                                        \
+        for (int i = 0; i < DIM; i++)                           \
+          t[i] = t_.x[i];                                       \
+        return t;                                               \
       }
-
-      typedef Point<1,coord_t> Point1D;
-      typedef Point<2,coord_t> Point2D;
-      typedef Point<3,coord_t> Point3D;
-      NEW_POINT_WRAPPER(legion_point_1d_t, Point1D, 1);
-      NEW_POINT_WRAPPER(legion_point_2d_t, Point2D, 2);
-      NEW_POINT_WRAPPER(legion_point_3d_t, Point3D, 3);
+      LEGION_FOREACH_N(NEW_POINT_WRAPPER)
 #undef NEW_POINT_WRAPPER
 
-#define NEW_RECT_WRAPPER(T_, T, PT)                     \
-      static T_ wrap(T t) {                             \
-        T_ t_;                                          \
-        t_.lo = wrap(PT(t.lo));                         \
-        t_.hi = wrap(PT(t.hi));                         \
-        return t_;                                      \
-      }                                                 \
-      static T unwrap(T_ t_) {                          \
-        T t(unwrap(t_.lo), unwrap(t_.hi));              \
-        return t;                                       \
+#define NEW_RECT_WRAPPER(DIM)                                   \
+      typedef Rect<DIM,coord_t> Rect##DIM##D;                   \
+      static legion_rect_##DIM##d_t wrap(Rect##DIM##D t) {      \
+        legion_rect_##DIM##d_t t_;                              \
+        t_.lo = wrap(Point##DIM##D(t.lo));                      \
+        t_.hi = wrap(Point##DIM##D(t.hi));                      \
+        return t_;                                              \
+      }                                                         \
+      static Rect##DIM##D unwrap(legion_rect_##DIM##d_t t_) {   \
+        Rect##DIM##D t(unwrap(t_.lo), unwrap(t_.hi));           \
+        return t;                                               \
       }
-
-      typedef Rect<1,coord_t> Rect1D;
-      typedef Rect<2,coord_t> Rect2D;
-      typedef Rect<3,coord_t> Rect3D;
-      NEW_RECT_WRAPPER(legion_rect_1d_t, Rect1D, Point1D);
-      NEW_RECT_WRAPPER(legion_rect_2d_t, Rect2D, Point2D);
-      NEW_RECT_WRAPPER(legion_rect_3d_t, Rect3D, Point3D);
+      LEGION_FOREACH_N(NEW_RECT_WRAPPER)
 #undef NEW_RECT_WRAPPER 
 
-#define NEW_BLOCKIFY_WRAPPER(T_, T)                     \
-      static T unwrap(T_ t_) {                          \
-        T t(unwrap(t_.block_size), unwrap(t_.offset));  \
-        return t;                                       \
+#define NEW_BLOCKIFY_WRAPPER(DIM)                                   \
+      static Blockify<DIM> unwrap(legion_blockify_##DIM##d_t t_) {  \
+        Blockify<DIM> t(unwrap(t_.block_size), unwrap(t_.offset));  \
+        return t;                                                   \
       }
       template<int DIM>
       struct Blockify {
@@ -225,79 +219,43 @@ namespace Legion {
       public:
         Point<DIM,coord_t> block_size, offset;
       };
+      LEGION_FOREACH_N(NEW_BLOCKIFY_WRAPPER)
+#undef NEW_BLOCKIFY_WRAPPER
 
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_1d_t, Blockify<1>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_2d_t, Blockify<2>);
-      NEW_BLOCKIFY_WRAPPER(legion_blockify_3d_t, Blockify<3>);
-#undef NEW_RECT_WRAPPER
-
-#define NEW_TRANSFORM_WRAPPER(T_, T, X, Y)              \
-      static T_ wrap(T t) {                             \
-        T_ t_;                                          \
-        for (int i = 0; i < X; i++)                     \
-          for (int j = 0; j < Y; j++)                   \
-            t_.trans[i][j] = t[i][j];                   \
-        return t_;                                      \
-      }                                                 \
-      static T unwrap(T_ t_) {                          \
-        T t;                                            \
-        for (int i = 0; i < X; i++)                     \
-          for (int j = 0; j < Y; j++)                   \
-            t[i][j] = t_.trans[i][j];                   \
-        return t;                                       \
+#define NEW_TRANSFORM_WRAPPER(D1,D2)                                            \
+      typedef Transform<D1,D2,coord_t> Transform##D1##x##D2;                    \
+      static legion_transform_##D1##x##D2##_t wrap(Transform##D1##x##D2 t) {    \
+        legion_transform_##D1##x##D2##_t t_;                                    \
+        for (int i = 0; i < D1; i++)                                            \
+          for (int j = 0; j < D2; j++)                                          \
+            t_.trans[i][j] = t[i][j];                                           \
+        return t_;                                                              \
+      }                                                                         \
+      static Transform##D1##x##D2 unwrap(legion_transform_##D1##x##D2##_t t_) { \
+        Transform##D1##x##D2 t;                                                 \
+        for (int i = 0; i < D1; i++)                                            \
+          for (int j = 0; j < D2; j++)                                          \
+            t[i][j] = t_.trans[i][j];                                           \
+        return t;                                                               \
       }
-    typedef Transform<1,1,coord_t> Transform1x1;
-    typedef Transform<1,2,coord_t> Transform1x2;
-    typedef Transform<1,3,coord_t> Transform1x3;
-    typedef Transform<2,1,coord_t> Transform2x1;
-    typedef Transform<2,2,coord_t> Transform2x2;
-    typedef Transform<2,3,coord_t> Transform2x3;
-    typedef Transform<3,1,coord_t> Transform3x1;
-    typedef Transform<3,2,coord_t> Transform3x2;
-    typedef Transform<3,3,coord_t> Transform3x3;
-    NEW_TRANSFORM_WRAPPER(legion_transform_1x1_t, Transform1x1, 1, 1);
-    NEW_TRANSFORM_WRAPPER(legion_transform_1x2_t, Transform1x2, 1, 2);
-    NEW_TRANSFORM_WRAPPER(legion_transform_1x3_t, Transform1x3, 1, 3);
-    NEW_TRANSFORM_WRAPPER(legion_transform_2x1_t, Transform2x1, 2, 1);
-    NEW_TRANSFORM_WRAPPER(legion_transform_2x2_t, Transform2x2, 2, 2);
-    NEW_TRANSFORM_WRAPPER(legion_transform_2x3_t, Transform2x3, 2, 3);
-    NEW_TRANSFORM_WRAPPER(legion_transform_3x1_t, Transform3x1, 3, 1);
-    NEW_TRANSFORM_WRAPPER(legion_transform_3x2_t, Transform3x2, 3, 2);
-    NEW_TRANSFORM_WRAPPER(legion_transform_3x3_t, Transform3x3, 3, 3);
+      LEGION_FOREACH_NN(NEW_TRANSFORM_WRAPPER)
 #undef NEW_TRANSFORM_WRAPPER
 
-#define NEW_AFFINE_TRANSFORM_WRAPPER(T_, T)             \
-    static T_ wrap(T t) {                               \
-      T_ t_;                                            \
-      t_.transform = wrap(t.transform);                 \
-      t_.offset = wrap(t.offset);                       \
-      return t_;                                        \
-    }                                                   \
-    static T unwrap(T_ t_) {                            \
-      T t;                                              \
-      t.transform = unwrap(t_.transform);               \
-      t.offset = unwrap(t_.offset);                     \
-      return t;                                         \
+#define NEW_AFFINE_TRANSFORM_WRAPPER(D1,D2)                                                 \
+    typedef AffineTransform<D1,D2,coord_t> AffineTransform##D1##x##D2;                      \
+    static legion_affine_transform_##D1##x##D2##_t wrap(AffineTransform##D1##x##D2 t) {     \
+      legion_affine_transform_##D1##x##D2##_t t_;                                           \
+      t_.transform = wrap(t.transform);                                                     \
+      t_.offset = wrap(t.offset);                                                           \
+      return t_;                                                                            \
+    }                                                                                       \
+    static AffineTransform##D1##x##D2 unwrap(legion_affine_transform_##D1##x##D2##_t t_) {  \
+      AffineTransform##D1##x##D2 t;                                                         \
+      t.transform = unwrap(t_.transform);                                                   \
+      t.offset = unwrap(t_.offset);                                                         \
+      return t;                                                                             \
     }
-
-    typedef AffineTransform<1,1,coord_t> AffineTransform1x1;
-    typedef AffineTransform<1,2,coord_t> AffineTransform1x2;
-    typedef AffineTransform<1,3,coord_t> AffineTransform1x3;
-    typedef AffineTransform<2,1,coord_t> AffineTransform2x1;
-    typedef AffineTransform<2,2,coord_t> AffineTransform2x2;
-    typedef AffineTransform<2,3,coord_t> AffineTransform2x3;
-    typedef AffineTransform<3,1,coord_t> AffineTransform3x1;
-    typedef AffineTransform<3,2,coord_t> AffineTransform3x2;
-    typedef AffineTransform<3,3,coord_t> AffineTransform3x3;
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x1_t, AffineTransform1x1);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x2_t, AffineTransform1x2);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_1x3_t, AffineTransform1x3);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x1_t, AffineTransform2x1);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x2_t, AffineTransform2x2);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_2x3_t, AffineTransform2x3);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x1_t, AffineTransform3x1);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x2_t, AffineTransform3x2);
-    NEW_AFFINE_TRANSFORM_WRAPPER(legion_affine_transform_3x3_t, AffineTransform3x3);
+    LEGION_FOREACH_NN(NEW_AFFINE_TRANSFORM_WRAPPER)
 #undef NEW_AFFINE_TRANSFORM_WRAPPER
 
       static legion_domain_t

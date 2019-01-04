@@ -6123,6 +6123,7 @@ namespace Legion {
                     parent_ctx->get_unique_id());
             break;
           }
+#if LEGION_MAX_DIM >= 2
         case 2:
           {
             REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
@@ -6135,6 +6136,8 @@ namespace Legion {
                     parent_ctx->get_task_name(), parent_ctx->get_unique_id());
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 3
         case 3:
           {
             REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
@@ -6147,6 +6150,103 @@ namespace Legion {
                     parent_ctx->get_task_name(), parent_ctx->get_unique_id());
             break;
           }
+#endif
+#if LEGION_MAX_DIM >= 4
+        case 4:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld) of index space " 
+                    "task %s (UID %lld) in parent task %s (UID %lld) are "
+                    "interfering.", idx1, idx2, index_point[0], index_point[1],
+                    index_point[2], index_point[3], get_task_name(), 
+                    get_unique_id(), parent_ctx->get_task_name(), 
+                    parent_ctx->get_unique_id());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 5
+        case 5:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld,%lld) of index "
+                    "space task %s (UID %lld) in parent task %s (UID %lld) are "
+                    "interfering.", idx1, idx2, index_point[0], index_point[1],
+                    index_point[2], index_point[3], index_point[4], 
+                    get_task_name(), get_unique_id(), 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 6
+        case 6:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld,%lld,%lld) of "
+                    "index space task %s (UID %lld) in parent task %s (UID "
+                    "%lld) are interfering.", idx1, idx2, index_point[0], 
+                    index_point[1], index_point[2], index_point[3], 
+                    index_point[4], index_point[5], get_task_name(), 
+                    get_unique_id(), parent_ctx->get_task_name(), 
+                    parent_ctx->get_unique_id());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 7
+        case 7:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld,%lld,%lld,%lld) of"
+                    " index space task %s (UID %lld) in parent task %s (UID "
+                    "%lld) are interfering.", idx1, idx2, index_point[0], 
+                    index_point[1], index_point[2], index_point[3], 
+                    index_point[4], index_point[5], index_point[6],
+                    get_task_name(), get_unique_id(), 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 8
+        case 8:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,"
+                    "%lld) of index space task %s (UID %lld) in parent task "
+                    "%s (UID %lld) are interfering.", idx1, idx2, 
+                    index_point[0], index_point[1], index_point[2], 
+                    index_point[3], index_point[4], index_point[5], 
+                    index_point[6], index_point[7], get_task_name(), 
+                    get_unique_id(), parent_ctx->get_task_name(), 
+                    parent_ctx->get_unique_id());
+            break;
+          }
+#endif
+#if LEGION_MAX_DIM >= 9
+        case 9:
+          {
+            REPORT_LEGION_ERROR(ERROR_ALIASED_REGION_REQUIREMENTS,
+                    "Aliased and interfering region requirements for "
+                    "point tasks are not permitted. Region requirements "
+                    "%d and %d of point (%lld,%lld,%lld,%lld,%lld,%lld,%lld,"
+                    "%lld,%lld) of index space task %s (UID %lld) in parent "
+                    "task %s (UID %lld) are interfering.", idx1, idx2, 
+                    index_point[0], index_point[1], index_point[2], 
+                    index_point[3], index_point[4], index_point[5], 
+                    index_point[6], index_point[7], index_point[8],
+                    get_task_name(), get_unique_id(), 
+                    parent_ctx->get_task_name(), parent_ctx->get_unique_id());
+            break;
+          }
+#endif
         default:
           assert(false);
       }
