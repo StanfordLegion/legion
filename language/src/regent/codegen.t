@@ -2429,6 +2429,15 @@ function codegen.expr_index_access(cx, node)
       [index.actions];
       [emit_debuginfo(node)]
     end
+    if bounds_checks then
+      actions = quote
+        [actions];
+        std.assert_error([index].value.__ptr.x >= 0 and [index].value.__ptr.x < [value_type.M],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+        std.assert_error([index].value.__ptr.y >= 0 and [index].value.__ptr.y < [value_type.N],
+          [get_source_location(node) .. ": array access to " .. tostring(value_type) .. " is out-of-bounds"])
+      end
+    end
     return values.rawref(node, expr.just(actions,
           `([value].value.impl.trans[ [index].value.__ptr.x ][ [index].value.__ptr.y ])), &expr_type)
   else
