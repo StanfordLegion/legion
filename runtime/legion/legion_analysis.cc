@@ -7911,21 +7911,14 @@ namespace Legion {
               KDTree *tree = NULL;
               switch (set_expr->get_num_dims())
               {
-                case 1:
-                  {
-                    tree = new KDNode<1>(set_expr, runtime, 0/*dim*/);
-                    break;
+#define KDDIM(DIM) \
+                case DIM: \
+                  { \
+                    tree = new KDNode<DIM>(set_expr, runtime, 0/*dim*/); \
+                    break; \
                   }
-                case 2:
-                  {
-                    tree = new KDNode<2>(set_expr, runtime, 0/*dim*/);
-                    break;
-                  }
-                case 3:
-                  {
-                    tree = new KDNode<3>(set_expr, runtime, 0/*dim*/);
-                    break;
-                  }
+                LEGION_FOREACH_N(KDDIM)
+#undef KDDIM
                 default:
                   assert(false);
               }
