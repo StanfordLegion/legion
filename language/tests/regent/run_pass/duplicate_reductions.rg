@@ -261,8 +261,8 @@ do
   end
 end
 
-task restrict(r_mesh_0     : region(ispace(int2d), Node),
-              r_interior_1 : region(ispace(int2d), Node))
+task perform_restriction(r_mesh_0     : region(ispace(int2d), Node),
+                         r_interior_1 : region(ispace(int2d), Node))
 where
   reads(r_mesh_0.aux),
   writes(r_interior_1.f, r_interior_1.phi)
@@ -510,7 +510,7 @@ task main()
     end
     -- restrict residuals to coarser level [0]->[1]
     for color in p_private_1.colors do
-      restrict(p_halo_0[color], p_private_1[color])
+      perform_restriction(p_halo_0[color], p_private_1[color])
     end
     
     -- pre-smooth [1]
