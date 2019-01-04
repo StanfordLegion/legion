@@ -3682,7 +3682,7 @@ namespace Legion {
           std::set<ApEvent> dummy_remote_events;
           effects_done = 
             runtime->forest->physical_perform_registration(local_expr,
-                requirement, this, 0/*index*/, completion_event,
+                requirement, this, 0/*index*/, termination_event,
                 mapped_instances, trace_info, NULL/*aggregator*/,
                 dummy_remote_events, mapped_views, map_applied_conditions);
         }
@@ -3690,7 +3690,7 @@ namespace Legion {
           effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                 requirement, version_info, this, 0/*index*/, init_precondition,
-                completion_event, mapped_instances, trace_info, 
+                termination_event, mapped_instances, trace_info, 
                 map_applied_conditions,
 #ifdef DEBUG_LEGION
                 get_logging_name(), unique_op_id,
@@ -3712,7 +3712,7 @@ namespace Legion {
         std::set<ApEvent> dummy_remote_events;
         effects_done = 
           runtime->forest->physical_perform_registration(local_expr,
-              requirement, this, 0/*index*/, completion_event,
+              requirement, this, 0/*index*/, termination_event,
               mapped_instances, trace_info, NULL/*aggregator*/,
               dummy_remote_events, mapped_views, map_applied_conditions);
         // We need to fill in the sharded view before we do the next
@@ -3747,14 +3747,35 @@ namespace Legion {
         const bool is_write = IS_WRITE(requirement);
         if (is_write)
           requirement.privilege = READ_ONLY; // pretend read-only for now
-        // Never any output effects for read-only cases
-        runtime->forest->physical_perform_updates_and_registration(requirement,
-            version_info, this, 0/*index*/, init_precondition, completion_event,
-            mapped_instances, trace_info, map_applied_conditions,
+        // Perform the updates first as if we're read-only
+        CopyFillAggregator *output_aggregator = NULL;
+        std::set<ApEvent> remote_ready;
+        std::set<ApEvent> effects_events;
+        std::vector<InstanceView*> target_views;
+        IndexSpaceExpression *local_expr = NULL;
+        const RtEvent registration_precondition = 
+          runtime->forest->physical_perform_updates(requirement, version_info,
+              this, 0/*index*/, init_precondition, termination_event, 
+              mapped_instances, trace_info, output_aggregator, 
+              map_applied_conditions, remote_ready, effects_events, 
+              target_views, local_expr,
 #ifdef DEBUG_LEGION
-            get_logging_name(), unique_op_id,
+              get_logging_name(), unique_op_id,
 #endif
-            false/*track effects*/, false/*check initialized*/);
+              false/*track events*/, false/*check init*/,false/*defer copies*/);
+        // If we're a write, then switch back privileges
+        if (is_write) // Set the privilege back to read-write
+          requirement.privilege = READ_WRITE;
+        // Wait for the precondition to perform our registration if necessary
+        if (registration_precondition.exists() && 
+            !registration_precondition.has_triggered())
+          registration_precondition.wait();
+        // Then do the registration, no need to track output effects since we
+        // know that this instance can't be restricted in a control 
+        // replicated context
+        runtime->forest->physical_perform_registration(local_expr, requirement,
+            this, 0/*index*/, termination_event, mapped_instances, trace_info,
+            output_aggregator,remote_ready,target_views,map_applied_conditions);
         // If we have a write then we make a sharded view and 
         // then shard 0 will do the overwrite
         if (is_write)
@@ -3763,8 +3784,6 @@ namespace Legion {
           assert(sharded_view != NULL);
           assert(exchange != NULL);
 #endif
-          // Set the privilege back to read-write
-          requirement.privilege = READ_WRITE;
           // We need to fill in the sharded view before we do the next
           // call in case there are output effects due to restriction
           // Note this has to be done across all the shards in case 
