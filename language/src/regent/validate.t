@@ -157,6 +157,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Partition]                  = continue,
   [ast.typed.expr.PartitionEqual]             = continue,
   [ast.typed.expr.PartitionByField]           = continue,
+  [ast.typed.expr.PartitionByRestriction]     = continue,
   [ast.typed.expr.Image]                      = continue,
   [ast.typed.expr.ImageByTask]                = continue,
   [ast.typed.expr.Preimage]                   = continue,

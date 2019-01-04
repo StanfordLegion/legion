@@ -1670,6 +1670,86 @@ function type_check.expr_partition_by_field(cx, node)
   }
 end
 
+function type_check.expr_partition_by_restriction(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.check_read(cx, region)
+
+  local transform = type_check.expr(cx, node.transform)
+  local transform_type = std.check_read(cx, transform)
+
+  local extent = type_check.expr(cx, node.extent)
+  local extent_type = std.check_read(cx, extent)
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.check_read(cx, colors)
+
+  if not std.is_transform_type(transform_type) then
+    report.error(node, "type mismatch in argument 2: expected transform type but got " ..
+                 tostring(transform_type))
+  end
+
+  if not std.is_rect_type(extent_type) then
+    report.error(node, "type mismatch in argument 3: expected rect type but got " ..
+                 tostring(extent_type))
+  end
+
+  if not std.is_ispace(colors_type) then
+    report.error(node, "type mismatch in argument 4: expected ispace but got " ..
+                 tostring(colors_type))
+  end
+
+  local M = region_type:ispace().dim
+  local N = colors_type.dim
+
+  if transform_type.M ~= M then
+    report.error(node, "type mismatch: expected transform(" .. tostring(M) .. ",*) type but got " ..
+                 tostring(transform_type))
+  end
+
+  if transform_type.N ~= N then
+    report.error(node, "type mismatch: expected transform(*," .. tostring(N) .. ") type but got " ..
+                 tostring(transform_type))
+  end
+
+  if extent_type.dim ~= M then
+    report.error(node, "type mismatch: expected rect" .. tostring(M) .. "d type but got " ..
+                 tostring(extent_type))
+  end
+
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = std.newsymbol()
+  end
+
+  local colors_symbol
+  if colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  else
+    colors_symbol = std.newsymbol(colors_type)
+  end
+
+  local expr_type = std.partition(std.aliased, region_symbol, colors_symbol)
+
+  -- Hack: Stuff the region type back into the partition's region
+  -- argument, if necessary.
+  if not expr_type.parent_region_symbol:hastype() then
+    expr_type.parent_region_symbol:settype(region_type)
+  end
+  assert(expr_type.parent_region_symbol:gettype() == region_type)
+
+  return ast.typed.expr.PartitionByRestriction {
+    region = region,
+    transform = transform,
+    extent = extent,
+    colors = colors,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_image(cx, node)
   local parent = type_check.expr(cx, node.parent)
   local parent_type = std.check_read(cx, parent)
@@ -3053,6 +3133,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.Partition]                  = type_check.expr_partition,
   [ast.specialized.expr.PartitionEqual]             = type_check.expr_partition_equal,
   [ast.specialized.expr.PartitionByField]           = type_check.expr_partition_by_field,
+  [ast.specialized.expr.PartitionByRestriction]     = type_check.expr_partition_by_restriction,
 
   [ast.specialized.expr.Image] = function(cx, node)
     if not node.region.fields and

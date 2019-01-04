@@ -760,6 +760,25 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("restrict") then
+    p:expect("(")
+    local region = p:expr()
+    p:expect(",")
+    local transform = p:expr()
+    p:expect(",")
+    local extent = p:expr()
+    p:expect(",")
+    local colors = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.PartitionByRestriction {
+      region = region,
+      transform = transform,
+      extent = extent,
+      colors = colors,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   elseif p:nextif("cross_product") then
     p:expect("(")
     local args = p:expr_list()

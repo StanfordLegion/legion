@@ -422,6 +422,16 @@ function pretty.expr_partition_by_field(cx, node)
       ")"})
 end
 
+function pretty.expr_partition_by_restriction(cx, node)
+  return join({
+      "restrict(",
+      commas({pretty.expr(cx, node.region),
+              pretty.expr(cx, node.transform),
+              pretty.expr(cx, node.extent),
+              pretty.expr(cx, node.colors)}),
+      ")"})
+end
+
 function pretty.expr_image(cx, node)
   return join({
       "image(",
@@ -744,6 +754,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return pretty.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return pretty.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return pretty.expr_image(cx, node)

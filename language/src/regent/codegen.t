@@ -4339,6 +4339,45 @@ function codegen.expr_partition_by_field(cx, node)
     partition_type)
 end
 
+function codegen.expr_partition_by_restriction(cx, node)
+  local region_type = std.as_read(node.region.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local transform_type = std.as_read(node.transform.expr_type)
+  local transform = codegen.expr(cx, node.transform):read(cx)
+  local extent_type = std.as_read(node.extent.expr_type)
+  local extent = codegen.expr(cx, node.extent):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local partition_type = std.as_read(node.expr_type)
+  local actions = quote
+    [region.actions];
+    [transform.actions];
+    [extent.actions];
+    [colors.actions];
+    [emit_debuginfo(node)]
+  end
+
+  assert(cx:has_region(region_type))
+
+  local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+  actions = quote
+    [actions]
+    var [ip] = c.legion_index_partition_create_by_restriction(
+      [cx.runtime], [cx.context],
+      [region.value].impl.index_space,
+      [colors.value].impl,
+      [transform.value], [extent.value], c.COMPUTE_KIND, -1)
+    var [lp] = c.legion_logical_partition_create(
+      [cx.runtime], [cx.context], [region.value].impl, [ip])
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, `(partition_type { impl = [lp] }), partition_type),
+    partition_type)
+end
+
 function codegen.expr_image(cx, node)
   local parent_type = std.as_read(node.parent.expr_type)
   local parent = codegen.expr(cx, node.parent):read(cx)
@@ -7307,6 +7346,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.PartitionByField) then
     return codegen.expr_partition_by_field(cx, node)
+
+  elseif node:is(ast.typed.expr.PartitionByRestriction) then
+    return codegen.expr_partition_by_restriction(cx, node)
 
   elseif node:is(ast.typed.expr.Image) then
     return codegen.expr_image(cx, node)
