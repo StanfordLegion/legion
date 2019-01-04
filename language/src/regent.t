@@ -134,6 +134,7 @@ local language = {
     "relaxed",
     "release",
     "region",
+    "restrict",
     "simultaneous",
     "static_cast",
     "unsafe_cast",
