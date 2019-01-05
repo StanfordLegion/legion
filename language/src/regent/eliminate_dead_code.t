@@ -22,12 +22,7 @@ local function eliminate_dead_if_node(node, continuation)
   if node.cond:is(ast.typed.expr.Constant) and
      not node.cond.value and #node.elseif_blocks == 0
   then
-    local block = continuation(node.else_block)
-    return ast.typed.stat.Block {
-      block = block,
-      annotations = node.annotations,
-      span = node.span,
-    }
+    return node.else_block.stats
 
   else
     return continuation(node, true)
@@ -45,13 +40,15 @@ end
 local function do_nothing(node, continuation) return node end
 
 local dce_table = {
-  [ast.typed.stat.If]      = eliminate_dead_if_node,
-  [ast.typed.stat.Elseif]  = apply_dce_block_stat,
-  [ast.typed.stat.While]   = apply_dce_block_stat,
-  [ast.typed.stat.ForNum]  = apply_dce_block_stat,
-  [ast.typed.stat.ForList] = apply_dce_block_stat,
-  [ast.typed.stat.Repeat]  = apply_dce_block_stat,
-  [ast.typed.stat.Block]   = apply_dce_block_stat,
+  [ast.typed.stat.If]              = eliminate_dead_if_node,
+  [ast.typed.stat.Elseif]          = apply_dce_block_stat,
+  [ast.typed.stat.While]           = apply_dce_block_stat,
+  [ast.typed.stat.ForNum]          = apply_dce_block_stat,
+  [ast.typed.stat.ForList]         = apply_dce_block_stat,
+  [ast.typed.stat.Repeat]          = apply_dce_block_stat,
+  [ast.typed.stat.MustEpoch]       = apply_dce_block_stat,
+  [ast.typed.stat.Block]           = apply_dce_block_stat,
+  [ast.typed.stat.ParallelizeWith] = apply_dce_block_stat,
 
   [ast.typed.expr] = do_nothing,
   [ast.typed.stat] = do_nothing,
@@ -71,7 +68,7 @@ local apply_dce_node = ast.make_single_dispatch(
 
 function eliminate_dead_code.top(node)
   if node:is(ast.typed.top.Task) then
-    return node { body = ast.map_node_continuation(apply_dce_node(), node.body) }
+    return node { body = ast.flatmap_node_continuation(apply_dce_node(), node.body) }
   else
     return node
   end
