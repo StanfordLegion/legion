@@ -181,7 +181,9 @@ function skip_empty_tasks.top_task(cx, node)
 end
 
 function skip_empty_tasks.top(cx, node)
-  if node:is(ast.typed.top.Task) then
+  if node:is(ast.typed.top.Task) and
+     not node.config_options.leaf
+  then
     return skip_empty_tasks.top_task(cx, node)
 
   else

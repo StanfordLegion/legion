@@ -816,7 +816,9 @@ function optimize_index_launches.top_task(cx, node)
 end
 
 function optimize_index_launches.top(cx, node)
-  if node:is(ast.typed.top.Task) then
+  if node:is(ast.typed.top.Task) and
+     not node.config_options.leaf
+  then
     return optimize_index_launches.top_task(cx, node)
 
   else
