@@ -3311,9 +3311,7 @@ namespace Legion {
                             const RegionUsage &dst_usage,
                             const FieldMask &src_mask,
                             const FieldMask &dst_mask,
-                            const InstanceSet &src_instances,
                             const InstanceSet &dst_instances,
-                            const std::vector<InstanceView*> &src_views,
                             const std::vector<InstanceView*> &dst_views,
                             const LogicalRegion src_handle,
                             const LogicalRegion dst_handle,
@@ -3330,7 +3328,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!remote_sets.empty());
-      assert(src_instances.size() == src_views.size());
       assert(dst_instances.size() == dst_views.size());
       assert(src_indexes.size() == dst_indexes.size());
 #endif
@@ -3363,12 +3360,6 @@ namespace Legion {
           rez.serialize(dst_usage);
           rez.serialize(src_mask);
           rez.serialize(dst_mask);
-          rez.serialize<size_t>(src_instances.size());
-          for (unsigned idx = 0; idx < src_instances.size(); idx++)
-          {
-            src_instances[idx].pack_reference(rez);
-            rez.serialize(src_views[idx]->did);
-          }
           rez.serialize<size_t>(dst_instances.size());
           for (unsigned idx = 0; idx < dst_instances.size(); idx++)
           {
@@ -4403,23 +4394,6 @@ namespace Legion {
       FieldMask src_mask, dst_mask;
       derez.deserialize(src_mask);
       derez.deserialize(dst_mask);
-      size_t num_srcs;
-      derez.deserialize(num_srcs);
-      InstanceSet src_instances(num_srcs);
-      std::vector<InstanceView*> src_views(num_srcs, NULL);
-      for (unsigned idx = 0; idx < num_srcs; idx++)
-      {
-        RtEvent ready;
-        src_instances[idx].unpack_reference(runtime, derez, ready);
-        if (ready.exists())
-          ready_events.insert(ready);
-        DistributedID did;
-        derez.deserialize(did);
-        LogicalView *view = runtime->find_or_request_logical_view(did, ready);
-        src_views[idx] = static_cast<InstanceView*>(view);
-        if (ready.exists())
-          ready_events.insert(ready);
-      }
       size_t num_dsts;
       derez.deserialize(num_dsts);
       InstanceSet dst_instances(num_dsts);
@@ -4494,9 +4468,9 @@ namespace Legion {
           if (overlap->is_empty())
             continue;
           set->issue_across_copies(remote_tracker,dummy_alt_sets,sources[idx],
-              op, src_index, dst_index, dst_usage, src_mask, src_instances, 
-              dst_instances, src_views, dst_views, overlap, across_aggregator,
-              pred_guard, redop, initialized, map_applied_events);
+              op, src_index, dst_index, dst_usage, src_mask, dst_instances, 
+              dst_views, overlap, across_aggregator, pred_guard, redop, 
+              initialized, map_applied_events);
           local_exprs.insert(overlap);
         }
       }
@@ -4521,8 +4495,7 @@ namespace Legion {
             continue;
           set->issue_across_copies(remote_tracker, dummy_alt_sets, sources[idx],
                                      op, src_index, dst_index, dst_usage, 
-                                     src_mask, src_instances, dst_instances,
-                                     src_views, dst_views, overlap, 
+                                     src_mask, dst_instances, dst_views,overlap,
                                      across_aggregator, pred_guard, redop, 
                                      initialized, map_applied_events, 
                                      &src_indexes,&dst_indexes,&across_helpers);
@@ -4542,10 +4515,10 @@ namespace Legion {
       {
         std::set<IndexSpaceExpression*> remote_exprs;
         remote_tracker.perform_remote_copies_across(op, src_index, dst_index,
-            src_usage, dst_usage, src_mask, dst_mask, src_instances, 
-            dst_instances, src_views, dst_views, src_handle, dst_handle,
-            pred_guard, precondition, redop, perfect, src_indexes, 
-            dst_indexes, map_applied_events, copy_events, remote_exprs);
+            src_usage, dst_usage, src_mask, dst_mask, dst_instances, dst_views,
+            src_handle, dst_handle, pred_guard, precondition, redop, perfect, 
+            src_indexes, dst_indexes, map_applied_events, copy_events, 
+            remote_exprs);
         IndexSpaceExpression *remote_expr = 
           runtime->forest->union_index_spaces(remote_exprs);
         local_expr = 
@@ -4556,21 +4529,6 @@ namespace Legion {
         // Record the event field preconditions for each view
         // Use the destination expr since we know we we're only actually
         // issuing copies for that particular expression
-        const bool has_src_preconditions = !src_instances.empty();
-        if (has_src_preconditions)
-        {
-          for (unsigned idx = 0; idx < src_instances.size(); idx++)
-          {
-            const InstanceRef &ref = src_instances[idx];
-            const ApEvent event = ref.get_ready_event();
-            if (!event.exists())
-              continue;
-            const FieldMask &mask = ref.get_valid_fields();
-            InstanceView *view = src_views[idx];
-            across_aggregator->record_precondition(view, true/*reading*/,
-                                                   event, mask, local_expr);
-          }
-        } 
         for (unsigned idx = 0; idx < dst_instances.size(); idx++)
         {
           const InstanceRef &ref = dst_instances[idx];
@@ -4584,7 +4542,7 @@ namespace Legion {
         }
         const RtEvent done = 
           across_aggregator->issue_updates(trace_info, precondition,
-              has_src_preconditions, true/*has dst preconditions*/);
+              false/*has src preconditions*/, true/*has dst preconditions*/);
         if (done.exists() && !done.has_triggered())
           done.wait();
         const ApEvent result = across_aggregator->summarize(trace_info);
@@ -6856,9 +6814,7 @@ namespace Legion {
                 std::set<EquivalenceSet*> &alt_sets,const AddressSpaceID source,
                 Operation *op,const unsigned src_index,const unsigned dst_index,
                 const RegionUsage &usage, const FieldMask &src_mask, 
-                const InstanceSet &source_instances,
                 const InstanceSet &target_instances,
-                const std::vector<InstanceView*> &source_views,
                 const std::vector<InstanceView*> &target_views,
                 IndexSpaceExpression *overlap, CopyFillAggregator *&aggregator,
                 PredEvent pred_guard, ReductionOpID redop,
@@ -6910,10 +6866,10 @@ namespace Legion {
           if (subset_overlap->is_empty())
             continue;
           (*it)->issue_across_copies(remote_tracker, alt_sets, local_space, op,
-              src_index, dst_index, usage, src_mask, source_instances, 
-              target_instances, source_views, target_views, subset_overlap, 
-              aggregator, pred_guard, redop, initialized_fields, applied_events,
-              src_indexes, dst_indexes, across_helpers, false/*original set*/);
+              src_index, dst_index, usage, src_mask, target_instances, 
+              target_views, subset_overlap, aggregator, pred_guard, redop, 
+              initialized_fields, applied_events, src_indexes, dst_indexes, 
+              across_helpers, false/*original set*/);
         }
         eq.reacquire();
         return true;
@@ -6959,31 +6915,13 @@ namespace Legion {
           }
           // Now find all the source instances for this destination
           FieldMaskSet<LogicalView> src_views;
-          if (!source_views.empty())
+          for (FieldMaskSet<LogicalView>::const_iterator it =
+                valid_instances.begin(); it != valid_instances.end(); it++)
           {
-#ifdef DEBUG_LEGION
-            assert(source_instances.size() == source_views.size());
-#endif
-            // We already know the answers because they were mapped
-            for (unsigned idx2 = 0; idx2 < source_views.size(); idx2++)
-            {
-              const FieldMask &mask = source_instances[idx2].get_valid_fields();
-              const FieldMask field_overlap = mask & src_mask;
-              if (!field_overlap)
-                continue;
-              src_views.insert(source_views[idx2], field_overlap);
-            }
-          }
-          else
-          {
-            for (FieldMaskSet<LogicalView>::const_iterator it =
-                  valid_instances.begin(); it != valid_instances.end(); it++)
-            {
-              const FieldMask field_overlap = it->second & src_mask;
-              if (!field_overlap)
-                continue;
-              src_views.insert(it->first, field_overlap);
-            }
+            const FieldMask field_overlap = it->second & src_mask;
+            if (!field_overlap)
+              continue;
+            src_views.insert(it->first, field_overlap);
           }
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op,
@@ -7032,38 +6970,11 @@ namespace Legion {
       {
         // Fields align and we're not doing a reduction so we can just 
         // do a normal update copy analysis to figure out what to do
-        if (!source_views.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(source_instances.size() == source_views.size());
-#endif
-          // We already know the instances that we need to use as
-          // the source instances for the copy across
-          FieldMaskSet<LogicalView> src_views;
-          for (unsigned idx = 0; idx < source_views.size(); idx++)
-          {
-            const FieldMask &mask = source_instances[idx].get_valid_fields();
-            const FieldMask overlap = mask & src_mask;
-            if (!overlap)
-              continue;
-            src_views.insert(source_views[idx], overlap);
-          }
-          for (unsigned idx = 0; idx < target_views.size(); idx++)
-          {
-            const FieldMask &mask = target_instances[idx].get_valid_fields(); 
-            if (aggregator == NULL)
-              aggregator = new CopyFillAggregator(runtime->forest, op,
-                  src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
-            aggregator->record_updates(target_views[idx], src_views, mask,
-                                       overlap, redop, NULL/*across*/);
-          }
-        }
-        else
-          issue_update_copies_and_fills(aggregator, RtEvent::NO_RT_EVENT,
-                                        op, src_index, true/*track effects*/,
-                                        src_mask, target_instances,
-                                        target_views, overlap, 
-                                        true/*skip check*/, dst_index);
+        issue_update_copies_and_fills(aggregator, RtEvent::NO_RT_EVENT,
+                                      op, src_index, true/*track effects*/,
+                                      src_mask, target_instances,
+                                      target_views, overlap, 
+                                      true/*skip check*/, dst_index);
         // We also need to check for any reductions that need to be applied
         const FieldMask reduce_mask = reduction_fields & src_mask;
         if (!!reduce_mask)
@@ -7098,33 +7009,13 @@ namespace Legion {
         // Fields align but we're doing a reduction across
         // Find the valid views that we need for issuing the updates  
         FieldMaskSet<LogicalView> src_views;
-        if (!source_views.empty())
+        for (FieldMaskSet<LogicalView>::const_iterator it = 
+              valid_instances.begin(); it != valid_instances.end(); it++)
         {
-          // We already know what the answers should be because
-          // they were already mapped by copy operation
-#ifdef DEBUG_LEGION
-          assert(source_instances.size() == source_views.size());
-#endif
-          // We already know the answers because they were mapped
-          for (unsigned idx = 0; idx < source_views.size(); idx++)
-          {
-            const FieldMask &mask = source_instances[idx].get_valid_fields();
-            const FieldMask overlap = mask & src_mask;
-            if (!overlap)
-              continue;
-            src_views.insert(source_views[idx], overlap);
-          }
-        }
-        else
-        {
-          for (FieldMaskSet<LogicalView>::const_iterator it = 
-                valid_instances.begin(); it != valid_instances.end(); it++)
-          {
-            const FieldMask overlap = it->second & src_mask;
-            if (!overlap)
-              continue;
-            src_views.insert(it->first, overlap);
-          }
+          const FieldMask overlap = it->second & src_mask;
+          if (!overlap)
+            continue;
+          src_views.insert(it->first, overlap);
         }
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {

@@ -2218,23 +2218,92 @@ namespace Legion {
       src_node->column_source->get_field_indexes(src_req.instance_fields, 
                                                  src_indexes);   
       dst_node->column_source->get_field_indexes(dst_req.instance_fields,
-                                                 dst_indexes);
+                                                 dst_indexes); 
+      // Perform the copies/reductions across
+      InnerContext *context = op->find_physical_context(dst_index);
+      std::vector<InstanceView*> target_views;
+      context->convert_target_views(dst_targets, target_views);
+      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      if (!src_targets.empty())
+      {
+        // If we already have the targets there's no need to 
+        // iterate over the source equivalence sets
+        InnerContext *src_context = op->find_physical_context(src_index);
+        std::vector<InstanceView*> source_views;
+        src_context->convert_target_views(src_targets, source_views);
+        std::set<ApEvent> copy_preconditions;
+        std::vector<CopySrcDstField> src_fields, dst_fields;  
+        // Iterate over all the indexes for the fields
+        for (unsigned fidx = 0; fidx < dst_req.instance_fields.size(); fidx++)
+        {
+#ifdef DEBUG_LEGION
+          bool found = false;
+#endif
+          // Find the source instance
+          for (unsigned idx = 0; idx < src_targets.size(); idx++)
+          {
+            const InstanceRef &ref = src_targets[idx];
+            const FieldMask &src_mask = ref.get_valid_fields();
+            if (!src_mask.is_set(src_indexes[fidx]))
+              continue;
+            // We found it
+            FieldMask copy_mask;
+            copy_mask.set_bit(src_indexes[fidx]);
+            source_views[idx]->copy_from(copy_mask, src_fields);
+            copy_preconditions.insert(ref.get_ready_event());
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+          found = false;
+#endif
+          // Find the destination instance
+          for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+          {
+            const InstanceRef &ref = dst_targets[idx];
+            const FieldMask &dst_mask = ref.get_valid_fields();
+            if (!dst_mask.is_set(dst_indexes[fidx]))
+              continue;
+            // We found it
+            FieldMask copy_mask;
+            copy_mask.set_bit(dst_indexes[fidx]);
+            target_views[idx]->copy_to(copy_mask, dst_fields);
+            copy_preconditions.insert(ref.get_ready_event());
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            break;
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+        }
+        if (precondition.exists())
+          copy_preconditions.insert(precondition);
+        // Now we can issue the copy operation
+        ApEvent full_precondition;
+        if (!copy_preconditions.empty())
+          full_precondition = 
+            Runtime::merge_events(&trace_info, copy_preconditions);
+        // Early out here since we've done the full copy
+        return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                    dst_req.region.get_field_space(), 
+                                    src_req.region.get_tree_id(),
+                                    dst_req.region.get_tree_id(),
+#endif
+                                    full_precondition,
+                                    dst_req.redop, false/*fold*/);
+      }
       FieldMask src_mask, dst_mask; 
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
       {
         src_mask.set_bit(src_indexes[idx]);
         dst_mask.set_bit(dst_indexes[idx]);
-      } 
-      InnerContext *context = op->find_physical_context(dst_index);
-      std::vector<InstanceView*> source_views, target_views;
-      if (!src_targets.empty())
-      {
-        InnerContext *src_context = op->find_physical_context(src_index);
-        src_context->convert_target_views(src_targets, source_views);
       }
-      context->convert_target_views(dst_targets, target_views);
-      // Perform the copies/reductions across
-      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
       const RegionUsage usage(dst_req);
       const std::set<EquivalenceSet*> &src_eq_sets = 
         src_version_info.get_equivalence_sets();
@@ -2265,9 +2334,8 @@ namespace Legion {
           if (overlap->is_empty())
             continue;
           if ((*it)->issue_across_copies(remote_tracker, alt_sets, local_space,
-              op, src_index, dst_index, usage, src_mask, src_targets, 
-              dst_targets, source_views, target_views, overlap, 
-              across_aggregator, guard, dst_req.redop, 
+              op, src_index, dst_index, usage, src_mask, dst_targets, 
+              target_views, overlap, across_aggregator, guard, dst_req.redop, 
               initialized, map_applied_events))
             to_delete.push_back(*it);
         } 
@@ -2292,9 +2360,8 @@ namespace Legion {
           if (overlap->is_empty())
             continue;
           if ((*it)->issue_across_copies(remote_tracker, alt_sets, local_space,
-                                     op, src_index, dst_index, usage, 
-                                     src_mask, src_targets, dst_targets,
-                                     source_views, target_views, overlap, 
+                                     op, src_index, dst_index, usage, src_mask, 
+                                     dst_targets, target_views, overlap, 
                                      across_aggregator, guard, dst_req.redop, 
                                      initialized, map_applied_events, 
                                      &src_indexes,&dst_indexes,&across_helpers))
@@ -2313,10 +2380,10 @@ namespace Legion {
         RegionUsage src_usage(src_req);
         std::set<IndexSpaceExpression*> remote_exprs;
         remote_tracker.perform_remote_copies_across(op, src_index, dst_index,
-            src_usage, usage, src_mask, dst_mask, src_targets, dst_targets, 
-            source_views, target_views, src_req.region, dst_req.region, guard, 
-            precondition, dst_req.redop, perfect, src_indexes, dst_indexes, 
-            map_applied_events, copy_events, remote_exprs);
+            src_usage, usage, src_mask, dst_mask, dst_targets, target_views, 
+            src_req.region, dst_req.region, guard, precondition, dst_req.redop,
+            perfect, src_indexes, dst_indexes, map_applied_events, copy_events, 
+            remote_exprs);
         IndexSpaceExpression *remote_expr = union_index_spaces(remote_exprs);
         dst_expr = subtract_index_spaces(dst_expr, remote_expr);
       }
@@ -2325,21 +2392,6 @@ namespace Legion {
         // Record the event field preconditions for each view
         // Use the destination expr since we know we we're only actually
         // issuing copies for that particular expression
-        const bool has_src_preconditions = !src_targets.empty();
-        if (has_src_preconditions)
-        {
-          for (unsigned idx = 0; idx < src_targets.size(); idx++)
-          {
-            const InstanceRef &ref = src_targets[idx];
-            const ApEvent event = ref.get_ready_event();
-            if (!event.exists())
-              continue;
-            const FieldMask &mask = ref.get_valid_fields();
-            InstanceView *view = source_views[idx];
-            across_aggregator->record_precondition(view, true/*reading*/,
-                                                   event, mask, dst_expr);
-          }
-        } 
         for (unsigned idx = 0; idx < dst_targets.size(); idx++)
         {
           const InstanceRef &ref = dst_targets[idx];
@@ -2353,7 +2405,7 @@ namespace Legion {
         }
         const RtEvent done = 
           across_aggregator->issue_updates(trace_info, precondition,
-              has_src_preconditions, true/*has dst preconditions*/);
+              false/*has src preconditions*/, true/*has dst preconditions*/);
         if (done.exists() && !done.has_triggered())
           done.wait();
         const ApEvent result = across_aggregator->summarize(trace_info);
