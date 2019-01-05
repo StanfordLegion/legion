@@ -2223,7 +2223,7 @@ namespace Legion {
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
-      IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
+      IndexSpaceExpression *dst_expr = dst_node->row_source;
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
@@ -2289,14 +2289,34 @@ namespace Legion {
           full_precondition = 
             Runtime::merge_events(&trace_info, copy_preconditions);
         // Early out here since we've done the full copy
-        return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+        // If we're doing a reduction we actually want the intersection
+        // of the two index spaces for source and destination, In the
+        // normal write case we know we have to be writing everything
+        IndexSpaceExpression *src_expr = src_node->row_source;
+        if ((dst_req.redop > 0) && (dst_expr->expr_id != src_expr->expr_id))
+        {
+          IndexSpaceExpression *intersect = 
+            intersect_index_spaces(src_expr, dst_expr);
+          if (intersect->is_empty())
+            return ApEvent::NO_AP_EVENT;
+          return intersect->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                    dst_req.region.get_field_space(), 
-                                    src_req.region.get_tree_id(),
-                                    dst_req.region.get_tree_id(),
+                                       dst_req.region.get_field_space(), 
+                                       src_req.region.get_tree_id(),
+                                       dst_req.region.get_tree_id(),
 #endif
-                                    full_precondition,
-                                    dst_req.redop, false/*fold*/);
+                                       full_precondition,
+                                       dst_req.redop, false/*fold*/);
+        }
+        else
+          return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                      dst_req.region.get_field_space(), 
+                                      src_req.region.get_tree_id(),
+                                      dst_req.region.get_tree_id(),
+#endif
+                                      full_precondition,
+                                      dst_req.redop, false/*fold*/);
       }
       FieldMask src_mask, dst_mask; 
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)
