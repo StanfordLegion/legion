@@ -3579,6 +3579,11 @@ namespace Legion {
       {
         // We need a second generation of the barrier for writes
         Runtime::advance_barrier(bar);
+        // We need a third generation of the barrirer if we're not discarding
+        // the previous version of the barrier so we can make sure all the
+        // updates have been performed before we register our users
+        if (!IS_DISCARD(requirement))
+          Runtime::advance_barrier(bar);
         view_did_broadcast = 
           new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_75);
         // if we're shard 0 then get the distributed id and send it out
@@ -3764,12 +3769,36 @@ namespace Legion {
 #endif
               false/*track events*/, false/*check init*/,false/*defer copies*/);
         // If we're a write, then switch back privileges
-        if (is_write) // Set the privilege back to read-write
+        if (is_write)
+        {
+          // In the read-write case we need to make sure everyone is done
+          // performing their updates before anyone does a registration
+          if (registration_precondition.exists())
+            map_applied_conditions.insert(registration_precondition);
+          if (!map_applied_conditions.empty())
+          {
+            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/,       
+                Runtime::merge_events(map_applied_conditions));
+            // Don't need these anymore since we're going to wait for them
+            map_applied_conditions.clear();
+          }
+          else
+            Runtime::phase_barrier_arrive(inline_barrier, 1/*count*/);
+          // Set the privilege back to read-write
           requirement.privilege = READ_WRITE;
-        // Wait for the precondition to perform our registration if necessary
-        if (registration_precondition.exists() && 
-            !registration_precondition.has_triggered())
-          registration_precondition.wait();
+          // Wait for everyone to finish their updates
+          inline_barrier.wait();
+          // Advance the barrier to the next generation
+          Runtime::advance_barrier(inline_barrier);
+        }
+        else
+        {
+          // In the read-only case we just need to wait for our registration
+          // to be done before we can proceed
+          if (registration_precondition.exists() && 
+              !registration_precondition.has_triggered())
+            registration_precondition.wait();
+        }
         // Then do the registration, no need to track output effects since we
         // know that this instance can't be restricted in a control 
         // replicated context
