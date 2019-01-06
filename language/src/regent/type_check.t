@@ -1683,6 +1683,11 @@ function type_check.expr_partition_by_restriction(cx, node)
   local colors = type_check.expr(cx, node.colors)
   local colors_type = std.check_read(cx, colors)
 
+  if not std.is_region(region_type) then
+    report.error(node, "type mismatch in argument 1: expected region type but got " ..
+                 tostring(region_type))
+  end
+
   if not std.is_transform_type(transform_type) then
     report.error(node, "type mismatch in argument 2: expected transform type but got " ..
                  tostring(transform_type))
