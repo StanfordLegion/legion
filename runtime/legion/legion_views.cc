@@ -787,16 +787,14 @@ namespace Legion {
           }
           else
           {
-            finder = target_finder->second.find(it->first);
-            if (finder == target_finder->second.end())
+            if (target_finder->second.insert(it->first, overlap))
             {
+              // Added a new user to the previous users
               if (needs_reference)
                 it->first->add_reference();
-              target_finder->second.insert(it->first, overlap);
             }
             else
             {
-              finder.merge(overlap);
               // Remove any extra references we might be trying to send back
               if (!needs_reference && it->first->remove_reference())
                 delete it->first;
@@ -870,9 +868,14 @@ namespace Legion {
           dead_events.insert(cit->first);
           continue;
         }
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every KDView
+        // when we go to add our user later
         if (!trace_info.recording &&
             preconditions.find(cit->first) != preconditions.end())
           continue;
+#endif
 #endif
         const EventUsers &event_users = cit->second;
         const FieldMask overlap = event_users.get_valid_mask() & user_mask;
@@ -935,9 +938,14 @@ namespace Legion {
           dead_events.insert(pit->first);
           continue;
         }
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every KDView
+        // when we go to add our user later
         if (!trace_info.recording &&
             preconditions.find(pit->first) != preconditions.end())
           continue;
+#endif
 #endif
         const EventUsers &event_users = pit->second;
         if (user_mask * event_users.get_valid_mask())
@@ -986,7 +994,10 @@ namespace Legion {
         if (!overlap)
           continue;
         EventFieldExprs::iterator finder = preconditions.find(cit->first);
-#ifndef LEGION_SPY
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every KDView
+        // when we go to add our user later
         if (!trace_info.recording && finder != preconditions.end())
         {
           overlap -= finder->second.get_valid_mask();
@@ -1056,7 +1067,10 @@ namespace Legion {
         if (!overlap)
           continue;
         EventFieldExprs::iterator finder = preconditions.find(pit->first);
-#ifndef LEGION_SPY
+#if 0
+        // You might think you can optimize things like this, but you can't
+        // because we still need the correct epoch users for every KDView
+        // when we go to add our user later
         if (!trace_info.recording && finder != preconditions.end())
         {
           overlap -= finder->second.get_valid_mask();
