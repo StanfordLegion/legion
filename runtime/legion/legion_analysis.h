@@ -203,7 +203,6 @@ namespace Legion {
     public:
       RegionUsage usage;
       IndexSpaceExpression *const expr;
-      const size_t expr_volume;
       UniqueID op_id;
       unsigned index; // region requirement index
       bool copy_user; // is this from a copy or an operation

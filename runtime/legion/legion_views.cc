@@ -342,29 +342,16 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    KDView<DIM>::KDView(RegionTreeForest *ctx, const Rect<DIM> &bounds) 
-      : context(ctx), kd_bounds(bounds), kd_volume(kd_bounds.volume()),
-        left(NULL), right(NULL), refinement_timeout(0),
-        refinement_multiplier(1), subexpr_users(0)
+    KDView::KDView(RegionTreeForest *ctx, IndexSpaceExpression *exp) 
+      : context(ctx), kd_expr(exp), kd_volume(kd_expr->get_volume())
     //--------------------------------------------------------------------------
     {
+      kd_expr->add_expression_reference();
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    KDView<DIM>::KDView(RegionTreeForest *ctx, IndexSpaceExpression *exp) 
-      : context(ctx), kd_bounds(get_bounds(exp)), kd_volume(kd_bounds.volume()),
-        left(NULL), right(NULL), refinement_timeout(0),
-        refinement_multiplier(1), subexpr_users(0)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    KDView<DIM>::KDView(const KDView &rhs)
-      : context(rhs.context), kd_bounds(rhs.kd_bounds), kd_volume(rhs.kd_volume) 
+    KDView::KDView(const KDView &rhs)
+      : context(rhs.context), kd_expr(rhs.kd_expr), kd_volume(rhs.kd_volume)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -372,14 +359,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    KDView<DIM>::~KDView(void)
+    KDView::~KDView(void)
     //--------------------------------------------------------------------------
     {
-      if (left != NULL)
-        delete left;
-      if (right != NULL)
-        delete right;
+      if (kd_expr->remove_expression_reference())
+        delete kd_expr;
+      if (!subviews.empty())
+      {
+        for (FieldMaskSet<KDView>::iterator it = subviews.begin();
+              it != subviews.end(); it++)
+          delete it->first;
+      }
       // If we have any current or previous users filter them out now
       if (!current_epoch_users.empty())
       {
@@ -408,8 +398,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    KDView<DIM>& KDView<DIM>::operator=(const KDView<DIM> &rhs)
+    KDView& KDView::operator=(const KDView &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -418,77 +407,101 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_user_preconditions(const RegionUsage &usage,
-                                           IndexSpaceExpression *user_expr,
-                                           const FieldMask &user_mask,
-                                           ApEvent term_event,
-                                           UniqueID op_id, unsigned index,
-                                           std::set<ApEvent> &preconditions,
-                                           const PhysicalTraceInfo &trace_info)
+    void KDView::find_user_preconditions(const RegionUsage &usage,
+                                         IndexSpaceExpression *user_expr,
+                                         const FieldMask &user_mask,
+                                         ApEvent term_event,
+                                         UniqueID op_id, unsigned index,
+                                         std::set<ApEvent> &preconditions,
+                                         const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
-      const Rect<DIM> user_bounds = get_bounds(user_expr);
-      find_local_user_preconditions(usage, user_bounds, user_expr, user_mask,
-                        term_event, op_id, index, preconditions, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_local_user_preconditions(const RegionUsage &usage,
-                                           const Rect<DIM> &user_bounds,
-                                           IndexSpaceExpression *user_expr,
-                                           const FieldMask &user_mask,
-                                           ApEvent term_event,
-                                           UniqueID op_id, unsigned index,
-                                           std::set<ApEvent> &preconditions,
-                                           const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      bool traverse_below = false;
       std::set<ApEvent> dead_events;
+      FieldMaskSet<KDView> to_traverse;
+      std::map<KDView*,IndexSpaceExpression*> traverse_exprs;
       EventFieldUsers current_to_filter, previous_to_filter;
       // Perform the analysis with a read-only lock
       {
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        if (left == NULL)
+        // Check to see if we dominate when doing this analysis and
+        // can therefore filter or whether we are just intersecting
+        // Do the local analysis
+        if ((user_expr->expr_id == kd_expr->expr_id) ||
+            (user_expr->get_volume() == kd_volume))
         {
+          // We dominate in this case so we can do filtering
           FieldMask observed, non_dominated;
-          find_current_preconditions(usage, user_mask, user_expr, 
-                                     term_event, op_id, index, 
-                                     preconditions, dead_events, 
-                                     current_to_filter, observed,
-                                     non_dominated, trace_info);
-          const FieldMask dominated = observed - non_dominated;
-          if (!!dominated)
-            find_previous_filter_users(dominated, user_expr,previous_to_filter);
-          const FieldMask previous_mask = user_mask - dominated;
-          if (!!previous_mask)
-            find_previous_preconditions(usage, previous_mask, user_expr,
-                                        term_event, op_id, index,
-                                        preconditions, dead_events, trace_info);
+          if (!current_epoch_users.empty())
+            find_current_preconditions(usage, user_mask,
+                                       term_event, op_id, index, 
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed,
+                                       non_dominated, trace_info);
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            if (!!dominated)
+              find_previous_filter_users(dominated, previous_to_filter);
+            const FieldMask previous_mask = user_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask,
+                                          term_event, op_id, index,
+                                          preconditions,dead_events,trace_info);
+          }
         }
         else
-          traverse_below = true;
+        {
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+          {
+            find_current_preconditions(usage, user_mask,
+                                       term_event, op_id, index, 
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed,
+                                       non_dominated, trace_info);
+            if (!current_to_filter.empty())
+              current_to_filter.clear();
+          }
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            const FieldMask previous_mask = user_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask,
+                                          term_event, op_id, index,
+                                          preconditions,dead_events,trace_info);
+          }
+        }
+        // Then see if there are any users below that we need to traverse
+        if (!subviews.empty() && 
+            !(subviews.get_valid_mask() * user_mask))
+        {
+          for (FieldMaskSet<KDView>::const_iterator it = 
+                subviews.begin(); it != subviews.end(); it++)
+          {
+            const FieldMask overlap = it->second & user_mask;
+            if (!overlap)
+              continue;
+            if (it->first->kd_expr == user_expr)
+            {
+              to_traverse.insert(it->first, overlap);
+              traverse_exprs[it->first] = user_expr;
+              continue;
+            }
+            IndexSpaceExpression *expr_overlap = 
+              context->intersect_index_spaces(it->first->kd_expr, user_expr);
+            if (!expr_overlap->is_empty())
+            {
+              to_traverse.insert(it->first, overlap);
+              traverse_exprs[it->first] = expr_overlap;
+            }
+          }
+        }
       }
-      if (traverse_below)
-      {
-        const Rect<DIM> left_overlap = 
-          user_bounds.intersection(left->kd_bounds);
-        if (!left_overlap.empty())
-          left->find_local_user_preconditions(usage, left_overlap, user_expr,
-              user_mask, term_event, op_id, index, preconditions, trace_info);
-        const Rect<DIM> right_overlap = 
-          user_bounds.intersection(right->kd_bounds);
-        if (!right_overlap.empty())
-          right->find_local_user_preconditions(usage, right_overlap, user_expr,
-              user_mask, term_event, op_id, index, preconditions, trace_info);
-      }
-      else if ((!dead_events.empty() || 
-           !previous_to_filter.empty() || !current_to_filter.empty()) &&
-          !trace_info.recording)
+      if (!trace_info.recording && (!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()))
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -501,76 +514,107 @@ namespace Legion {
         if (!current_to_filter.empty())
           filter_current_users(current_to_filter);
       }
+      if (!to_traverse.empty())
+      {
+        for (FieldMaskSet<KDView>::const_iterator it = 
+              to_traverse.begin(); it != to_traverse.end(); it++)
+          it->first->find_user_preconditions(usage, traverse_exprs[it->first],
+              it->second, term_event, op_id, index, preconditions, trace_info);
+      }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_copy_preconditions(const RegionUsage &usage,
-                                           IndexSpaceExpression *copy_expr,
-                                           const FieldMask &copy_mask,
-                                           UniqueID op_id, unsigned index,
-                                           EventFieldExprs &preconditions,
-                                           const PhysicalTraceInfo &trace_info)
+    void KDView::find_copy_preconditions(const RegionUsage &usage,
+                                         IndexSpaceExpression *copy_expr,
+                                         const FieldMask &copy_mask,
+                                         UniqueID op_id, unsigned index,
+                                         EventFieldExprs &preconditions,
+                                         const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
-      const Rect<DIM> copy_bounds = get_bounds(copy_expr);
-      find_local_copy_preconditions(usage, copy_bounds, copy_expr, copy_mask,
-                                    op_id, index, preconditions, trace_info);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_local_copy_preconditions(const RegionUsage &usage,
-                                           const Rect<DIM> &copy_bounds,
-                                           IndexSpaceExpression *copy_expr,
-                                           const FieldMask &copy_mask,
-                                           UniqueID op_id, unsigned index,
-                                           EventFieldExprs &preconditions,
-                                           const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      bool traverse_below = false;
-      FieldMask filter_mask;
       std::set<ApEvent> dead_events;
+      FieldMaskSet<KDView> to_traverse;
+      std::map<KDView*,IndexSpaceExpression*> traverse_exprs;
       EventFieldUsers current_to_filter, previous_to_filter;
       // Do the first pass with a read-only lock on the events
       {
-        FieldMask observed, non_dominated;
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
-        if (left == NULL)
+        // Check to see if we dominate when doing this analysis and
+        // can therefore filter or whether we are just intersecting
+        // Do the local analysis
+        if ((copy_expr->expr_id == kd_expr->expr_id) ||
+            (copy_expr->get_volume() == kd_volume))
         {
-          find_current_preconditions(usage, copy_mask, copy_expr, op_id, index,
-                                     preconditions, dead_events,
-                                     current_to_filter, observed,
-                                     non_dominated, trace_info);
-          const FieldMask dominated = observed - non_dominated;
-          if (!!dominated)
-            find_previous_filter_users(dominated, copy_expr,previous_to_filter);
-          const FieldMask previous_mask = copy_mask - dominated;
-          if (!!previous_mask)
-            find_previous_preconditions(usage, previous_mask, copy_expr, op_id, 
-                                index, preconditions, dead_events, trace_info);
+          // We dominate in this case so we can do filtering
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+            find_current_preconditions(usage, copy_mask, copy_expr, 
+                                       op_id, index, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated, trace_info);
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            if (!!dominated)
+              find_previous_filter_users(dominated, previous_to_filter);
+            const FieldMask previous_mask = copy_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, copy_expr,
+                                          op_id, index, preconditions,
+                                          dead_events, trace_info);
+          }
         }
         else
-          traverse_below = true;
+        {
+          FieldMask observed, non_dominated;
+          if (!current_epoch_users.empty())
+          {
+            find_current_preconditions(usage, copy_mask, copy_expr, 
+                                       op_id, index, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated, trace_info);
+            current_to_filter.clear();
+          }
+          if (!previous_epoch_users.empty())
+          {
+            const FieldMask dominated = observed - non_dominated;
+            const FieldMask previous_mask = copy_mask - dominated;
+            if (!!previous_mask)
+              find_previous_preconditions(usage, previous_mask, copy_expr,
+                                          op_id, index, preconditions,
+                                          dead_events, trace_info);
+          }
+        }
+        // Then see if there are any users below that we need to traverse
+        if (!subviews.empty() && 
+            !(subviews.get_valid_mask() * copy_mask))
+        {
+          for (FieldMaskSet<KDView>::const_iterator it = 
+                subviews.begin(); it != subviews.end(); it++)
+          {
+            const FieldMask overlap = it->second & copy_mask;
+            if (!overlap)
+              continue;
+            if (it->first->kd_expr == copy_expr)
+            {
+              to_traverse.insert(it->first, overlap);
+              traverse_exprs[it->first] = copy_expr;
+              continue;
+            }
+            IndexSpaceExpression *expr_overlap = 
+              context->intersect_index_spaces(it->first->kd_expr, copy_expr);
+            if (!expr_overlap->is_empty())
+            {
+              to_traverse.insert(it->first, overlap);
+              traverse_exprs[it->first] = expr_overlap;
+            }
+          }
+        }
       }
-      if (traverse_below)
-      {
-        const Rect<DIM> left_overlap = 
-          copy_bounds.intersection(left->kd_bounds);
-        if (!left_overlap.empty())
-          left->find_local_copy_preconditions(usage, left_overlap, copy_expr,
-                          copy_mask, op_id, index, preconditions, trace_info);
-        const Rect<DIM> right_overlap = 
-          copy_bounds.intersection(right->kd_bounds);
-        if (!right_overlap.empty())
-          right->find_local_copy_preconditions(usage, right_overlap, copy_expr,
-                            copy_mask, op_id, index, preconditions, trace_info);
-      }
-      else if ((!dead_events.empty() || !previous_to_filter.empty() || 
-            !current_to_filter.empty()) && !trace_info.recording)
+      if (!trace_info.recording && (!dead_events.empty() || 
+           !previous_to_filter.empty() || !current_to_filter.empty()))
       {
         // Need exclusive permissions to modify data structures
         AutoLock v_lock(view_lock);
@@ -583,109 +627,89 @@ namespace Legion {
         if (!current_to_filter.empty())
           filter_current_users(current_to_filter);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::add_user(const RegionUsage &usage,
-                               IndexSpaceExpression *user_expr,
-                               const FieldMask &user_mask,
-                               ApEvent term_event, UniqueID op_id, 
-                               unsigned index, bool copy_user)
-    //--------------------------------------------------------------------------
-    {
-      PhysicalUser *user = 
-        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
-      const Rect<DIM> user_bounds = get_bounds(user_expr);
-      add_local_user(user, user_bounds, term_event, user_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::add_local_user(PhysicalUser *user, 
-                                     const Rect<DIM> &user_bounds,
-                                     ApEvent term_event,
-                                     const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      // If we've already made subsets then traverse down them
-      bool traverse_below = false;
+      if (!to_traverse.empty())
       {
+        for (FieldMaskSet<KDView>::const_iterator it = 
+              to_traverse.begin(); it != to_traverse.end(); it++)
+          it->first->find_copy_preconditions(usage, traverse_exprs[it->first],
+                          it->second, op_id, index, preconditions, trace_info);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void KDView::add_initial_user(PhysicalUser *user,const FieldMask &user_mask,
+                      const ApEvent term_event, IndexSpaceExpression *user_expr,
+                      std::vector<KDView*> &added_views)
+    //--------------------------------------------------------------------------
+    {
+      const size_t user_volume = user_expr->get_volume();
+      // Handle the base case first
+      if ((user_expr == kd_expr) || (user_volume == kd_volume))
+      {
+        added_views.push_back(this);
+        add_current_user(user, user_mask, term_event);
+        return;
+      }
+      // We're either going to need to make or find subviews here
+      std::map<KDView*,IndexSpaceExpression*> to_traverse;
+      {
+        IndexSpaceExpression *remainder = user_expr;
         AutoLock v_lock(view_lock);
-        if (left == NULL)
+        for (FieldMaskSet<KDView>::iterator it = subviews.begin();
+              it != subviews.end(); it++)
         {
-          // Check to see if we need to refine this into subviews
-          if (subexpr_users >= LEGION_MAX_BVH_FANOUT)
+          if (it->first->kd_expr == remainder)
           {
-            if (refinement_timeout == 0)
-            {
-              // Try refining, if we can't refine then just do the normal add
-              if (!refine_users())
-              {
-                // Failed so reset the timeout and up the multiplier
-                refinement_timeout = 
-                  LEGION_MAX_BVH_FANOUT * refinement_multiplier; 
-                refinement_multiplier *= 2;
-                // Add the user like normal
-                add_current_user(user, term_event, user_mask);
-              }
-              else
-                traverse_below = true;
-            }
-            else
-            {
-              refinement_timeout--;
-              add_current_user(user, term_event, user_mask);
-            }
+            // Merge in any new fields to know there could be users down there
+            it.merge(user_mask);
+            to_traverse[it->first] = remainder;
+            remainder = NULL;
+            break;
+          }
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(remainder, it->first->kd_expr);
+          if (overlap->is_empty())
+            continue;
+          // Merge in any new fields to know there could be users down there
+          it.merge(user_mask);
+          to_traverse[it->first] = overlap;
+          // If we cover all the points then we're done otherwise do the
+          // subtraction to get the next remainder
+          if (overlap->get_volume() == remainder->get_volume())
+          {
+            remainder = NULL;
+            break;
           }
           else
-            add_current_user(user, term_event, user_mask);
+            remainder = context->subtract_index_spaces(remainder, overlap);
         }
-        else
-          traverse_below = true;
+        if (remainder != NULL)
+        {
+          // Make a new subview with the right fields and add it
+          KDView *new_subview = new KDView(context, remainder);
+          subviews.insert(new_subview, user_mask);
+          to_traverse[new_subview] = remainder;
+        }
       }
-      if (traverse_below)
-      {
-        const Rect<DIM> left_overlap = 
-          user_bounds.intersection(left->kd_bounds);
-        if (!left_overlap.empty())
-          left->add_local_user(user, left_overlap, term_event, user_mask);
-        const Rect<DIM> right_overlap = 
-          user_bounds.intersection(right->kd_bounds);
-        if (!right_overlap.empty())
-          right->add_local_user(user, right_overlap, term_event, user_mask);
-      }
+      for (std::map<KDView*,IndexSpaceExpression*>::const_iterator it = 
+            to_traverse.begin(); it != to_traverse.end(); it++)
+        it->first->add_initial_user(user, user_mask, term_event, 
+                                    it->second, added_views);
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::add_current_user(PhysicalUser *user, ApEvent term_event,
-                                       const FieldMask &user_mask)
+    void KDView::add_current_user(PhysicalUser *user, 
+                           const FieldMask &user_mask, const ApEvent term_event)
     //--------------------------------------------------------------------------
     {
-      if (user->expr_volume < kd_volume)
-        subexpr_users++;
+      AutoLock v_lock(view_lock);
       EventUsers &event_users = current_epoch_users[term_event];
       if (event_users.insert(user, user_mask))
         user->add_reference();
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::add_previous_user(PhysicalUser *user, ApEvent term_event,
-                                        const FieldMask &user_mask)
-    //--------------------------------------------------------------------------
-    {
-      if (user->expr_volume < kd_volume)
-        subexpr_users++;
-      EventUsers &event_users = previous_epoch_users[term_event];
-      if (event_users.insert(user, user_mask))
-        user->add_reference();
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::filter_local_users(ApEvent term_event) 
+    void KDView::filter_local_users(ApEvent term_event) 
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -701,16 +725,7 @@ namespace Legion {
         for (EventUsers::const_iterator it = current_finder->second.begin();
               it != current_finder->second.end(); it++)
           if (it->first->remove_reference())
-          {
-            if (it->first->expr_volume < kd_volume)
-            {
-#ifdef DEBUG_LEGION
-              assert(subexpr_users > 0);
-#endif
-              subexpr_users--;
-            }
             delete it->first;
-          }
         current_epoch_users.erase(current_finder);
       }
       LegionMap<ApEvent,EventUsers>::aligned::iterator previous_finder = 
@@ -720,24 +735,14 @@ namespace Legion {
         for (EventUsers::const_iterator it = previous_finder->second.begin();
               it != previous_finder->second.end(); it++)
           if (it->first->remove_reference())
-          {
-            if (it->first->expr_volume < kd_volume)
-            {
-#ifdef DEBUG_LEGION
-              assert(subexpr_users > 0);
-#endif
-              subexpr_users--;
-            }
             delete it->first;
-          }
         previous_epoch_users.erase(previous_finder);
       }
 #endif
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::filter_current_users(const EventFieldUsers &to_filter)
+    void KDView::filter_current_users(const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller 
@@ -794,16 +799,7 @@ namespace Legion {
               finder.merge(overlap);
               // Remove any extra references we might be trying to send back
               if (!needs_reference && it->first->remove_reference())
-              {
-                if (it->first->expr_volume < kd_volume)
-                {
-#ifdef DEBUG_LEGION
-                  assert(subexpr_users > 0);
-#endif
-                  subexpr_users--;
-                }
                 delete it->first;
-              }
             }
           }
         }
@@ -813,8 +809,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::filter_previous_users(const EventFieldUsers &to_filter)
+    void KDView::filter_previous_users(const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller
@@ -837,16 +832,7 @@ namespace Legion {
           if (!finder->second)
           {
             if (finder->first->remove_reference())
-            {
-              if (finder->first->expr_volume < kd_volume)
-              {
-#ifdef DEBUG_LEGION
-                assert(subexpr_users > 0);
-#endif
-                subexpr_users--;
-              }
               delete finder->first;
-            }
             event_finder->second.erase(finder);
           }
         }
@@ -856,182 +842,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    /*static*/ Rect<DIM> KDView<DIM>::get_bounds(IndexSpaceExpression *expr)
-    //--------------------------------------------------------------------------
-    {
-      ApEvent wait_on;
-      const Domain d = expr->get_domain(wait_on, true/*tight*/);
-      if (wait_on.exists())
-        wait_on.wait();
-      return d.bounds<DIM,coord_t>();
-    }
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    bool KDView<DIM>::refine_users(void)
-    //--------------------------------------------------------------------------
-    {
-      // TODO: keep the tree balanced in some way
-      std::map<PhysicalUser*,Rect<DIM> > user_bounds;
-      for (EventFieldUsers::const_iterator eit = current_epoch_users.begin(); 
-            eit != current_epoch_users.end(); eit++)
-      {
-        for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-        {
-          if (user_bounds.find(it->first) != user_bounds.end())
-            continue;
-          user_bounds[it->first] = kd_bounds.intersection(
-              get_bounds(it->first->expr));
-        }
-      }
-      for (EventFieldUsers::const_iterator eit = previous_epoch_users.begin(); 
-            eit != previous_epoch_users.end(); eit++)
-      {
-        for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-        {
-          if (user_bounds.find(it->first) != user_bounds.end())
-            continue;
-          user_bounds[it->first] = kd_bounds.intersection(
-              get_bounds(it->first->expr));
-        }
-      }
-      std::vector<Rect<DIM> > subset_bounds(user_bounds.size());
-      unsigned index = 0;
-      // Also check for the special case where they are all the same which 
-      // happnes frequently and guarantees we won't find a splitting plane
-      bool all_the_same = true;
-      for (typename std::map<PhysicalUser*,Rect<DIM> >::const_iterator it = 
-            user_bounds.begin(); it != user_bounds.end(); it++, index++)
-      {
-        subset_bounds[index] = it->second;
-        if (all_the_same && (subset_bounds[index] != subset_bounds[0]))
-          all_the_same = false;
-      }
-      if (all_the_same)
-        return false;
-      // Compute the best splitting plane along the dimensions
-      coord_t split = 0;
-      unsigned split_dim = 0;
-      unsigned split_max = subset_bounds.size();
-      for (int dim = 0; dim < DIM; dim++)
-      {
-        // Sort the start and end of each equivalence set bounding rectangle
-        // along the splitting dimension
-        std::set<KDLine> lines;
-        for (unsigned idx = 0; idx < subset_bounds.size(); idx++)
-        {
-          lines.insert(KDLine(subset_bounds[idx].lo[dim], idx, true));
-          lines.insert(KDLine(subset_bounds[idx].hi[dim], idx, false));
-        }
-        // Construct two lists by scanning from left-to-right and
-        // from right-to-left of the number of rectangles that would
-        // be inlcuded on the left or right side by each splitting plane
-        std::map<coord_t,unsigned> left_inclusive, right_inclusive;
-        unsigned count = 0;
-        for (typename std::set<KDLine>::const_iterator it = lines.begin();
-              it != lines.end(); it++)
-        {
-          // Only increment for new rectangles
-          if (it->start)
-            count++;
-          // Always record the count for all splits
-          left_inclusive[it->value] = count;
-        }
-        count = 0;
-        for (typename std::set<KDLine>::const_reverse_iterator it = 
-              lines.rbegin(); it != lines.rend(); it++)
-        {
-          // End of rectangles are the beginning in this direction
-          if (!it->start)
-            count++;
-          // Always record the count for all splits
-          right_inclusive[it->value] = count;
-        }
-#ifdef DEBUG_LEGION
-        assert(left_inclusive.size() == right_inclusive.size());
-#endif
-        // We want to take the mini-max of the two numbers in order
-        // to try to balance the splitting plane across the two sets
-        for (std::map<coord_t,unsigned>::const_iterator it = 
-              left_inclusive.begin(); it != left_inclusive.end(); it++)
-        {
-          const unsigned left = it->second;
-          const unsigned right = right_inclusive[it->first];
-          const unsigned max = (left > right) ? left : right;
-          if (max < split_max)
-          {
-            split_max = max;
-            split = it->first;
-            split_dim = dim;
-          }
-        }
-      }
-      // If we couldn't find a splitting plane in any dimension that 
-      // can actually reduce the number of users, then don't do anything
-      if (split_max == subset_bounds.size())
-        return false;
-      // Make new subviews and move the users below
-      Rect<DIM> left_bounds = kd_bounds;
-      left_bounds.hi[split_dim] = split;
-#ifdef DEBUG_LEGION
-      assert(!left_bounds.empty());
-#endif
-      left = new KDView<DIM>(context, left_bounds);
-      Rect<DIM> right_bounds = kd_bounds;
-      right_bounds.lo[split_dim] = split+1;
-#ifdef DEBUG_LEGION
-      assert(!right_bounds.empty());
-#endif
-      right = new KDView<DIM>(context, right_bounds);
-      for (EventFieldUsers::const_iterator eit = current_epoch_users.begin(); 
-            eit != current_epoch_users.end(); eit++)
-      {
-        for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-        {
-          const Rect<DIM> &bounds = user_bounds[it->first];
-          const Rect<DIM> left_overlap = bounds.intersection(left_bounds);
-          if (!left_overlap.empty())
-            left->add_current_user(it->first, eit->first, it->second);
-          const Rect<DIM> right_overlap = bounds.intersection(right_bounds);
-          if (!right_overlap.empty())
-            right->add_current_user(it->first, eit->first, it->second);
-          // Remove our reference
-          if (it->first->remove_reference())
-            assert(false); // should never actually be deleted
-        }
-      }
-      current_epoch_users.clear();
-      for (EventFieldUsers::const_iterator eit = previous_epoch_users.begin(); 
-            eit != previous_epoch_users.end(); eit++)
-      {
-        for (FieldMaskSet<PhysicalUser>::const_iterator it = 
-              eit->second.begin(); it != eit->second.end(); it++)
-        {
-          const Rect<DIM> &bounds = user_bounds[it->first];
-          const Rect<DIM> left_overlap = bounds.intersection(left_bounds);
-          if (!left_overlap.empty())
-            left->add_previous_user(it->first, eit->first, it->second);
-          const Rect<DIM> right_overlap = bounds.intersection(right_bounds);
-          if (!right_overlap.empty())
-            right->add_previous_user(it->first, eit->first, it->second);
-          // Remove our reference
-          if (it->first->remove_reference())
-            assert(false); // should never actually be deleted
-        }
-      }
-      previous_epoch_users.clear();
-      return true;
-    } 
-
-    //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_current_preconditions(const RegionUsage &usage,
+    void KDView::find_current_preconditions(const RegionUsage &usage,
                                             const FieldMask &user_mask,
-                                            IndexSpaceExpression *user_expr,
                                             ApEvent term_event,
                                             const UniqueID op_id,
                                             const unsigned index,
@@ -1073,43 +885,33 @@ namespace Legion {
           const FieldMask user_overlap = user_mask & it->second;
           if (!user_overlap)
             continue;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<false>(it->first, usage, op_id, index,
-                                            user_expr, overlap_expr))
+          if (has_local_precondition<false>(it->first, usage, op_id, index))
           {
             observed |= user_overlap;
             preconditions.insert(cit->first);
-            if ((overlap_expr->expr_id == it->first->expr->expr_id) ||
-                (overlap_expr->get_volume() == it->first->expr_volume))
+            if (to_filter == filter_users.end())
             {
-              if (to_filter == filter_users.end())
-              {
-                filter_users[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_users.find(cit->first);
-              }
-              else
-              {
-#ifdef DEBUG_LEGION
-                assert(to_filter->second.find(it->first) == 
-                        to_filter->second.end());
-#endif
-                to_filter->second.insert(it->first, user_overlap);
-              }
+              filter_users[cit->first].insert(it->first, user_overlap);
+              to_filter = filter_users.find(cit->first);
             }
             else
-              non_dominated |= user_overlap;
+            {
+#ifdef DEBUG_LEGION
+              assert(to_filter->second.find(it->first) == 
+                      to_filter->second.end());
+#endif
+              to_filter->second.insert(it->first, user_overlap);
+            }
           }
-          else if (!overlap_expr->is_empty())
+          else
             non_dominated |= user_overlap;
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_previous_preconditions(const RegionUsage &usage,
+    void KDView::find_previous_preconditions(const RegionUsage &usage,
                                              const FieldMask &user_mask,
-                                             IndexSpaceExpression *user_expr,
                                              ApEvent term_event,
                                              const UniqueID op_id,
                                              const unsigned index,
@@ -1145,16 +947,14 @@ namespace Legion {
         {
           if (user_mask * it->second)
             continue;
-          if (has_local_precondition<false>(it->first, usage,
-                                            op_id, index, user_expr))
+          if (has_local_precondition<false>(it->first, usage, op_id, index))
             preconditions.insert(pit->first);
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_current_preconditions(const RegionUsage &usage,
+    void KDView::find_current_preconditions(const RegionUsage &usage,
                                             const FieldMask &user_mask,
                                             IndexSpaceExpression *user_expr,
                                             const UniqueID op_id,
@@ -1201,41 +1001,32 @@ namespace Legion {
           const FieldMask user_overlap = user_mask & it->second;
           if (!user_overlap)
             continue;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<true>(it->first, usage, op_id, index, 
-                                           user_expr, overlap_expr))
+          if (has_local_precondition<true>(it->first, usage, op_id, index)) 
           {
             observed |= user_overlap;
             if (finder == preconditions.end())
             {
-              preconditions[cit->first].insert(overlap_expr, user_overlap);
+              preconditions[cit->first].insert(user_expr, user_overlap);
               finder = preconditions.find(cit->first);
             }
             else
-              finder->second.insert(overlap_expr, user_overlap);
-            if ((overlap_expr->expr_id == it->first->expr->expr_id) ||
-                (overlap_expr->get_volume() == it->first->expr_volume))
+              finder->second.insert(user_expr, user_overlap);
+            if (to_filter == filter_events.end())
             {
-              if (to_filter == filter_events.end())
-              {
-                filter_events[cit->first].insert(it->first, user_overlap);
-                to_filter = filter_events.find(cit->first);
-              }
-              else
-                to_filter->second.insert(it->first, user_overlap);
+              filter_events[cit->first].insert(it->first, user_overlap);
+              to_filter = filter_events.find(cit->first);
             }
             else
-              non_dominated |= user_overlap;
+              to_filter->second.insert(it->first, user_overlap);
           }
-          else if (!overlap_expr->is_empty())
+          else
             non_dominated |= user_overlap;
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_previous_preconditions(const RegionUsage &usage,
+    void KDView::find_previous_preconditions(const RegionUsage &usage,
                                              const FieldMask &user_mask,
                                              IndexSpaceExpression *user_expr,
                                              const UniqueID op_id,
@@ -1279,28 +1070,24 @@ namespace Legion {
           const FieldMask user_overlap = overlap & it->second;
           if (!user_overlap)
             continue;
-          IndexSpaceExpression *overlap_expr = NULL;
-          if (has_local_precondition<true>(it->first, usage, op_id, index, 
-                                           user_expr, overlap_expr))
+          if (has_local_precondition<true>(it->first, usage, op_id, index)) 
           {
             if (finder == preconditions.end())
             {
-              preconditions[pit->first].insert(overlap_expr, user_overlap);
+              preconditions[pit->first].insert(user_expr, user_overlap);
               // Needed for when we go around the loop again
               finder = preconditions.find(pit->first);
             }
             else
-              finder->second.insert(overlap_expr, user_overlap);
+              finder->second.insert(user_expr, user_overlap);
           }
         }
       }
     }
 
     //--------------------------------------------------------------------------
-    template<int DIM>
-    void KDView<DIM>::find_previous_filter_users(const FieldMask &dom_mask,
-                                            IndexSpaceExpression *filter_expr,
-                                                EventFieldUsers &filter_users)
+    void KDView::find_previous_filter_users(const FieldMask &dom_mask,
+                                            EventFieldUsers &filter_users)
     //--------------------------------------------------------------------------
     {
       // Lock better be held by caller
@@ -1317,20 +1104,13 @@ namespace Legion {
           const FieldMask user_overlap = it->second & event_overlap;
           if (!user_overlap)
             continue;
-          IndexSpaceExpression *expr_overlap = 
-            context->intersect_index_spaces(it->first->expr, filter_expr);
-          if (expr_overlap->is_empty())
-            continue;
-          else if (expr_overlap->get_volume() == it->first->expr_volume)
+          if (to_filter == filter_users.end())
           {
-            if (to_filter == filter_users.end())
-            {
-              filter_users[pit->first].insert(it->first, user_overlap);
-              to_filter = filter_users.find(pit->first);
-            }
-            else
-              to_filter->second.insert(it->first, user_overlap);
+            filter_users[pit->first].insert(it->first, user_overlap);
+            to_filter = filter_users.find(pit->first);
           }
+          else
+            to_filter->second.insert(it->first, user_overlap);
         }
       }
     }
@@ -1346,7 +1126,7 @@ namespace Legion {
                                AddressSpaceID log_own, InstanceManager *man,
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
-                     log_own, own_ctx, register_now), manager(man)
+               log_own, own_ctx, register_now), manager(man), expr_cache_uses(0)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -1356,21 +1136,7 @@ namespace Legion {
       // Keep the manager from being collected
       manager->add_nested_resource_ref(did);
       if (is_logical_owner())
-      {
-        switch (manager->instance_domain->get_num_dims())
-        {
-#define KDVIEW(DIM) \
-    case DIM: \
-      { \
-        current_users = new KDView<DIM>(context, manager->instance_domain); \
-        break; \
-      }
-          LEGION_FOREACH_N(KDVIEW)
-#undef KDVIEW
-          default:
-            assert(false);
-        }
-      }
+        current_users = new KDView(ctx, manager->instance_domain);
       else
         current_users = NULL;
 #ifdef LEGION_GC
@@ -1501,9 +1267,29 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
+      PhysicalUser *user = 
+        new PhysicalUser(usage, user_expr, op_id, index, false/*copy user*/);
       // No need to take the lock since we are just initializing
-      current_users->add_user(usage, user_expr, user_mask, term_event,
-                              op_id, index, false/*copy user*/); 
+      // See if we have it in the cache
+      LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
+        finder = expr_cache.find(user_expr->expr_id);
+      if (finder == expr_cache.end() || 
+          !(finder->second.invalid_fields * user_mask))
+      {
+        CacheEntry &entry = expr_cache[user_expr->expr_id];
+        entry.views.clear();
+        current_users->add_initial_user(user, user_mask, 
+                                        term_event, user_expr, entry.views);
+        entry.invalid_fields -= user_mask;
+      }
+      else
+      {
+        // Found it in the cache, so we can just add it directly
+        for (std::vector<KDView*>::const_iterator it = 
+              finder->second.views.begin(); it != 
+              finder->second.views.end(); it++)
+          (*it)->add_current_user(user, user_mask, term_event);
+      }
       initial_user_events.insert(term_event);
       // Don't need to actual launch a collection task, destructor
       // will handle this case
@@ -1756,9 +1542,58 @@ namespace Legion {
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      current_users->add_user(usage, user_expr, user_mask, term_event,
-                              op_id, index, copy_user);
+      PhysicalUser *user = 
+        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
+      std::vector<KDView*> views;
+      // Handle an easy case first, if the user_expr is the same as the 
+      // kd_expr for the root then this is easy
+      if (user_expr != current_users->kd_expr)
+      {
+        // Hard case where we will have subviews
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // See if we can find the entry in the cache and it's valid 
+        // for all of our fields
+        LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if ((finder != expr_cache.end()) && 
+            (finder->second.invalid_fields * user_mask))
+          views = finder->second.views;
+      }
+      else 
+        views.push_back(current_users);
+      if (!views.empty())
+      {
+        // Already know the views so just iterate them
+        for (std::vector<KDView*>::const_iterator it = views.begin();
+              it != views.end(); it++)
+          (*it)->add_current_user(user, user_mask, term_event);
+        // Clear them so we don't update them later
+        views.clear();
+      }
+      else
+        // Don't know the views yet so we need to compute them
+        current_users->add_initial_user(user, user_mask, 
+                                        term_event, user_expr, views);
       AutoLock v_lock(view_lock);
+      if (views.empty())
+      {
+        // Update the timeout and see if we need to clear the cache
+        if (!expr_cache.empty())
+        {
+          expr_cache_uses++;
+          if (expr_cache_uses == expr_cache_timeout)
+          {
+            expr_cache.clear();
+            expr_cache_uses = 0;
+          }
+        }
+      }
+      else
+      {
+        CacheEntry &entry = expr_cache[user_expr->expr_id];
+        entry.views.swap(views);
+        entry.invalid_fields -= user_mask;
+      }
       // If we're tracing we defer adding these events until the trace
       // capture is complete so we can get a full set of preconditions
       if (trace_info.recording)

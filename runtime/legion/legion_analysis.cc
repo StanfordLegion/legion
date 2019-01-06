@@ -70,7 +70,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(IndexSpaceExpression *e)
-      : expr(e), expr_volume(expr->get_volume())
+      : expr(e)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -82,8 +82,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
                                UniqueID id, unsigned x, bool copy)
-      : usage(u), expr(e), expr_volume(expr->get_volume()), op_id(id), 
-        index(x), copy_user(copy)
+      : usage(u), expr(e), op_id(id), index(x), copy_user(copy)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -94,7 +93,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
-      : expr(NULL), expr_volume(0)
+      : expr(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
