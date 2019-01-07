@@ -25,6 +25,7 @@ local specialize = require("regent/specialize")
 local normalize = require("regent/normalize")
 local inline_tasks = require("regent/inline_tasks")
 local eliminate_dead_code = require("regent/eliminate_dead_code")
+local desugar = require("regent/desugar")
 local std = require("regent/std")
 local type_check = require("regent/type_check")
 local validate = require("regent/validate")
@@ -46,7 +47,7 @@ end
 
 local function optimize_and_codegen(node, allow_pretty)
   node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
-  node = profile("normalize_after_type_check", node, normalize.entry)(node)
+  node = profile("desugar", node, desugar.entry)(node)
   node = profile("check_annotations", node, check_annotations.entry)(node)
   node = passes.optimize(node)
   return passes.codegen(node, allow_pretty)
@@ -57,7 +58,7 @@ function passes.compile(node, allow_pretty)
     local env = environment_function()
     local node = profile("specialize", node, specialize.entry)(env, node)
     if std.is_rquote(node) then return node end
-    node = profile("normalize_after_specialize", node, normalize.entry)(node)
+    node = profile("normalize", node, normalize.entry)(node)
     if std.config["inline"] then
       node = profile("inline_tasks", node, inline_tasks.entry)(node)
     end

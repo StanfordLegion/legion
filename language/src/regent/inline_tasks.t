@@ -149,8 +149,8 @@ function inline_tasks.expr_call(call)
       local new_symbol = std.newsymbol(symbol_type, param:hasname())
       symbol_mapping[param] = new_symbol
       actions:insert(ast.specialized.stat.Var {
-        symbols = terralib.newlist { new_symbol },
-        values = terralib.newlist { arg },
+        symbols = new_symbol,
+        values = arg,
         annotations = ast.default_annotations(),
         span = call.span,
       })
@@ -159,9 +159,19 @@ function inline_tasks.expr_call(call)
 
   -- Do alpha conversion to avoid type collision.
   local stats = ast.map_node_postorder(function(node)
-    if node:is(ast.specialized.stat.Var) or
-       node:is(ast.specialized.stat.VarUnpack)
-    then
+    if node:is(ast.specialized.stat.Var) then
+      local symbol = node.symbols
+      -- We should ignore the type of the existing symbol as we want to type check it again.
+      local symbol_type = symbol:hastype()
+      if is_singleton_type(symbol_type) then
+        symbol_type = nil
+      else
+        symbol_type = std.type_sub(symbol_type, symbol_mapping)
+      end
+      local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
+      symbol_mapping[symbol] = new_symbol
+      return node { symbols = new_symbol }
+    elseif node:is(ast.specialized.stat.VarUnpack) then
       local symbols = node.symbols:map(function(symbol)
         -- We should ignore the type of the existing symbol as we want to type check it again.
         local symbol_type = symbol:hastype()
@@ -221,8 +231,8 @@ function inline_tasks.expr_call(call)
     }
     local return_stat = stats[#stats]
     stats[#stats] = ast.specialized.stat.Var {
-      symbols = terralib.newlist { return_var },
-      values = terralib.newlist { return_stat.value },
+      symbols = return_var,
+      values = return_stat.value,
       annotations = ast.default_annotations(),
       span = return_stat.span,
     }
@@ -344,19 +354,16 @@ function inline_tasks.stat_repeat(node)
 end
 
 function inline_tasks.stat_var(node)
-  if #node.values == 0 then return node end
-  assert(#node.symbols == 1 and #node.values == 1)
-  local value, inlined, actions = inline_tasks.expr(node.values[1])
+  if not node.values then return node end
+  local value, inlined, actions = inline_tasks.expr(node.values)
   assert(not inlined or value ~= nil)
   if inlined then
     local stats = terralib.newlist { preserve_task_call(node {
-        symbols = terralib.newlist {
-          std.newsymbol(nil, node.symbols[1]:hasname())
-        },
+        symbols = std.newsymbol(nil, node.symbols:hasname()),
       })
     }
     stats:insertall(actions)
-    stats:insert(node { values = terralib.newlist { value } })
+    stats:insert(node { values = value })
     return stats
   else
     return node
@@ -398,28 +405,18 @@ end
 function inline_tasks.stat_assignment_or_reduce(node)
   local inlined_any = false
   local actions = terralib.newlist()
-  local new_lhs = node.lhs:map(function(lh)
-    local new_lh, inlined, lh_actions = inline_tasks.expr(lh)
-    if inlined then
-      assert(new_lh ~= nil)
-      inlined_any = true
-      actions:insertall(lh_actions)
-      return new_lh
-    else
-      return lh
-    end
-  end)
-  local new_rhs = node.rhs:map(function(rh)
-    local new_rh, inlined, rh_actions = inline_tasks.expr(rh)
-    if inlined then
-      assert(new_rh ~= nil)
-      inlined_any = true
-      actions:insertall(rh_actions)
-      return new_rh
-    else
-      return rh
-    end
-  end)
+  local new_lhs, inlined, lhs_actions = inline_tasks.expr(node.lhs)
+  if inlined then
+    assert(new_lhs ~= nil)
+    inlined_any = true
+    actions:insertall(lhs_actions)
+  end
+  local new_rhs, inlined, rhs_actions = inline_tasks.expr(node.rhs)
+  if inlined then
+    assert(new_rhs ~= nil)
+    inlined_any = true
+    actions:insertall(rhs_actions)
+  end
   if inlined_any then
     local stats = terralib.newlist { preserve_task_call(node) }
     stats:insertall(actions)

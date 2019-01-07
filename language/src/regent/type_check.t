@@ -3405,46 +3405,33 @@ function type_check.stat_block(cx, node)
 end
 
 function type_check.stat_var(cx, node)
-  local values = node.values:map(
-    function(value) return type_check.expr(cx, value) end)
-  local value_types = values:map(
-    function(value) return std.check_read(cx, value) end)
+  local value = node.values and type_check.expr(cx, node.values) or false
+  local value_type = value and std.check_read(cx, value) or nil
 
-  local types = terralib.newlist()
-  for i, symbol in ipairs(node.symbols) do
-    local var_type = symbol:hastype()
+  local symbol = node.symbols
+  local var_type = symbol:hastype()
 
-    local value = values[i]
-    local value_type = value_types[i]
-    if var_type then
-      if value and not std.validate_implicit_cast(value_type, var_type) then
-        report.error(node, "type mismatch in var: expected " .. tostring(var_type) .. " but got " .. tostring(value_type))
-      end
-    else
-      if not value then
-        report.error(node, "type must be specified for uninitialized variables")
-      end
-      var_type = value_type
-
-      -- Hack: Stuff the type back into the symbol so it's available
-      -- to ptr types if necessary.
-      symbol:settype(var_type)
+  if var_type then
+    if value and not std.validate_implicit_cast(value_type, var_type) then
+      report.error(node, "type mismatch in var: expected " .. tostring(var_type) .. " but got " .. tostring(value_type))
     end
-    cx.type_env:insert(node, symbol, std.rawref(&var_type))
-    types:insert(var_type)
+  else
+    if not value then
+      report.error(node, "type must be specified for uninitialized variables")
+    end
+    var_type = value_type
+
+    -- Hack: Stuff the type back into the symbol so it's available
+    -- to ptr types if necessary.
+    symbol:settype(var_type)
   end
+  cx.type_env:insert(node, symbol, std.rawref(&var_type))
 
-  values = data.zip(node.symbols, values, value_types):map(function(tuple)
-    local sym, value, value_type = unpack(tuple)
-    return insert_implicit_cast(value, value_type, sym:gettype())
-  end)
-
-  local value = false
-  if #values > 0 then value = values[1] end
+  value = value and insert_implicit_cast(value, value_type, symbol:gettype()) or false
 
   return ast.typed.stat.Var {
-    symbol = node.symbols[1],
-    type = types[1],
+    symbol = symbol,
+    type = var_type,
     value = value,
     annotations = node.annotations,
     span = node.span,
@@ -3552,28 +3539,17 @@ function type_check.stat_break(cx, node)
 end
 
 function type_check.stat_assignment(cx, node)
-  local lhs = node.lhs:map(
-    function(value) return type_check.expr(cx, value) end)
-  local lhs_types = lhs:map(
-    function(lh) return std.check_write(cx, lh) end)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_write(cx, lhs)
 
-  local rhs = node.rhs:map(
-    function(value) return type_check.expr(cx, value) end)
-  local rhs_types = rhs:map(
-    function(rh) return std.check_read(cx, rh) end)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
 
-  for i, lhs_type in ipairs(lhs_types) do
-    local rhs_type = rhs_types[i]
-
-    if not std.validate_implicit_cast(rhs_type, lhs_type) then
-      report.error(node, "type mismatch in assignment: expected " .. tostring(lhs_type) .. " but got " .. tostring(rhs_type))
-    end
+  if not std.validate_implicit_cast(rhs_type, lhs_type) then
+    report.error(node, "type mismatch in assignment: expected " .. tostring(lhs_type) .. " but got " .. tostring(rhs_type))
   end
 
-  rhs = data.zip(lhs_types, rhs, rhs_types):map(function(tuple)
-    local lh_type, rh, rh_type = unpack(tuple)
-    return insert_implicit_cast(rh, rh_type, lh_type)
-  end)
+  rhs = insert_implicit_cast(rhs, rhs_type, lhs_type)
 
   return ast.typed.stat.Assignment {
     lhs = lhs,
@@ -3584,25 +3560,16 @@ function type_check.stat_assignment(cx, node)
 end
 
 function type_check.stat_reduce(cx, node)
-  local lhs = node.lhs:map(
-    function(value) return type_check.expr(cx, value) end)
-  local lhs_types = lhs:map(
-    function(lh) return std.check_reduce(cx, node.op, lh) end)
+  local lhs = type_check.expr(cx, node.lhs)
+  local lhs_type = std.check_reduce(cx, node.op, lhs)
 
-  local rhs = node.rhs:map(
-    function(value) return type_check.expr(cx, value) end)
-  local rhs_types = rhs:map(
-    function(rh) return std.check_read(cx, rh) end)
+  local rhs = type_check.expr(cx, node.rhs)
+  local rhs_type = std.check_read(cx, rhs)
 
-  data.zip(lhs_types, rhs_types):map(
-    function(types)
-      local lhs_type, rhs_type = unpack(types)
-      local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
-      if not std.validate_explicit_cast(expr_type, lhs_type) then
-        report.error(node, "type mismatch between " .. tostring(expr_type) .. " and " .. tostring(lhs_type))
-      end
-    end)
-
+  local expr_type = binary_ops[node.op](cx, node, lhs_type, rhs_type)
+  if not std.validate_explicit_cast(expr_type, lhs_type) then
+    report.error(node, "type mismatch between " .. tostring(expr_type) .. " and " .. tostring(lhs_type))
+  end
 
   return ast.typed.stat.Reduce {
     op = node.op,
