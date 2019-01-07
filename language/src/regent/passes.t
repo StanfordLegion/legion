@@ -45,6 +45,7 @@ function passes.codegen(node, allow_pretty)
 end
 
 local function optimize_and_codegen(node, allow_pretty)
+  node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
   node = profile("normalize_after_type_check", node, normalize.entry)(node)
   node = profile("check_annotations", node, check_annotations.entry)(node)
   node = passes.optimize(node)
@@ -60,17 +61,17 @@ function passes.compile(node, allow_pretty)
     if std.config["inline"] then
       node = profile("inline_tasks", node, inline_tasks.entry)(node)
     end
-    profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
-    node = profile("type_check", node, type_check.entry)(node)
-    if std.config["inline"] then
-      node = profile("eliminate_dead_code", node, eliminate_dead_code.entry)(node)
+    if not (std.config["inline"] and std.is_inline_task(node)) then
+      profile("alpha_convert", node, alpha_convert.entry)(node) -- Run this here to avoid bitrot (discard result).
     end
+    -- Inline tasks need a full type check because their types are used to type check the caller
+    node = profile("type_check", node, type_check.entry)(node)
     if std.config["inline"] and std.is_inline_task(node) then
       local task = node.prototype
       task:set_optimization_thunk(function() optimize_and_codegen(node, allow_pretty) end)
       return task
     end
-    return optimize_and_codegen(node)
+    return optimize_and_codegen(node, allow_pretty)
   end
   return ctor
 end
