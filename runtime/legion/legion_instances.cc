@@ -2028,10 +2028,12 @@ namespace Legion {
 #ifdef LEGION_SPY
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
                     fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
-                    field_space_node->handle, tree_id, ready);
+                    field_space_node->handle, tree_id, ready,
+                    PredEvent::NO_PRED_EVENT);
 #else
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
-                    fill_buffer, reduction_op->sizeof_rhs, ready);
+                    fill_buffer, reduction_op->sizeof_rhs, ready,
+                    PredEvent::NO_PRED_EVENT);
 #endif
               // We can free the buffer after we've issued the fill
               free(fill_buffer);

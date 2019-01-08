@@ -528,9 +528,8 @@ namespace Legion {
       class Update {
       public:
         Update(IndexSpaceExpression *exp, const FieldMask &mask,
-               CopyAcrossHelper *helper, PredEvent guard)
-          : expr(exp), src_mask(mask), across_helper(helper), 
-            predicate_guard(guard) { }
+               CopyAcrossHelper *helper)
+          : expr(exp), src_mask(mask), across_helper(helper) { }
         virtual ~Update(void) { }
       public:
         virtual void record_source_expressions(
@@ -545,21 +544,18 @@ namespace Legion {
         IndexSpaceExpression *const expr;
         const FieldMask src_mask;
         CopyAcrossHelper *const across_helper;
-        const PredEvent predicate_guard;
       };
       class CopyUpdate : public Update, public LegionHeapify<CopyUpdate> {
       public:
         CopyUpdate(InstanceView *src, const FieldMask &mask,
                    IndexSpaceExpression *expr,
                    ReductionOpID red = 0,
-                   CopyAcrossHelper *helper = NULL,
-                   PredEvent guard = PredEvent::NO_PRED_EVENT)
-          : Update(expr, mask, helper, guard), source(src), redop(red) { }
+                   CopyAcrossHelper *helper = NULL)
+          : Update(expr, mask, helper), source(src), redop(red) { }
         virtual ~CopyUpdate(void) { }
       private:
         CopyUpdate(const CopyUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, 
-                   rhs.across_helper, rhs.predicate_guard), 
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper), 
             source(rhs.source), redop(rhs.redop) { assert(false); }
         CopyUpdate& operator=(const CopyUpdate &rhs)
           { assert(false); return *this; }
@@ -580,14 +576,12 @@ namespace Legion {
       public:
         FillUpdate(FillView *src, const FieldMask &mask,
                    IndexSpaceExpression *expr,
-                   CopyAcrossHelper *helper = NULL,
-                   PredEvent guard = PredEvent::NO_PRED_EVENT)
-          : Update(expr, mask, helper, guard), source(src) { }
+                   CopyAcrossHelper *helper = NULL)
+          : Update(expr, mask, helper), source(src) { }
         virtual ~FillUpdate(void) { }
       private:
         FillUpdate(const FillUpdate &rhs)
-          : Update(rhs.expr, rhs.src_mask, rhs.across_helper,
-                   rhs.predicate_guard),
+          : Update(rhs.expr, rhs.src_mask, rhs.across_helper),
             source(rhs.source) { assert(false); }
         FillUpdate& operator=(const FillUpdate &rhs)
           { assert(false); return *this; }
@@ -607,10 +601,12 @@ namespace Legion {
                FieldMaskSet<Update> >::aligned EventFieldUpdates;
     public:
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
-                         unsigned idx, RtEvent guard_event, bool track_events);
+                         unsigned idx, RtEvent guard_event, bool track_events,
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(RegionTreeForest *forest, Operation *op, 
                          unsigned src_idx, unsigned dst_idx, 
-                         RtEvent guard_event, bool track_events);
+                         RtEvent guard_event, bool track_events,
+                         PredEvent pred_guard = PredEvent::NO_PRED_EVENT);
       CopyFillAggregator(const CopyFillAggregator &rhs);
       virtual ~CopyFillAggregator(void);
     public:
@@ -689,6 +685,7 @@ namespace Legion {
       const RtEvent guard_precondition;
       const RtUserEvent guard_postcondition;
       const RtUserEvent applied_event; // for when our effects are done
+      const PredEvent predicate_guard;
       const bool track_events;
     protected:
       FieldMask update_fields;

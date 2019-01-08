@@ -4747,7 +4747,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
 #endif
-                                     precondition, redop, reduction_fold);
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4859,7 +4860,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
 #endif
-                                     precondition);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------

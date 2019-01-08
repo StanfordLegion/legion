@@ -1809,11 +1809,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
                                            Operation *o, unsigned idx, 
-                                           RtEvent g, bool t)
+                                           RtEvent g, bool t, PredEvent p)
       : WrapperReferenceMutator(effects), forest(f), op(o), src_index(idx), 
         dst_index(idx), guard_precondition(g), 
         guard_postcondition(Runtime::create_rt_user_event()),
-        applied_event(Runtime::create_rt_user_event()), track_events(t)
+        applied_event(Runtime::create_rt_user_event()), 
+        predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -1821,11 +1822,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
                                 Operation *o, unsigned src_idx, unsigned dst_idx,
-                                RtEvent g, bool t)
+                                RtEvent g, bool t, PredEvent p)
       : WrapperReferenceMutator(effects), forest(f), op(o), src_index(src_idx), 
         dst_index(dst_idx), guard_precondition(g),
         guard_postcondition(Runtime::create_rt_user_event()),
-        applied_event(Runtime::create_rt_user_event()), track_events(t)
+        applied_event(Runtime::create_rt_user_event()), 
+        predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -1836,7 +1838,8 @@ namespace Legion {
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
         guard_precondition(rhs.guard_precondition),
         guard_postcondition(rhs.guard_postcondition),
-        applied_event(rhs.applied_event), track_events(rhs.track_events)
+        applied_event(rhs.applied_event), predicate_guard(rhs.predicate_guard),
+        track_events(rhs.track_events)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -2726,7 +2729,8 @@ namespace Legion {
                                                      field_space_node->handle,
                                                      manager->tree_id,
 #endif
-                                                     precondition);
+                                                     precondition,
+                                                     predicate_guard);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -2793,7 +2797,8 @@ namespace Legion {
                                                        field_space_node->handle,
                                                        manager->tree_id,
 #endif
-                                                       precondition);
+                                                       precondition,
+                                                       predicate_guard);
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
@@ -2854,7 +2859,8 @@ namespace Legion {
                                     source->get_manager()->tree_id,
                                     manager->tree_id,
 #endif
-                                    precondition, update->redop, false/*fold*/);
+                                    precondition, predicate_guard,
+                                    update->redop, false/*fold*/);
           if (result.exists())
           {
             source->add_copy_user(true/*reading*/,
@@ -2923,7 +2929,8 @@ namespace Legion {
                                     it->first->get_manager()->tree_id,
                                     manager->tree_id,
 #endif
-                                    precondition, redop, false/*fold*/);
+                                    precondition, predicate_guard,
+                                    redop, false/*fold*/);
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/,
@@ -6924,7 +6931,8 @@ namespace Legion {
           }
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op,
-                src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+                          src_index, dst_index, RtEvent::NO_RT_EVENT, 
+                          true/*track*/, pred_guard);
           aggregator->record_updates(target_views[idx], src_views,
               src_mask, overlap, redop, (*across_helpers)[idx]);
         }
@@ -6957,7 +6965,8 @@ namespace Legion {
                 continue;
               if (aggregator == NULL)
                 aggregator = new CopyFillAggregator(runtime->forest, op,
-                    src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+                              src_index, dst_index, RtEvent::NO_RT_EVENT, 
+                              true/*track*/, pred_guard);
               aggregator->record_reductions(target_views[idx], finder->second,
                          src_fidx, dst_fidx, overlap, (*across_helpers)[idx]);
             }
@@ -6995,7 +7004,8 @@ namespace Legion {
                 continue;
               if (aggregator == NULL)
                 aggregator = new CopyFillAggregator(runtime->forest, op,
-                    src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+                              src_index, dst_index, RtEvent::NO_RT_EVENT, 
+                              true/*track*/, pred_guard);
               aggregator->record_reductions(target_views[idx], 
                             finder->second, fidx, fidx, overlap);
             }
@@ -7021,7 +7031,8 @@ namespace Legion {
           const FieldMask &mask = target_instances[idx].get_valid_fields(); 
           if (aggregator == NULL)
             aggregator = new CopyFillAggregator(runtime->forest, op,
-                src_index, dst_index, RtEvent::NO_RT_EVENT, true/*track*/);
+                          src_index, dst_index, RtEvent::NO_RT_EVENT, 
+                          true/*track*/, pred_guard);
           aggregator->record_updates(target_views[idx], src_views, mask,
                                      overlap, redop, NULL/*across*/);
         }

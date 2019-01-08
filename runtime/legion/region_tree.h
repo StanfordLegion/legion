@@ -801,7 +801,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition) = 0;
+                                 ApEvent precondition,PredEvent pred_guard) = 0;
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -810,7 +810,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold) = 0;
       virtual Realm::InstanceLayoutGeneric*
                    create_layout(const Realm::InstanceLayoutConstraints &ilc,
@@ -846,7 +846,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition);
+                                 ApEvent precondition, PredEvent pred_guard);
       template<int DIM, typename T>
       inline ApEvent issue_copy_internal(RegionTreeForest *forest,
                                  const Realm::IndexSpace<DIM,T> &space,
@@ -858,7 +858,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold);
       template<int DIM, typename T>
       inline Realm::InstanceLayoutGeneric* create_layout_internal(
@@ -985,7 +985,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition);
+                                 ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -994,7 +994,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
                    create_layout(const Realm::InstanceLayoutConstraints &ilc,
@@ -1152,7 +1152,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition);
+                                 ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1161,7 +1161,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
                    create_layout(const Realm::InstanceLayoutConstraints &ilc,
@@ -1226,7 +1226,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition);
+                                 ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1235,7 +1235,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
                    create_layout(const Realm::InstanceLayoutConstraints &ilc,
@@ -1815,7 +1815,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition);
+                                 ApEvent precondition, PredEvent pred_guard);
       virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
                                  const std::vector<CopySrcDstField> &src_fields,
@@ -1824,7 +1824,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold);
       virtual Realm::InstanceLayoutGeneric*
                    create_layout(const Realm::InstanceLayoutConstraints &ilc,

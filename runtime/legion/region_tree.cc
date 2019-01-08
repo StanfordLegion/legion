@@ -2305,7 +2305,7 @@ namespace Legion {
                                        src_req.region.get_tree_id(),
                                        dst_req.region.get_tree_id(),
 #endif
-                                       full_precondition,
+                                       full_precondition, guard,
                                        dst_req.redop, false/*fold*/);
         }
         else
@@ -2315,7 +2315,7 @@ namespace Legion {
                                       src_req.region.get_tree_id(),
                                       dst_req.region.get_tree_id(),
 #endif
-                                      full_precondition,
+                                      full_precondition, guard,
                                       dst_req.redop, false/*fold*/);
       }
       FieldMask src_mask, dst_mask; 
@@ -5453,7 +5453,7 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition)
+                                 ApEvent precondition, PredEvent pred_guard)
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
@@ -5465,7 +5465,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                 fill_uid, handle, tree_id,
 #endif
-                                precondition);
+                                precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -5478,7 +5478,7 @@ namespace Legion {
                                  RegionTreeID src_tree_id,
                                  RegionTreeID dst_tree_id,
 #endif
-                                 ApEvent precondition,
+                                 ApEvent precondition, PredEvent pred_guard,
                                  ReductionOpID redop, bool reduction_fold)
     //--------------------------------------------------------------------------
     {
@@ -5491,7 +5491,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                 handle, src_tree_id, dst_tree_id,
 #endif
-                                precondition, redop, reduction_fold);
+                                precondition, pred_guard, redop,reduction_fold);
     }
 
     //--------------------------------------------------------------------------
