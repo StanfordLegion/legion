@@ -318,12 +318,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void CollectableView::defer_collect_user(PhysicalManager *manager,
-                                             ApEvent term_event)
+                                  ApEvent term_event, ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       // The runtime will add the gc reference to this view when necessary
       std::set<ApEvent> to_collect;
-      manager->defer_collect_user(this, term_event, to_collect);
+      manager->defer_collect_user(this, term_event, mutator, to_collect);
       if (!to_collect.empty())
         collect_users(to_collect); 
     }
@@ -335,7 +335,7 @@ namespace Legion {
     {
       view->collect_users(to_collect);
       // Then remove the gc reference on the object
-      if (view->remove_collectable_reference())
+      if (view->remove_collectable_reference(NULL))
         delete view;
     }
 
@@ -1005,14 +1005,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::add_collectable_reference(void)
+    void ExprView::add_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       add_reference();
     }
 
     //--------------------------------------------------------------------------
-    bool ExprView::remove_collectable_reference(void)
+    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       return remove_reference();
@@ -2824,7 +2824,10 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-          defer_collect_user(get_manager(), term_event);
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(get_manager(), term_event, &mutator);
+        }
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
@@ -2959,7 +2962,10 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-          defer_collect_user(get_manager(), term_event);
+        {
+          WrapperReferenceMutator mutator(applied_events);
+          defer_collect_user(get_manager(), term_event, &mutator);
+        }
       }
     }
 
@@ -3269,23 +3275,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::add_collectable_reference(void)
+    void ReductionView::add_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(is_owner()); // should be the owner
+      assert(mutator != NULL);
 #endif
-      add_base_gc_ref(PENDING_GC_REF, NULL);
+      add_base_gc_ref(PENDING_GC_REF, mutator);
     }
 
     //--------------------------------------------------------------------------
-    bool ReductionView::remove_collectable_reference(void)
+    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(is_owner()); // should be the owner
-#endif
-      return remove_base_gc_ref(PENDING_GC_REF, NULL);
+      return remove_base_gc_ref(PENDING_GC_REF, mutator);
     }
 
     //--------------------------------------------------------------------------
