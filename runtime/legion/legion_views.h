@@ -188,12 +188,13 @@ namespace Legion {
     public:
       virtual ~CollectableView(void) { }
     public:
-      virtual void add_collectable_reference(void) = 0;
-      virtual bool remove_collectable_reference(void) = 0;
+      virtual void add_collectable_reference(ReferenceMutator *mutator) = 0;
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
       virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
-      void defer_collect_user(PhysicalManager *manager, ApEvent term_event);
+      void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
+                              ReferenceMutator *mutator = NULL);
       static void handle_deferred_collect(CollectableView *view,
                                           const std::set<ApEvent> &to_collect);
     };
@@ -224,8 +225,8 @@ namespace Legion {
     public:
       ExprView& operator=(const ExprView &rhs);
     public:
-      virtual void add_collectable_reference(void);
-      virtual bool remove_collectable_reference(void);
+      virtual void add_collectable_reference(ReferenceMutator *mutator);
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
       virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
@@ -255,6 +256,10 @@ namespace Legion {
                                  size_t &bound_volume);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
           const FieldMask &user_mask, const PhysicalTraceInfo &trace_info);
+      // TODO: Optimize this so that we prune out intermediate nodes in 
+      // the tree that are empty and re-balance the tree. The hard part of
+      // this is that it will require stopping any precondition searches
+      // which currently can still happen at the same time
       void clean_views(FieldMask &valid_mask);
       void add_dominated_subview(ExprView *subview, const FieldMask &view_mask);
     protected:
@@ -580,8 +585,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void add_collectable_reference(void);
-      virtual bool remove_collectable_reference(void);
+      virtual void add_collectable_reference(ReferenceMutator *mutator);
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:

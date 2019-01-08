@@ -212,7 +212,7 @@ namespace Legion {
       RtEvent detach_external_instance(void);
     public:
       void defer_collect_user(CollectableView *view, ApEvent term_event,
-                              std::set<ApEvent> &to_collect);
+               ReferenceMutator *mutator, std::set<ApEvent> &to_collect);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
       static inline DistributedID encode_instance_did(DistributedID did,
