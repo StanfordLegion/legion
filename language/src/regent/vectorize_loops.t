@@ -701,6 +701,23 @@ function check_vectorizability.has_aliasing(cx, write_set)
 end
 
 function check_vectorizability.stat(cx, node)
+  local function contains_loop_var(node)
+    if node:is(ast.typed.expr.Cast) then
+      return contains_loop_var(node.arg)
+    elseif node:is(ast.typed.expr.Binary) then
+      return contains_loop_var(node.lhs) or
+             contains_loop_var(node.rhs)
+    elseif node:is(ast.typed.expr.Unary) then
+      return contains_loop_var(node.rhs)
+    elseif node:is(ast.typed.expr.ID) then
+      return cx.loop_symbol == node.value or
+             (std.is_bounded_type(node.expr_type) and
+              std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
+    else
+      return false
+    end
+  end
+
   if node:is(ast.typed.stat.Block) then
     return check_vectorizability.block(cx, node.block)
 
@@ -708,6 +725,10 @@ function check_vectorizability.stat(cx, node)
     local fact = V
     if node.value then
       if not check_vectorizability.expr(cx, node.value) then return false end
+      if not check_vectorizability.type(std.as_read(node.value.expr_type)) then
+        cx:report_error_when_demanded(node,
+          error_prefix .. "an expression of an inadmissible type")
+      end
       fact = cx:lookup_expr_type(node.value)
     end
 
@@ -722,6 +743,13 @@ function check_vectorizability.stat(cx, node)
     end
     cx:assign(node.symbol, fact)
     if node.value then
+      -- TODO: for the moment we reject declarations like
+      -- 'var x = i' where 'i' is of an index type
+      if contains_loop_var(node.value) then
+        cx:report_error_when_demanded(node, error_prefix ..
+          "a corner case statement not supported for the moment")
+        return false
+      end
       collect_bounds(node.value):map(function(pair)
         local ty, field = unpack(pair)
         local field_hash = field:hash()
@@ -756,22 +784,6 @@ function check_vectorizability.stat(cx, node)
 
     -- TODO: for the moment we reject an assignment such as
     -- 'r[i] = i' where 'i' is of an index type
-    local function contains_loop_var(node)
-      if node:is(ast.typed.expr.Cast) then
-        return contains_loop_var(node.arg)
-      elseif node:is(ast.typed.expr.Binary) then
-        return contains_loop_var(node.lhs) or
-               contains_loop_var(node.rhs)
-      elseif node:is(ast.typed.expr.Unary) then
-        return contains_loop_var(node.rhs)
-      elseif node:is(ast.typed.expr.ID) then
-        return cx.loop_symbol == node.value or
-               (std.is_bounded_type(node.expr_type) and
-                std.type_eq(cx.loop_symbol:gettype(), node.expr_type))
-      else
-        return false
-      end
-    end
     if contains_loop_var(rh) then
       cx:report_error_when_demanded(node, error_prefix ..
         "a corner case statement not supported for the moment")
