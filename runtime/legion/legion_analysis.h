@@ -206,7 +206,6 @@ namespace Legion {
     public:
       RegionUsage usage;
       IndexSpaceExpression *const expr;
-      const size_t expr_volume;
       UniqueID op_id;
       unsigned index; // region requirement index
       bool copy_user; // is this from a copy or an operation
@@ -851,9 +850,7 @@ namespace Legion {
                                 const RegionUsage &dst_usage,
                                 const FieldMask &src_mask,
                                 const FieldMask &dst_mask,
-                                const InstanceSet &src_instances,
                                 const InstanceSet &dst_instances,
-                                const std::vector<InstanceView*> &src_views,
                                 const std::vector<InstanceView*> &dst_views,
                                 const LogicalRegion src_handle,
                                 const LogicalRegion dst_handle,
@@ -1160,9 +1157,7 @@ namespace Legion {
               std::set<EquivalenceSet*> &alt_sets, const AddressSpaceID source,
               Operation *op, const unsigned src_index, const unsigned dst_index,
               const RegionUsage &usage, const FieldMask &src_mask, 
-              const InstanceSet &source_instances,
               const InstanceSet &target_instances,
-              const std::vector<InstanceView*> &source_views,
               const std::vector<InstanceView*> &target_views,
               IndexSpaceExpression *overlap, CopyFillAggregator *&aggregator,
               PredEvent pred_guard, ReductionOpID redop, 

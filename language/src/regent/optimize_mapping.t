@@ -623,7 +623,7 @@ end
 
 function optimize_mapping.top(cx, node)
   if node:is(ast.typed.top.Task) and
-     not node.config_options.inner
+     not (node.config_options.inner or node.config_options.leaf)
   then
     return optimize_mapping.top_task(cx, node)
 

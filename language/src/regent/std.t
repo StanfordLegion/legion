@@ -1503,11 +1503,12 @@ std.quote_unary_op = base.quote_unary_op
 std.quote_binary_op = base.quote_binary_op
 
 -- #####################################
--- ## Inlie Task Helpers
+-- ## Inline Task Helpers
 -- #################
 
 function std.is_inline_task(node)
-  return node:is(ast.typed.top.Task) and node.annotations.inline:is(ast.annotation.Demand)
+  return (node:is(ast.specialized.top.Task) or node:is(ast.typed.top.Task)) and
+         node.annotations.inline:is(ast.annotation.Demand)
 end
 
 -- #####################################

@@ -1336,14 +1336,14 @@ typedef enum legion_dimension_kind_t {
   DIM_X = 0, // first logical index space dimension
   DIM_Y = 1, // second logical index space dimension
   DIM_Z = 2, // ...
-  DIM_W = 3,
-  DIM_A = 4,
-  DIM_B = 5,
-  DIM_C = 6,
-  DIM_D = 7,
-  DIM_E = 8,
-  // TODO: Something for DIM 9?
-  DIM_F = 9, // field dimension
+  // field dimension (this is here for legacy reasons: Regent has hard coded it)
+  DIM_F = 3, 
+  DIM_W = 4, // fourth logical index space dimension
+  DIM_V = 5, // fifth logical index space dimension
+  DIM_U = 6, // ...
+  DIM_T = 7,
+  DIM_S = 8,
+  DIM_R = 9,
   INNER_DIM_X = 10, // inner dimension for tiling X
   OUTER_DIM_X = 11, // outer dimension for tiling X
   INNER_DIM_Y = 12, // ...
@@ -1352,16 +1352,16 @@ typedef enum legion_dimension_kind_t {
   OUTER_DIM_Z = 15,
   INNER_DIM_W = 16,
   OUTER_DIM_W = 17,
-  INNER_DIM_A = 18,
-  OUTER_DIM_A = 19,
-  INNER_DIM_B = 20,
-  OUTER_DIM_B = 21,
-  INNER_DIM_C = 22,
-  OUTER_DIM_C = 23,
-  INNER_DIM_D = 24,
-  OUTER_DIM_D = 25,
-  INNER_DIM_E = 26,
-  OUTER_DIM_E = 27,
+  INNER_DIM_V = 18,
+  OUTER_DIM_V = 19,
+  INNER_DIM_U = 20,
+  OUTER_DIM_U = 21,
+  INNER_DIM_T = 22,
+  OUTER_DIM_T = 23,
+  INNER_DIM_S = 24,
+  OUTER_DIM_S = 25,
+  INNER_DIM_R = 26,
+  OUTER_DIM_R = 27,
 } legion_dimension_kind_t;
 
 // Make all flags 1-hot encoding so we can logically-or them together
