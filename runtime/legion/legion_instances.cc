@@ -717,7 +717,7 @@ namespace Legion {
       {
         // We do need the lock if we're going to be modifying this
         AutoLock inst(inst_lock);
-        for (std::map<InstanceView*,std::set<ApEvent> >::iterator it =
+        for (std::map<CollectableView*,std::set<ApEvent> >::iterator it =
               gc_events.begin(); it != gc_events.end(); it++)
         {
           GarbageCollectionArgs args(it->first, new std::set<ApEvent>());
@@ -1005,13 +1005,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::defer_collect_user(InstanceView *view,
+    void PhysicalManager::defer_collect_user(CollectableView *view,
                               ApEvent term_event, std::set<ApEvent> &to_collect)
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
       std::set<ApEvent> &view_events = gc_events[view]; 
-      const bool add_reference = view_events.empty();
+      if (view_events.empty())
+        view->add_collectable_reference();
       view_events.insert(term_event);
       // If the number of events is too big then prune them out
       if (view_events.size() >= runtime->gc_epoch_size)
@@ -1031,13 +1032,10 @@ namespace Legion {
         if (view_events.empty())
         {
           gc_events.erase(view);
-          return false;
+          if (view->remove_collectable_reference())
+            delete view;
         }
-        else
-          return add_reference;
       }
-      else
-        return add_reference;
     }
 
     //--------------------------------------------------------------------------
@@ -1046,7 +1044,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock,1,false/*exclusive*/);
-      for (std::map<InstanceView*,std::set<ApEvent> >::const_iterator git =
+      for (std::map<CollectableView*,std::set<ApEvent> >::const_iterator git =
             gc_events.begin(); git != gc_events.end(); git++)
       {
         // Make sure to test these for having triggered or risk a shutdown hang

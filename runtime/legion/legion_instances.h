@@ -112,11 +112,11 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
       public:
-        GarbageCollectionArgs(InstanceView *v, std::set<ApEvent> *collect)
+        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
           : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
             view(v), to_collect(collect) { }
       public:
-        InstanceView *const view;
+        CollectableView *const view;
         std::set<ApEvent> *const to_collect;
       };
     public:
@@ -211,7 +211,7 @@ namespace Legion {
                                            GCPriority priority); 
       RtEvent detach_external_instance(void);
     public:
-      bool defer_collect_user(InstanceView *view, ApEvent term_event,
+      void defer_collect_user(CollectableView *view, ApEvent term_event,
                               std::set<ApEvent> &to_collect);
       void find_shutdown_preconditions(std::set<ApEvent> &preconditions);
     public:
@@ -237,7 +237,7 @@ namespace Legion {
       std::set<InnerContext*> active_contexts;
     private:
       // Events that have to trigger before we can remove our GC reference
-      std::map<InstanceView*,std::set<ApEvent> > gc_events;
+      std::map<CollectableView*,std::set<ApEvent> > gc_events;
     };
 
     /**

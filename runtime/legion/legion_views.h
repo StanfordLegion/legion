@@ -66,8 +66,6 @@ namespace Legion {
       static void handle_view_request(Deserializer &derez, Runtime *runtime,
                                       AddressSpaceID source);
     public:
-      virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0; 
-    public:
       static inline DistributedID encode_materialized_did(DistributedID did);
       static inline DistributedID encode_reduction_did(DistributedID did);
       static inline DistributedID encode_fill_did(DistributedID did);
@@ -154,19 +152,12 @@ namespace Legion {
     public:
       virtual void send_view(AddressSpaceID target) = 0; 
     public:
-      // Instance recycling
-      virtual void collect_users(const std::set<ApEvent> &term_events) = 0;
-    public:
       // Getting field information for performing copies
       virtual void copy_to(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &dst_fields,
                            CopyAcrossHelper *across_helper = NULL) = 0;
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields) = 0;
-    public:
-      void defer_collect_user(ApEvent term_event, ReferenceMutator *mutator);
-      static void handle_deferred_collect(InstanceView *view,
-                                          const std::set<ApEvent> &term_events);
     public:
       static void handle_view_register_user(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
@@ -185,12 +176,35 @@ namespace Legion {
     };
 
     /**
-     * \class KDView
-     * A KDView is a node in a KD tree for capturing users of a physical
-     * instance. We use them for splitting apart users for different parts
-     * of the physical space on a given dimension.
+     * \class CollectableView
+     * An interface class for handling garbage collection of users
      */
-    class KDView : public LegionHeapify<KDView> {
+    class CollectableView {
+    public:
+      virtual ~CollectableView(void) { }
+    public:
+      virtual void add_collectable_reference(void) = 0;
+      virtual bool remove_collectable_reference(void) = 0;
+      virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0;
+      virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
+    public:
+      void defer_collect_user(PhysicalManager *manager, ApEvent term_event);
+      static void handle_deferred_collect(CollectableView *view,
+                                          const std::set<ApEvent> &to_collect);
+    };
+
+    /**
+     * \class ExprView
+     * A ExprView is a node in a tree of ExprViews for capturing users of a
+     * physical instance. At each node it tracks the users of a specific
+     * index space expression for the physical instance. It also knows about
+     * the subviews which are any expressions that are dominated by the 
+     * current node and which may overlap but no subview can dominate another.
+     * Finding the interfering users then just requires traversing the top
+     * node and any overlapping sub nodes and then doing this recursively.
+     */
+    class ExprView : public LegionHeapify<ExprView>, 
+                     public CollectableView, public Collectable {
     public:
       typedef LegionMap<ApEvent,
                 FieldMaskSet<IndexSpaceExpression> >::aligned EventFieldExprs; 
@@ -198,31 +212,46 @@ namespace Legion {
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
-      KDView(RegionTreeForest *ctx, IndexSpaceExpression *expr); 
-      KDView(const KDView &rhs);
-      ~KDView(void);
+      ExprView(RegionTreeForest *ctx, InstanceManager *manager,
+               IndexSpaceExpression *expr); 
+      ExprView(const ExprView &rhs);
+      virtual ~ExprView(void);
     public:
-      KDView& operator=(const KDView &rhs);
+      ExprView& operator=(const ExprView &rhs);
+    public:
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
+      virtual void update_gc_events(const std::set<ApEvent> &term_events);
+      virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
       void find_user_preconditions(const RegionUsage &usage,
                                    IndexSpaceExpression *user_expr,
+                                   const bool user_dominates,
                                    const FieldMask &user_mask,
                                    ApEvent term_event,
                                    UniqueID op_id, unsigned index,
                                    std::set<ApEvent> &preconditions,
                                    const PhysicalTraceInfo &trace_info);
       void find_copy_preconditions(const RegionUsage &usage,
-                                   IndexSpaceExpression *user_expr,
-                                   const FieldMask &user_mask,
+                                   IndexSpaceExpression *copy_expr,
+                                   const bool copy_dominates,
+                                   const FieldMask &copy_mask,
                                    UniqueID op_id, unsigned index,
                                    EventFieldExprs &preconditions,
                                    const PhysicalTraceInfo &trace_info);
-      void add_initial_user(PhysicalUser *user, const FieldMask &user_mask,
-                            const ApEvent term_event,
-                            IndexSpaceExpression *user_expr,
-                            std::vector<KDView*> &added_views);
-      void add_current_user(PhysicalUser *user, const FieldMask &user_mask,
-                            const ApEvent term_event);
+      ExprView* add_initial_user(PhysicalUser *user, const FieldMask &user_mask,
+                                 const ApEvent term_event,
+                                 IndexSpaceExpression *user_expr,
+                                 const PhysicalTraceInfo &trace_info);
+      ExprView* find_initial_user(PhysicalUser *user, const FieldMask &user_mask,
+                                 const ApEvent term_event,
+                                 IndexSpaceExpression *user_expr,
+                                 const PhysicalTraceInfo &trace_info,
+                                 size_t &bound_volume);
+      void add_current_user(PhysicalUser *user, const ApEvent term_event,
+          const FieldMask &user_mask, const PhysicalTraceInfo &trace_info);
+      void clean_views(FieldMask &valid_mask);
+      void add_dominated_subview(ExprView *subview, const FieldMask &view_mask);
     protected:
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
@@ -278,8 +307,9 @@ namespace Legion {
       bool refine_users(void);
     public:
       RegionTreeForest *const context;
-      IndexSpaceExpression *const kd_expr;
-      const size_t kd_volume;
+      InstanceManager *const manager;
+      IndexSpaceExpression *const view_expr;
+      const size_t view_volume;
     protected:
       mutable LocalLock view_lock;
     protected:
@@ -302,9 +332,15 @@ namespace Legion {
       // the view tree that less frequently filter their sub-users.
       EventFieldUsers current_epoch_users;
       EventFieldUsers previous_epoch_users;
+      // Also keep a set of events for which we have outstanding
+      // garbage collection meta-tasks so we don't launch more than one
+      // We need this even though we have the data structures above because
+      // an event might be filtered out for some fields, so we can't rely
+      // on it to detect when we have outstanding gc meta-tasks
+      std::set<ApEvent> outstanding_gc_events;
     protected:
       // Subviews for fields that have users in subexpressions
-      FieldMaskSet<KDView> subviews;
+      FieldMaskSet<ExprView> subviews;
     };
 
     /**
@@ -327,7 +363,7 @@ namespace Legion {
         // Track the invalid fields so we can do intersections
         // and not differences
         FieldMask invalid_fields;
-        std::vector<KDView*> views;
+        ExprView *target_view;
       };
     public:
       typedef LegionMap<VersionID,FieldMaskSet<IndexSpaceExpression>,
@@ -356,8 +392,6 @@ namespace Legion {
                            CopyAcrossHelper *across_helper = NULL);
       virtual void copy_from(const FieldMask &copy_mask, 
                    std::vector<CopySrcDstField> &src_fields);
-    public:
-      void accumulate_events(std::set<ApEvent> &all_events);
     public:
       virtual bool has_manager(void) const { return true; }
       virtual PhysicalManager* get_manager(void) const { return manager; }
@@ -400,11 +434,9 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void collect_users(const std::set<ApEvent> &term_users);
-      virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:
       virtual void send_view(AddressSpaceID target); 
-      bool add_current_user(const RegionUsage &usage,
+      void add_current_user(const RegionUsage &usage,
                             IndexSpaceExpression *user_expr,
                             const FieldMask &user_mask,
                             ApEvent term_event, UniqueID op_id, 
@@ -434,27 +466,22 @@ namespace Legion {
       // on individual fields of this materialized view. Only the
       // top-level view for an instance needs to track this.
       std::map<FieldID,Reservation> atomic_reservations;
-      // Use a KDView tree to track the current users of this instance
-      KDView *current_users; 
-      // Mapping from user expressions to KDViews to attach to
+      // Use a ExprView DAG to track the current users of this instance
+      ExprView *current_users; 
+      // Mapping from user expressions to ExprViews to attach to
       LegionMap<IndexSpaceExprID,CacheEntry>::aligned expr_cache;
       // A timeout counter for the cache so we don't permanently keep growing
       // in the case where the sets of expressions we use change over time
       unsigned expr_cache_uses;
-      // Also keep a set of events for which we have outstanding
-      // garbage collection meta-tasks so we don't launch more than one
-      // We need this even though we have the data structures above because
-      // an event might be filtered out for some fields, so we can't rely
-      // on it to detect when we have outstanding gc meta-tasks
-      std::set<ApEvent> outstanding_gc_events;
+      // Helping with making sure that there are no outstanding users being
+      // added for when we go to invalidate the cache and clean the views
+      unsigned outstanding_additions;
+      RtUserEvent clean_waiting; 
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
       // resilience or mis-speculation.
       //VersionFieldExprs current_versions;
-    protected:
-      // Useful for pruning the initial users at cleanup time
-      std::set<ApEvent> initial_user_events;
     };
 
     /**
@@ -462,7 +489,7 @@ namespace Legion {
      * The ReductionView class is used for providing a view
      * onto reduction physical instances from any logical perspective.
      */
-    class ReductionView : public InstanceView,
+    class ReductionView : public InstanceView, public CollectableView, 
                           public LegionHeapify<ReductionView> {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
@@ -548,6 +575,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
+      virtual void add_collectable_reference(void);
+      virtual bool remove_collectable_reference(void);
       virtual void collect_users(const std::set<ApEvent> &term_events);
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:
@@ -604,13 +633,6 @@ namespace Legion {
       // Should never be called directly
       virtual InnerContext* get_context(void) const
         { assert(false); return NULL; }
-    public:
-      // Should never be called directly
-      virtual void collect_users(const std::set<ApEvent> &term_events)
-        { assert(false); }
-      // Should never be called
-      virtual void update_gc_events(const std::set<ApEvent> &term_events)
-        { assert(false); }
     public:
       virtual void flatten(CopyFillAggregator &aggregator,
                            InstanceView *dst_view, const FieldMask &src_mask,
@@ -941,10 +963,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<bool COPY_USER>
-    inline bool KDView::has_local_precondition(PhysicalUser *user,
-                                               const RegionUsage &next_user,
-                                               const UniqueID op_id,
-                                               const unsigned index)
+    inline bool ExprView::has_local_precondition(PhysicalUser *user,
+                                                 const RegionUsage &next_user,
+                                                 const UniqueID op_id,
+                                                 const unsigned index)
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost

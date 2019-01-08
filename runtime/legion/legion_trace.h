@@ -666,7 +666,8 @@ namespace Legion {
                                             const FieldMask &copy_mask,
                                             ContextID logical_ctx,
                                             ContextID physical_ctx);
-      void record_outstanding_gc_event(InstanceView *view, ApEvent term_event);
+      void record_outstanding_gc_event(CollectableView *view, 
+                                       ApEvent term_event);
     public:
       RtEvent defer_template_deletion(void);
     public:
@@ -760,7 +761,7 @@ namespace Legion {
       LegionMap<FillView*,     FieldMask>::aligned    untracked_fill_views;
       LegionMap<InstanceView*, ContextID>::aligned    logical_contexts;
       LegionMap<InstanceView*, ContextID>::aligned    physical_contexts;
-      std::map<InstanceView*, std::set<ApEvent> >     outstanding_gc_events;
+      std::map<CollectableView*, std::set<ApEvent> >  outstanding_gc_events;
     };
 
     enum InstructionKind

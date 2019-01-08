@@ -2424,7 +2424,7 @@ namespace Legion {
       recording = false;
       replayable = !has_blocking_call && check_replayable();
       if (outstanding_gc_events.size() > 0)
-        for (std::map<InstanceView*, std::set<ApEvent> >::iterator it =
+        for (std::map<CollectableView*, std::set<ApEvent> >::iterator it =
              outstanding_gc_events.begin(); it !=
              outstanding_gc_events.end(); ++it)
         {
@@ -4314,7 +4314,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::record_outstanding_gc_event(
-                                         InstanceView *view, ApEvent term_event)
+                                      CollectableView *view, ApEvent term_event)
     //--------------------------------------------------------------------------
     {
       AutoLock tpl_lock(template_lock);

@@ -70,32 +70,7 @@ namespace Legion {
 
     /////////////////////////////////////////////////////////////
     // InstanceView 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    void InstanceView::defer_collect_user(ApEvent term_event,
-                                          ReferenceMutator *mutator) 
-    //--------------------------------------------------------------------------
-    {
-      // The runtime will add the gc reference to this view when necessary
-      PhysicalManager *manager = get_manager(); 
-      std::set<ApEvent> to_collect;
-      if (manager->defer_collect_user(this, term_event, to_collect))
-        add_base_gc_ref(PENDING_GC_REF, mutator);
-      if (!to_collect.empty())
-        collect_users(to_collect); 
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void InstanceView::handle_deferred_collect(InstanceView *view,
-                                            const std::set<ApEvent> &to_collect)
-    //--------------------------------------------------------------------------
-    {
-      view->collect_users(to_collect);
-      // Then remove the gc reference on the object
-      if (view->remove_base_gc_ref(PENDING_GC_REF))
-        delete view;
-    }
+    ///////////////////////////////////////////////////////////// 
 
     //--------------------------------------------------------------------------
     InstanceView::InstanceView(RegionTreeForest *ctx, DistributedID did,
@@ -338,20 +313,50 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // KDView
+    // CollectableView 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    KDView::KDView(RegionTreeForest *ctx, IndexSpaceExpression *exp) 
-      : context(ctx), kd_expr(exp), kd_volume(kd_expr->get_volume())
+    void CollectableView::defer_collect_user(PhysicalManager *manager,
+                                             ApEvent term_event)
     //--------------------------------------------------------------------------
     {
-      kd_expr->add_expression_reference();
+      // The runtime will add the gc reference to this view when necessary
+      std::set<ApEvent> to_collect;
+      manager->defer_collect_user(this, term_event, to_collect);
+      if (!to_collect.empty())
+        collect_users(to_collect); 
     }
 
     //--------------------------------------------------------------------------
-    KDView::KDView(const KDView &rhs)
-      : context(rhs.context), kd_expr(rhs.kd_expr), kd_volume(rhs.kd_volume)
+    /*static*/ void CollectableView::handle_deferred_collect(
+                     CollectableView *view, const std::set<ApEvent> &to_collect)
+    //--------------------------------------------------------------------------
+    {
+      view->collect_users(to_collect);
+      // Then remove the gc reference on the object
+      if (view->remove_collectable_reference())
+        delete view;
+    }
+
+    /////////////////////////////////////////////////////////////
+    // ExprView
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExprView::ExprView(RegionTreeForest *ctx, InstanceManager *man, 
+                       IndexSpaceExpression *exp) 
+      : context(ctx), manager(man),
+        view_expr(exp), view_volume(view_expr->get_volume())
+    //--------------------------------------------------------------------------
+    {
+      view_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView::ExprView(const ExprView &rhs)
+      : context(rhs.context), manager(rhs.manager), 
+        view_expr(rhs.view_expr), view_volume(rhs.view_volume)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -359,16 +364,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    KDView::~KDView(void)
+    ExprView::~ExprView(void)
     //--------------------------------------------------------------------------
     {
-      if (kd_expr->remove_expression_reference())
-        delete kd_expr;
+      if (view_expr->remove_expression_reference())
+        delete view_expr;
       if (!subviews.empty())
       {
-        for (FieldMaskSet<KDView>::iterator it = subviews.begin();
+        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
               it != subviews.end(); it++)
-          delete it->first;
+          if (it->first->remove_reference())
+            delete it->first;
       }
       // If we have any current or previous users filter them out now
       if (!current_epoch_users.empty())
@@ -398,7 +404,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    KDView& KDView::operator=(const KDView &rhs)
+    ExprView& ExprView::operator=(const ExprView &rhs)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -407,20 +413,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_user_preconditions(const RegionUsage &usage,
-                                         IndexSpaceExpression *user_expr,
-                                         const FieldMask &user_mask,
-                                         ApEvent term_event,
-                                         UniqueID op_id, unsigned index,
-                                         std::set<ApEvent> &preconditions,
-                                         const PhysicalTraceInfo &trace_info)
+    void ExprView::find_user_preconditions(const RegionUsage &usage,
+                                           IndexSpaceExpression *user_expr,
+                                           const bool user_dominates,
+                                           const FieldMask &user_mask,
+                                           ApEvent term_event,
+                                           UniqueID op_id, unsigned index,
+                                           std::set<ApEvent> &preconditions,
+                                           const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_PRECONDITIONS_CALL);
       std::set<ApEvent> dead_events;
-      FieldMaskSet<KDView> to_traverse;
-      std::map<KDView*,IndexSpaceExpression*> traverse_exprs;
+      FieldMaskSet<ExprView> to_traverse;
+      std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
       EventFieldUsers current_to_filter, previous_to_filter;
       // Perform the analysis with a read-only lock
       {
@@ -428,8 +435,7 @@ namespace Legion {
         // Check to see if we dominate when doing this analysis and
         // can therefore filter or whether we are just intersecting
         // Do the local analysis
-        if ((user_expr->expr_id == kd_expr->expr_id) ||
-            (user_expr->get_volume() == kd_volume))
+        if (user_dominates)
         {
           // We dominate in this case so we can do filtering
           FieldMask observed, non_dominated;
@@ -478,22 +484,32 @@ namespace Legion {
         if (!subviews.empty() && 
             !(subviews.get_valid_mask() * user_mask))
         {
-          for (FieldMaskSet<KDView>::const_iterator it = 
+          for (FieldMaskSet<ExprView>::const_iterator it = 
                 subviews.begin(); it != subviews.end(); it++)
           {
-            const FieldMask overlap = it->second & user_mask;
+            FieldMask overlap = it->second & user_mask;
             if (!overlap)
               continue;
-            if (it->first->kd_expr == user_expr)
+            // If we've already determined the user dominates
+            // then we don't even have to do this test
+            if (user_dominates)
             {
+              it->first->add_reference();
+              to_traverse.insert(it->first, overlap);
+              continue;
+            }
+            if (it->first->view_expr == user_expr)
+            {
+              it->first->add_reference();
               to_traverse.insert(it->first, overlap);
               traverse_exprs[it->first] = user_expr;
               continue;
             }
             IndexSpaceExpression *expr_overlap = 
-              context->intersect_index_spaces(it->first->kd_expr, user_expr);
+              context->intersect_index_spaces(it->first->view_expr, user_expr);
             if (!expr_overlap->is_empty())
             {
+              it->first->add_reference();
               to_traverse.insert(it->first, overlap);
               traverse_exprs[it->first] = expr_overlap;
             }
@@ -516,27 +532,51 @@ namespace Legion {
       }
       if (!to_traverse.empty())
       {
-        for (FieldMaskSet<KDView>::const_iterator it = 
-              to_traverse.begin(); it != to_traverse.end(); it++)
-          it->first->find_user_preconditions(usage, traverse_exprs[it->first],
-              it->second, term_event, op_id, index, preconditions, trace_info);
+        if (user_dominates)
+        {
+          for (FieldMaskSet<ExprView>::const_iterator it = 
+                to_traverse.begin(); it != to_traverse.end(); it++)
+          {
+            it->first->find_user_preconditions(usage, it->first->view_expr,
+                                  true/*dominate*/, it->second, term_event,
+                                  op_id, index, preconditions, trace_info);
+            if (it->first->remove_reference())
+              delete it->first;
+          }
+        }
+        else
+        {
+          for (FieldMaskSet<ExprView>::const_iterator it = 
+                to_traverse.begin(); it != to_traverse.end(); it++)
+          {
+            IndexSpaceExpression *intersect = traverse_exprs[it->first];
+            const bool user_dominates = 
+              (intersect->expr_id == it->first->view_expr->expr_id) ||
+              (intersect->get_volume() == it->first->view_volume);
+            it->first->find_user_preconditions(usage, intersect, user_dominates,
+               it->second, term_event, op_id, index, preconditions, trace_info);
+            if (it->first->remove_reference())
+              delete it->first;
+          }
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_copy_preconditions(const RegionUsage &usage,
-                                         IndexSpaceExpression *copy_expr,
-                                         const FieldMask &copy_mask,
-                                         UniqueID op_id, unsigned index,
-                                         EventFieldExprs &preconditions,
-                                         const PhysicalTraceInfo &trace_info)
+    void ExprView::find_copy_preconditions(const RegionUsage &usage,
+                                           IndexSpaceExpression *copy_expr,
+                                           const bool copy_dominates,
+                                           const FieldMask &copy_mask,
+                                           UniqueID op_id, unsigned index,
+                                           EventFieldExprs &preconditions,
+                                           const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, 
                         MATERIALIZED_VIEW_FIND_LOCAL_COPY_PRECONDITIONS_CALL);
       std::set<ApEvent> dead_events;
-      FieldMaskSet<KDView> to_traverse;
-      std::map<KDView*,IndexSpaceExpression*> traverse_exprs;
+      FieldMaskSet<ExprView> to_traverse;
+      std::map<ExprView*,IndexSpaceExpression*> traverse_exprs;
       EventFieldUsers current_to_filter, previous_to_filter;
       // Do the first pass with a read-only lock on the events
       {
@@ -544,8 +584,7 @@ namespace Legion {
         // Check to see if we dominate when doing this analysis and
         // can therefore filter or whether we are just intersecting
         // Do the local analysis
-        if ((copy_expr->expr_id == kd_expr->expr_id) ||
-            (copy_expr->get_volume() == kd_volume))
+        if (copy_dominates)
         {
           // We dominate in this case so we can do filtering
           FieldMask observed, non_dominated;
@@ -591,22 +630,32 @@ namespace Legion {
         if (!subviews.empty() && 
             !(subviews.get_valid_mask() * copy_mask))
         {
-          for (FieldMaskSet<KDView>::const_iterator it = 
+          for (FieldMaskSet<ExprView>::const_iterator it = 
                 subviews.begin(); it != subviews.end(); it++)
           {
-            const FieldMask overlap = it->second & copy_mask;
+            FieldMask overlap = it->second & copy_mask;
             if (!overlap)
               continue;
-            if (it->first->kd_expr == copy_expr)
+            // If the copy dominates then we don't even have
+            // to do the intersection test
+            if (copy_dominates)
             {
+              it->first->add_reference();
+              to_traverse.insert(it->first, overlap);
+              continue;
+            }
+            if (it->first->view_expr == copy_expr)
+            {
+              it->first->add_reference();
               to_traverse.insert(it->first, overlap);
               traverse_exprs[it->first] = copy_expr;
               continue;
             }
             IndexSpaceExpression *expr_overlap = 
-              context->intersect_index_spaces(it->first->kd_expr, copy_expr);
+              context->intersect_index_spaces(it->first->view_expr, copy_expr);
             if (!expr_overlap->is_empty())
             {
+              it->first->add_reference();
               to_traverse.insert(it->first, overlap);
               traverse_exprs[it->first] = expr_overlap;
             }
@@ -629,87 +678,380 @@ namespace Legion {
       }
       if (!to_traverse.empty())
       {
-        for (FieldMaskSet<KDView>::const_iterator it = 
-              to_traverse.begin(); it != to_traverse.end(); it++)
-          it->first->find_copy_preconditions(usage, traverse_exprs[it->first],
-                          it->second, op_id, index, preconditions, trace_info);
+        if (copy_dominates)
+        {
+          for (FieldMaskSet<ExprView>::const_iterator it = 
+                to_traverse.begin(); it != to_traverse.end(); it++)
+          {
+            it->first->find_copy_preconditions(usage, it->first->view_expr,
+                                true/*dominate*/, it->second, op_id, index, 
+                                preconditions, trace_info);
+            if (it->first->remove_reference())
+              delete it->first;
+          }
+        }
+        else
+        {
+          for (FieldMaskSet<ExprView>::const_iterator it = 
+                to_traverse.begin(); it != to_traverse.end(); it++)
+          {
+            IndexSpaceExpression *intersect = traverse_exprs[it->first];
+            const bool copy_dominates = 
+              (intersect->expr_id == it->first->view_expr->expr_id) ||
+              (intersect->get_volume() == it->first->view_volume);
+            it->first->find_copy_preconditions(usage, intersect, copy_dominates,
+                           it->second, op_id, index, preconditions, trace_info);
+            if (it->first->remove_reference())
+              delete it->first;
+          }
+        }
       }
     }
 
     //--------------------------------------------------------------------------
-    void KDView::add_initial_user(PhysicalUser *user,const FieldMask &user_mask,
-                      const ApEvent term_event, IndexSpaceExpression *user_expr,
-                      std::vector<KDView*> &added_views)
+    ExprView* ExprView::add_initial_user(PhysicalUser *user,
+           const FieldMask &user_mask, const ApEvent term_event,
+           IndexSpaceExpression *user_expr, const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      const size_t user_volume = user_expr->get_volume();
       // Handle the base case first
-      if ((user_expr == kd_expr) || (user_volume == kd_volume))
+      if ((user_expr == view_expr) || (user_expr->get_volume() == view_volume))
       {
-        added_views.push_back(this);
-        add_current_user(user, user_mask, term_event);
-        return;
+        add_current_user(user, term_event, user_mask, trace_info);
+        return this;
       }
-      // We're either going to need to make or find subviews here
-      std::map<KDView*,IndexSpaceExpression*> to_traverse;
+      // No need for extra reference here because we know that additions
+      // don't race with cleans because of the owner materialized view
+      ExprView *to_traverse = NULL;
       {
-        IndexSpaceExpression *remainder = user_expr;
+        std::vector<ExprView*> dominated_subviews;
+        std::vector<ExprView*> dominating_subviews;
         AutoLock v_lock(view_lock);
-        for (FieldMaskSet<KDView>::iterator it = subviews.begin();
+        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
               it != subviews.end(); it++)
         {
-          if (it->first->kd_expr == remainder)
+          if (it->first->view_expr == user_expr)
           {
+#ifdef DEBUG_LEGION
+            assert(dominated_subviews.empty());
+            assert(dominating_subviews.empty());
+#endif
             // Merge in any new fields to know there could be users down there
             it.merge(user_mask);
-            to_traverse[it->first] = remainder;
-            remainder = NULL;
+            to_traverse = it->first;
             break;
           }
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(remainder, it->first->kd_expr);
-          if (overlap->is_empty())
+            context->intersect_index_spaces(user_expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
             continue;
-          // Merge in any new fields to know there could be users down there
-          it.merge(user_mask);
-          to_traverse[it->first] = overlap;
-          // If we cover all the points then we're done otherwise do the
-          // subtraction to get the next remainder
-          if (overlap->get_volume() == remainder->get_volume())
+          // See if we dominate or just intersect
+          if (overlap_volume == user_expr->get_volume())
           {
-            remainder = NULL;
-            break;
+            // We dominate so we can just continue traversing
+            dominating_subviews.push_back(it->first);
+          }
+          else if (overlap_volume == it->first->view_volume)
+            dominated_subviews.push_back(it->first);
+        }
+        // See if one of the dominating subviews already has it, if it does
+        // then we know that they all have it
+        if (!dominating_subviews.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(to_traverse == NULL);
+          assert(dominated_subviews.empty());
+#endif
+          if (dominating_subviews.size() > 1)
+          {
+            // We need to deduplicate finding or making the new ExprView
+            // First check to see if we have it already in one sub-tree
+            // If not, we'll pick the one with the smallest bounding volume
+            size_t upper_bound_volume = 0;
+            for (unsigned idx = 0; idx < dominating_subviews.size(); idx++)
+            {
+              size_t volume = 0;
+              ExprView *result = dominating_subviews[idx]->find_initial_user(
+                  user, user_mask, term_event, user_expr, trace_info, volume);
+              // If we find it in one of the sub-trees then we are done
+              if (result != NULL)
+              {
+                // Record the fields for this subview
+                subviews.insert(dominating_subviews[idx], user_mask);
+                return result;
+              }
+              if (upper_bound_volume == 0)
+              {
+                to_traverse = dominating_subviews[idx];
+                upper_bound_volume = volume;
+              }
+              else if (volume < upper_bound_volume)
+              {
+                to_traverse = dominating_subviews[idx];
+                upper_bound_volume = volume;
+              }
+            }
           }
           else
-            remainder = context->subtract_index_spaces(remainder, overlap);
+            to_traverse = dominating_subviews[0];
+          // Record the fields for the subview to traverse
+          subviews.insert(to_traverse, user_mask);
         }
-        if (remainder != NULL)
+        // Couldn't find anything to continue the traversal so make a new node
+        else if (to_traverse == NULL)
         {
           // Make a new subview with the right fields and add it
-          KDView *new_subview = new KDView(context, remainder);
-          subviews.insert(new_subview, user_mask);
-          to_traverse[new_subview] = remainder;
+          to_traverse = new ExprView(context, manager, user_expr);
+          // If we have any dominated subviews add them inside this
+          // new ExprView so we can prevent aliasing
+          std::set<ExprView*> visited_nodes;
+          FieldMask subview_mask = user_mask;
+          if (!dominated_subviews.empty())
+          {
+            for (std::vector<ExprView*>::const_iterator it = 
+                  dominated_subviews.begin(); it != 
+                  dominated_subviews.end(); it++)
+            {
+              FieldMaskSet<ExprView>::iterator finder = 
+                subviews.find(*it);
+#ifdef DEBUG_LEGION
+              assert(finder != subviews.end());
+#endif
+              subview_mask |= finder->second;
+              // Reference flows back with this 
+              to_traverse->add_dominated_subview(*it, finder->second);
+              subviews.erase(finder);
+            }
+          }
+          // If we have any intersection only cases we need to 
+          to_traverse->add_reference();
+          subviews.insert(to_traverse, subview_mask);
         }
       }
-      for (std::map<KDView*,IndexSpaceExpression*>::const_iterator it = 
-            to_traverse.begin(); it != to_traverse.end(); it++)
-        it->first->add_initial_user(user, user_mask, term_event, 
-                                    it->second, added_views);
+      return to_traverse->add_initial_user(user, user_mask, term_event, 
+                                           user_expr, trace_info);
     }
 
     //--------------------------------------------------------------------------
-    void KDView::add_current_user(PhysicalUser *user, 
-                           const FieldMask &user_mask, const ApEvent term_event)
+    ExprView* ExprView::find_initial_user(PhysicalUser *user, 
+                                          const FieldMask &user_mask,
+                                          const ApEvent term_event,
+                                          IndexSpaceExpression *user_expr,
+                                          const PhysicalTraceInfo &trace_info,
+                                          size_t &bound_volume)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the base case first
+      if ((user_expr == view_expr) || (user_expr->get_volume() == view_volume))
+      {
+        add_current_user(user, term_event, user_mask, trace_info);
+        return this;
+      }
+      ExprView *to_traverse = NULL;
+      {
+        std::vector<ExprView*> dominating_subviews;
+        AutoLock v_lock(view_lock);
+        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
+              it != subviews.end(); it++)
+        {
+          if (it->first->view_expr == user_expr)
+          {
+#ifdef DEBUG_LEGION
+            assert(dominating_subviews.empty());
+#endif
+            // Merge in any new fields to know there could be users down there
+            it.merge(user_mask);
+            to_traverse = it->first;
+            break;
+          }
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(user_expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
+            continue;
+          // See if we dominate or just intersect
+          if (overlap_volume == user_expr->get_volume())
+          {
+            // We dominate so we can just continue traversing
+            dominating_subviews.push_back(it->first);
+          } 
+        }
+        if (!dominating_subviews.empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(to_traverse == NULL);
+#endif
+          // See if any of them have it already
+          // If not, we'll pick the one with the smallest bounding volume
+          size_t upper_bound_volume = 0;
+          for (unsigned idx = 0; idx < dominating_subviews.size(); idx++)
+          {
+            size_t volume = 0;
+            ExprView *result = dominating_subviews[idx]->find_initial_user(
+                user, user_mask, term_event, user_expr, trace_info, volume);
+            // If we find it in one of the sub-trees then we are done
+            if (result != NULL)
+            {
+              // Record the fields for this subview
+              subviews.insert(dominating_subviews[idx], user_mask);
+              return result;
+            }
+            if (upper_bound_volume == 0)
+              upper_bound_volume = volume;
+            else if (volume < upper_bound_volume)
+              upper_bound_volume = volume;
+          }
+          bound_volume = upper_bound_volume;
+          return NULL;
+        }
+      }
+      if (to_traverse == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(bound_volume == 0);
+#endif
+        bound_volume = view_volume;
+        return NULL;
+      }
+      return to_traverse->find_initial_user(user, user_mask, term_event,
+                                    user_expr, trace_info, bound_volume);
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_current_user(PhysicalUser *user,const ApEvent term_event,
+                const FieldMask &user_mask, const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      bool issue_collect = true;
+      {
+        AutoLock v_lock(view_lock);
+        EventUsers &event_users = current_epoch_users[term_event];
+        if (event_users.insert(user, user_mask))
+          user->add_reference();
+        else
+          issue_collect = false;
+      }
+      if (issue_collect)
+      {
+        // If we're tracing we defer adding these events until the trace
+        // capture is complete so we can get a full set of preconditions
+        if (trace_info.recording)
+        {
+#ifdef DEBUG_LEGION
+          assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
+#endif
+          trace_info.tpl->record_outstanding_gc_event(this, term_event); 
+        }
+        else
+          defer_collect_user(manager, term_event);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::clean_views(FieldMask &valid_mask) 
+    //--------------------------------------------------------------------------
+    {
+      // No need to hold the lock for this part we know that no one
+      // is going to be modifying this data structure at the same time
+      FieldMaskSet<ExprView> new_subviews;
+      std::vector<ExprView*> to_delete;
+      for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
+            it != subviews.end(); it++)
+      {
+        // See if we already visited it
+        FieldMask new_mask;
+        it->first->clean_views(new_mask);
+        if (!!new_mask)
+          new_subviews.insert(it->first, new_mask);
+        else
+          to_delete.push_back(it->first);
+      }
+      valid_mask |= new_subviews.get_valid_mask();
+      AutoLock v_lock(view_lock);
+      subviews.swap(new_subviews);
+      if (!to_delete.empty())
+      {
+        for (std::vector<ExprView*>::const_iterator it = 
+              to_delete.begin(); it != to_delete.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      }
+      if (!current_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator it = 
+              current_epoch_users.begin(); it != 
+              current_epoch_users.end(); it++)
+          valid_mask |= it->second.get_valid_mask();
+      }
+      if (!previous_epoch_users.empty())
+      {
+        for (EventFieldUsers::const_iterator it = 
+              previous_epoch_users.begin(); it != 
+              previous_epoch_users.end(); it++)
+          valid_mask |= it->second.get_valid_mask();
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_dominated_subview(ExprView *subview, 
+                                         const FieldMask &subview_mask)
+    //--------------------------------------------------------------------------
+    {
+      // No need for a lock since no one knows about us yet
+      // Also no need to add a reference since it's comping from
+      // the previous owner of the subview
+      subviews.insert(subview, subview_mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::add_collectable_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    bool ExprView::remove_collectable_reference(void)
+    //--------------------------------------------------------------------------
+    {
+      return remove_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::update_gc_events(const std::set<ApEvent> &term_events)
+    //--------------------------------------------------------------------------
+    {
+      // See which ones are still in current or previous users and defer them
+      std::vector<ApEvent> to_defer;
+      {
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        for (std::set<ApEvent>::const_iterator it = 
+              term_events.begin(); it != term_events.end(); it++)
+          if ((current_epoch_users.find(*it) != current_epoch_users.end()) ||
+              (previous_epoch_users.find(*it) != previous_epoch_users.end()))
+            to_defer.push_back(*it);
+      }
+      if (!to_defer.empty())
+      {
+        for (std::vector<ApEvent>::const_iterator it = 
+              to_defer.begin(); it != to_defer.end(); it++)
+          defer_collect_user(manager, *it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ExprView::collect_users(const std::set<ApEvent> &to_collect)
     //--------------------------------------------------------------------------
     {
       AutoLock v_lock(view_lock);
-      EventUsers &event_users = current_epoch_users[term_event];
-      if (event_users.insert(user, user_mask))
-        user->add_reference();
+      for (std::set<ApEvent>::const_iterator it = 
+            to_collect.begin(); it != to_collect.end(); it++)
+        filter_local_users(*it);
     }
 
     //--------------------------------------------------------------------------
-    void KDView::filter_local_users(ApEvent term_event) 
+    void ExprView::filter_local_users(ApEvent term_event) 
     //--------------------------------------------------------------------------
     {
       // Caller must be holding the lock
@@ -742,7 +1084,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::filter_current_users(const EventFieldUsers &to_filter)
+    void ExprView::filter_current_users(const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller 
@@ -807,7 +1149,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::filter_previous_users(const EventFieldUsers &to_filter)
+    void ExprView::filter_previous_users(const EventFieldUsers &to_filter)
     //--------------------------------------------------------------------------
     {
       // Lock needs to be held by caller
@@ -840,16 +1182,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_current_preconditions(const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            ApEvent term_event,
-                                            const UniqueID op_id,
-                                            const unsigned index,
-                                            std::set<ApEvent> &preconditions,
-                                            std::set<ApEvent> &dead_events,
-                                            EventFieldUsers &filter_users,
-                                            FieldMask &observed,
-                                            FieldMask &non_dominated,
+    void ExprView::find_current_preconditions(const RegionUsage &usage,
+                                              const FieldMask &user_mask,
+                                              ApEvent term_event,
+                                              const UniqueID op_id,
+                                              const unsigned index,
+                                              std::set<ApEvent> &preconditions,
+                                              std::set<ApEvent> &dead_events,
+                                              EventFieldUsers &filter_users,
+                                              FieldMask &observed,
+                                              FieldMask &non_dominated,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -870,7 +1212,7 @@ namespace Legion {
         }
 #if 0
         // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every KDView
+        // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_info.recording &&
             preconditions.find(cit->first) != preconditions.end())
@@ -913,13 +1255,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_previous_preconditions(const RegionUsage &usage,
-                                             const FieldMask &user_mask,
-                                             ApEvent term_event,
-                                             const UniqueID op_id,
-                                             const unsigned index,
-                                             std::set<ApEvent> &preconditions,
-                                             std::set<ApEvent> &dead_events,
+    void ExprView::find_previous_preconditions(const RegionUsage &usage,
+                                               const FieldMask &user_mask,
+                                               ApEvent term_event,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               std::set<ApEvent> &preconditions,
+                                               std::set<ApEvent> &dead_events,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -940,7 +1282,7 @@ namespace Legion {
         }
 #if 0
         // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every KDView
+        // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_info.recording &&
             preconditions.find(pit->first) != preconditions.end())
@@ -962,16 +1304,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_current_preconditions(const RegionUsage &usage,
-                                            const FieldMask &user_mask,
-                                            IndexSpaceExpression *user_expr,
-                                            const UniqueID op_id,
-                                            const unsigned index,
-                                            EventFieldExprs &preconditions,
-                                            std::set<ApEvent> &dead_events,
-                                            EventFieldUsers &filter_events,
-                                            FieldMask &observed,
-                                            FieldMask &non_dominated,
+    void ExprView::find_current_preconditions(const RegionUsage &usage,
+                                              const FieldMask &user_mask,
+                                              IndexSpaceExpression *user_expr,
+                                              const UniqueID op_id,
+                                              const unsigned index,
+                                              EventFieldExprs &preconditions,
+                                              std::set<ApEvent> &dead_events,
+                                              EventFieldUsers &filter_events,
+                                              FieldMask &observed,
+                                              FieldMask &non_dominated,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -996,7 +1338,7 @@ namespace Legion {
         EventFieldExprs::iterator finder = preconditions.find(cit->first);
 #if 0
         // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every KDView
+        // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_info.recording && finder != preconditions.end())
         {
@@ -1037,13 +1379,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_previous_preconditions(const RegionUsage &usage,
-                                             const FieldMask &user_mask,
-                                             IndexSpaceExpression *user_expr,
-                                             const UniqueID op_id,
-                                             const unsigned index,
-                                             EventFieldExprs &preconditions,
-                                             std::set<ApEvent> &dead_events,
+    void ExprView::find_previous_preconditions(const RegionUsage &usage,
+                                               const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
+                                               const UniqueID op_id,
+                                               const unsigned index,
+                                               EventFieldExprs &preconditions,
+                                               std::set<ApEvent> &dead_events,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
@@ -1069,7 +1411,7 @@ namespace Legion {
         EventFieldExprs::iterator finder = preconditions.find(pit->first);
 #if 0
         // You might think you can optimize things like this, but you can't
-        // because we still need the correct epoch users for every KDView
+        // because we still need the correct epoch users for every ExprView
         // when we go to add our user later
         if (!trace_info.recording && finder != preconditions.end())
         {
@@ -1100,7 +1442,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void KDView::find_previous_filter_users(const FieldMask &dom_mask,
+    void ExprView::find_previous_filter_users(const FieldMask &dom_mask,
                                             EventFieldUsers &filter_users)
     //--------------------------------------------------------------------------
     {
@@ -1140,7 +1482,8 @@ namespace Legion {
                                AddressSpaceID log_own, InstanceManager *man,
                                UniqueID own_ctx, bool register_now)
       : InstanceView(ctx, encode_materialized_did(did), own_addr,
-               log_own, own_ctx, register_now), manager(man), expr_cache_uses(0)
+                     log_own, own_ctx, register_now), 
+        manager(man), expr_cache_uses(0), outstanding_additions(0)
     //--------------------------------------------------------------------------
     {
       // Otherwise the instance lock will get filled in when we are unpacked
@@ -1150,7 +1493,10 @@ namespace Legion {
       // Keep the manager from being collected
       manager->add_nested_resource_ref(did);
       if (is_logical_owner())
-        current_users = new KDView(ctx, manager->instance_domain);
+      {
+        current_users = new ExprView(ctx, manager, manager->instance_domain);
+        current_users->add_reference();
+      }
       else
         current_users = NULL;
 #ifdef LEGION_GC
@@ -1189,15 +1535,7 @@ namespace Legion {
         }
         atomic_reservations.clear();
       }
-      if (!initial_user_events.empty())
-        collect_users(initial_user_events);
-#if !defined(LEGION_SPY) && !defined(EVENT_GRAPH_TRACE) && \
-      defined(DEBUG_LEGION)
-      // Don't forget to remove the initial user if there was one
-      // before running these checks
-      assert(outstanding_gc_events.empty());
-#endif
-      if (current_users != NULL)
+      if ((current_users != NULL) && current_users->remove_reference())
         delete current_users;
     }
 
@@ -1261,15 +1599,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::accumulate_events(std::set<ApEvent> &all_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(view_lock,1,false/*exclusive*/);
-      all_events.insert(outstanding_gc_events.begin(),
-                        outstanding_gc_events.end());
-    } 
-
-    //--------------------------------------------------------------------------
     void MaterializedView::add_initial_user(ApEvent term_event,
                                             const RegionUsage &usage,
                                             const FieldMask &user_mask,
@@ -1287,27 +1616,21 @@ namespace Legion {
       // See if we have it in the cache
       LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
         finder = expr_cache.find(user_expr->expr_id);
+      const PhysicalTraceInfo trace_info(NULL);
       if (finder == expr_cache.end() || 
           !(finder->second.invalid_fields * user_mask))
       {
         CacheEntry &entry = expr_cache[user_expr->expr_id];
-        entry.views.clear();
-        current_users->add_initial_user(user, user_mask, 
-                                        term_event, user_expr, entry.views);
+        entry.target_view = current_users->add_initial_user(user, user_mask, 
+                                          term_event, user_expr, trace_info);
         entry.invalid_fields -= user_mask;
       }
       else
-      {
         // Found it in the cache, so we can just add it directly
-        for (std::vector<KDView*>::const_iterator it = 
-              finder->second.views.begin(); it != 
-              finder->second.views.end(); it++)
-          (*it)->add_current_user(user, user_mask, term_event);
-      }
-      initial_user_events.insert(term_event);
+        finder->second.target_view->add_current_user(user, term_event,
+                                                     user_mask, trace_info);
       // Don't need to actual launch a collection task, destructor
       // will handle this case
-      outstanding_gc_events.insert(term_event);
     }
 
     //--------------------------------------------------------------------------
@@ -1360,18 +1683,14 @@ namespace Legion {
         if (start_use_event.exists())
           wait_on_events.insert(start_use_event);
         // Find the preconditions
-        current_users->find_user_preconditions(usage, user_expr, user_mask, 
-            term_event, op_id, index, wait_on_events, trace_info);
+        const bool user_dominates = 
+          (user_expr->expr_id == current_users->view_expr->expr_id) ||
+          (user_expr->get_volume() == current_users->view_volume);
+        current_users->find_user_preconditions(usage, user_expr, user_dominates,
+               user_mask, term_event, op_id, index, wait_on_events, trace_info);
         // Add our local user
-        const bool issue_collect = add_current_user(usage, user_expr, user_mask, 
-           term_event, op_id, index, false/*copy*/, applied_events, trace_info);
-        // Launch the garbage collection task, if it doesn't exist
-        // then the user wasn't registered anyway, see add_local_user
-        if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(term_event, &mutator);
-        }
+        add_current_user(usage, user_expr, user_mask, term_event, op_id, index,
+                         false/*copy*/, applied_events, trace_info);
         // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_LEGION
         if (term_event.exists())
@@ -1423,8 +1742,11 @@ namespace Legion {
         if (start_use_event.exists())
           preconditions[start_use_event].insert(copy_expr, copy_mask);
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-        current_users->find_copy_preconditions(usage, copy_expr, copy_mask, 
-                                       op_id, index, preconditions, trace_info);
+        const bool copy_dominates = 
+          (copy_expr->expr_id == current_users->view_expr->expr_id) ||
+          (copy_expr->get_volume() == current_users->view_volume);
+        current_users->find_copy_preconditions(usage, copy_expr, copy_dominates,
+                            copy_mask, op_id, index, preconditions, trace_info);
         // Return any preconditions we found to the aggregator
         if (!preconditions.empty())
           aggregator.record_preconditions(this, reading, preconditions);
@@ -1446,8 +1768,11 @@ namespace Legion {
       assert(is_logical_owner());
 #endif
       const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-      current_users->find_copy_preconditions(usage, copy_expr, copy_mask, 
-                                op_id, index, preconditions, trace_info);
+      const bool copy_dominates = 
+          (copy_expr->expr_id == current_users->view_expr->expr_id) ||
+          (copy_expr->get_volume() == current_users->view_volume);
+      current_users->find_copy_preconditions(usage, copy_expr, copy_dominates,
+                          copy_mask, op_id, index, preconditions, trace_info);
     }
 
     //--------------------------------------------------------------------------
@@ -1488,15 +1813,8 @@ namespace Legion {
       else
       {
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-        const bool issue_collect = add_current_user(usage, copy_expr, copy_mask,
-            term_event, op_id, index, true/*copy*/, applied_events, trace_info);
-        // Launch the garbage collection task, if it doesn't exist
-        // then the user wasn't registered anyway, see add_local_user
-        if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(term_event, &mutator);
-        }
+        add_current_user(usage, copy_expr, copy_mask, term_event, op_id, index, 
+                         true/*copy*/, applied_events, trace_info);
       }
     }
  
@@ -1537,17 +1855,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::collect_users(const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(view_lock);
-      for (std::set<ApEvent>::const_iterator it = 
-            term_events.begin(); it != term_events.end(); it++)
-        outstanding_gc_events.erase(*it);
-    }
-
-    //--------------------------------------------------------------------------
-    bool MaterializedView::add_current_user(const RegionUsage &usage,
+    void MaterializedView::add_current_user(const RegionUsage &usage,
                                             IndexSpaceExpression *user_expr,
                                             const FieldMask &user_mask,
                                             ApEvent term_event, UniqueID op_id,
@@ -1558,10 +1866,14 @@ namespace Legion {
     {
       PhysicalUser *user = 
         new PhysicalUser(usage, user_expr, op_id, index, copy_user);
-      std::vector<KDView*> views;
+      // Hold a reference to this in case it finishes before we're done
+      // with the analysis and its get pruned/deleted
+      user->add_reference();
+      ExprView *target_view = NULL;
       // Handle an easy case first, if the user_expr is the same as the 
-      // kd_expr for the root then this is easy
-      if (user_expr != current_users->kd_expr)
+      // view_expr for the root then this is easy
+      bool update_count = true;
+      if (user_expr != current_users->view_expr)
       {
         // Hard case where we will have subviews
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
@@ -1571,72 +1883,79 @@ namespace Legion {
           finder = expr_cache.find(user_expr->expr_id);
         if ((finder != expr_cache.end()) && 
             (finder->second.invalid_fields * user_mask))
-          views = finder->second.views;
+          target_view = finder->second.target_view;
+        // increment the number of outstanding additions
+        __sync_fetch_and_add(&outstanding_additions,1);
       }
-      else 
-        views.push_back(current_users);
-      if (!views.empty())
+      else // This is just going to add at the top so never needs to wait
       {
-        // Already know the views so just iterate them
-        for (std::vector<KDView*>::const_iterator it = views.begin();
-              it != views.end(); it++)
-          (*it)->add_current_user(user, user_mask, term_event);
-        // Clear them so we don't update them later
-        views.clear();
+        target_view = current_users;
+        update_count = false;
+      }
+      bool update_cache = false;
+      if (target_view == NULL)
+      {
+        // Don't know the view yet so we need to compute it
+        target_view = current_users->add_initial_user(user, user_mask, 
+                                    term_event, user_expr, trace_info);
+        update_cache = true;
       }
       else
-        // Don't know the views yet so we need to compute them
-        current_users->add_initial_user(user, user_mask, 
-                                        term_event, user_expr, views);
+        // Already know the view so just iterate them
+        target_view->add_current_user(user, term_event, user_mask, trace_info);
+      if (user->remove_reference())
+        delete user;
       AutoLock v_lock(view_lock);
-      if (views.empty())
+      if (update_count)
+      {
+#ifdef DEBUG_LEGION
+        assert(outstanding_additions > 0);
+#endif
+        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        {
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      }
+      if (!update_cache)
       {
         // Update the timeout and see if we need to clear the cache
         if (!expr_cache.empty())
         {
           expr_cache_uses++;
+          // Check for equality guarantees only one thread in here at a time
           if (expr_cache_uses == expr_cache_timeout)
           {
+            // Wait until there are are no more outstanding additions
+            while (outstanding_additions > 0)
+            {
+#ifdef DEBUG_LEGION
+              assert(!clean_waiting.exists());
+#endif
+              clean_waiting = Runtime::create_rt_user_event();
+              const RtEvent wait_on = clean_waiting;
+              v_lock.release();
+              wait_on.wait();
+              v_lock.reacquire();
+            }
+            // Now we can clean the cache and the views
             expr_cache.clear();
             expr_cache_uses = 0;
+            // Anytime we clean the cache, we also traverse the 
+            // view tree and see if there are any views we can 
+            // remove because they no longer have live users
+            FieldMask dummy_mask;
+            current_users->clean_views(dummy_mask);
           }
         }
       }
       else
       {
         CacheEntry &entry = expr_cache[user_expr->expr_id];
-        entry.views.swap(views);
+        entry.target_view = target_view;
         entry.invalid_fields -= user_mask;
       }
-      // If we're tracing we defer adding these events until the trace
-      // capture is complete so we can get a full set of preconditions
-      if (trace_info.recording)
-      {
-#ifdef DEBUG_LEGION
-        assert(trace_info.tpl != NULL && trace_info.tpl->is_recording());
-#endif
-        trace_info.tpl->record_outstanding_gc_event(this, term_event);
-        return false;
-      }
-      else if (outstanding_gc_events.find(term_event) == 
-                outstanding_gc_events.end())
-      {
-        outstanding_gc_events.insert(term_event);
-        return true;
-      }
-      else
-        return false;
-    }
-
-    //--------------------------------------------------------------------------
-    void MaterializedView::update_gc_events(
-                                           const std::set<ApEvent> &term_events)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock v_lock(view_lock);
-      for (std::set<ApEvent>::const_iterator it = term_events.begin();
-            it != term_events.end(); it++)
-        outstanding_gc_events.insert(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -1720,7 +2039,7 @@ namespace Legion {
           }
         }
       }
-    }
+    } 
 
     //--------------------------------------------------------------------------
     void MaterializedView::find_field_reservations(
@@ -2505,10 +2824,7 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(term_event, &mutator);
-        }
+          defer_collect_user(get_manager(), term_event);
         if (!wait_on_events.empty())
           return Runtime::merge_events(&trace_info, wait_on_events);
         else
@@ -2643,10 +2959,7 @@ namespace Legion {
         // Launch the garbage collection task, if it doesn't exist
         // then the user wasn't registered anyway, see add_local_user
         if (issue_collect)
-        {
-          WrapperReferenceMutator mutator(applied_events);
-          defer_collect_user(term_event, &mutator);
-        }
+          defer_collect_user(get_manager(), term_event);
       }
     }
 
@@ -2953,6 +3266,26 @@ namespace Legion {
       // No need to check for deletion of the manager since
       // we know that we also hold a resource reference
       manager->remove_nested_valid_ref(did, mutator);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReductionView::add_collectable_reference(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner()); // should be the owner
+#endif
+      add_base_gc_ref(PENDING_GC_REF, NULL);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ReductionView::remove_collectable_reference(void)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(is_owner()); // should be the owner
+#endif
+      return remove_base_gc_ref(PENDING_GC_REF, NULL);
     }
 
     //--------------------------------------------------------------------------

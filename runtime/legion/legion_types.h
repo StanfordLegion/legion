@@ -1405,6 +1405,7 @@ namespace Legion {
     class InstanceManager;
     class InstanceKey;
     class InstanceView;
+    class CollectableView; // pure virtual class
     class DeferredView;
     class MaterializedView;
     class FillView;
