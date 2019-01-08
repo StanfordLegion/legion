@@ -299,9 +299,6 @@ def install(gasnet=False, cuda=False, openmp=False, hdf=False, llvm=False,
     if clean_first and cmake_build_dir is not None:
         raise Exception('Cannot clean a pre-existing build directory')
 
-    if spy and not debug:
-        raise Exception('Debugging mode is required for detailed Legion Spy.')
-
     thread_count = thread_count
     if thread_count is None:
         thread_count = multiprocessing.cpu_count()
