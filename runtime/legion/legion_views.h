@@ -250,6 +250,10 @@ namespace Legion {
                                  size_t &bound_volume);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
           const FieldMask &user_mask, const PhysicalTraceInfo &trace_info);
+      // TODO: Optimize this so that we prune out intermediate nodes in 
+      // the tree that are empty and re-balance the tree. The hard part of
+      // this is that it will require stopping any precondition searches
+      // which currently can still happen at the same time
       void clean_views(FieldMask &valid_mask);
       void add_dominated_subview(ExprView *subview, const FieldMask &view_mask);
     protected:
