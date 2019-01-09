@@ -2442,7 +2442,12 @@ end
 function normalize_accesses.expr(normalizer_cx)
   return function(node, continuation)
     if node:is(ast.typed.expr.ID) then
-      return normalizer_cx:find_decl(node.value) or node
+      local decl = normalizer_cx:find_decl(node.value)
+      if decl ~= nil then
+        return continuation(decl)
+      else
+        return node
+      end
     else
       return continuation(node, true)
     end
