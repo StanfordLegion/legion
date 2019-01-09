@@ -1639,14 +1639,10 @@ namespace Legion {
     inline void Serializer::serialize(const Domain &dom)
     //--------------------------------------------------------------------------
     {
+      serialize(dom.is_id);
       serialize(dom.dim);
-      if (dom.dim == 0)
-        serialize(dom.is_id);
-      else
-      {
-        for (int i = 0; i < 2*dom.dim; i++)
-          serialize(dom.rect_data[i]);
-      }
+      for (int i = 0; i < 2*dom.dim; i++)
+        serialize(dom.rect_data[i]);
     }
 
     //--------------------------------------------------------------------------
@@ -1869,14 +1865,10 @@ namespace Legion {
     inline void Deserializer::deserialize(Domain &dom)
     //--------------------------------------------------------------------------
     {
+      deserialize(dom.is_id);
       deserialize(dom.dim);
-      if (dom.dim == 0)
-        deserialize(dom.is_id);
-      else
-      {
-        for (int i = 0; i < 2*dom.dim; i++)
-          deserialize(dom.rect_data[i]);
-      }
+      for (int i = 0; i < 2*dom.dim; i++)
+        deserialize(dom.rect_data[i]);
     }
 
     //--------------------------------------------------------------------------
