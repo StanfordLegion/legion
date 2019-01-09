@@ -1534,16 +1534,42 @@ namespace Legion {
       RtUserEvent to_trigger;
       std::set<ApEvent> arrival_events;
       {
+        IndexSpaceNode *node = runtime->forest->get_node(space);
+        ApEvent domain_ready;
+        const Domain dom = node->get_domain(domain_ready, true/*tight*/);
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          for (unsigned idx = 0; idx < instances.size(); idx++)
+          if (domain_ready.exists() && !domain_ready.has_triggered())
           {
-            const InstanceRef &ref = instances[idx];
-            src_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), 
-                  ref.get_ready_event(), space));
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              const InstanceRef &ref = instances[idx];
+              const ApEvent inst_ready = ref.get_ready_event();
+              if (inst_ready.exists() && !inst_ready.has_triggered())
+                src_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      Runtime::merge_events(&trace_info, domain_ready,
+                        inst_ready), dom));
+              else
+                src_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      domain_ready, dom));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              const InstanceRef &ref = instances[idx];
+              src_records[index].push_back(IndirectRecord(
+                    ref.get_valid_fields(),
+                    ref.get_manager()->get_instance(), 
+                    ref.get_ready_event(), dom));
+            }
           }
           src_exchange_events[index].insert(local_done);
           if (!src_exchanged[index].exists())
@@ -1565,12 +1591,35 @@ namespace Legion {
         }
         else
         {
-          for (unsigned idx = 0; idx < instances.size(); idx++)
+          if (domain_ready.exists() && !domain_ready.has_triggered())
           {
-            const InstanceRef &ref = instances[idx];
-            dst_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), 
-                  ref.get_ready_event(), space));
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              const InstanceRef &ref = instances[idx];
+              const ApEvent inst_ready = ref.get_ready_event();
+              if (inst_ready.exists() && !inst_ready.has_triggered())
+                dst_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      Runtime::merge_events(&trace_info, domain_ready,
+                        inst_ready), dom));
+              else
+                dst_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      domain_ready, dom));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < instances.size(); idx++)
+            {
+              const InstanceRef &ref = instances[idx];
+              dst_records[index].push_back(IndirectRecord(
+                    ref.get_valid_fields(),
+                    ref.get_manager()->get_instance(), 
+                    ref.get_ready_event(), dom));
+            }
           }
           dst_exchange_events[index].insert(local_done);
           if (!dst_exchanged[index].exists())
@@ -6643,7 +6692,7 @@ namespace Legion {
       for (LegionVector<IndirectRecord>::aligned::const_iterator it = 
             local_records.begin(); it != local_records.end(); it++)
       {
-        const IndirectKey key(it->inst, it->ready_event, it->space);
+        const IndirectKey key(it->inst, it->ready_event, it->domain);
         records[key] = it->fields;
       }
       perform_collective_sync();
@@ -6655,7 +6704,7 @@ namespace Legion {
         IndirectRecord &record = local_records[index];
         record.inst = it->first.inst;
         record.ready_event = it->first.ready_event;
-        record.space = it->first.space;
+        record.domain = it->first.domain;
         record.fields = it->second;
       }
     }
@@ -6671,7 +6720,7 @@ namespace Legion {
       {
         rez.serialize(it->first.inst);
         rez.serialize(it->first.ready_event);
-        rez.serialize(it->first.space);
+        rez.serialize(it->first.domain);
         rez.serialize(it->second);
       }
     }
@@ -6688,7 +6737,7 @@ namespace Legion {
         IndirectKey key;
         derez.deserialize(key.inst);
         derez.deserialize(key.ready_event);
-        derez.deserialize(key.space);
+        derez.deserialize(key.domain);
         LegionMap<IndirectKey,FieldMask>::aligned::iterator finder = 
           records.find(key);
         if (finder != records.end())

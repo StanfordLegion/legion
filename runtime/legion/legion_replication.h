@@ -424,8 +424,8 @@ namespace Legion {
       struct IndirectKey {
       public:
         IndirectKey(void) { }
-        IndirectKey(PhysicalInstance i, ApEvent e, IndexSpace s)
-          : inst(i), ready_event(e), space(s) { }
+        IndirectKey(PhysicalInstance i, ApEvent e, const Domain &d)
+          : inst(i), ready_event(e), domain(d) { }
       public:
         inline bool operator<(const IndirectKey &rhs) const 
         {
@@ -437,7 +437,7 @@ namespace Legion {
             return true;
           if (ready_event.id > rhs.ready_event.id)
             return false;
-          return (space < rhs.space);
+          return (domain < rhs.domain);
         }
         inline bool operator==(const IndirectKey &rhs) const
         {
@@ -445,12 +445,12 @@ namespace Legion {
             return false;
           if (ready_event.id != rhs.ready_event.id)
             return false;
-          return (space == rhs.space);
+          return (domain == rhs.domain);
         }
       public:
         PhysicalInstance inst;
         ApEvent ready_event;
-        IndexSpace space;
+        Domain domain;
       };
     public:
       IndirectRecordExchange(ReplicateContext *ctx,
