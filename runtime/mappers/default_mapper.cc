@@ -2660,7 +2660,9 @@ namespace Legion {
                                               output.src_instances[idx]);
         // Check to see if we are doing a reduce-across in which case we
         // need to actually create a real physical instance
-        if (copy.dst_requirements[idx].privilege == REDUCE)
+        if ((copy.dst_requirements[idx].privilege == REDUCE) ||
+            (idx < copy.src_indirect_requirements.size()) ||
+            (idx < copy.dst_indirect_requirements.size()))
         {
           // If the source is restricted, we know we are good
           if (!copy.src_requirements[idx].is_restricted())
@@ -2686,6 +2688,42 @@ namespace Legion {
           if (!copy.dst_requirements[idx].is_restricted())
             default_create_copy_instance<false/*is src*/>(ctx, copy, 
                 copy.dst_requirements[idx], idx, output.dst_instances[idx]);
+        }
+      }
+      if (!copy.src_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < 
+              copy.src_indirect_requirements.size(); idx++)
+        {
+          if (!input.src_indirect_instances[idx].empty())
+            output.src_indirect_instances[idx] = 
+              input.src_indirect_instances[idx][0];
+          if (!copy.src_indirect_requirements[idx].is_restricted())
+          {
+            std::vector<PhysicalInstance> temp_instances;
+            default_create_copy_instance<false/*is src*/>(ctx, copy, 
+                copy.src_indirect_requirements[idx], idx, temp_instances);
+            assert(!temp_instances.empty());
+            output.src_indirect_instances[idx] = temp_instances[0];
+          }
+        }
+      }
+      if (!copy.dst_indirect_requirements.empty())
+      {
+        for (unsigned idx = 0; idx < 
+              copy.dst_indirect_requirements.size(); idx++)
+        {
+          if (!input.dst_indirect_instances[idx].empty())
+            output.dst_indirect_instances[idx] = 
+              input.dst_indirect_instances[idx][0];
+          if (!copy.dst_indirect_requirements[idx].is_restricted())
+          {
+            std::vector<PhysicalInstance> temp_instances;
+            default_create_copy_instance<false/*is src*/>(ctx, copy, 
+                copy.dst_indirect_requirements[idx], idx, temp_instances);
+            assert(!temp_instances.empty());
+            output.dst_indirect_instances[idx] = temp_instances[0];
+          }
         }
       }
     } 
