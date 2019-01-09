@@ -369,6 +369,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTraceInfo::record_issue_indirect(ApEvent &result,
+                                 IndexSpaceExpression *expr,
+                                 const std::vector<CopySrcDstField>& src_fields,
+                                 const std::vector<CopySrcDstField>& dst_fields,
+                                 const std::vector<void*> &indirections,
+                                 ApEvent precondition) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(recording);
+      assert(tpl != NULL);
+      assert(tpl->is_recording());
+#endif
+      tpl->record_issue_indirect(op, result, expr, src_fields, dst_fields,
+                                 indirections, precondition);
+    }
+
+    //--------------------------------------------------------------------------
     void PhysicalTraceInfo::record_empty_copy(DeferredView *view,
                                               const FieldMask &copy_mask,
                                               MaterializedView *dst) const

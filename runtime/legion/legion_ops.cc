@@ -3231,38 +3231,134 @@ namespace Legion {
             check_copy_privilege(dst_indirect_requirements[idx], offset + idx);
           } 
         }
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          IndexSpace src_space = src_requirements[idx].region.get_index_space();
-          IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-          if (!runtime->forest->are_compatible(src_space, dst_space))
-            REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
-                          "Copy launcher index space mismatch at index "
-                          "%d of cross-region copy (ID %lld) in task %s "
-                          "(ID %lld). Source requirement with index "
-                          "space %x and destination requirement "
-                          "with index space %x do not have the "
-                          "same number of dimensions or the same number "
-                          "of elements in their element masks.",
-                          idx, get_unique_id(),
-                          parent_ctx->get_task_name(), 
-                          parent_ctx->get_unique_id(),
-                          src_space.id, dst_space.id)
-          else if (!runtime->forest->is_dominated(src_space, dst_space))
-            REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE,
-                          "Destination index space %x for "
-                          "requirement %d of cross-region copy "
-                          "(ID %lld) in task %s (ID %lld) is not "
-                          "a sub-region of the source index space %x.", 
-                          dst_space.id, idx, get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          src_space.id)
-        }
+        check_compatibility_properties();  
       }
       if (runtime->legion_spy_enabled)
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::check_compatibility_properties(void) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (idx >= dst_indirect_requirements.size())
+        {
+          if (idx >= src_indirect_requirements.size())
+          {
+            // Normal copy
+            IndexSpace src_space = 
+              src_requirements[idx].region.get_index_space();
+            IndexSpace dst_space = 
+              dst_requirements[idx].region.get_index_space();
+            if (!runtime->forest->are_compatible(src_space, dst_space))
+              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+                            "Copy launcher index space mismatch at index "
+                            "%d of cross-region copy (ID %lld) in task %s "
+                            "(ID %lld). Source requirement with index "
+                            "space %x and destination requirement "
+                            "with index space %x do not have the "
+                            "same number of dimensions.",
+                            idx, get_unique_id(),
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id(),
+                            src_space.id, dst_space.id)
+            // Only need to check for dominance if we're not reducing
+            else if ((dst_requirements[idx].redop == 0) &&
+                      !runtime->forest->is_dominated(src_space, dst_space))
+              REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE,
+                            "Destination index space %x for "
+                            "requirement %d of cross-region copy "
+                            "(ID %lld) in task %s (ID %lld) is not "
+                            "a sub-space of the source index space %x.", 
+                            dst_space.id, idx, get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id(),
+                            src_space.id)
+          }
+          else
+          {
+            // Gather copy
+            IndexSpace src_indirect_space = 
+              src_indirect_requirements[idx].region.get_index_space();
+            IndexSpace dst_space = 
+              dst_requirements[idx].region.get_index_space();
+            if (!runtime->forest->are_compatible(src_indirect_space, dst_space))
+              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+                            "Copy launcher index space mismatch at index "
+                            "%d of cross-region copy (ID %lld) in task %s "
+                            "(ID %lld). Source indirect requirement with index "
+                            "space %d and destination requirement "
+                            "with index space %d do not have the "
+                            "same number of dimensions.", 
+                            idx, get_unique_id(),
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id(),
+                            src_indirect_space.id, dst_space.id)
+            else if ((dst_requirements[idx].redop == 0) &&
+                   !runtime->forest->is_dominated(src_indirect_space,dst_space))
+              REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE,
+                            "Destination index space %d for "
+                            "requirement %d of cross-region copy "
+                            "(ID %lld) in task %s (ID %lld) is not a sub-space "
+                            "of the source indirection index space %d.",
+                            dst_space.id, idx, get_unique_id(),
+                            parent_ctx->get_task_name(),
+                            parent_ctx->get_unique_id(),
+                            src_indirect_space.id)
+          }
+        }
+        else
+        {
+          if (idx >= src_indirect_requirements.size())
+          {
+            // Scatter copy
+            IndexSpace src_space = 
+              src_requirements[idx].region.get_index_space();
+            IndexSpace dst_indirect_space= 
+              dst_indirect_requirements[idx].region.get_index_space();
+            // Just check compatibility here since it's really hard to
+            // prove that we're actually going to write everything
+            if (!runtime->forest->are_compatible(src_space, dst_indirect_space))
+              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+                            "Copy launcher index space mismatch at index "
+                            "%d of cross-region copy (ID %lld) in task %s "
+                            "(ID %lld). Source requirement with index "
+                            "space %d and destination indirect requirement "
+                            "with index space %d do not have the "
+                            "same number of dimensions.",
+                            idx, get_unique_id(),
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id(),
+                            src_space.id, dst_indirect_space.id)
+          }
+          else
+          {
+            // Indirect copy
+            IndexSpace src_indirect_space = 
+              src_requirements[idx].region.get_index_space();
+            IndexSpace dst_indirect_space= 
+              dst_indirect_requirements[idx].region.get_index_space();
+            // Just check compatibility here since it's really hard to
+            // prove that we're actually going to write everything
+            if (!runtime->forest->are_compatible(src_indirect_space, 
+                                                 dst_indirect_space))
+              REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
+                            "Copy launcher index space mismatch at index "
+                            "%d of cross-region copy (ID %lld) in task %s "
+                            "(ID %lld). Source indirect requirement with index "
+                            "space %d and destination indirect requirement "
+                            "with index space %d do not have the "
+                            "same number of dimensions.",
+                            idx, get_unique_id(),
+                            parent_ctx->get_task_name(), 
+                            parent_ctx->get_unique_id(),
+                            src_indirect_space.id, dst_indirect_space.id)
+          }
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3862,8 +3958,11 @@ namespace Legion {
           dst_requirements[idx].privilege = REDUCE; 
         if (idx < src_indirect_requirements.size())
         {
-          std::vector<MappingInstance> gather_instances(1,
-                                        output.src_indirect_instances[idx]);
+          std::vector<MappingInstance> gather_instances(1);
+          if (idx < output.src_indirect_instances.size())
+            gather_instances[0] = output.src_indirect_instances[idx];
+          else
+            gather_instances.clear();
           perform_conversion<GATHER_REQ>(idx, src_indirect_requirements[idx],
                                          gather_instances, gather_targets);
           // Now do the registration
@@ -3893,8 +3992,11 @@ namespace Legion {
         }
         if (idx < dst_indirect_requirements.size())
         {
-          std::vector<MappingInstance> scatter_instances(1,
-                                        output.dst_indirect_instances[idx]);
+          std::vector<MappingInstance> scatter_instances(1);
+          if (idx < output.dst_indirect_instances.size())
+            scatter_instances[0] = output.dst_indirect_instances[idx];
+          else
+            scatter_instances.clear();
           perform_conversion<SCATTER_REQ>(idx, dst_indirect_requirements[idx],
                                           scatter_instances, scatter_targets);
           // Now do the registration
@@ -4042,21 +4144,55 @@ namespace Legion {
             dst_targets, dst_requirements[index].region.get_index_space(),
             dst_records, false/*sources*/);
       }
-      if ((gather_targets != NULL) || (scatter_targets != NULL))
+      if (scatter_targets == NULL)
       {
-        // We have at least one indirection to handle
-        assert(false);
-        // Trigger the indirect_done event once everything is applied
-        //Runtime::trigger_event(indirect_done, local_done);
+        if (gather_targets == NULL)
+        {
+          // Normal copy across
+          copy_done = runtime->forest->copy_across( 
+              src_requirements[index], dst_requirements[index],
+              src_versions[index], dst_versions[index],
+              src_targets, dst_targets, this, index, 
+              index + src_requirements.size(),
+              local_init_precondition, predication_guard, 
+              trace_info, applied_conditions);
+        }
+        else
+        {
+          // Gather copy
+          const ApEvent local_done = runtime->forest->gather_across(
+              src_requirements[index], src_indirect_requirements[index],
+              dst_requirements[index], src_records,
+              (*gather_targets)[0], dst_targets, this, 
+              src_requirements.size() + index,
+              local_init_precondition, predication_guard, trace_info);
+          Runtime::trigger_event(indirect_done, local_done);
+        }
       }
-      else // Normal copy
-        copy_done = runtime->forest->copy_across( 
-                              src_requirements[index],dst_requirements[index],
-                              src_versions[index], dst_versions[index],
-                              src_targets, dst_targets, this, index, 
-                              index + src_requirements.size(),
-                              local_init_precondition, predication_guard, 
-                              trace_info, applied_conditions);
+      else
+      {
+        if (gather_targets == NULL)
+        {
+          // Scatter copy
+          const ApEvent local_done = runtime->forest->scatter_across(
+              src_requirements[index], dst_indirect_requirements[index],
+              dst_requirements[index], src_targets,
+              (*scatter_targets)[0], dst_records, this, index,
+              local_init_precondition, predication_guard, trace_info);
+          Runtime::trigger_event(indirect_done, local_done);
+        }
+        else
+        {
+          // Full indirection copy
+          const ApEvent local_done = runtime->forest->indirect_across(
+              src_requirements[index], src_indirect_requirements[index],
+              dst_requirements[index], dst_indirect_requirements[index],
+              src_records, (*gather_targets)[0],
+              dst_records, (*scatter_targets)[0],
+              local_init_precondition, predication_guard, trace_info);
+          Runtime::trigger_event(indirect_done, local_done);
+        }
+      }
       Runtime::trigger_event(local_completion, copy_done);
       if (is_recording())
       {
@@ -4131,11 +4267,35 @@ namespace Legion {
              LegionVector<IndirectRecord>::aligned &records, const bool sources)
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < insts.size(); idx++)
+      IndexSpaceNode *node = runtime->forest->get_node(space);
+      ApEvent domain_ready;
+      const Domain dom = node->get_domain(domain_ready, true/*tight*/);
+      if (domain_ready.exists() && !domain_ready.has_triggered())
       {
-        const InstanceRef &ref = insts[idx];
-        records.push_back(IndirectRecord(ref.get_valid_fields(),
-              ref.get_manager()->get_instance(), ref.get_ready_event(), space));
+        for (unsigned idx = 0; idx < insts.size(); idx++)
+        {
+          const InstanceRef &ref = insts[idx];
+          records.push_back(IndirectRecord(ref.get_valid_fields(),
+                ref.get_manager()->get_instance(), ref.get_ready_event(), dom));
+        }
+      }
+      else
+      {
+        for (unsigned idx = 0; idx < insts.size(); idx++)
+        {
+          const InstanceRef &ref = insts[idx];
+          const ApEvent inst_ready = ref.get_ready_event();
+          if (inst_ready.exists() && !inst_ready.has_triggered())
+          {
+            records.push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), 
+                  Runtime::merge_events(&trace_info, domain_ready, inst_ready),
+                  dom));
+          }
+          else
+            records.push_back(IndirectRecord(ref.get_valid_fields(),
+                  ref.get_manager()->get_instance(), domain_ready, dom));
+        }
       }
       return local_done;
     }
@@ -4144,16 +4304,19 @@ namespace Legion {
     unsigned CopyOp::find_parent_index(unsigned idx)
     //--------------------------------------------------------------------------
     {
-      if (idx >= src_parent_indexes.size())
-      {
-        idx -= src_parent_indexes.size();
-#ifdef DEBUG_LEGION
-        assert(idx < dst_parent_indexes.size());
-#endif
-        return dst_parent_indexes[idx];
-      }
-      else
+      if (idx < src_parent_indexes.size())
         return src_parent_indexes[idx];
+      idx -= src_parent_indexes.size();
+      if (idx < dst_parent_indexes.size())
+        return dst_parent_indexes[idx];
+      idx -= dst_parent_indexes.size();
+      if (idx < gather_parent_indexes.size())
+        return gather_parent_indexes[idx];
+      idx -= gather_parent_indexes.size();
+#ifdef DEBUG_LEGION
+      assert(idx < scatter_parent_indexes.size());
+#endif
+      return scatter_parent_indexes[idx];
     }
 
     //--------------------------------------------------------------------------
@@ -4626,10 +4789,11 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_MISSING_INSTANCE_FIELD,
                       "Invalid mapper output from invocation of 'map_copy' "
                       "on mapper %s. Mapper failed to specify a physical "
-                      "instance for %zd fields of the region requirement %d "
+                      "instance for %zd fields of the %s region requirement %d "
                       "of explicit region-to-region copy in task %s (ID %lld). "
                       "The missing fields are listed below.",
-                      mapper->get_mapper_name(), missing_fields.size(), idx,
+                      mapper->get_mapper_name(), missing_fields.size(), 
+                      get_req_type_name<REQ_TYPE>(), idx,
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id())
       }
       if (!unacquired.empty())
@@ -5389,7 +5553,7 @@ namespace Legion {
       // the destination requirements for each point
       for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
             it != points.end(); it++)
-        (*it)->check_domination();
+        (*it)->check_compatibility();
 #endif
       if (runtime->legion_spy_enabled)
       {
@@ -5503,16 +5667,42 @@ namespace Legion {
       RtEvent wait_on;
       RtUserEvent to_trigger;
       {
+        IndexSpaceNode *node = runtime->forest->get_node(space);
+        ApEvent domain_ready;
+        const Domain dom = node->get_domain(domain_ready, true/*tight*/);
         // Take the lock and record our sets and instances
         AutoLock o_lock(op_lock);
         if (sources)
         {
-          for (unsigned idx = 0; idx < insts.size(); idx++)
+          if (domain_ready.exists() && !domain_ready.has_triggered())
           {
-            const InstanceRef &ref = insts[idx];
-            src_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), 
-                  ref.get_ready_event(), space));
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              const ApEvent inst_ready = ref.get_ready_event();
+              if (inst_ready.exists() && !inst_ready.has_triggered())
+                src_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      Runtime::merge_events(&trace_info, domain_ready,
+                        inst_ready), dom));
+              else
+                src_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      domain_ready, dom));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              src_records[index].push_back(IndirectRecord(
+                    ref.get_valid_fields(),
+                    ref.get_manager()->get_instance(), 
+                    ref.get_ready_event(), dom));
+            }
           }
           src_exchange_events[index].insert(local_done);
           if (!src_exchanged[index].exists())
@@ -5524,12 +5714,35 @@ namespace Legion {
         }
         else
         {
-          for (unsigned idx = 0; idx < insts.size(); idx++)
+          if (domain_ready.exists() && !domain_ready.has_triggered())
           {
-            const InstanceRef &ref = insts[idx];
-            dst_records[index].push_back(IndirectRecord(ref.get_valid_fields(),
-                  ref.get_manager()->get_instance(), 
-                  ref.get_ready_event(), space));
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              const ApEvent inst_ready = ref.get_ready_event();
+              if (inst_ready.exists() && !inst_ready.has_triggered())
+                dst_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      Runtime::merge_events(&trace_info, domain_ready,
+                        inst_ready), dom));
+              else
+                dst_records[index].push_back(IndirectRecord(
+                      ref.get_valid_fields(),
+                      ref.get_manager()->get_instance(), 
+                      domain_ready, dom));
+            }
+          }
+          else
+          {
+            for (unsigned idx = 0; idx < insts.size(); idx++)
+            {
+              const InstanceRef &ref = insts[idx];
+              dst_records[index].push_back(IndirectRecord(
+                    ref.get_valid_fields(),
+                    ref.get_manager()->get_instance(), 
+                    ref.get_ready_event(), dom));
+            }
           }
           dst_exchange_events[index].insert(local_done);
           if (!dst_exchanged[index].exists())
@@ -5725,37 +5938,10 @@ namespace Legion {
 
 #ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
-    void PointCopyOp::check_domination(void) const
+    void PointCopyOp::check_compatibility(void) const
     //--------------------------------------------------------------------------
     {
-      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-      {
-        IndexSpace src_space = src_requirements[idx].region.get_index_space();
-        IndexSpace dst_space = dst_requirements[idx].region.get_index_space();
-        if (!runtime->forest->are_compatible(src_space, dst_space))
-          REPORT_LEGION_ERROR(ERROR_COPY_LAUNCHER_INDEX,
-                        "Copy launcher index space mismatch at index "
-                        "%d of cross-region copy (ID %lld) in task %s "
-                        "(ID %lld). Source requirement with index "
-                        "space %x and destination requirement "
-                        "with index space %x do not have the "
-                        "same number of dimensions or the same number "
-                        "of elements in their element masks.",
-                        idx, get_unique_id(),
-                        parent_ctx->get_task_name(), 
-                        parent_ctx->get_unique_id(),
-                        src_space.id, dst_space.id)
-        else if (!runtime->forest->is_dominated(src_space, dst_space))
-          REPORT_LEGION_ERROR(ERROR_DESTINATION_INDEX_SPACE2,
-                        "Destination index space %x for "
-                        "requirement %d of cross-region copy "
-                        "(ID %lld) in task %s (ID %lld) is not "
-                        "a sub-region of the source index space %x.", 
-                        dst_space.id, idx, get_unique_id(),
-                        parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id(),
-                        src_space.id)
-      }
+      check_compatibility_properties();
     }
 #endif
 

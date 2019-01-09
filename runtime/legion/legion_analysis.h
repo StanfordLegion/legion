@@ -155,6 +155,12 @@ namespace Legion {
                              RegionTreeID tree_id,
 #endif
                              ApEvent precondition) const;
+      void record_issue_indirect(ApEvent &result,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition) const;
       void record_empty_copy(DeferredView *view,
                              const FieldMask &copy_mask,
                              MaterializedView *dst) const;

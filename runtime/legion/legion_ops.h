@@ -992,6 +992,7 @@ namespace Legion {
     protected:
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
                                 bool permit_projection = false);
+      void check_compatibility_properties(void) const;
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
                                const ApEvent local_init_precondition,
@@ -1131,7 +1132,7 @@ namespace Legion {
     public:
       void initialize(IndexCopyOp *owner, const DomainPoint &point);
 #ifdef DEBUG_LEGION
-      void check_domination(void) const;
+      void check_compatibility(void) const;
 #endif
       void launch(void);
     public:

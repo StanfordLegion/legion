@@ -2447,6 +2447,369 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::gather_across(const RegionRequirement &src_req,
+                                            const RegionRequirement &idx_req,
+                                            const RegionRequirement &dst_req,
+                    const LegionVector<IndirectRecord>::aligned &src_records,
+                                            const InstanceRef &idx_target,
+                                            const InstanceSet &dst_targets,
+                                            Operation *op, unsigned dst_index,
+                                            const ApEvent precondition, 
+                                            const PredEvent pred_guard,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_req.handle_type == SINGULAR);
+      assert(idx_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
+      assert(idx_req.privilege_fields.size() == 1);
+#endif  
+      const FieldID idx_field = *(idx_req.privilege_fields.begin());
+      // Get the field indexes for src/dst fields
+      RegionNode *src_node = get_node(src_req.region);
+      RegionNode *idx_node = get_node(idx_req.region);
+      RegionNode *dst_node = get_node(dst_req.region);
+      IndexSpaceExpression *copy_expr = 
+        // If they are the same then we know the answer
+        (idx_node->row_source == dst_node->row_source) ? dst_node->row_source :
+        // If we're writing we already checked for dominance so just do the dst
+        (dst_req.redop == 0) ? dst_node->row_source :
+        // Otherwise take the intersection of the two index spaces
+        intersect_index_spaces(idx_node->row_source, dst_node->row_source);
+      // Easy out if we're not moving anything
+      if ((copy_expr != dst_node->row_source) && copy_expr->is_empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      src_node->column_source->get_field_indexes(src_req.instance_fields,
+                                                 src_indexes);
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
+      // Build the indirection first which will also give us the
+      // indirection indexes for each of the source fields
+      std::vector<void*> indirections;
+      std::vector<unsigned> indirection_indexes;
+      copy_expr->construct_indirections(src_indexes, idx_field, 
+               src_req.region.get_index_space().get_type_tag(), 
+               idx_target.get_manager()->get_instance(),
+               src_records, indirections, indirection_indexes);
+#ifdef DEBUG_LEGION
+      assert(indirection_indexes.size() == src_req.instance_fields.size());
+#endif
+      std::vector<CopySrcDstField> src_fields(src_req.instance_fields.size());
+      std::vector<CopySrcDstField> dst_fields;
+      std::set<ApEvent> copy_preconditions;
+      // Construct the source and destination field info 
+      InnerContext *context = op->find_physical_context(dst_index);
+      std::vector<InstanceView*> target_views;
+      context->convert_target_views(dst_targets, target_views);
+      FieldSpaceNode *src_field_node = src_node->column_source;
+      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
+      {
+        // The source entry is easy
+        const FieldID src_fid = src_req.instance_fields[fidx];
+        const size_t field_size = src_field_node->get_field_size(src_fid);
+        src_fields[fidx].set_indirect(indirection_indexes[fidx], 
+                                      src_fid, field_size);
+        // We need to find the destination instance
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        // Find the destination instance
+        for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+        {
+          const InstanceRef &ref = dst_targets[idx];
+          const FieldMask &dst_mask = ref.get_valid_fields();
+          if (!dst_mask.is_set(dst_indexes[fidx]))
+            continue;
+          // We found it
+          FieldMask copy_mask;
+          copy_mask.set_bit(dst_indexes[fidx]);
+          target_views[idx]->copy_to(copy_mask, dst_fields);
+          copy_preconditions.insert(ref.get_ready_event());
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+      // Handle any reduction operations
+      if (dst_req.redop > 0)
+      {
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
+      }
+      // Also add any other copy preconditions
+      for (unsigned idx = 0; idx < src_records.size(); idx++)
+      {
+        const ApEvent src_event = src_records[idx].ready_event;
+        if (src_event.exists())
+          copy_preconditions.insert(src_event);
+      }
+      const ApEvent indirect_event = idx_target.get_ready_event();
+      if (indirect_event.exists())
+        copy_preconditions.insert(indirect_event);
+      if (precondition.exists())
+        copy_preconditions.insert(precondition);
+      ApEvent copy_pre;
+      if (!copy_preconditions.empty())
+        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+      const ApEvent copy_post = 
+        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
+                                  indirections, copy_pre, pred_guard);
+      if (!trace_info.recording)
+        // If we're not recording then destroy our indirections
+        // Otherwise the trace took ownership of them
+        copy_expr->destroy_indirections(indirections);
+      return copy_post;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::scatter_across(const RegionRequirement &src_req,
+                                             const RegionRequirement &idx_req,
+                                             const RegionRequirement &dst_req,
+                                             const InstanceSet &src_targets,
+                                             const InstanceRef &idx_target,
+                    const LegionVector<IndirectRecord>::aligned &dst_records,
+                                             Operation *op, unsigned src_index,
+                                             const ApEvent precondition, 
+                                             const PredEvent pred_guard,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_req.handle_type == SINGULAR);
+      assert(idx_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
+      assert(idx_req.privilege_fields.size() == 1);
+#endif  
+      const FieldID idx_field = *(idx_req.privilege_fields.begin());
+      // Get the field indexes for src/dst fields
+      RegionNode *src_node = get_node(src_req.region);
+      RegionNode *idx_node = get_node(idx_req.region);
+      RegionNode *dst_node = get_node(dst_req.region);
+      IndexSpaceExpression *copy_expr = 
+        (idx_node->row_source == src_node->row_source) ? idx_node->row_source :
+        intersect_index_spaces(src_node->row_source, idx_node->row_source);
+      // Easy out if we're not going to move anything
+      if ((copy_expr != idx_node->row_source) && copy_expr->is_empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      src_node->column_source->get_field_indexes(src_req.instance_fields,
+                                                 src_indexes);
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
+      // Build the indirection first which will also give us the
+      // indirection indexes for each of the source fields
+      std::vector<void*> indirections;
+      std::vector<unsigned> indirection_indexes;
+      copy_expr->construct_indirections(dst_indexes, idx_field, 
+               dst_req.region.get_index_space().get_type_tag(), 
+               idx_target.get_manager()->get_instance(),
+               dst_records, indirections, indirection_indexes);
+#ifdef DEBUG_LEGION
+      assert(indirection_indexes.size() == dst_req.instance_fields.size());
+#endif
+      std::vector<CopySrcDstField> src_fields;
+      std::vector<CopySrcDstField> dst_fields(dst_req.instance_fields.size());
+      std::set<ApEvent> copy_preconditions;
+      // Construct the source and destination field info 
+      InnerContext *context = op->find_physical_context(src_index);
+      std::vector<InstanceView*> source_views;
+      context->convert_target_views(src_targets, source_views);
+      FieldSpaceNode *dst_field_node = dst_node->column_source;
+      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
+      {
+        // We need to find the source instance
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        // Find the source instance
+        for (unsigned idx = 0; idx < src_targets.size(); idx++)
+        {
+          const InstanceRef &ref = src_targets[idx];
+          const FieldMask &src_mask = ref.get_valid_fields();
+          if (!src_mask.is_set(src_indexes[fidx]))
+            continue;
+          // We found it
+          FieldMask copy_mask;
+          copy_mask.set_bit(src_indexes[fidx]);
+          source_views[idx]->copy_to(copy_mask, src_fields);
+          copy_preconditions.insert(ref.get_ready_event());
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+        // The destination entry is easy
+        const FieldID dst_fid = dst_req.instance_fields[fidx];
+        const size_t field_size = dst_field_node->get_field_size(dst_fid);
+        dst_fields[fidx].set_indirect(indirection_indexes[fidx], 
+                                      dst_fid, field_size);
+      }
+      // Handle any reduction operations
+      if (dst_req.redop > 0)
+      {
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
+      }
+      // Also add any other copy preconditions
+      for (unsigned idx = 0; idx < dst_records.size(); idx++)
+      {
+        const ApEvent dst_event = dst_records[idx].ready_event;
+        if (dst_event.exists())
+          copy_preconditions.insert(dst_event);
+      }
+      const ApEvent indirect_event = idx_target.get_ready_event();
+      if (indirect_event.exists())
+        copy_preconditions.insert(indirect_event);
+      if (precondition.exists())
+        copy_preconditions.insert(precondition);
+      ApEvent copy_pre;
+      if (!copy_preconditions.empty())
+        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+      const ApEvent copy_post = 
+        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
+                                  indirections, copy_pre, pred_guard);
+      if (!trace_info.recording)
+        // If we're not recording then destroy our indirections
+        // Otherwise the trace took ownership of them
+        copy_expr->destroy_indirections(indirections);
+      return copy_post;
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::indirect_across(const RegionRequirement &src_req,
+                              const RegionRequirement &src_idx_req,
+                              const RegionRequirement &dst_req,
+                              const RegionRequirement &dst_idx_req,
+                      const LegionVector<IndirectRecord>::aligned &src_records,
+                              const InstanceRef &src_idx_target,
+                      const LegionVector<IndirectRecord>::aligned &dst_records,
+                              const InstanceRef &dst_idx_target,
+                              const ApEvent precondition, 
+                              const PredEvent pred_guard,
+                              const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(src_req.handle_type == SINGULAR);
+      assert(src_idx_req.handle_type == SINGULAR);
+      assert(dst_req.handle_type == SINGULAR);
+      assert(dst_idx_req.handle_type == SINGULAR);
+      assert(src_req.instance_fields.size() == dst_req.instance_fields.size());
+      assert(src_idx_req.privilege_fields.size() == 1);
+      assert(dst_idx_req.privilege_fields.size() == 1);
+#endif  
+      const FieldID src_idx_field = *(src_idx_req.privilege_fields.begin());
+      const FieldID dst_idx_field = *(dst_idx_req.privilege_fields.begin());
+      // Get the field indexes for src/dst fields
+      RegionNode *src_node = get_node(src_req.region);
+      RegionNode *src_idx_node = get_node(src_idx_req.region);
+      RegionNode *dst_node = get_node(dst_req.region);
+      RegionNode *dst_idx_node = get_node(dst_idx_req.region);
+      IndexSpaceExpression *copy_expr = 
+        (src_idx_node->row_source == dst_idx_node->row_source) ? 
+         src_idx_node->row_source : intersect_index_spaces(
+             src_idx_node->row_source, dst_idx_node->row_source);
+      // Quick out if there is nothing we're going to copy
+      if ((copy_expr != src_idx_node->row_source) && copy_expr->is_empty())
+        return ApEvent::NO_AP_EVENT;
+      std::vector<unsigned> src_indexes(src_req.instance_fields.size());
+      src_node->column_source->get_field_indexes(src_req.instance_fields,
+                                                 src_indexes);
+      std::vector<unsigned> dst_indexes(dst_req.instance_fields.size());
+      dst_node->column_source->get_field_indexes(dst_req.instance_fields,
+                                                 dst_indexes);
+      // Build the indirection first which will also give us the
+      // indirection indexes for each of the source fields
+      std::vector<void*> indirections;
+      std::vector<unsigned> src_indirection_indexes;
+      copy_expr->construct_indirections(src_indexes, src_idx_field,
+               src_req.region.get_index_space().get_type_tag(),
+               src_idx_target.get_manager()->get_instance(),
+               src_records, indirections, src_indirection_indexes);
+#ifdef DEBUG_LEGION
+      assert(src_indirection_indexes.size() == src_req.instance_fields.size());
+#endif
+      std::vector<unsigned> dst_indirection_indexes;
+      copy_expr->construct_indirections(dst_indexes, dst_idx_field,
+               dst_req.region.get_index_space().get_type_tag(),
+               dst_idx_target.get_manager()->get_instance(),
+               dst_records, indirections, dst_indirection_indexes);
+#ifdef DEBUG_LEGION
+      assert(dst_indirection_indexes.size() == dst_req.instance_fields.size());
+#endif
+      std::vector<CopySrcDstField> src_fields(src_req.instance_fields.size());
+      std::vector<CopySrcDstField> dst_fields(dst_req.instance_fields.size());
+      std::set<ApEvent> copy_preconditions;
+      // Construct the source and destination field info 
+      FieldSpaceNode *src_field_node = src_node->column_source;
+      FieldSpaceNode *dst_field_node = dst_node->column_source;
+      for (unsigned fidx = 0; fidx < src_req.instance_fields.size(); fidx++)
+      {
+        // Do the source field first
+        const FieldID src_fid = src_req.instance_fields[fidx];
+        const size_t src_field_size = src_field_node->get_field_size(src_fid);
+        src_fields[fidx].set_indirect(src_indirection_indexes[fidx],
+                                      src_fid, src_field_size);
+        // Then the destination field
+        const FieldID dst_fid = dst_req.instance_fields[fidx];
+        const size_t dst_field_size = dst_field_node->get_field_size(dst_fid);
+        dst_fields[fidx].set_indirect(dst_indirection_indexes[fidx], 
+                                      dst_fid, dst_field_size);
+      }
+      // Handle any reduction operations
+      if (dst_req.redop > 0)
+      {
+        for (unsigned idx = 0; idx < dst_fields.size(); idx++)
+          dst_fields[idx].set_redop(dst_req.redop, false/*fold*/);
+      }
+      // Also add any other copy preconditions
+      for (unsigned idx = 0; idx < src_records.size(); idx++)
+      {
+        const ApEvent src_event = src_records[idx].ready_event;
+        if (src_event.exists())
+          copy_preconditions.insert(src_event);
+      }
+      for (unsigned idx = 0; idx < dst_records.size(); idx++)
+      {
+        const ApEvent dst_event = dst_records[idx].ready_event;
+        if (dst_event.exists())
+          copy_preconditions.insert(dst_event);
+      }
+      const ApEvent src_indirect_event = src_idx_target.get_ready_event();
+      if (src_indirect_event.exists())
+        copy_preconditions.insert(src_indirect_event);
+      const ApEvent dst_indirect_event = dst_idx_target.get_ready_event();
+      if (dst_indirect_event.exists())
+        copy_preconditions.insert(dst_indirect_event);
+      if (precondition.exists())
+        copy_preconditions.insert(precondition);
+      ApEvent copy_pre;
+      if (!copy_preconditions.empty())
+        copy_pre = Runtime::merge_events(&trace_info, copy_preconditions);
+      const ApEvent copy_post = 
+        copy_expr->issue_indirect(trace_info, dst_fields, src_fields,
+                                  indirections, copy_pre, pred_guard);
+      if (!trace_info.recording)
+        // If we're not recording then destroy our indirections
+        // Otherwise the trace took ownership of them
+        copy_expr->destroy_indirections(indirections);
+      return copy_post;
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::fill_fields(Operation *op,
                                           const RegionRequirement &req,
                                           const unsigned index,
@@ -5492,6 +5855,59 @@ namespace Legion {
                                 handle, src_tree_id, dst_tree_id,
 #endif
                                 precondition, pred_guard, redop,reduction_fold);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingIndexSpaceExpression::construct_indirections(
+                                     const std::vector<unsigned> &field_indexes,
+                                     const FieldID indirect_field,
+                                     const TypeTag indirect_type,
+                                     const PhysicalInstance indirect_instance,
+                                     const LegionVector<
+                                            IndirectRecord>::aligned &records,
+                                     std::vector<void*> &indirections,
+                                     std::vector<unsigned> &indirect_indexes)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      result->construct_indirections(field_indexes, indirect_field, 
+                                     indirect_type, indirect_instance, records,
+                                     indirections, indirect_indexes);
+    }
+
+    //--------------------------------------------------------------------------
+    void PendingIndexSpaceExpression::destroy_indirections(
+                                               std::vector<void*> &indirections)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      result->destroy_indirections(indirections);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent PendingIndexSpaceExpression::issue_indirect(
+                                 const PhysicalTraceInfo &trace_info,
+                                 const std::vector<CopySrcDstField> &dst_fields,
+                                 const std::vector<CopySrcDstField> &src_fields,
+                                 const std::vector<void*> &indirects,
+                                 ApEvent precondition, PredEvent pred_guard)
+    //--------------------------------------------------------------------------
+    {
+      if (!ready_event.has_triggered())
+        ready_event.wait();
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
+      return result->issue_indirect(trace_info, dst_fields, src_fields,
+                                    indirects, precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
