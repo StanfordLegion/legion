@@ -223,7 +223,8 @@ namespace Legion {
                            records[idx].fields);
 #ifdef DEBUG_LEGION
       // Little sanity check here that all fields are represented
-      assert(record_sets.get_valid_mask().pop_count() == field_indexes.size());
+      assert(unsigned(record_sets.get_valid_mask().pop_count()) == 
+              field_indexes.size());
 #endif
       // construct indirections for each field set
       LegionList<FieldSet<IndirectRecord*> >::aligned field_sets;
