@@ -4335,6 +4335,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PhysicalTemplate::record_issue_indirect(Operation* op, ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: support for tracing of gather/scatter/indirect operations
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     RtEvent PhysicalTemplate::defer_template_deletion(void)
     //--------------------------------------------------------------------------
     {
@@ -4757,7 +4770,8 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
 #endif
-                                     precondition, redop, reduction_fold);
+                                     precondition, PredEvent::NO_PRED_EVENT,
+                                     redop, reduction_fold);
     }
 
     //--------------------------------------------------------------------------
@@ -4869,7 +4883,7 @@ namespace Legion {
 #ifdef LEGION_SPY
                                      fill_uid, handle, tree_id,
 #endif
-                                     precondition);
+                                     precondition, PredEvent::NO_PRED_EVENT);
     }
 
     //--------------------------------------------------------------------------

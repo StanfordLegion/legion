@@ -96,11 +96,16 @@ namespace Realm {
   class CopyIndirection {
   public:
     class Base {
+    public:
+      virtual ~Base(void) { } 
+      // TODO: remove this
       IndexSpace<N,T> target;
     };
 
     template <int N2, typename T2 = int>
     class Affine : public CopyIndirection<N,T>::Base {
+    public:
+      virtual ~Affine(void) { }
     public:
       Matrix<N,N2,T2> transform;
       Point<N2,T2> offset_lo, offset_hi;
@@ -111,6 +116,8 @@ namespace Realm {
 
     template <int N2, typename T2 = int>
     class Unstructured : public CopyIndirection<N,T>::Base {
+    public:
+      virtual ~Unstructured(void) { }
     public:
       FieldID field_id;
       RegionInstance inst;

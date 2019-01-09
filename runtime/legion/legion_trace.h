@@ -668,6 +668,12 @@ namespace Legion {
                                             ContextID physical_ctx);
       void record_outstanding_gc_event(CollectableView *view, 
                                        ApEvent term_event);
+      void record_issue_indirect(Operation* op, ApEvent &lhs,
+                             IndexSpaceExpression *expr,
+                             const std::vector<CopySrcDstField>& src_fields,
+                             const std::vector<CopySrcDstField>& dst_fields,
+                             const std::vector<void*> &indirections,
+                             ApEvent precondition);
     public:
       RtEvent defer_template_deletion(void);
     public:
