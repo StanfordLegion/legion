@@ -321,6 +321,8 @@ end
 
 -- Normalization for Expressions
 
+local function unreachable(stats, node) assert(false) end
+
 local function expr_call(stats, expr)
   local args = expr.args:map(function(arg) return normalize.expr(stats, arg) end)
   local temp_var = std.newsymbol()
@@ -401,12 +403,16 @@ local normalize_expr_table = {
   [ast.specialized.expr.Unary]                      = pass_through_expr,
   [ast.specialized.expr.Binary]                     = pass_through_expr,
   [ast.specialized.expr.Deref]                      = pass_through_expr,
+
+  [ast.specialized.expr.LuaTable]                   = unreachable,
 }
 
+local normalize_expr = ast.make_single_dispatch(
+  normalize_expr_table,
+  {ast.specialized.expr})
+
 function normalize.expr(stats, expr)
-  local f = normalize_expr_table[expr.node_type]
-  assert(f ~= nil)
-  return f(stats, expr)
+  return normalize_expr(stats)(expr)
 end
 
 -- Normalization for Statements
@@ -607,6 +613,11 @@ local function stat_assignment_or_reduce(stats, stat)
   end
 end
 
+local function stat_expr(stats, stat)
+  local expr = normalize.expr(stats, stat.expr)
+  stats:insert(stat { expr = expr })
+end
+
 local function pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_stat_table = {
@@ -626,15 +637,19 @@ local normalize_stat_table = {
   [ast.specialized.stat.Break]           = pass_through_stat,
   [ast.specialized.stat.Assignment]      = stat_assignment_or_reduce,
   [ast.specialized.stat.Reduce]          = stat_assignment_or_reduce,
-  [ast.specialized.stat.Expr]            = pass_through_stat,
+  [ast.specialized.stat.Expr]            = stat_expr,
   [ast.specialized.stat.RawDelete]       = pass_through_stat,
   [ast.specialized.stat.Fence]           = pass_through_stat,
+
+  [ast.specialized.stat.Elseif]          = unreachable,
 }
 
+local normalize_stat = ast.make_single_dispatch(
+  normalize_stat_table,
+  {ast.specialized.stat})
+
 function normalize.stat(stats, stat)
-  local f = normalize_stat_table[stat.node_type]
-  assert(f ~= nil)
-  f(stats, stat)
+  normalize_stat(stats)(stat)
 end
 
 function normalize.block(node)
