@@ -15,7 +15,7 @@
 -- fails-with:
 -- constraint_pack3.rg:27: invalid cast missing constraint $s * $r
 --   var x = [t(r)] { b = s }
---           ^
+--                  ^
 
 import "regent"
 
