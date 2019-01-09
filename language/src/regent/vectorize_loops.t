@@ -963,7 +963,7 @@ function check_vectorizability.expr(cx, node)
     return true
 
   elseif node:is(ast.typed.expr.Unary) then
-    if not check_vectorizability.expr(cx, node.rhs) then return true end
+    if not check_vectorizability.expr(cx, node.rhs) then return false end
     cx:assign_expr_type(node, cx:lookup_expr_type(node.rhs))
     return true
 
