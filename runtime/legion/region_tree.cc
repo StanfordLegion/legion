@@ -2215,6 +2215,10 @@ namespace Legion {
       // Get the field indexes for all the fields
       RegionNode *src_node = get_node(src_req.region);
       RegionNode *dst_node = get_node(dst_req.region);
+      IndexSpaceExpression *dst_expr = dst_node->row_source;
+      // Quick out if there is nothing to copy to
+      if (dst_expr->is_empty())
+        return ApEvent::NO_AP_EVENT;
       src_node->column_source->get_field_indexes(src_req.instance_fields, 
                                                  src_indexes);   
       dst_node->column_source->get_field_indexes(dst_req.instance_fields,
@@ -2223,7 +2227,6 @@ namespace Legion {
       InnerContext *context = op->find_physical_context(dst_index);
       std::vector<InstanceView*> target_views;
       context->convert_target_views(dst_targets, target_views);
-      IndexSpaceExpression *dst_expr = dst_node->row_source;
       if (!src_targets.empty())
       {
         // If we already have the targets there's no need to 
