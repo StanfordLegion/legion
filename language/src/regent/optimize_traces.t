@@ -50,8 +50,10 @@ end
 local optimize_traces = {}
 
 local function apply_tracing_while(cx, node)
+  local block = optimize_traces.block(cx, node.block)
+
   if not node.annotations.trace:is(ast.annotation.Demand) then
-    return node
+    return node { block = block }
   end
 
   if node.cond:is(ast.typed.expr.FutureGetResult) and
@@ -80,7 +82,7 @@ local function apply_tracing_while(cx, node)
     })
     inner_stats:insert(
       ast.typed.stat.Block {
-        block = optimize_traces.block(cx, node.block),
+        block = block,
         annotations = ast.default_annotations(),
         span = node.span,
     })
@@ -156,7 +158,7 @@ local function apply_tracing_while(cx, node)
     })
     stats:insert(
       ast.typed.stat.Block {
-        block = optimize_traces.block(cx, node.block),
+        block = block,
         annotations = ast.default_annotations(),
         span = node.span,
     })
@@ -172,8 +174,10 @@ local function apply_tracing_while(cx, node)
 end
 
 local function apply_tracing_block(cx, node)
+  local block = optimize_traces.block(cx, node.block)
+
   if not node.annotations.trace:is(ast.annotation.Demand) then
-    return node
+    return node { block = block }
   end
 
   local trace_id = ast.typed.expr.Constant {
@@ -193,7 +197,7 @@ local function apply_tracing_block(cx, node)
   })
   stats:insert(
     ast.typed.stat.Block {
-      block = optimize_traces.block(cx, node.block),
+      block = block,
       annotations = ast.default_annotations(),
       span = node.span,
   })
