@@ -196,6 +196,11 @@ before_script:
     - grep 'model name' /proc/cpuinfo | uniq -c
     - free
     - ./test.py
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - unknown_failure
 
 # Some additional tests are only run on certain configurations.
 .external_tests: &external_tests
@@ -207,6 +212,11 @@ before_script:
         ssh-add <(echo "$GITLAB_DEPLOY_KEY")
       fi
     - ./test.py --test=external --test=private
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - unknown_failure
 
 # For performance tests, run these commands:
 .perf_tests: &perf_tests
@@ -222,6 +232,11 @@ before_script:
     - export PERF_MIN_NODES=1
     - export PERF_MAX_NODES=1
     - ./test.py --test=perf
+  retry:
+    max: 2
+    when:
+      - runner_system_failure
+      - unknown_failure
 
 ###
 ### Jobs
