@@ -47,6 +47,8 @@ function context.new_global_scope()
   return setmetatable(cx, context)
 end
 
+local optimize_traces = {}
+
 local function apply_tracing_while(cx, node)
   if not node.annotations.trace:is(ast.annotation.Demand) then
     return node
@@ -76,7 +78,12 @@ local function apply_tracing_while(cx, node)
         annotations = ast.default_annotations(),
         span = node.span,
     })
-    inner_stats:insertall(node.block.stats)
+    inner_stats:insert(
+      ast.typed.stat.Block {
+        block = optimize_traces.block(cx, node.block),
+        annotations = ast.default_annotations(),
+        span = node.span,
+    })
     inner_stats:insert(
       ast.typed.stat.Assignment {
         lhs = ast.typed.expr.ID {
@@ -147,7 +154,12 @@ local function apply_tracing_while(cx, node)
         annotations = ast.default_annotations(),
         span = node.span,
     })
-    stats:insertall(node.block.stats)
+    stats:insert(
+      ast.typed.stat.Block {
+        block = optimize_traces.block(cx, node.block),
+        annotations = ast.default_annotations(),
+        span = node.span,
+    })
     stats:insert(
       ast.typed.stat.EndTrace {
         trace_id = trace_id,
@@ -179,7 +191,12 @@ local function apply_tracing_block(cx, node)
       annotations = ast.default_annotations(),
       span = node.span,
   })
-  stats:insertall(node.block.stats)
+  stats:insert(
+    ast.typed.stat.Block {
+      block = optimize_traces.block(cx, node.block),
+      annotations = ast.default_annotations(),
+      span = node.span,
+  })
   stats:insert(
     ast.typed.stat.EndTrace {
       trace_id = trace_id,
@@ -190,6 +207,24 @@ local function apply_tracing_block(cx, node)
   return node { block = node.block { stats = stats } }
 end
 
+local function apply_tracing_if(cx, node)
+  local then_block = optimize_traces.block(cx, node.then_block)
+  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+    return optimize_traces.stat(cx, elseif_block)
+  end)
+  local else_block = optimize_traces.block(cx, node.else_block)
+  return node {
+    then_block = then_block,
+    elseif_blocks = elseif_blocks,
+    else_block = else_block,
+  }
+end
+
+local function apply_tracing_elseif(cx, node)
+  local block = optimize_traces.block(cx, node.block)
+  return node { block = block }
+end
+
 local function do_nothing(cx, node) return node end
 
 local node_tracing = {
@@ -198,32 +233,28 @@ local node_tracing = {
   [ast.typed.stat.ForList] = apply_tracing_block,
   [ast.typed.stat.Repeat]  = apply_tracing_block,
   [ast.typed.stat.Block]   = apply_tracing_block,
-
-  [ast.typed.expr] = do_nothing,
-  [ast.typed.stat] = do_nothing,
-
-  [ast.typed.Block]             = do_nothing,
-  [ast.IndexLaunchArgsProvably] = do_nothing,
-  [ast.location]                = do_nothing,
-  [ast.annotation]              = do_nothing,
-  [ast.condition_kind]          = do_nothing,
-  [ast.disjointness_kind]       = do_nothing,
-  [ast.fence_kind]              = do_nothing,
+  [ast.typed.stat.If]      = apply_tracing_if,
+  [ast.typed.stat.Elseif]  = apply_tracing_elseif,
+  [ast.typed.stat]         = do_nothing,
 }
 
 local apply_tracing_node = ast.make_single_dispatch(
   node_tracing,
   {})
 
-local function apply_tracing(cx, node)
-  return ast.map_node_postorder(apply_tracing_node(cx), node)
+function optimize_traces.stat(cx, node)
+  return apply_tracing_node(cx)(node)
 end
 
-local optimize_traces = {}
+function optimize_traces.block(cx, block)
+  return block {
+    stats = block.stats:map(function(stat) return optimize_traces.stat(cx, stat) end),
+  }
+end
 
 function optimize_traces.top_task(cx, node)
   local cx = cx:new_task_scope()
-  local body = apply_tracing(cx, node.body)
+  local body = node.body and optimize_traces.block(cx, node.body) or false
 
   return node { body = body }
 end
