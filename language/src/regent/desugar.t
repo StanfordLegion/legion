@@ -145,6 +145,7 @@ local desugar_stat_table = {
   [ast.typed.stat.ForList]          = desugar_block,
   [ast.typed.stat.Repeat]           = desugar_block,
   [ast.typed.stat.Block]            = desugar_block,
+  [ast.typed.stat.MustEpoch]        = desugar_block,
   [ast.typed.stat.If]               = desugar_if,
   [ast.typed.stat.Elseif]           = desugar_elseif,
   [ast.typed.stat.ParallelizeWith]  = desugar_parallelize_with,

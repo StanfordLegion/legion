@@ -228,14 +228,15 @@ end
 local function do_nothing(cx, node) return node end
 
 local node_tracing = {
-  [ast.typed.stat.While]   = apply_tracing_while,
-  [ast.typed.stat.ForNum]  = apply_tracing_block,
-  [ast.typed.stat.ForList] = apply_tracing_block,
-  [ast.typed.stat.Repeat]  = apply_tracing_block,
-  [ast.typed.stat.Block]   = apply_tracing_block,
-  [ast.typed.stat.If]      = apply_tracing_if,
-  [ast.typed.stat.Elseif]  = apply_tracing_elseif,
-  [ast.typed.stat]         = do_nothing,
+  [ast.typed.stat.While]     = apply_tracing_while,
+  [ast.typed.stat.ForNum]    = apply_tracing_block,
+  [ast.typed.stat.ForList]   = apply_tracing_block,
+  [ast.typed.stat.Repeat]    = apply_tracing_block,
+  [ast.typed.stat.Block]     = apply_tracing_block,
+  [ast.typed.stat.MustEpoch] = apply_tracing_block,
+  [ast.typed.stat.If]        = apply_tracing_if,
+  [ast.typed.stat.Elseif]    = apply_tracing_elseif,
+  [ast.typed.stat]           = do_nothing,
 }
 
 local apply_tracing_node = ast.make_single_dispatch(
