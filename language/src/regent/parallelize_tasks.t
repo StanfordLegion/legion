@@ -2574,7 +2574,8 @@ function normalize_accesses.stat(task_cx, normalizer_cx)
     if node:is(ast.typed.stat.Var) then
       local symbol_type = node.symbol:gettype()
       if std.is_index_type(symbol_type) or
-         std.is_bounded_type(symbol_type) then
+         std.is_bounded_type(symbol_type) or
+         std.is_rect_type(symbol_type) then
         -- TODO: variables can be assigned later
         assert(node.value)
         normalizer_cx:add_decl(node.symbol, node.value)
