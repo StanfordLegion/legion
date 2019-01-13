@@ -343,18 +343,33 @@ local normalize_expr_factory = terralib.memoize(function(field, is_list, read)
   end
 end)
 
+local predicates = {
+  [ast.specialized.expr.ID]       = function(node) return true end,
+  [ast.specialized.expr.Constant] = function(node) return true end,
+  [ast.specialized.expr.Function] = function(node) return true end,
+  [ast.specialized.expr.Unary]    =
+    function(node)
+      return normalize.normalized(node.rhs)
+    end,
+  [ast.specialized.expr.Binary]   =
+    function(node)
+      return normalize.normalized(node.lhs) and normalize.normalized(node.rhs)
+    end,
+  [ast.specialized.expr.Cast]     =
+    function(node)
+      return normalize.normalized(node.args[1])
+    end,
+  [ast.specialized.expr.Ctor]     =
+    function(node)
+      return data.all(node.fields:map(function(field)
+        return normalize.normalized(field.value)
+      end))
+    end,
+}
+
 normalize.normalized = terralib.memoize(function(expr)
-  return expr:is(ast.specialized.expr.ID) or
-         expr:is(ast.specialized.expr.Constant) or
-         (expr:is(ast.specialized.expr.Unary) and
-          normalize.normalized(expr.rhs)) or
-         (expr:is(ast.specialized.expr.Binary) and
-          normalize.normalized(expr.lhs) and
-          normalize.normalized(expr.rhs)) or
-         (expr:is(ast.specialized.expr.Ctor) and
-          data.all(expr.fields:map(function(field)
-              return normalize.normalized(field.value)
-          end)))
+  local predicate = predicates[expr.node_type]
+  return predicate and predicate(expr) or false
 end)
 
 local expr_regent_cast = normalize_expr_factory("value", false, true)
@@ -395,7 +410,27 @@ local function expr_index_access(stats, expr)
   }
 end
 
-local expr_call = normalize_expr_factory("args", true, true)
+local function is_projection(node)
+  return node:is(ast.specialized.expr.IndexAccess) and
+         (normalize.normalized(node.value) or is_projection(node.value)) and
+         normalize.normalized(node.index)
+end
+
+local function expr_call(stats, expr)
+  local args = expr.args
+  -- TODO: We handle task launches specially here to make the index launch optimizer
+  --       (and potentially other optimization passes as well) happy
+  if std.is_task(expr.fn.value) then
+    args = args:map(function(arg)
+      return normalize.expr(stats, arg, not is_projection(arg))
+    end)
+  else
+    args = args:map(function(arg) return normalize.expr(stats, arg, true) end)
+  end
+  return expr { args = args }
+end
+
+local expr_method_call = normalize_expr_factory("args", true, true)
 
 local expr_ctor = normalize_expr_factory("fields", true, false)
 
@@ -426,7 +461,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.Region]                     = expr_region,
   [ast.specialized.expr.FieldAccess]                = expr_field_access,
   [ast.specialized.expr.IndexAccess]                = expr_index_access,
-  [ast.specialized.expr.MethodCall]                 = expr_call,
+  [ast.specialized.expr.MethodCall]                 = expr_method_call,
   [ast.specialized.expr.Call]                       = expr_call,
   [ast.specialized.expr.Ctor]                       = expr_ctor,
   [ast.specialized.expr.CtorListField]              = expr_ctor_field,
@@ -672,15 +707,7 @@ local function stat_assignment_or_reduce(stats, stat)
   if #stat.lhs == 1 then
     assert(#stat.rhs == 1)
     local lhs = normalize.expr(stats, stat.lhs[1], false)
-    local rhs = stat.rhs[1]
-    -- TODO: Index launch optimizer and static control replication do not handle
-    --       normalized task arguments, so we do not normalize reductions whose
-    --       RHS is a task launch.
-    if not (stat:is(ast.specialized.stat.Reduce) and
-            rhs:is(ast.specialized.expr.Call))
-    then
-      rhs = normalize.expr(stats, rhs, not normalize.normalized(lhs))
-    end
+    local rhs = normalize.expr(stats, stat.rhs[1], not normalize.normalized(lhs))
     stats:insert(stat {
       lhs = lhs,
       rhs = rhs,
@@ -715,14 +742,8 @@ local function stat_assignment_or_reduce(stats, stat)
 end
 
 local function stat_expr(stats, stat)
-  -- TODO: Index launch optimizer and static control replication do not handle
-  --       normalized task arguments, so we do not normalize top-level
-  --       task launches for now.
-  --
-  --local expr = normalize.expr(stats, stat.expr, false)
-  --stats:insert(stat { expr = expr })
-
-  stats:insert(stat)
+  local expr = normalize.expr(stats, stat.expr, false)
+  stats:insert(stat { expr = expr })
 end
 
 local function pass_through_stat(stats, stat) stats:insert(stat) end
