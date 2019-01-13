@@ -343,10 +343,19 @@ local normalize_expr_factory = terralib.memoize(function(field, is_list, read)
   end
 end)
 
-local function normalized(expr)
+normalize.normalized = terralib.memoize(function(expr)
   return expr:is(ast.specialized.expr.ID) or
-         expr:is(ast.specialized.expr.Constant)
-end
+         expr:is(ast.specialized.expr.Constant) or
+         (expr:is(ast.specialized.expr.Unary) and
+          normalize.normalized(expr.rhs)) or
+         (expr:is(ast.specialized.expr.Binary) and
+          normalize.normalized(expr.lhs) and
+          normalize.normalized(expr.rhs)) or
+         (expr:is(ast.specialized.expr.Ctor) and
+          data.all(expr.fields:map(function(field)
+              return normalize.normalized(field.value)
+          end)))
+end)
 
 local expr_regent_cast = normalize_expr_factory("value", false, true)
 
@@ -366,7 +375,7 @@ local function expr_field_access(stats, expr)
     not (expr.value:is(ast.specialized.expr.FieldAccess) or
          expr.value:is(ast.specialized.expr.IndexAccess) or
          expr.value:is(ast.specialized.expr.Deref) or
-         normalized(expr.value))
+         normalize.normalized(expr.value))
 
   local value = normalize.expr(stats, expr.value, read)
   return expr { value = value }
@@ -378,7 +387,7 @@ local function expr_index_access(stats, expr)
     not (expr.value:is(ast.specialized.expr.FieldAccess) or
          expr.value:is(ast.specialized.expr.IndexAccess) or
          expr.value:is(ast.specialized.expr.Deref) or
-         normalized(expr.value))
+         normalize.normalized(expr.value))
   local value = normalize.expr(stats, expr.value, read)
   return expr {
     index = index,
@@ -395,6 +404,19 @@ local expr_ctor_field = normalize_expr_factory("value", false, true)
 local expr_is_null = normalize_expr_factory("pointer", false, true)
 
 local expr_deref = normalize_expr_factory("value", false, true)
+
+local expr_unary = normalize_expr_factory("rhs", false, false)
+
+local function expr_binary(stats, expr)
+  local lhs = normalize.expr(stats, expr.lhs, false)
+  local rhs = normalize.expr(stats, expr.rhs, false)
+  return expr {
+    lhs = lhs,
+    rhs = rhs,
+  }
+end
+
+local expr_cast = normalize_expr_factory("args", true, false)
 
 local normalize_expr_table = {
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
@@ -459,14 +481,9 @@ local normalize_expr_table = {
   [ast.specialized.expr.WithScratchFields]          = pass_through_expr,
   [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
   [ast.specialized.expr.Condition]                  = pass_through_expr,
-
-  -- TODO: Normalizing these expressions crashes many test cases and
-  --       also silently disables optimizations with some syntactic
-  --       assumptions (e.g., index launch optimizer assuming that
-  --       the loop body has only a single statement launching a task).
-  [ast.specialized.expr.Unary]                      = pass_through_expr,
-  [ast.specialized.expr.Binary]                     = pass_through_expr,
-  [ast.specialized.expr.Cast]                       = pass_through_expr,
+  [ast.specialized.expr.Unary]                      = expr_unary,
+  [ast.specialized.expr.Binary]                     = expr_binary,
+  [ast.specialized.expr.Cast]                       = expr_cast,
 
   [ast.specialized.expr.LuaTable]                   = pass_through_expr,
 }
@@ -477,7 +494,7 @@ local normalize_expr = ast.make_single_dispatch(
 
 function normalize.expr(stats, expr, read)
   local expr = normalize_expr(stats)(expr, read)
-  if read and not normalized(expr) then
+  if read and not normalize.normalized(expr) then
     local temp_var = std.newsymbol()
     stats:insert(ast.specialized.stat.Var {
       symbols = temp_var,
@@ -638,6 +655,17 @@ local function stat_var(stats, stat)
   end
 end
 
+local function stat_var_unpack(stats, stat)
+  stats:insert(stat {
+    value = normalize.expr(stats, stat.value, true)
+  })
+end
+
+local function stat_return(stats, stat)
+  local value = stat.value and normalize.expr(stats, stat.value, true) or false
+  stats:insert(stat { value = value })
+end
+
 local function stat_assignment_or_reduce(stats, stat)
   stat = flatten_multifield_accesses(stat)
 
@@ -651,7 +679,7 @@ local function stat_assignment_or_reduce(stats, stat)
     if not (stat:is(ast.specialized.stat.Reduce) and
             rhs:is(ast.specialized.expr.Call))
     then
-      rhs = normalize.expr(stats, rhs, not normalized(lhs))
+      rhs = normalize.expr(stats, rhs, not normalize.normalized(lhs))
     end
     stats:insert(stat {
       lhs = lhs,
@@ -711,8 +739,8 @@ local normalize_stat_table = {
   [ast.specialized.stat.ParallelPrefix]  = pass_through_stat,
 
   [ast.specialized.stat.Var]             = stat_var,
-  [ast.specialized.stat.VarUnpack]       = pass_through_stat,
-  [ast.specialized.stat.Return]          = pass_through_stat,
+  [ast.specialized.stat.VarUnpack]       = stat_var_unpack,
+  [ast.specialized.stat.Return]          = stat_return,
   [ast.specialized.stat.Break]           = pass_through_stat,
   [ast.specialized.stat.Assignment]      = stat_assignment_or_reduce,
   [ast.specialized.stat.Reduce]          = stat_assignment_or_reduce,
