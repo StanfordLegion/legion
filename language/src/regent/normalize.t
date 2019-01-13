@@ -468,6 +468,9 @@ local normalize_expr_table = {
   [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
   [ast.specialized.expr.Isnull]                     = expr_is_null,
   [ast.specialized.expr.Deref]                      = expr_deref,
+  [ast.specialized.expr.Unary]                      = expr_unary,
+  [ast.specialized.expr.Binary]                     = expr_binary,
+  [ast.specialized.expr.Cast]                       = expr_cast,
 
   -- Normal expressions
   [ast.specialized.expr.ID]                         = pass_through_expr,
@@ -516,9 +519,6 @@ local normalize_expr_table = {
   [ast.specialized.expr.WithScratchFields]          = pass_through_expr,
   [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
   [ast.specialized.expr.Condition]                  = pass_through_expr,
-  [ast.specialized.expr.Unary]                      = expr_unary,
-  [ast.specialized.expr.Binary]                     = expr_binary,
-  [ast.specialized.expr.Cast]                       = expr_cast,
 
   [ast.specialized.expr.LuaTable]                   = pass_through_expr,
 }
