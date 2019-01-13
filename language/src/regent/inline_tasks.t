@@ -19,7 +19,6 @@ local data = require("common/data")
 local std = require("regent/std")
 local report = require("common/report")
 local symbol_table = require("regent/symbol_table")
-local pretty = require("regent/pretty")
 
 local inline_tasks = {}
 
@@ -51,6 +50,224 @@ local function check_valid_inline_task(node, task)
   if has_self_recursion then
     report.error(task, "inline tasks cannot be recursive")
   end
+end
+
+local function is_singleton_type(type)
+  return std.is_ispace(type) or std.is_region(type) or
+         std.is_list_of_regions(type) or
+         std.is_partition(type) or std.is_cross_product(type)
+end
+
+local substitute = {}
+
+local function pass_through(cx, node) return node end
+
+local function unreachable(cx, node) return assert(false) end
+
+local function substitute_expr_id(cx, node)
+  local new_node = cx.expr_mapping[node.value] or
+                   (cx.symbol_mapping[node.value] ~= nil and
+                    node { value = cx.symbol_mapping[node.value] }) or
+                   node
+  return new_node
+end
+
+local function substitute_expr_regent_cast(cx, node)
+  return node { expr_type = std.type_sub(node.expr_type, cx.symbol_mapping) }
+end
+
+local function substitute_expr_cast(cx, node)
+  return node { fn = node.fn { value = std.type_sub(node.fn.value, cx.symbol_mapping) } }
+end
+
+local function substitute_expr_null(cx, node)
+  return node { pointer_type = std.type_sub(node.pointer_type, cx.symbol_mapping) }
+end
+
+local function substitute_expr_region(cx, node)
+  return node { fspace_type = std.type_sub(node.fspace_type, cx.symbol_mapping) }
+end
+
+local substitute_expr_table = {
+  [ast.specialized.expr.ID]          = substitute_expr_id,
+  [ast.specialized.expr.DynamicCast] = substitute_expr_regent_cast,
+  [ast.specialized.expr.StaticCast]  = substitute_expr_regent_cast,
+  [ast.specialized.expr.UnsafeCast]  = substitute_expr_regent_cast,
+  [ast.specialized.expr.Cast]        = substitute_expr_cast,
+  [ast.specialized.expr.Null]        = substitute_expr_null,
+  [ast.specialized.expr.Region]      = substitute_expr_region,
+  [ast.specialized.expr]             = pass_through,
+  [ast.specialized.region]           = pass_through,
+  [ast.condition_kind]               = pass_through,
+  [ast.disjointness_kind]            = pass_through,
+  [ast.fence_kind]                   = pass_through,
+  [ast.location]                     = pass_through,
+  [ast.annotation]                   = pass_through,
+}
+
+local substitute_expr = ast.make_single_dispatch(
+  substitute_expr_table,
+  {})
+
+function substitute.expr(cx, node)
+  return ast.map_node_postorder(substitute_expr(cx), node)
+end
+
+local function substitute_stat_if(cx, node)
+  local cond = substitute.expr(cx, node.cond)
+  local then_block = substitute.block(cx, node.then_block)
+  local else_block = substitute.block(cx, node.else_block)
+  return node {
+    cond = cond,
+    then_block = then_block,
+    else_block = else_block,
+  }
+end
+
+local function substitute_stat_while(cx, node)
+  local cond = substitute.expr(cx, node.cond)
+  local block = substitute.block(cx, node.block)
+  return node {
+    cond = cond,
+    block = block,
+  }
+end
+
+local function substitute_stat_for_num(cx, node)
+  local values = node.values:map(function(value)
+    return substitute.expr(cx, value)
+  end)
+  local block = substitute.block(cx, node.block)
+  return node {
+    values = values,
+    block = block,
+  }
+end
+
+local function substitute_stat_for_list(cx, node)
+  local symbol = node.symbol
+  local new_symbol = std.newsymbol(nil, symbol:hasname())
+  cx.symbol_mapping[symbol] = new_symbol
+  local value = substitute.expr(cx, node.value)
+  local block = substitute.block(cx, node.block)
+  return node {
+    symbol = new_symbol,
+    value = value,
+    block = block,
+  }
+end
+
+local function substitute_stat_repeat(cx, node)
+  local until_cond = substitute.expr(cx, node.until_cond)
+  local block = substitute.block(cx, node.block)
+  return node {
+    until_cond = until_cond,
+    block = block,
+  }
+end
+
+local function substitute_stat_block(cx, node)
+  return node { block = substitute.block(cx, node.block) }
+end
+
+local function substitute_stat_var(cx, node)
+  local symbol = node.symbols
+  -- We should ignore the type of the existing symbol as we want to type check it again.
+  local symbol_type = symbol:hastype()
+  if is_singleton_type(symbol_type) then
+    symbol_type = nil
+  else
+    symbol_type = std.type_sub(symbol_type, cx.symbol_mapping)
+  end
+  local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
+  cx.symbol_mapping[symbol] = new_symbol
+  local value = node.values and substitute.expr(cx, node.values) or false
+  return node {
+    symbols = new_symbol,
+    values = value,
+  }
+end
+
+local function substitute_stat_var_unpack(cx, node)
+  local symbols = node.symbols:map(function(symbol)
+    -- We should ignore the type of the existing symbol as we want to type check it again.
+    local symbol_type = symbol:hastype()
+    if is_singleton_type(symbol_type) then
+      symbol_type = nil
+    else
+      symbol_type = std.type_sub(symbol_type, cx.symbol_mapping)
+    end
+    local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
+    cx.symbol_mapping[symbol] = new_symbol
+    return new_symbol
+  end)
+  local value = substitute.expr(cx, node.value)
+  return node {
+    symbols = symbols,
+    value = value,
+  }
+end
+
+local function substitute_stat_return(cx, node)
+  local value = node.value and substitute.expr(cx, node.value) or false
+  return node { value = value }
+end
+
+local function substitute_stat_assignment_or_reduce(cx, node)
+  local lhs = substitute.expr(cx, node.lhs)
+  local rhs = substitute.expr(cx, node.rhs)
+  return node {
+    lhs = lhs,
+    rhs = rhs,
+  }
+end
+
+local function substitute_stat_expr(cx, node)
+  return node { expr = substitute.expr(cx, node.expr) }
+end
+
+local function substitute_stat_raw_delete(cx, node)
+  return node { value = substitute.expr(cx, node.value) }
+end
+
+local function substitute_stat_parallel_prefix(cx, node)
+  return node { dir = substitute.expr(cx, node.dir) }
+end
+
+local substitute_stat_table = {
+  [ast.specialized.stat.If]              = substitute_stat_if,
+  [ast.specialized.stat.Elseif]          = unreachable,
+  [ast.specialized.stat.While]           = substitute_stat_while,
+  [ast.specialized.stat.ForNum]          = substitute_stat_for_num,
+  [ast.specialized.stat.ForList]         = substitute_stat_for_list,
+  [ast.specialized.stat.Repeat]          = substitute_stat_repeat,
+  [ast.specialized.stat.MustEpoch]       = substitute_stat_block,
+  [ast.specialized.stat.Block]           = substitute_stat_block,
+  [ast.specialized.stat.Var]             = substitute_stat_var,
+  [ast.specialized.stat.VarUnpack]       = substitute_stat_var_unpack,
+  [ast.specialized.stat.Return]          = substitute_stat_return,
+  [ast.specialized.stat.Assignment]      = substitute_stat_assignment_or_reduce,
+  [ast.specialized.stat.Reduce]          = substitute_stat_assignment_or_reduce,
+  [ast.specialized.stat.Expr]            = substitute_stat_expr,
+  [ast.specialized.stat.RawDelete]       = substitute_stat_raw_delete,
+  -- TODO: Symbols in the constraints should be handled here
+  [ast.specialized.stat.ParallelizeWith] = substitute_stat_block,
+  [ast.specialized.stat.ParallelPrefix]  = substitute_stat_parallel_prefix,
+  [ast.specialized.stat]                 = pass_through,
+}
+
+local substitute_stat = ast.make_single_dispatch(
+  substitute_stat_table,
+  {})
+
+function substitute.stat(cx, node)
+  return substitute_stat(cx)(node)
+end
+
+function substitute.block(cx, node)
+  return node {
+    stats = node.stats:map(function(stat) return substitute.stat(cx, stat) end),
+  }
 end
 
 -- To be able to correctly type check the task call after inlining,
@@ -126,11 +343,6 @@ function inline_tasks.expr_call(call)
     end
   end)
 
-  local function is_singleton_type(type)
-    return std.is_ispace(type) or std.is_region(type) or
-           std.is_list_of_regions(type) or
-           std.is_partition(type) or std.is_cross_product(type)
-  end
   -- Second, make assignments to temporary variables.
   local params = task_ast.params:map(function(param) return param.symbol end)
   local param_types = params:map(function(param) return param:gettype() end)
@@ -157,67 +369,12 @@ function inline_tasks.expr_call(call)
     end
   end)
 
-  -- Do alpha conversion to avoid type collision.
-  local stats = ast.map_node_postorder(function(node)
-    if node:is(ast.specialized.stat.Var) then
-      local symbol = node.symbols
-      -- We should ignore the type of the existing symbol as we want to type check it again.
-      local symbol_type = symbol:hastype()
-      if is_singleton_type(symbol_type) then
-        symbol_type = nil
-      else
-        symbol_type = std.type_sub(symbol_type, symbol_mapping)
-      end
-      local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
-      symbol_mapping[symbol] = new_symbol
-      return node { symbols = new_symbol }
-    elseif node:is(ast.specialized.stat.VarUnpack) then
-      local symbols = node.symbols:map(function(symbol)
-        -- We should ignore the type of the existing symbol as we want to type check it again.
-        local symbol_type = symbol:hastype()
-        if is_singleton_type(symbol_type) then
-          symbol_type = nil
-        else
-          symbol_type = std.type_sub(symbol_type, symbol_mapping)
-        end
-        local new_symbol = std.newsymbol(symbol_type, symbol:hasname())
-        symbol_mapping[symbol] = new_symbol
-        return new_symbol
-      end)
-      return node { symbols = symbols }
-    elseif node:is(ast.specialized.stat.ForList) then
-      local symbol = node.symbol
-      local new_symbol = std.newsymbol(nil, symbol:hasname())
-      symbol_mapping[symbol] = new_symbol
-      return node { symbol = new_symbol }
-    else
-      return node
-    end
-  end, task_ast.body.stats)
+  local cx = {
+    symbol_mapping = symbol_mapping,
+    expr_mapping = expr_mapping,
+  }
 
-  -- Third, replace all occurrences of parameters in the task body with the new temporary variables.
-  stats = ast.map_node_postorder(function(node)
-    if node:is(ast.specialized.expr.ID) then
-      local new_node = expr_mapping[node.value] or
-                       (symbol_mapping[node.value] ~= nil and
-                        node { value = symbol_mapping[node.value] }) or
-                       node
-      return new_node
-    elseif node:is(ast.specialized.expr.DynamicCast) or
-           node:is(ast.specialized.expr.StaticCast) or
-           node:is(ast.specialized.expr.UnsafeCast)
-    then
-      return node { expr_type = std.type_sub(node.expr_type, symbol_mapping) }
-    elseif node:is(ast.specialized.expr.Cast) then
-      return node { fn = node.fn { value = std.type_sub(node.fn.value, symbol_mapping) } }
-    elseif node:is(ast.specialized.expr.Null) then
-      return node { pointer_type = std.type_sub(node.pointer_type, symbol_mapping) }
-    elseif node:is(ast.specialized.expr.Region) then
-      return node { fspace_type = std.type_sub(node.fspace_type, symbol_mapping) }
-    else
-      return node
-    end
-  end, stats)
+  local stats = substitute.block(cx, task_ast.body).stats
 
   -- Finally, convert any return statement to an assignment to a temporary variable
   local return_var_expr = nil
