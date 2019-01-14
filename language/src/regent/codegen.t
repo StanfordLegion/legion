@@ -8480,9 +8480,19 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       return codegen.expr_condition(cx, condition)
     end)
 
+  local symbol_type = node.symbol:gettype()
+  local symbol = node.symbol:getsymbol()
+
   local actions = quote
     [actions]
     [fn.actions];
+    -- XXX: We put a dummy declaration of the loop variable here so we can
+    --      run the preamble. Running the preamble is necessary to initialize
+    --      the invariant task arguments correctly. This is correct
+    --      only when the index launch optimizer soundly detects invariant
+    --      task arguments.
+    var [symbol];
+    [preamble];
     [data.zip(args, args_partitions, node.args_provably.invariant):map(
        function(pair)
          local arg, arg_partition, invariant = unpack(pair)
@@ -8628,8 +8638,6 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
-  local symbol_type = node.symbol:gettype()
-  local symbol = node.symbol:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
     symbol_setup = quote
