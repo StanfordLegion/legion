@@ -281,7 +281,13 @@ local function preserve_task_call(node)
       span = node.span,
     },
     then_block = ast.specialized.Block {
-      stats = terralib.newlist { node },
+      stats = terralib.newlist {
+        ast.specialized.stat.Expr {
+          expr = node,
+          annotations = ast.default_annotations(),
+          span = node.span,
+        }
+      },
       span = node.span,
     },
     elseif_blocks = terralib.newlist(),
@@ -294,56 +300,35 @@ local function preserve_task_call(node)
   }
 end
 
-function inline_tasks.expr_call(call)
+function inline_tasks.expr_call(stats, call)
+  if not call:is(ast.specialized.expr.Call) then return call end
+
   -- Task T is inlined at call site C only if T demands inlining and
   -- C does not forbid inlining.
-  local function demands_inlining(node)
-    return node.annotations.inline:is(ast.annotation.Demand)
-  end
-  local function forbids_inlining(node)
-    return node.annotations.inline:is(ast.annotation.Forbid)
-  end
-
-  if not call:is(ast.specialized.expr.Call) or forbids_inlining(call) then
-    if call:is(ast.specialized.expr.Call) and std.is_task(call.fn.value) and
-       call.fn.value.is_inline
-    then
-      call.fn.value:optimize()
-    end
-    return call, false
-  end
 
   local task = call.fn.value
-  if not std.is_task(task) then return call, false end
+  if not std.is_task(task) then return call end
+
+  if call.annotations.inline:is(ast.annotation.Forbid) then
+    if std.is_task(task) and task.is_inline then task:optimize() end
+    return call
+  end
 
   local task_ast = task:has_primary_variant() and
                    task:get_primary_variant():has_untyped_ast()
   if not task_ast then
-    if demands_inlining(call) then
+    if call.annotations.inline:is(ast.annotation.Demand) then
       report.error(call, "cannot inline a task that does not demand inlining")
     end
-    return call, false
+    return call
   end
-  assert(demands_inlining(task_ast))
 
-  -- If the task does not demand inlining, check its validity before inlining it.
-  if not demands_inlining(task_ast) then check_valid_inline_task(call, task_ast) end
+  local args = call.args
 
-  -- Once we reach this point, the task and the task call are valid for inlining.
-  local actions = terralib.newlist()
+  -- Preserve the original call expression for type checking
+  stats:insert(preserve_task_call(call))
 
-  -- First, inline any task calls in the argument list.
-  local args = call.args:map(function(arg)
-    local new_arg, inlined, arg_actions = inline_tasks.expr(arg)
-    assert(new_arg ~= nil)
-    if not inlined then return arg
-    else
-      actions:insertall(arg_actions)
-      return new_arg
-    end
-  end)
-
-  -- Second, make assignments to temporary variables.
+  -- Make assignments to temporary variables.
   local params = task_ast.params:map(function(param) return param.symbol end)
   local param_types = params:map(function(param) return param:gettype() end)
   local symbol_mapping = {}
@@ -360,7 +345,7 @@ function inline_tasks.expr_call(call)
       end
       local new_symbol = std.newsymbol(symbol_type, param:hasname())
       symbol_mapping[param] = new_symbol
-      actions:insert(ast.specialized.stat.Var {
+      stats:insert(ast.specialized.stat.Var {
         symbols = new_symbol,
         values = arg,
         annotations = ast.default_annotations(),
@@ -374,11 +359,11 @@ function inline_tasks.expr_call(call)
     expr_mapping = expr_mapping,
   }
 
-  local stats = substitute.block(cx, task_ast.body).stats
+  local body_stats = substitute.block(cx, task_ast.body).stats
 
-  -- Finally, convert any return statement to an assignment to a temporary variable
+  -- Convert any return statement to an assignment to a temporary variable
   local return_var_expr = nil
-  if #stats > 0 and stats[#stats]:is(ast.specialized.stat.Return) then
+  if #body_stats > 0 and body_stats[#body_stats]:is(ast.specialized.stat.Return) then
     local task_name = task_ast.name:mkstring("", "_", "")
     local return_var = std.newsymbol(nil, "__" .. task_name .."_ret")
     return_var_expr = ast.specialized.expr.ID {
@@ -386,243 +371,102 @@ function inline_tasks.expr_call(call)
       annotations = ast.default_annotations(),
       span = call.span,
     }
-    local return_stat = stats[#stats]
-    stats[#stats] = ast.specialized.stat.Var {
+    local return_stat = body_stats[#body_stats]
+    body_stats[#body_stats] = ast.specialized.stat.Var {
       symbols = return_var,
       values = return_stat.value,
       annotations = ast.default_annotations(),
       span = return_stat.span,
     }
   end
+  stats:insertall(body_stats)
 
-  actions:insertall(stats)
-  return return_var_expr, true, actions
+  return return_var_expr
 end
 
-function inline_tasks.expr(node, no_return)
-  local inlined_any = false
-  local actions = terralib.newlist()
-  local new_node = ast.map_node_postorder(function(node)
-    local new_node, inlined, node_actions = inline_tasks.expr_call(node)
-    if not inlined then return node
-    else
-      inlined_any = true
-      actions:insertall(node_actions)
-      return new_node
-    end
-  end, node)
-  if not inlined_any then
-    return node, false
+function inline_tasks.expr(stats, node, expects_value)
+  local expr = inline_tasks.expr_call(stats, node)
+  if expects_value and expr == nil then
+    report.error(node, "cannot inline a task with no return value in a place where a value is expected")
+  end
+  return expr
+end
+
+function inline_tasks.stat_if(stats, node)
+  local then_block = inline_tasks.block(node.then_block)
+  local else_block = inline_tasks.block(node.else_block)
+  stats:insert(node {
+    then_block = then_block,
+    else_block = else_block,
+  })
+end
+
+function inline_tasks.stat_var(stats, node)
+  if not node.values then
+    stats:insert(node)
   else
-    if no_return and new_node ~= nil then
-      actions:insert(ast.specialized.stat.Expr {
-        expr = new_node,
-        annotations = ast.default_annotations(),
-        span = node.span,
-      })
-      return nil, true, actions
-    else
-      return new_node, true, actions
-    end
-  end
-end
-
-function inline_tasks.stat_if(node)
-  local inlined_any = false
-  local actions = terralib.newlist()
-  local new_cond, inlined, cond_actions = inline_tasks.expr(node.cond)
-  if inlined then
-    assert(new_cond ~= nil)
-    inlined_any = true
-    actions:insertall(cond_actions)
-  end
-  local new_elseif_blocks = node.elseif_blocks:map(function(elseif_block)
-    local new_cond, inlined, cond_actions =
-      inline_tasks.expr(elseif_block.cond)
-    if inlined then
-      inlined_any = true
-      actions:insertall(cond_actions)
-      return elseif_block { cond = new_cond }
-    else
-      return elseif_block
-    end
-  end)
-  if inlined_any then
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node {
-      cond = new_cond,
-      elseif_blocks = new_elseif_blocks,
-    })
-    return stats
-  else
-    return node
-  end
-end
-
-function inline_tasks.stat_while(node)
-  local value, inlined, actions = inline_tasks.expr(node.cond)
-  if inlined then
-    assert(value ~= nil)
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node { cond = value })
-    return stats
-  else
-    return node
-  end
-end
-
-function inline_tasks.stat_fornum(node)
-  local inlined_any = false
-  local actions = terralib.newlist()
-  local values = node.values:map(function(value)
-    local new_value, inlined, value_actions = inline_tasks.expr(value)
-    if inlined then
-      assert(new_value ~= nil)
-      inlined_any = true
-      actions:insertall(value_actions)
-      return new_value
-    else
-      return value
-    end
-  end)
-  if inlined_any then
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node { values = values })
-    return stats
-  else
-    return node
-  end
-end
-
-function inline_tasks.stat_repeat(node)
-  local new_cond, inlined, actions = inline_tasks.expr(node.until_cond)
-  if inlined then
-    assert(new_cond ~= nil)
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node { until_cond = new_cond })
-    return stats
-  else
-    return node
-  end
-end
-
-function inline_tasks.stat_var(node)
-  if not node.values then return node end
-  local value, inlined, actions = inline_tasks.expr(node.values)
-  assert(not inlined or value ~= nil)
-  if inlined then
-    local stats = terralib.newlist { preserve_task_call(node {
-        symbols = std.newsymbol(nil, node.symbols:hasname()),
-      })
-    }
-    stats:insertall(actions)
+    local value = inline_tasks.expr(stats, node.values, true)
     stats:insert(node { values = value })
-    return stats
-  else
-    return node
   end
 end
 
-function inline_tasks.stat_forlist_or_varunpack(node)
-  local value, inlined, actions = inline_tasks.expr(node.value)
-  assert(not inlined or value ~= nil)
-  if inlined then
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node { value = value })
-    return stats
-  else
-    return node
+function inline_tasks.stat_expr(stats, node)
+  local expr = inline_tasks.expr(stats, node.expr, false)
+  if expr ~= nil then
+    stats:insert(node { expr = expr })
   end
 end
 
-function inline_tasks.stat_return(node)
-  if not node.value then return node end
-  local value, inlined, actions = inline_tasks.expr(node.value)
-  assert(not inlined or value ~= nil)
-  if inlined then
-    local stats = terralib.newlist { preserve_task_call(ast.specialized.stat.Expr {
-        expr = node.value,
-        annotations = ast.default_annotations(),
-        span = node.span,
-      })
-    }
-    stats:insertall(actions)
-    stats:insert(node { value = value })
-    return stats
-  else
-    return node
-  end
+function inline_tasks.stat_block(stats, node)
+  stats:insert(node { block = inline_tasks.block(node.block) })
 end
 
-function inline_tasks.stat_assignment_or_reduce(node)
-  local inlined_any = false
-  local actions = terralib.newlist()
-  local new_lhs, inlined, lhs_actions = inline_tasks.expr(node.lhs)
-  if inlined then
-    assert(new_lhs ~= nil)
-    inlined_any = true
-    actions:insertall(lhs_actions)
-  end
-  local new_rhs, inlined, rhs_actions = inline_tasks.expr(node.rhs)
-  if inlined then
-    assert(new_rhs ~= nil)
-    inlined_any = true
-    actions:insertall(rhs_actions)
-  end
-  if inlined_any then
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    stats:insert(node {
-      lhs = new_lhs,
-      rhs = new_rhs,
-    })
-    return stats
-  else
-    return node
-  end
+function inline_tasks.stat_assignment_or_reduce(stats, node)
+  -- Only the RHS can have a task launch
+  local rhs = inline_tasks.expr(stats, node.rhs, true)
+  stats:insert(node { rhs = rhs })
 end
 
-function inline_tasks.stat_expr(node)
-  local value, inlined, actions = inline_tasks.expr(node.expr, true)
-  if inlined then
-    assert(value == nil)
-    local stats = terralib.newlist { preserve_task_call(node) }
-    stats:insertall(actions)
-    return stats
-  else
-    return node
-  end
-end
+local function pass_through_stat(stats, node) stats:insert(node) end
 
-local dispatch_table = {
-  [ast.specialized.stat.If] = inline_tasks.stat_if,
-  [ast.specialized.stat.While] = inline_tasks.stat_while,
-  [ast.specialized.stat.ForNum] = inline_tasks.stat_fornum,
-  [ast.specialized.stat.Repeat] = inline_tasks.stat_repeat,
-  [ast.specialized.stat.Var] = inline_tasks.stat_var,
-  [ast.specialized.stat.ForList] = inline_tasks.stat_forlist_or_varunpack,
-  [ast.specialized.stat.VarUnpack] = inline_tasks.stat_forlist_or_varunpack,
-  [ast.specialized.stat.Return] = inline_tasks.stat_return,
-  [ast.specialized.stat.Assignment] = inline_tasks.stat_assignment_or_reduce,
-  [ast.specialized.stat.Reduce] = inline_tasks.stat_assignment_or_reduce,
-  [ast.specialized.stat.Expr] = inline_tasks.stat_expr,
+local inline_tasks_stat_table = {
+  [ast.specialized.stat.If]              = inline_tasks.stat_if,
+  [ast.specialized.stat.Var]             = inline_tasks.stat_var,
+  [ast.specialized.stat.Expr]            = inline_tasks.stat_expr,
+
+  [ast.specialized.stat.While]           = inline_tasks.stat_block,
+  [ast.specialized.stat.ForNum]          = inline_tasks.stat_block,
+  [ast.specialized.stat.ForList]         = inline_tasks.stat_block,
+  [ast.specialized.stat.Repeat]          = inline_tasks.stat_block,
+  [ast.specialized.stat.MustEpoch]       = inline_tasks.stat_block,
+  [ast.specialized.stat.Block]           = inline_tasks.stat_block,
+  [ast.specialized.stat.ParallelizeWith] = inline_tasks.stat_block,
+
+  [ast.specialized.stat.Assignment]      = inline_tasks.stat_assignment_or_reduce,
+  [ast.specialized.stat.Reduce]          = inline_tasks.stat_assignment_or_reduce,
+
+  [ast.specialized.stat.Return]          = pass_through_stat,
+  [ast.specialized.stat.VarUnpack]       = pass_through_stat,
+  [ast.specialized.stat]                 = pass_through_stat,
 }
 
-function inline_tasks.stat(node)
-  if dispatch_table[node.node_type] ~= nil then
-    return dispatch_table[node.node_type](node)
-  else
-    return node
-  end
+local inline_tasks_stat = ast.make_single_dispatch(
+  inline_tasks_stat_table,
+  {})
+
+function inline_tasks.stat(stats, node)
+  inline_tasks_stat(stats)(node)
+end
+
+function inline_tasks.block(node)
+  local stats = terralib.newlist()
+  node.stats:map(function(stat) inline_tasks.stat(stats, stat) end)
+  return node { stats = stats }
 end
 
 function inline_tasks.top_task(node)
-  return ast.flatmap_node_postorder(inline_tasks.stat, node)
+  local body = node.body and inline_tasks.block(node.body) or false
+  return node { body = body }
 end
 
 function inline_tasks.top(node)
