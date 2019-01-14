@@ -5196,7 +5196,8 @@ namespace Legion {
       // We are the logical owner so clone the meta data
       // No need for a mutator here since all the views already
       // have valid references being held by the parent equivalence set
-      if (!(clone_mask * parent->valid_instances.get_valid_mask()))
+      if (!parent->valid_instances.empty() && 
+          !(clone_mask * parent->valid_instances.get_valid_mask()))
       {
         for (FieldMaskSet<LogicalView>::const_iterator it = 
               parent->valid_instances.begin(); it !=
@@ -5230,22 +5231,19 @@ namespace Legion {
           }
         }
       }
-      if (!!parent->restricted_fields)
+      if (!parent->restricted_instances.empty() &&
+          !(clone_mask * parent->restricted_instances.get_valid_mask()))
       {
-        const FieldMask restr_overlap = parent->restricted_fields & clone_mask;
-        if (!!restr_overlap)
+        this->restricted_fields |= (clone_mask & parent->restricted_fields);
+        for (FieldMaskSet<InstanceView>::const_iterator it = 
+              parent->restricted_instances.begin(); it !=
+              parent->restricted_instances.end(); it++)
         {
-          this->restricted_fields |= restr_overlap;
-          for (FieldMaskSet<InstanceView>::const_iterator it = 
-                parent->restricted_instances.begin(); it !=
-                parent->restricted_instances.end(); it++)
-          {
-            const FieldMask overlap = clone_mask & it->second;
-            if (!overlap)
-              continue;
-            if (this->restricted_instances.insert(it->first, overlap))
-              it->first->add_nested_valid_ref(did);
-          }
+          const FieldMask overlap = it->second & clone_mask;
+          if (!overlap)
+            continue;
+          if (this->restricted_instances.insert(it->first, overlap))
+            it->first->add_nested_valid_ref(did);
         }
       }
       // Return our space since we stored the data here
