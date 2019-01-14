@@ -1793,7 +1793,8 @@ namespace Legion {
       std::vector<std::set<ApEvent> > remote_ready(requirements.size());
       std::set<ApEvent> wait_events;
       std::vector<ApEvent> effects(requirements.size(), ApEvent::NO_AP_EVENT);
-      std::vector<IndexSpaceExpression*> local_exprs(requirements.size(), NULL);
+      LegionVector<FieldMaskSet<IndexSpaceExpression> >::aligned 
+        local_exprs(requirements.size());
       std::vector<RtEvent> reg_pre(requirements.size(), RtEvent::NO_RT_EVENT);
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
       {

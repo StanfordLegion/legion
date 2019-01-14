@@ -97,24 +97,25 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
-        DeferPhysicalRegistrationArgs(IndexSpaceExpression *expr,
-                                 const RegionRequirement &r,
-                                 Operation *o, UniqueID uid, unsigned idx,
-                                 ApEvent term, InstanceSet &t,
-                                 const PhysicalTraceInfo &info,
-                                 CopyFillAggregator *&output,
-                                 const std::set<ApEvent> &remote,
-                                 std::vector<InstanceView*> &views, 
-                                 std::set<RtEvent> &map_applied,
-                                 ApEvent &res)
+        DeferPhysicalRegistrationArgs(
+                               const FieldMaskSet<IndexSpaceExpression> &exprs,
+                               const RegionRequirement &r,
+                               Operation *o, UniqueID uid, unsigned idx,
+                               ApEvent term, InstanceSet &t,
+                               const PhysicalTraceInfo &info,
+                               CopyFillAggregator *&output,
+                               const std::set<ApEvent> &remote,
+                               std::vector<InstanceView*> &views, 
+                               std::set<RtEvent> &map_applied,
+                               ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
-            local_expr(expr), req(r), op(o), index(idx), 
+            local_exprs(exprs), req(r), op(o), index(idx), 
             term_event(term), targets(t), trace_info(info),
             output_aggregator(output), remote_ready(remote), 
             target_views(views), map_applied_events(map_applied),
             result(res) { }
       public:
-        IndexSpaceExpression *const local_expr;
+        const FieldMaskSet<IndexSpaceExpression> &local_exprs;
         const RegionRequirement &req;
         Operation *const op; 
         const unsigned index;
@@ -378,35 +379,36 @@ namespace Legion {
       // Return a runtime event for when it's safe to perform
       // the registration for this equivalence set
       RtEvent physical_perform_updates(const RegionRequirement &req,
-                                  VersionInfo &version_info,
-                                  Operation *op, unsigned index,
-                                  ApEvent precondition, ApEvent term_event,
-                                  const InstanceSet &targets,
-                                  const PhysicalTraceInfo &trace_info,
-                                  CopyFillAggregator *&output_aggregator,
-                                  std::set<RtEvent> &map_applied_events,
-                                  std::set<ApEvent> &remote_events,
-                                  std::set<ApEvent> &effects_events,
-                                  std::vector<InstanceView*> &target_views,
-                                  IndexSpaceExpression *&local_expr,
+                                VersionInfo &version_info,
+                                Operation *op, unsigned index,
+                                ApEvent precondition, ApEvent term_event,
+                                const InstanceSet &targets,
+                                const PhysicalTraceInfo &trace_info,
+                                CopyFillAggregator *&output_aggregator,
+                                std::set<RtEvent> &map_applied_events,
+                                std::set<ApEvent> &remote_events,
+                                std::set<ApEvent> &effects_events,
+                                std::vector<InstanceView*> &target_views,
+                                FieldMaskSet<IndexSpaceExpression> &local_exprs,
 #ifdef DEBUG_LEGION
-                                  const char *log_name,
-                                  UniqueID uid,
+                                const char *log_name,
+                                UniqueID uid,
 #endif
-                                  const bool track_effects,
-                                  const bool check_initialized = true,
-                                  const bool defer_copies = true);
+                                const bool track_effects,
+                                const bool check_initialized = true,
+                                const bool defer_copies = true);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
-      ApEvent physical_perform_registration(IndexSpaceExpression *local_expr,
-                                 const RegionRequirement &req,
-                                 Operation *op, unsigned index,
-                                 ApEvent term_event, InstanceSet &targets,
-                                 const PhysicalTraceInfo &trace_info,
-                                 CopyFillAggregator *output_aggregator,
-                                 const std::set<ApEvent> &remote_events,
-                                 std::vector<InstanceView*> &target_views,
-                                 std::set<RtEvent> &map_applied_events);
+      ApEvent physical_perform_registration(
+                         const FieldMaskSet<IndexSpaceExpression> &local_exprs,
+                         const RegionRequirement &req,
+                         Operation *op, unsigned index,
+                         ApEvent term_event, InstanceSet &targets,
+                         const PhysicalTraceInfo &trace_info,
+                         CopyFillAggregator *output_aggregator,
+                         const std::set<ApEvent> &remote_events,
+                         std::vector<InstanceView*> &target_views,
+                         std::set<RtEvent> &map_applied_events);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
@@ -424,16 +426,16 @@ namespace Legion {
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
-                                   IndexSpaceExpression *local_expr,
-                                   const RegionRequirement &req,
-                                   Operation *op, unsigned index,
-                                   ApEvent term_event, InstanceSet &targets,
-                                   const PhysicalTraceInfo &trace_info,
-                                   CopyFillAggregator *output_aggregator,
-                                   const std::set<ApEvent> &remote_ready,
-                                   std::vector<InstanceView*> &target_views,
-                                   std::set<RtEvent> &map_applied_events,
-                                   ApEvent &result);
+                           const FieldMaskSet<IndexSpaceExpression> &local_expr,
+                           const RegionRequirement &req,
+                           Operation *op, unsigned index,
+                           ApEvent term_event, InstanceSet &targets,
+                           const PhysicalTraceInfo &trace_info,
+                           CopyFillAggregator *output_aggregator,
+                           const std::set<ApEvent> &remote_ready,
+                           std::vector<InstanceView*> &target_views,
+                           std::set<RtEvent> &map_applied_events,
+                           ApEvent &result);
       void handle_defer_registration(const void *args);
       ApEvent acquire_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
@@ -3088,6 +3090,7 @@ namespace Legion {
                                           InnerContext *parent_ctx,
                                           VersionInfo *version_info,
                                           LogicalRegion upper_bound,
+                                          const FieldMask &version_mask,
                                           Operation *op);
     public:
       void find_open_complete_partitions(ContextID ctx,

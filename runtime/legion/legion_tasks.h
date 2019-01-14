@@ -280,7 +280,6 @@ namespace Legion {
       virtual void update_atomic_locks(Reservation lock, bool exclusive);
       virtual unsigned find_parent_index(unsigned idx);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
       virtual ApEvent compute_sync_precondition(
                                  const PhysicalTraceInfo *info) const;
@@ -516,7 +515,7 @@ namespace Legion {
       // Regions which are NO_ACCESS or have no privilege fields
       std::vector<bool>                     no_access_regions;
       // The version infos for this operation
-      std::vector<VersionInfo>              version_infos;
+      LegionVector<VersionInfo>::aligned    version_infos;
     protected:
       std::vector<Processor>                target_processors;
       // Hold the result of the mapping 
@@ -674,7 +673,6 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
       virtual RegionTreePath& get_privilege_path(unsigned idx);
     public:
       virtual ApEvent get_task_completion(void) const;
@@ -773,7 +771,6 @@ namespace Legion {
       virtual bool is_stealable(void) const;
       virtual bool can_early_complete(ApUserEvent &chain_event);
       virtual VersionInfo& get_version_info(unsigned idx);
-      virtual const std::vector<VersionInfo>* get_version_infos(void);
     public:
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
@@ -932,7 +929,7 @@ namespace Legion {
       unsigned complete_points;
       unsigned committed_points;
     protected:
-      std::map<unsigned/*idx*/,VersionInfo> version_infos;
+      LegionMap<unsigned/*idx*/,VersionInfo>::aligned version_infos;
       std::vector<RegionTreePath> privilege_paths;
       std::deque<SliceTask*> origin_mapped_slices;
     protected:

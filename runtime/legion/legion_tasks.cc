@@ -1272,15 +1272,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* TaskOp::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      // This should never be called
-      assert(false);
-      return NULL;
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreePath& TaskOp::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -3446,7 +3437,8 @@ namespace Legion {
           std::vector<std::vector<InstanceView*> > target_views(regions.size());
           std::vector<std::set<ApEvent> > remote_ready(regions.size());
           std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
-          std::vector<IndexSpaceExpression*> local_exprs(regions.size(), NULL);
+          LegionVector<FieldMaskSet<IndexSpaceExpression> >::aligned
+            local_exprs(regions.size());
           std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
@@ -5059,13 +5051,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* IndividualTask::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return &version_infos;
-    }
-
-    //--------------------------------------------------------------------------
     RegionTreePath& IndividualTask::get_privilege_path(unsigned idx)
     //--------------------------------------------------------------------------
     {
@@ -5883,13 +5868,6 @@ namespace Legion {
       if (idx < version_infos.size())
         return version_infos[idx];
       return slice_owner->get_version_info(idx);
-    }
-
-    //--------------------------------------------------------------------------
-    const std::vector<VersionInfo>* PointTask::get_version_infos(void)
-    //--------------------------------------------------------------------------
-    {
-      return &version_infos;
     }
 
     //--------------------------------------------------------------------------
