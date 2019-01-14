@@ -440,18 +440,18 @@ local expr_is_null = normalize_expr_factory("pointer", false, true)
 
 local expr_deref = normalize_expr_factory("value", false, true)
 
-local expr_unary = normalize_expr_factory("rhs", false, false)
+local expr_unary = normalize_expr_factory("rhs", false, true)
 
 local function expr_binary(stats, expr)
-  local lhs = normalize.expr(stats, expr.lhs, false)
-  local rhs = normalize.expr(stats, expr.rhs, false)
+  local lhs = normalize.expr(stats, expr.lhs, true)
+  local rhs = normalize.expr(stats, expr.rhs, true)
   return expr {
     lhs = lhs,
     rhs = rhs,
   }
 end
 
-local expr_cast = normalize_expr_factory("args", true, false)
+local expr_cast = normalize_expr_factory("args", true, true)
 
 local normalize_expr_table = {
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
@@ -583,6 +583,20 @@ end
 local function stat_while(stats, stat)
   local cond_stats = terralib.newlist()
   local cond = normalize.expr(cond_stats, stat.cond, true)
+  if not cond:is(ast.specialized.expr.ID) then
+    local cond_var = std.newsymbol()
+    cond_stats:insert(ast.specialized.stat.Var {
+      symbols = cond_var,
+      values = cond,
+      span = cond.span,
+      annotations = ast.default_annotations(),
+    })
+    cond = ast.specialized.expr.ID {
+      value = cond_var,
+      span = cond.span,
+      annotations = ast.default_annotations(),
+    }
+  end
   local block = normalize.block(stat.block)
   local block_stats = block.stats
 
