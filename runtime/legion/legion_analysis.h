@@ -1068,7 +1068,7 @@ namespace Legion {
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
-      AddressSpaceID clone_from(EquivalenceSet *parent, 
+      AddressSpaceID clone_from(const EquivalenceSet *parent, 
                                 const FieldMask &clone_mask);
       void remove_update_guard(CopyFillAggregator *aggregator);
       // Must be called while holding the lock

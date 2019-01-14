@@ -1883,7 +1883,7 @@ namespace Legion {
       const RegionUsage usage(req);
       // We can skip this if the term event is a 
       // no-event (happens with post-mapping and copies)
-      if (term_event.exists())
+      if (term_event.exists() && !local_exprs.empty())
       {
         const UniqueID op_id = op->get_unique_op_id();
         ApEvent remote_ready;

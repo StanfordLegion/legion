@@ -3796,8 +3796,6 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
       RemoteEqTracker *target;
       derez.deserialize(target);
       RtUserEvent ready;
@@ -3873,8 +3871,6 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
-      FieldMask request_mask;
-      derez.deserialize(request_mask);
       ReductionOpID redop;
       derez.deserialize(redop);
       RemoteEqTracker *target;
@@ -5178,7 +5174,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    AddressSpaceID EquivalenceSet::clone_from(EquivalenceSet *parent,
+    AddressSpaceID EquivalenceSet::clone_from(const EquivalenceSet *parent,
                                               const FieldMask &clone_mask)
     //--------------------------------------------------------------------------
     {
@@ -5224,7 +5220,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(reduc_insts.empty());
 #endif
-            reduc_insts = parent->reduction_instances[fidx];
+            std::map<unsigned,std::vector<ReductionView*> >::const_iterator
+              finder = parent->reduction_instances.find(fidx);
+#ifdef DEBUG_LEGION
+            assert(finder != parent->reduction_instances.end());
+#endif
+            reduc_insts = finder->second;
             for (unsigned idx = 0; idx < reduc_insts.size(); idx++)
               reduc_insts[idx]->add_nested_valid_ref(did);
             fidx = reduc_overlap.find_next_set(fidx+1);
@@ -5411,14 +5412,16 @@ namespace Legion {
           return;
         }
       }
+      RegionTreeForest *forest = runtime->forest;
 #ifdef DEBUG_LEGION
       assert(expr != NULL);
+      // An expensive sanity check if you want to turn it on
+      //assert(forest->subtract_index_spaces(expr, set_expr)->is_empty());
 #endif
       RtEvent refinement_done;
       FieldMaskSet<EquivalenceSet> to_traverse, pending_to_traverse;
       std::map<EquivalenceSet*,IndexSpaceExpression*> to_traverse_exprs;
       {
-        RegionTreeForest *forest = runtime->forest;
         // Try to get the lock, if we don't get it build a continuation 
         AutoTryLock eq(eq_lock);
         if (!eq.has_lock())
@@ -5742,6 +5745,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
                       assert(disjoint_partition_refinements.get_valid_mask() * 
                               it->set_mask);
+                      assert(unrefined_remainders.get_valid_mask() * 
+                              it->set_mask);
 #endif
                       unrefined_remainders.insert(remainder, it->set_mask);
                     }
@@ -5783,6 +5788,8 @@ namespace Legion {
                   {
 #ifdef DEBUG_LEGION
                     assert(disjoint_partition_refinements.get_valid_mask() * 
+                            to_filter);
+                    assert(unrefined_remainders.get_valid_mask() * 
                             to_filter);
 #endif
                     unrefined_remainders.insert(remainder, to_filter);
@@ -5869,13 +5876,20 @@ namespace Legion {
 #endif
               refinement_done = refinement_event;
             }
+            // Subtract from any unrefined remainders
+            filter_unrefined_remainders(ray_mask, expr);
+            if (!!ray_mask)
+            {
 #ifdef DEBUG_LEGION
-            assert(disjoint_partition_refinements.get_valid_mask() * ray_mask);
+              assert(disjoint_partition_refinements.get_valid_mask() * 
+                      ray_mask);
+              assert(unrefined_remainders.get_valid_mask() * 
+                      ray_mask);
 #endif
-            // Update the unrefined remainder
-            unrefined_remainders.insert(diff, ray_mask);
-            ray_mask.clear();
-          }    
+              unrefined_remainders.insert(diff, ray_mask);
+              ray_mask.clear();
+            }
+          }
         }
         // Otherwise we can fall through because this means the
         // expressions are equivalent
@@ -5888,13 +5902,13 @@ namespace Legion {
       // Any fields which are still valid should be recorded
       if (!!ray_mask)
       {
+        // Not local so we need to send a message
         if (source != runtime->address_space)
         {
-          // Not local so we need to send a message
+          // If there's nothing to do after this we can use
+          // the trace_done event directly
           if (to_traverse.empty() && pending_to_traverse.empty())
           {
-            // If there's nothing to do after this we can use
-            // the trace_done event directly
             Serializer rez;
             {
               RezCheck z(rez);
@@ -9063,7 +9077,12 @@ namespace Legion {
         IndexSpaceExpression *diff_expr = 
           runtime->forest->subtract_index_spaces(set_expr, union_expr);
         if ((diff_expr != NULL) && !diff_expr->is_empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(unrefined_remainders.get_valid_mask() * finalize_mask);
+#endif
           unrefined_remainders.insert(diff_expr, finalize_mask);
+        }
       }
       else if (!partition->is_complete())
       {
@@ -9073,7 +9092,12 @@ namespace Legion {
           runtime->forest->subtract_index_spaces(set_expr, 
               partition->get_union_expression());
         if ((diff_expr != NULL) && !diff_expr->is_empty())
+        {
+#ifdef DEBUG_LEGION
+          assert(unrefined_remainders.get_valid_mask() * finalize_mask);
+#endif
           unrefined_remainders.insert(diff_expr, finalize_mask);
+        }
       }
     }
 
