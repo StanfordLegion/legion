@@ -760,6 +760,16 @@ local function stat_expr(stats, stat)
   stats:insert(stat { expr = expr })
 end
 
+local function stat_raw_delete(stats, stat)
+  local value = normalize.expr(stats, stat.value, false)
+  stats:insert(stat { value = value })
+end
+
+local function stat_parallel_prefix(stats, stat)
+  local dir = normalize.expr(stats, stat.dir, true)
+  stats:insert(stat { dir = dir })
+end
+
 local function pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_stat_table = {
@@ -771,7 +781,6 @@ local normalize_stat_table = {
   [ast.specialized.stat.MustEpoch]       = stat_block,
   [ast.specialized.stat.Block]           = stat_block,
   [ast.specialized.stat.ParallelizeWith] = stat_block,
-  [ast.specialized.stat.ParallelPrefix]  = pass_through_stat,
 
   [ast.specialized.stat.Var]             = stat_var,
   [ast.specialized.stat.VarUnpack]       = stat_var_unpack,
@@ -780,7 +789,8 @@ local normalize_stat_table = {
   [ast.specialized.stat.Assignment]      = stat_assignment_or_reduce,
   [ast.specialized.stat.Reduce]          = stat_assignment_or_reduce,
   [ast.specialized.stat.Expr]            = stat_expr,
-  [ast.specialized.stat.RawDelete]       = pass_through_stat,
+  [ast.specialized.stat.ParallelPrefix]  = stat_parallel_prefix,
+  [ast.specialized.stat.RawDelete]       = stat_raw_delete,
   [ast.specialized.stat.Fence]           = pass_through_stat,
 
   [ast.specialized.stat.Elseif]          = unreachable,
