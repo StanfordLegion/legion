@@ -2114,7 +2114,7 @@ namespace Legion {
               const FieldMask overlap = inst_mask & it->set_mask;
               if (!overlap)
                 continue;
-              ApEvent ready = target_views[idx]->register_user(usage, inst_mask, 
+              ApEvent ready = target_views[idx]->register_user(usage, overlap, 
                local_expr,op_id,index,term_event,map_applied_events,trace_info);
               if (already_set[idx])
                 ready = Runtime::merge_events(&trace_info, ready,
@@ -2132,11 +2132,17 @@ namespace Legion {
         }
         else
         {
-          IndexSpaceExpression *local_expr = local_exprs.begin()->first;
+          FieldMaskSet<IndexSpaceExpression>::const_iterator 
+            first = local_exprs.begin();
+          IndexSpaceExpression *local_expr = first->first;
+          const FieldMask &set_mask = first->second;
           for (unsigned idx = 0; idx < targets.size(); idx++)
           {
             const FieldMask &inst_mask = targets[idx].get_valid_fields();
-            ApEvent ready = target_views[idx]->register_user(usage, inst_mask, 
+            const FieldMask overlap = inst_mask & set_mask;
+            if (!overlap)
+              continue;
+            ApEvent ready = target_views[idx]->register_user(usage, overlap, 
               local_expr, op_id,index,term_event,map_applied_events,trace_info);
             // Record the event as the precondition for the task
             if (remote_ready.exists())

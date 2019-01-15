@@ -2701,9 +2701,6 @@ namespace Legion {
     void CopyFillAggregator::record_guard_set(EquivalenceSet *set)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-      assert(guarded_sets.find(set) == guarded_sets.end());
-#endif
       guarded_sets.insert(set);
     }
 
@@ -5596,7 +5593,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       // Put this assertion after the test above in case we were migrated
       assert((eq_state == MAPPING_STATE) || 
-             (eq_state == PENDING_REFINED_STATE));
+             (eq_state == PENDING_REFINED_STATE) ||
+             (update_guards.get_valid_mask() * refinement_fields));
 #endif
       FieldMaskSet<CopyFillAggregator>::iterator finder = 
         update_guards.find(aggregator);
@@ -5879,7 +5877,6 @@ namespace Legion {
                     if (!refinement_done.exists())
                     {
 #ifdef DEBUG_LEGION
-                      assert(eq_state == PENDING_REFINED_STATE);
                       assert(refinement_event.exists());
 #endif
                       refinement_done = refinement_event;
@@ -5926,7 +5923,6 @@ namespace Legion {
                           if (!refinement_done.exists())
                           {
 #ifdef DEBUG_LEGION
-                            assert(eq_state == PENDING_REFINED_STATE);
                             assert(refinement_event.exists());
 #endif
                             refinement_done = refinement_event;
@@ -5947,7 +5943,6 @@ namespace Legion {
                       if (!refinement_done.exists())
                       {
 #ifdef DEBUG_LEGION
-                        assert(eq_state == PENDING_REFINED_STATE);
                         assert(refinement_event.exists());
 #endif
                         refinement_done = refinement_event;
@@ -6010,7 +6005,6 @@ namespace Legion {
               if (!refinement_done.exists())
               {
 #ifdef DEBUG_LEGION
-                assert(eq_state == PENDING_REFINED_STATE);
                 assert(refinement_event.exists());
 #endif
                 refinement_done = refinement_event;
@@ -6062,7 +6056,6 @@ namespace Legion {
                   if (!refinement_done.exists())
                   {
 #ifdef DEBUG_LEGION
-                    assert(eq_state == PENDING_REFINED_STATE);
                     assert(refinement_event.exists());
 #endif
                     refinement_done = refinement_event;
@@ -6107,7 +6100,6 @@ namespace Legion {
                 if (!refinement_done.exists())
                 {
 #ifdef DEBUG_LEGION
-                  assert(eq_state == PENDING_REFINED_STATE);
                   assert(refinement_event.exists());
 #endif
                   refinement_done = refinement_event;
@@ -6177,7 +6169,6 @@ namespace Legion {
                 if (!refinement_done.exists())
                 {
 #ifdef DEBUG_LEGION
-                  assert(eq_state == PENDING_REFINED_STATE);
                   assert(refinement_event.exists());
 #endif
                   refinement_done = refinement_event;
@@ -6206,7 +6197,6 @@ namespace Legion {
             if (!refinement_done.exists())
             {
 #ifdef DEBUG_LEGION
-              assert(eq_state == PENDING_REFINED_STATE);
               assert(refinement_event.exists());
 #endif
               refinement_done = refinement_event;
