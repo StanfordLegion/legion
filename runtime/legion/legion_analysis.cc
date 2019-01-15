@@ -5595,6 +5595,10 @@ namespace Legion {
                     {
                       EquivalenceSet *child = 
                         add_pending_refinement(expr, overlap, node, source);
+#ifdef DEBUG_LEGION
+                      // These should be the same equivalence set
+                      assert(child == finder->second);
+#endif
                       pending_to_traverse.insert(child, overlap);
                       to_traverse_exprs[child] = expr;
                       // If this is a pending refinement then we'll need to
