@@ -9390,27 +9390,46 @@ namespace Legion {
       // Figure out if we finished refining or whether there
       // is still an unrefined remainder
       IndexPartNode *partition = dis->partition;
-      const size_t total_children = partition->color_space->get_volume();
-      if (dis->children.size() < total_children)
+      if (dis->children.size() < size_t(partition->total_children))
       {
-        // Summarize all the children with a union and then subtract
-        std::set<IndexSpaceExpression*> all_children;
-        for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator
-              it = dis->children.begin(); it != dis->children.end(); it++)
-          all_children.insert(it->first);
-        IndexSpaceExpression *union_expr = 
-          runtime->forest->union_index_spaces(all_children);
-        IndexSpaceExpression *diff_expr = 
-          runtime->forest->subtract_index_spaces(set_expr, union_expr);
-        if ((diff_expr != NULL) && !diff_expr->is_empty())
+        std::set<LegionColor> current_colors;
+        for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator it =
+              dis->children.begin(); it != dis->children.end(); it++)
+          current_colors.insert(it->first->color);
+        // No matter what finish making all the children since making
+        // disjoint partitions is a good thing
+        if (partition->total_children == partition->max_linearized_color)
         {
-#ifdef DEBUG_LEGION
-          assert(unrefined_remainders.get_valid_mask() * finalize_mask);
-#endif
-          unrefined_remainders.insert(diff_expr, finalize_mask);
+          for (LegionColor color = 0; 
+                color < partition->total_children; color++)
+          {
+            if (current_colors.find(color) != current_colors.end())
+              continue;
+            IndexSpaceNode *child = partition->get_child(color);
+            EquivalenceSet *child_set = 
+              add_pending_refinement(child, finalize_mask, 
+                                     child, runtime->address_space);
+            dis->children[child] = child_set;
+          }
+        }
+        else
+        {
+          for (LegionColor color = 0; 
+                color < partition->max_linearized_color; color++)
+          {
+            if (current_colors.find(color) != current_colors.end())
+              continue;
+            if (!partition->color_space->contains_color(color))
+              continue;
+            IndexSpaceNode *child = partition->get_child(color);
+            EquivalenceSet *child_set = 
+              add_pending_refinement(child, finalize_mask, 
+                                     child, runtime->address_space);
+            dis->children[child] = child_set;
+          }
         }
       }
-      else if (!partition->is_complete())
+      if (!partition->is_complete())
       {
         // We had all the children, but the partition is not 
         // complete so we actually need to do the subtraction
