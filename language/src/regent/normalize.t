@@ -347,6 +347,20 @@ local predicates = {
   [ast.specialized.expr.ID]       = function(node) return true end,
   [ast.specialized.expr.Constant] = function(node) return true end,
   [ast.specialized.expr.Function] = function(node) return true end,
+  [ast.specialized.expr.FieldAccess] =
+    function(node)
+      return normalize.normalized(node.value)
+    end,
+  [ast.specialized.expr.Deref]       =
+    function(node)
+      return normalize.normalized(node.value)
+    end,
+  [ast.specialized.expr.IndexAccess] =
+    function(node)
+      return
+        normalize.normalized(node.value) and
+        normalize.normalized(node.index)
+      end,
   [ast.specialized.expr.Unary]    =
     function(node)
       return normalize.normalized(node.rhs)
@@ -385,25 +399,13 @@ end
 
 local expr_region = normalize_expr_factory("ispace", false, true)
 
-local function expr_field_access(stats, expr)
-  local read =
-    not (expr.value:is(ast.specialized.expr.FieldAccess) or
-         expr.value:is(ast.specialized.expr.IndexAccess) or
-         expr.value:is(ast.specialized.expr.Deref) or
-         normalize.normalized(expr.value))
+local expr_field_access = normalize_expr_factory("value", false, true)
 
-  local value = normalize.expr(stats, expr.value, read)
-  return expr { value = value }
-end
+local expr_deref = normalize_expr_factory("value", false, true)
 
 local function expr_index_access(stats, expr)
+  local value = normalize.expr(stats, expr.value, true)
   local index = normalize.expr(stats, expr.index, true)
-  local read =
-    not (expr.value:is(ast.specialized.expr.FieldAccess) or
-         expr.value:is(ast.specialized.expr.IndexAccess) or
-         expr.value:is(ast.specialized.expr.Deref) or
-         normalize.normalized(expr.value))
-  local value = normalize.expr(stats, expr.value, read)
   return expr {
     index = index,
     value = value,
@@ -438,8 +440,6 @@ local expr_ctor_field = normalize_expr_factory("value", false, true)
 
 local expr_is_null = normalize_expr_factory("pointer", false, true)
 
-local expr_deref = normalize_expr_factory("value", false, true)
-
 local expr_unary = normalize_expr_factory("rhs", false, true)
 
 local function expr_binary(stats, expr)
@@ -460,6 +460,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.Ispace]                     = expr_ispace,
   [ast.specialized.expr.Region]                     = expr_region,
   [ast.specialized.expr.FieldAccess]                = expr_field_access,
+  [ast.specialized.expr.Deref]                      = expr_deref,
   [ast.specialized.expr.IndexAccess]                = expr_index_access,
   [ast.specialized.expr.MethodCall]                 = expr_method_call,
   [ast.specialized.expr.Call]                       = expr_call,
@@ -467,7 +468,6 @@ local normalize_expr_table = {
   [ast.specialized.expr.CtorListField]              = expr_ctor_field,
   [ast.specialized.expr.CtorRecField]               = expr_ctor_field,
   [ast.specialized.expr.Isnull]                     = expr_is_null,
-  [ast.specialized.expr.Deref]                      = expr_deref,
   [ast.specialized.expr.Unary]                      = expr_unary,
   [ast.specialized.expr.Binary]                     = expr_binary,
   [ast.specialized.expr.Cast]                       = expr_cast,
