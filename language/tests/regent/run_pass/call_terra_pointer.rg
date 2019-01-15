@@ -12,22 +12,28 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- vectorize_loops22.rg:31: vectorization failed: loop body has a future access
---     @e = foo()
---             ^
-
 import "regent"
 
-task foo()
-  return 1
-end
+struct s
+{
+  x : int[10];
+}
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), int)
-  __demand(__vectorize)
-  for e in r do
-    @e = foo()
+terra f(x : &int)
+  for i = 0, 10 do
+    x[i] = i + 1
   end
 end
+
+task main()
+  var v : s
+  for i = 0, 10 do
+    v.x[i] = 0
+  end
+  f([&int](v.x))
+  for i = 0, 10 do
+    regentlib.assert(v.x[i] == i + 1, "test failed")
+  end
+end
+
+regentlib.start(main)
