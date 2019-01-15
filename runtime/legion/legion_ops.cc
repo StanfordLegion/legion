@@ -6046,24 +6046,24 @@ namespace Legion {
           }
         }
       }
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
         enqueue_ready_operation();
-      // We can also mark this as having our resolved any predication
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
     void PointCopyOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      // Tell our owner that we are done
-      owner->handle_point_commit(profiling_reported);
       // Don't commit this operation until we've reported our profiling
       // Out index owner will deactivate the operation
       commit_operation(false/*deactivate*/, profiling_reported);
+      // Tell our owner that we are done, they will do the deactivate
+      owner->handle_point_commit(profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -12172,13 +12172,13 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
       // Then put ourselves in the queue of operations ready to map
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
         enqueue_ready_operation();
-      // We can also mark this as having our resolved any predication
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
@@ -12226,11 +12226,11 @@ namespace Legion {
     void PointDepPartOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      // Tell our owner that we are done
-      owner->handle_point_commit(profiling_reported);
       // Don't commit this operation until we've reported our profiling
       // Out index owner will deactivate the operation
       commit_operation(false/*deactivate*/, profiling_reported);
+      // Tell our owner that we are done, they will do the deactivate
+      owner->handle_point_commit(profiling_reported);
     }
 
     //--------------------------------------------------------------------------
@@ -13339,23 +13339,23 @@ namespace Legion {
       std::set<RtEvent> preconditions;
       runtime->forest->perform_versioning_analysis(this, 0/*idx*/,
                         requirement, version_info, preconditions);
+      // We can also mark this as having our resolved any predication
+      resolve_speculation();
       if (!preconditions.empty())
         enqueue_ready_operation(Runtime::merge_events(preconditions));
       else
         enqueue_ready_operation();
-      // We can also mark this as having our resolved any predication
-      resolve_speculation();
     }
 
     //--------------------------------------------------------------------------
     void PointFillOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
-      // Tell our owner that we are done
-      owner->handle_point_commit();
       // Don't commit this operation until we've reported our profiling
       // Out index owner will deactivate the operation
       commit_operation(false/*deactivate*/);
+      // Tell our owner that we are done, they will do the deactivate
+      owner->handle_point_commit();
     }
 
     //--------------------------------------------------------------------------

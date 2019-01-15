@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops5.rg:39: vectorization failed: loop body has an expression of an inadmissible type
+-- vectorize_loops5.rg:39: vectorization failed: loop body has an assignment between expressions that have inadmissible types
 --     e.v1 = e.v2
---             ^
+--     ^
 
 import "regent"
 
