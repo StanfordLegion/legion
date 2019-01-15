@@ -105,7 +105,7 @@ local function apply_tracing_elseif(cx, node)
   return node { block = block }
 end
 
-local function do_nothing(cx, node, continuation) return continuation(node, true) end
+local function do_nothing(cx, node) return node end
 
 local node_tracing = {
   [ast.typed.stat.While]     = apply_tracing_block,
