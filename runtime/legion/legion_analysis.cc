@@ -5282,9 +5282,6 @@ namespace Legion {
     {
       if (!is_logical_owner())
         return;
-#ifdef DEBUG_LEGION
-      assert(update_guards.empty() || (update_guards.get_valid_mask() * mask));
-#endif
       // Check for any disjoint pieces
       if (!disjoint_partition_refinements.empty())
       {
@@ -9196,9 +9193,33 @@ namespace Legion {
           subset_exprs = new std::map<IndexSpaceExpression*,EquivalenceSet*>();
         // Save it in the set
         (*subset_exprs)[expr] = subset;
+        pending_refinements.insert(subset, mask);
+        refinement_fields |= mask;
       }
-      pending_refinements.insert(subset, mask);
-      refinement_fields |= mask;
+      else
+      {
+        // We already have a subset, see which fields it's already
+        // been refined for (maybe none if it is still pending)
+        FieldMaskSet<EquivalenceSet>::const_iterator finder = 
+          subsets.find(subset);
+        if (finder != subsets.end())
+        {
+          const FieldMask diff_mask = mask - finder->second;
+          if (!!diff_mask)
+          {
+            pending_refinements.insert(subset, diff_mask);
+            refinement_fields |= diff_mask;
+          }
+          else // It's already refined for all of them, so just return
+            return subset;
+        }
+        else
+        {
+          // Do the normal insert if we couldn't find it
+          pending_refinements.insert(subset, mask);
+          refinement_fields |= mask;
+        }
+      }
       if (eq_state == MAPPING_STATE)
       {
 #ifdef DEBUG_LEGION
