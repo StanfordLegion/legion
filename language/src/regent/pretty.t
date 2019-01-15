@@ -1004,6 +1004,9 @@ function pretty.stat_index_launch_num(cx, node)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
   end
+  node.preamble:map(function(stat)
+    result:insert(text.Indent { value = pretty.stat(cx, stat) })
+  end)
   result:insert(text.Indent { value = call })
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }
@@ -1021,6 +1024,9 @@ function pretty.stat_index_launch_list(cx, node)
   if node.reduce_op then
     call = join({pretty.expr(cx, node.reduce_lhs), node.reduce_op .. "=", call}, true)
   end
+  node.preamble:map(function(stat)
+    result:insert(text.Indent { value = pretty.stat(cx, stat) })
+  end)
   result:insert(text.Indent { value = call })
   result:insert(text.Line { value = "end" })
   return text.Lines { lines = result }

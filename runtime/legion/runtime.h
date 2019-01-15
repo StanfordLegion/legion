@@ -2679,7 +2679,8 @@ namespace Legion {
       void handle_equivalence_set_ray_trace_request(Deserializer &derez,
                                                     AddressSpaceID source);
       void handle_equivalence_set_ray_trace_response(Deserializer &derez);
-      void handle_equivalence_set_migration(Deserializer &derez);
+      void handle_equivalence_set_migration(Deserializer &derez,
+                                            AddressSpaceID source);
       void handle_equivalence_set_owner_update(Deserializer &derez);
       void handle_equivalence_set_remote_refinement(Deserializer &derez);
       void handle_equivalence_set_remote_request_instances(Deserializer &derez, 

@@ -20,8 +20,8 @@
 --   * Leaf: Task issues no sub-operations
 --   * Inner: Task does not access any regions
 --   * Idempotent: Task has no external side-effects
+--   * Replicable: Task's control flow can be replicated
 --
--- (Currently the optimization returns false for idempotent.)
 
 local ast = require("regent/ast")
 local data = require("common/data")
@@ -40,6 +40,13 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
+local function all_with_provenance(acc, value)
+  if not value[1] then
+    return value
+  end
+  return acc
+end
+
 local context = {}
 
 function context:__index (field)
@@ -55,15 +62,21 @@ function context:__newindex (field, value)
 end
 
 function context.new_global_scope()
-  local cx = {}
+  local cx = {
+    leaf       = { true, nil },
+    inner      = { true, nil },
+    idempotent = { true, nil },
+    replicable = { true, nil },
+  }
   return setmetatable(cx, context)
 end
 
-local function all_with_provenance(acc, value)
-  if not value[1] then
-    return value
-  end
-  return acc
+function context:update(field, value)
+  self[field] = all_with_provenance(self[field], value)
+end
+
+function context:analysis_done()
+  return not (self.leaf[1] or self.inner[1] or self.idempotent[1] or self.replicable[1])
 end
 
 local node_is_leaf = {
@@ -593,6 +606,26 @@ local function analyze_replicable(cx, node)
     node, {true})
 end
 
+local function analyze_all_node(cx)
+  local analyze_leaf_node = analyze_leaf_node()
+  local analyze_inner_node = analyze_inner_node()
+  local analyze_idempotent_node = analyze_idempotent_node()
+  local analyze_replicable_node = analyze_replicable_node()
+  return function(node, continuation)
+    if cx.leaf[1] then cx:update("leaf", analyze_leaf_node(node)) end
+    if cx.inner[1] then cx:update("inner", analyze_inner_node(node)) end
+    if cx.idempotent[1] then cx:update("idempotent", analyze_idempotent_node(node)) end
+    if cx.replicable[1] then cx:update("replicable", analyze_replicable_node(node)) end
+    if not cx:analysis_done() then continuation(node, true) end
+  end
+end
+
+local function analyze_all(cx, node)
+  return ast.traverse_node_continuation(
+    analyze_all_node(cx),
+    node)
+end
+
 local optimize_config_options = {}
 
 function optimize_config_options.top_task(cx, node)
@@ -600,10 +633,12 @@ function optimize_config_options.top_task(cx, node)
 
   -- Do the analysis first and then mask it out if the configuration
   -- is disabled. This is to ensure that the analysis always works.
-  local leaf, leaf_node = unpack(analyze_leaf(cx, node.body))
-  local inner, inner_node = unpack(analyze_inner(cx, node.body))
-  local idempotent, idempotent_node = unpack(analyze_idempotent(cx, node.body))
-  local replicable, replicable_node = unpack(analyze_replicable(cx, node.body))
+  analyze_all(cx, node.body)
+
+  local leaf, leaf_node = unpack(cx.leaf)
+  local inner, inner_node = unpack(cx.inner)
+  local idempotent, idempotent_node = unpack(cx.idempotent)
+  local replicable, replicable_node = unpack(cx.replicable)
 
   leaf = leaf and not node.annotations.leaf:is(ast.annotation.Forbid) and std.config["leaf"]
   inner = inner and not node.annotations.inner:is(ast.annotation.Forbid) and std.config["inner"] and not leaf

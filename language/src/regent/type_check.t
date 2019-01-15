@@ -1043,6 +1043,7 @@ function type_check.expr_cast(cx, node)
       for _, field in ipairs(arg.fields) do
         if field.value:is(ast.typed.expr.ID) and
           std.is_symbol(field.value.value) and
+          field.value.value:hasname() and
           field.value.value:hastype()
         then
           from_symbols[field.value.value:gettype()] = field.value.value

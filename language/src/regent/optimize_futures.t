@@ -267,12 +267,14 @@ function analyze_var_flow.stat_block(cx, node)
 end
 
 function analyze_var_flow.stat_index_launch_num(cx, node)
+  node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
     analyze_var_flow.expr(cx, node.reduce_lhs)
   flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_index_launch_list(cx, node)
+  node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
     analyze_var_flow.expr(cx, node.reduce_lhs)
   flow_future_into(cx, reduce_lhs)
@@ -1207,6 +1209,10 @@ end
 function optimize_futures.stat_index_launch_num(cx, node)
   local values = node.values:map(
     function(value) return concretize(optimize_futures.expr(cx, value)) end)
+  local preamble = terralib.newlist()
+  node.preamble:map(function(stat)
+    preamble:insertall(optimize_futures.stat(cx, stat))
+  end)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
@@ -1233,6 +1239,7 @@ function optimize_futures.stat_index_launch_num(cx, node)
   return terralib.newlist({
     node {
       values = values,
+      preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
     }
@@ -1241,6 +1248,10 @@ end
 
 function optimize_futures.stat_index_launch_list(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
+  local preamble = terralib.newlist()
+  node.preamble:map(function(stat)
+    preamble:insertall(optimize_futures.stat(cx, stat))
+  end)
   local call = optimize_futures.expr(cx, node.call)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
@@ -1267,6 +1278,7 @@ function optimize_futures.stat_index_launch_list(cx, node)
   return terralib.newlist({
     node {
       value = value,
+      preamble = preamble,
       call = call,
       reduce_lhs = reduce_lhs,
     }

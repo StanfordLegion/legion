@@ -746,7 +746,8 @@ namespace Legion {
                                          std::set<RtEvent> &preconditions);
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, AddressSpaceID source);
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        AddressSpaceID source);
       virtual bool attempt_children_complete(void);
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
@@ -1242,7 +1243,8 @@ namespace Legion {
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
-                        IndexSpaceExpression *expr, AddressSpaceID source);
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        AddressSpaceID source);
     protected:
       std::vector<RegionRequirement>       dummy_requirements;
       std::vector<unsigned>                dummy_indexes;
@@ -1325,7 +1327,8 @@ namespace Legion {
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, AddressSpaceID source);
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        AddressSpaceID source);
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
                                             const void *realm_is, 
@@ -1722,7 +1725,8 @@ namespace Legion {
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle,
-                        IndexSpaceExpression *expr, AddressSpaceID source);
+                        IndexSpaceExpression *expr, const FieldMask &mask,
+                        AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                                 LogicalRegion *handle = NULL);
       virtual void record_using_physical_context(LogicalRegion handle);

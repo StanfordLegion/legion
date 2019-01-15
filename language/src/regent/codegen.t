@@ -8438,6 +8438,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local symbol = node.symbol:getsymbol()
   local cx = cx:new_local_scope()
   local preamble = node.preamble:map(function(stat) return codegen.stat(cx, stat) end)
+  local has_preamble = #preamble > 0
 
   local fn = codegen.expr(cx, node.call.fn):read(cx)
   assert(std.is_task(fn.value))
@@ -8480,6 +8481,9 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       return codegen.expr_condition(cx, condition)
     end)
 
+  local symbol_type = node.symbol:gettype()
+  local symbol = node.symbol:getsymbol()
+
   local actions = quote
     [actions]
     [fn.actions];
@@ -8494,7 +8498,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
          end
 
          -- Normal invariant arg actions.
-         if invariant then
+         if not has_preamble and invariant then
            arg_actions = quote [arg_actions]; [arg.actions] end
          end
 
@@ -8530,7 +8534,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   task_args_setup:insertall(preamble)
   for i, arg in ipairs(args) do
     local invariant = node.args_provably.invariant[i]
-    if not invariant then
+    if has_preamble or not invariant then
       task_args_setup:insert(arg.actions)
     end
   end
@@ -8628,8 +8632,6 @@ local function stat_index_launch_setup(cx, node, domain, actions)
 
   local point = terralib.newsymbol(c.legion_domain_point_t, "point")
 
-  local symbol_type = node.symbol:gettype()
-  local symbol = node.symbol:getsymbol()
   local symbol_setup
   if std.is_bounded_type(symbol_type) then
     symbol_setup = quote
@@ -8648,21 +8650,6 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   local launcher_setup = quote
     [must_epoch_setup]
     var [argument_map] = c.legion_argument_map_create()
-    do
-      var it = c.legion_domain_point_iterator_create([domain])
-      while c.legion_domain_point_iterator_has_next(it) do
-        var [point] = c.legion_domain_point_iterator_next(it)
-        [symbol_setup]
-
-        var [task_args]
-        [task_args_setup]
-        c.legion_argument_map_set_point(
-          [argument_map], [point], [task_args], true)
-        [task_args_cleanup]
-      end
-      c.legion_domain_point_iterator_destroy(it)
-    end
-
     var g_args : c.legion_task_argument_t
     g_args.args = nil
     g_args.arglen = 0
@@ -8672,7 +8659,27 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       [fn.value:get_task_id()],
       [domain], g_args, [argument_map],
       c.legion_predicate_true(), false, 0, [tag])
-    [args_setup]
+    do
+      var it = c.legion_domain_point_iterator_create([domain])
+      var args_uninitialized = true
+      while c.legion_domain_point_iterator_has_next(it) do
+        var [point] = c.legion_domain_point_iterator_next(it)
+        [symbol_setup]
+
+        var [task_args]
+        [task_args_setup]
+        c.legion_argument_map_set_point(
+          [argument_map], [point], [task_args], true)
+
+        if args_uninitialized then
+          [args_setup];
+          args_uninitialized = false
+        end
+
+        [task_args_cleanup]
+      end
+      c.legion_domain_point_iterator_destroy(it)
+    end
   end
 
   local execute_fn = c.legion_index_launcher_execute

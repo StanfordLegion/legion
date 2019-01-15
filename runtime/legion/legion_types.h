@@ -331,6 +331,7 @@ namespace Legion {
       LG_DEFER_RAY_TRACE_TASK_ID,
       LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
+      LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -416,6 +417,7 @@ namespace Legion {
         "Defer Ray Trace",                                        \
         "Defer Subset Request",                                   \
         "Defer Make Owner",                                       \
+        "Defer Merge or Forward",                                 \
         "Defer Remote Decrement",                                 \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \

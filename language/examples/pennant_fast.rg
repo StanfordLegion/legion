@@ -1802,107 +1802,115 @@ task test()
     end
   end
 
-  __demand(__spmd)
-  do
-    -- Main Simulation Loop
-    __demand(__trace)
-    while continue_simulation(warmup, cycle, cstop, time, tstop) do
-      -- if warmup and cycle > 0 then
-      --   wait_for(dthydro)
-      --   enable = true
-      --   warmup = false
-      --   time = 0.0
-      --   cycle = 0
-      --   dt = dtmax
-      --   dthydro = dtmax
-      --   start_time = c.legion_get_current_time_in_micros()/1.e6
-      --   last_time = start_time
-      -- end
+  -- FIXME: The new normalization triggers a toposort bug in SPMD without
+  --        these copies of scalar variables, which effectively force
+  --        the version numbers to be incremented.
+  var cycle_copy = cycle
+  var time_copy = time
 
-      -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
+  -- Main Simulation Loop
+  __demand(__spmd, __trace)
+  while continue_simulation(warmup, cycle, cstop, time, tstop) do
+    -- if warmup and cycle > 0 then
+    --   wait_for(dthydro)
+    --   enable = true
+    --   warmup = false
+    --   time = 0.0
+    --   cycle = 0
+    --   dt = dtmax
+    --   dthydro = dtmax
+    --   start_time = c.legion_get_current_time_in_micros()/1.e6
+    --   last_time = start_time
+    -- end
 
-      dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
+    -- c.legion_runtime_begin_trace(__runtime(), __context(), 0, false)
 
-      -- if cycle > 0 and cycle % interval == 0 then
-      --   var current_time = c.legion_get_current_time_in_micros()/1.e6
-      --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-      --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      --   last_time = current_time
-      -- end
+    dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
-      print_ts = requested_print_ts and cycle == prune
+    -- if cycle > 0 and cycle % interval == 0 then
+    --   var current_time = c.legion_get_current_time_in_micros()/1.e6
+    --   c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+    --            cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+    --   last_time = current_time
+    -- end
 
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_half(rp_all_private_p[i],
-                     rp_spans_private_p[i],
-                     dt,
-                     enable, print_ts)
-      end
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_half(rp_all_shared_p[i],
-                     rp_spans_shared_p[i],
-                     dt,
-                     enable, print_ts)
-      end
+    print_ts = requested_print_ts and cycle == prune
 
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        calc_everything(rz_all_p[i],
-                        rp_all_private_p[i],
-                        rp_all_ghost_p[i],
-                        rs_all_p[i],
-                        rz_spans_p[i],
-                        rs_spans_p[i],
-                        alfa, gamma, ssmin, dt,
-                        q1, q2,
-                        enable)
-      end
-
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_full(rp_all_private_p[i],
-                     rp_spans_private_p[i],
-                     dt,
-                     enable)
-      end
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        adv_pos_full(rp_all_shared_p[i],
-                     rp_spans_shared_p[i],
-                     dt,
-                     enable)
-      end
-
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        calc_everything_full(rz_all_p[i],
-                             rp_all_private_p[i],
-                             rp_all_ghost_p[i],
-                             rs_all_p[i],
-                             rz_spans_p[i],
-                             rs_spans_p[i],
-                             dt,
-                             enable)
-      end
-
-      print_ts = requested_print_ts and cycle == cstop - 1 - prune
-
-      dthydro = dtmax
-      -- __demand(__parallel)
-      for i = 0, npieces do
-        dthydro min= calc_dt_hydro(rz_all_p[i],
-                                   rz_spans_p[i],
-                                   dt, dtmax, cfl, cflv,
-                                   enable, print_ts)
-      end
-
-      cycle += 1
-      time += dt
-
-      -- c.legion_runtime_end_trace(__runtime(), __context(), 0)
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      adv_pos_half(rp_all_private_p[i],
+                   rp_spans_private_p[i],
+                   dt,
+                   enable, print_ts)
     end
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      adv_pos_half(rp_all_shared_p[i],
+                   rp_spans_shared_p[i],
+                   dt,
+                   enable, print_ts)
+    end
+
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      calc_everything(rz_all_p[i],
+                      rp_all_private_p[i],
+                      rp_all_ghost_p[i],
+                      rs_all_p[i],
+                      rz_spans_p[i],
+                      rs_spans_p[i],
+                      alfa, gamma, ssmin, dt,
+                      q1, q2,
+                      enable)
+    end
+
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      adv_pos_full(rp_all_private_p[i],
+                   rp_spans_private_p[i],
+                   dt,
+                   enable)
+    end
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      adv_pos_full(rp_all_shared_p[i],
+                   rp_spans_shared_p[i],
+                   dt,
+                   enable)
+    end
+
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      calc_everything_full(rz_all_p[i],
+                           rp_all_private_p[i],
+                           rp_all_ghost_p[i],
+                           rs_all_p[i],
+                           rz_spans_p[i],
+                           rs_spans_p[i],
+                           dt,
+                           enable)
+    end
+
+    print_ts = requested_print_ts and cycle == cstop - 1 - prune
+
+    dthydro = dtmax
+    -- __demand(__parallel)
+    for i = 0, npieces do
+      dthydro min= calc_dt_hydro(rz_all_p[i],
+                                 rz_spans_p[i],
+                                 dt, dtmax, cfl, cflv,
+                                 enable, print_ts)
+    end
+
+    cycle_copy = cycle
+    time_copy = time
+
+    cycle_copy += 1
+    time_copy += dt
+
+    cycle = cycle_copy
+    time = time_copy
+
   end
 
   if conf.seq_init then

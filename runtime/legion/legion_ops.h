@@ -1033,19 +1033,19 @@ namespace Legion {
       // Separate function for this so it can be called by base classes
       RtEvent perform_local_versioning_analysis(void);
     public:
-      std::vector<RegionTreePath> src_privilege_paths;
-      std::vector<RegionTreePath> dst_privilege_paths;
-      std::vector<unsigned>       src_parent_indexes;
-      std::vector<unsigned>       dst_parent_indexes;
-      std::vector<VersionInfo>    src_versions;
-      std::vector<VersionInfo>    dst_versions;
+      std::vector<RegionTreePath>           src_privilege_paths;
+      std::vector<RegionTreePath>           dst_privilege_paths;
+      std::vector<unsigned>                 src_parent_indexes;
+      std::vector<unsigned>                 dst_parent_indexes;
+      LegionVector<VersionInfo>::aligned    src_versions;
+      LegionVector<VersionInfo>::aligned    dst_versions;
     public: // These are only used for indirect copies
-      std::vector<RegionTreePath> gather_privilege_paths;
-      std::vector<RegionTreePath> scatter_privilege_paths;
-      std::vector<unsigned>       gather_parent_indexes;
-      std::vector<unsigned>       scatter_parent_indexes;
-      std::vector<VersionInfo>    gather_versions;
-      std::vector<VersionInfo>    scatter_versions;
+      std::vector<RegionTreePath>           gather_privilege_paths;
+      std::vector<RegionTreePath>           scatter_privilege_paths;
+      std::vector<unsigned>                 gather_parent_indexes;
+      std::vector<unsigned>                 scatter_parent_indexes;
+      LegionVector<VersionInfo>::aligned    gather_versions;
+      LegionVector<VersionInfo>::aligned    scatter_versions;
     protected: // for support with mapping
       MapperManager*              mapper;
       unsigned                    current_index;
@@ -1431,7 +1431,7 @@ namespace Legion {
      * need to be closed up to the original physical instance
      * that was mapped by the parent task.
      */
-    class PostCloseOp : public CloseOp {
+    class PostCloseOp : public CloseOp, public LegionHeapify<PostCloseOp> {
     public:
       PostCloseOp(Runtime *runtime);
       PostCloseOp(const PostCloseOp &rhs);
@@ -1484,7 +1484,8 @@ namespace Legion {
      * that can then be propagated back to the enclosing
      * parent task.
      */
-    class VirtualCloseOp : public CloseOp {
+    class VirtualCloseOp : public CloseOp, 
+                           public LegionHeapify<VirtualCloseOp> {
     public:
       VirtualCloseOp(Runtime *runtime);
       VirtualCloseOp(const VirtualCloseOp &rhs);

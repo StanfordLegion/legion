@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops21.rg:51: vectorization failed: loop body has a scattered read from a structured region
---    e.g = 0.5 * r1[e.p].f
---                  ^
+-- vectorize_loops21.rg:51: vectorization failed: loop body has an expression of an inadmissible type
+--     e.g = 0.5 * r1[e.p].f
+--                     ^
 
 import "regent"
 

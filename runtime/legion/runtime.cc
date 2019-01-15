@@ -6568,7 +6568,8 @@ namespace Legion {
             }
           case SEND_EQUIVALENCE_SET_MIGRATION:
             {
-              runtime->handle_equivalence_set_migration(derez);
+              runtime->handle_equivalence_set_migration(derez,
+                                                        remote_address_space);
               break;
             }
           case SEND_EQUIVALENCE_SET_OWNER_UPDATE:
@@ -16682,10 +16683,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_migration(Deserializer &derez)
+    void Runtime::handle_equivalence_set_migration(Deserializer &derez,
+                                                   AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      EquivalenceSet::handle_migration(derez, this); 
+      EquivalenceSet::handle_migration(derez, this, source); 
     }
 
     //--------------------------------------------------------------------------
@@ -21946,6 +21948,11 @@ namespace Legion {
             EquivalenceSet::handle_make_owner(args);
             break;
           }
+        case LG_DEFER_MERGE_OR_FORWARD_TASK_ID:
+          {
+            EquivalenceSet::handle_merge_or_forward(args);
+            break;
+          }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_decrement(args);
@@ -21973,7 +21980,7 @@ namespace Legion {
           }
         case LG_DEFER_REMOTE_UPDATE_TASK_ID:
           {
-            RemoteEqTracker::handle_defer_remote_updates(args);
+            RemoteEqTracker::handle_defer_remote_updates(runtime, args);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:
