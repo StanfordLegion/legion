@@ -95,36 +95,90 @@ local function desugar_image_by_task(cx, node)
   return stats
 end
 
-function desugar.stat(cx)
-  return function(node, continuation)
-    if not std.config["parallelize"] and
-           node:is(ast.typed.stat.ParallelizeWith) then
-      node = ast.typed.stat.Block {
-        block = node.block,
-        span = node.span,
-        annotations = node.annotations,
-      }
-      return continuation(node, true)
-    elseif node:is(ast.typed.stat.Var) and node.value and
-           node.value:is(ast.typed.expr.ImageByTask) then
-      return desugar_image_by_task(cx, node)
-    else
-      return continuation(node, true)
-    end
+local function desugar_block(cx, node)
+  return node { block = desugar.block(cx, node.block) }
+end
+
+local function desugar_if(cx, node)
+  local then_block = desugar.block(cx, node.then_block)
+  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+    return desugar.stat(cx, elseif_block)
+  end)
+  local else_block = desugar.block(cx, node.else_block)
+  return node {
+    then_block = then_block,
+    elseif_blocks = elseif_blocks,
+    else_block = else_block,
+  }
+end
+
+local function desugar_elseif(cx, node)
+  local block = desugar.block(cx, node.block)
+  return node { block = block }
+end
+
+local function desugar_parallelize_with(cx, node)
+  if not std.config["parallelize"] then
+    return ast.typed.stat.Block {
+      block = node.block,
+      span = node.span,
+      annotations = node.annotations,
+    }
+  else
+    return node
   end
 end
 
+local function desugar_var(cx, node)
+  if node.value and node.value:is(ast.typed.expr.ImageByTask) then
+    return desugar_image_by_task(cx, node)
+  else
+    return node
+  end
+end
+
+local function do_nothing(cx, node) return node end
+
+local desugar_stat_table = {
+  [ast.typed.stat.While]            = desugar_block,
+  [ast.typed.stat.ForNum]           = desugar_block,
+  [ast.typed.stat.ForList]          = desugar_block,
+  [ast.typed.stat.Repeat]           = desugar_block,
+  [ast.typed.stat.Block]            = desugar_block,
+  [ast.typed.stat.MustEpoch]        = desugar_block,
+  [ast.typed.stat.If]               = desugar_if,
+  [ast.typed.stat.Elseif]           = desugar_elseif,
+  [ast.typed.stat.ParallelizeWith]  = desugar_parallelize_with,
+  [ast.typed.stat.Var]              = desugar_var,
+  [ast.typed.stat]                  = do_nothing,
+}
+
+local desugar_stat = ast.make_single_dispatch(
+  desugar_stat_table,
+  {})
+
+function desugar.stat(cx, node)
+  return desugar_stat(cx)(node)
+end
+
+function desugar.block(cx, block)
+  local stats = terralib.newlist()
+  block.stats:map(function(stat)
+    local new_stat = desugar.stat(cx, stat)
+    if terralib.islist(new_stat) then
+      stats:insertall(new_stat)
+    else
+      stats:insert(new_stat)
+    end
+  end)
+  return block { stats = stats }
+end
+
 function desugar.top_task(node)
-  local cx = {
-    constraints = node.prototype:get_constraints(),
-  }
-  return node {
-    body = node.body and node.body {
-      stats = ast.flatmap_node_continuation(
-        desugar.stat(cx),
-        node.body.stats)
-      }
-  }
+  local cx = { constraints = node.prototype:get_constraints() }
+  local body = node.body and desugar.block(cx, node.body) or false
+
+  return node { body = body }
 end
 
 function desugar.entry(node)

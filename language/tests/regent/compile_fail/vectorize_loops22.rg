@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops22.rg:31: vectorization failed: loop body has a future access
+-- vectorize_loops22.rg:31: vectorization failed: loop body has an unsupported function call
 --     @e = foo()
 --             ^
 

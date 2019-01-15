@@ -13,10 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- constraint_pack1.rg:30: invalid cast missing constraint $s <= $r
+-- constraint_pack1.rg:29: invalid cast missing constraint $s <= $r
 --   var x = [t(r)] { b = s }
---           ^
-
+--                  ^
 
 import "regent"
 

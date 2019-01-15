@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- optimize_index_launch_list9.rg:76: loop optimization failed: argument 2 is not side-effect free
+-- optimize_index_launch_list9.rg:76: loop optimization failed: preamble statement is not side-effect free
 --     f(p_disjoint[i], @x0)
---      ^
+--                      ^
 
 import "regent"
 

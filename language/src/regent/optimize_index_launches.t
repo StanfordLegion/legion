@@ -484,6 +484,7 @@ local function analyze_is_projectable(cx, arg)
 end
 
 local optimize_index_launch = {}
+local optimize_index_launches = {}
 
 local function ignore(...) end
 
@@ -737,7 +738,9 @@ function optimize_index_launch.stat_for_num(cx, node)
 
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    return node
+    return node {
+      block = optimize_index_launches.block(cx, node.block),
+    }
   end
 
   return ast.typed.stat.IndexLaunchNum {
@@ -773,7 +776,9 @@ function optimize_index_launch.stat_for_list(cx, node)
 
   local body = optimize_loop_body(cx, node, report_pass, report_fail)
   if not body then
-    return node
+    return node {
+      block = optimize_index_launches.block(cx, node.block),
+    }
   end
 
   return ast.typed.stat.IndexLaunchList {
@@ -789,21 +794,60 @@ function optimize_index_launch.stat_for_list(cx, node)
   }
 end
 
-local optimize_index_launches = {}
+function optimize_index_launches.stat_block(cx, node)
+  return node {
+    block = optimize_index_launches.block(cx, node.block),
+  }
+end
 
-local function optimize_index_launches_node(cx)
-  return function(node)
-    if node:is(ast.typed.stat.ForNum) then
-      return optimize_index_launch.stat_for_num(cx, node)
-    elseif node:is(ast.typed.stat.ForList) then
-      return optimize_index_launch.stat_for_list(cx, node)
-    end
-    return node
-  end
+function optimize_index_launches.stat_if(cx, node)
+  local then_block = optimize_index_launches.block(cx, node.then_block)
+  local elseif_blocks = node.elseif_blocks:map(function(elseif_block)
+    return optimize_index_launches.stat(cx, elseif_block)
+  end)
+  local else_block = optimize_index_launches.block(cx, node.else_block)
+  return node {
+    then_block = then_block,
+    elseif_blocks = elseif_blocks,
+    else_block = else_block,
+  }
+end
+
+function optimize_index_launches.stat_elseif(cx, node)
+  local block = optimize_index_launches.block(cx, node.block)
+  return node { block = block }
+end
+
+local function do_nothing(cx, node) return node end
+
+local optimize_index_launches_stat_table = {
+  [ast.typed.stat.ForNum]    = optimize_index_launch.stat_for_num,
+  [ast.typed.stat.ForList]   = optimize_index_launch.stat_for_list,
+
+  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
+  [ast.typed.stat.Repeat]    = optimize_index_launches.stat_block,
+  [ast.typed.stat.Block]     = optimize_index_launches.stat_block,
+  [ast.typed.stat.MustEpoch] = optimize_index_launches.stat_block,
+  [ast.typed.stat.While]     = optimize_index_launches.stat_block,
+  [ast.typed.stat.If]        = optimize_index_launches.stat_if,
+  [ast.typed.stat.Elseif]    = optimize_index_launches.stat_elseif,
+  [ast.typed.stat]           = do_nothing,
+}
+
+local optimize_index_launches_stat = ast.make_single_dispatch(
+  optimize_index_launches_stat_table,
+  {})
+
+function optimize_index_launches.stat(cx, node)
+  return optimize_index_launches_stat(cx)(node)
 end
 
 function optimize_index_launches.block(cx, node)
-  return ast.map_node_postorder(optimize_index_launches_node(cx), node)
+  return node {
+    stats = node.stats:map(function(stat)
+      return optimize_index_launches.stat(cx, stat)
+    end)
+  }
 end
 
 function optimize_index_launches.top_task(cx, node)
