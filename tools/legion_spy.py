@@ -2228,10 +2228,8 @@ class IndexExpr(object):
         if self.kind is None:
             self.kind = INDEX_SPACE_EXPR
             self.base = index_space
-        else:
-            # Should be some kind of normal expression
-            # that we turned into an index space
-            assert self.kind != INDEX_SPACE_EXPR
+        elif self.kind == INDEX_SPACE_EXPR:
+            assert self.base is index_space
 
     def add_union_expr(self, union_expr):
         if self.kind != UNION_EXPR:
@@ -2343,7 +2341,7 @@ class IndexSpace(object):
         self.name = name
 
     def set_expr(self, expr):
-        assert self.expr is None
+        assert self.expr is None or self.expr is expr
         self.expr = expr
 
     def set_parent(self, parent, color):
