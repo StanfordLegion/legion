@@ -4128,11 +4128,8 @@ namespace Legion {
                                 const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      if (term_event.exists())
+      if (term_event.exists() && !local_exprs.empty())
       {
-#ifdef DEBUG_LEGION
-        assert(!local_exprs.empty());
-#endif
         if (local_exprs.size() > 1)
         {
           LegionList<FieldSet<IndexSpaceExpression*> >::aligned expr_sets;

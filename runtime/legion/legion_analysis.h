@@ -75,7 +75,7 @@ namespace Legion {
      * \class VersionInfo
      * A class for tracking version information about region usage
      */
-    class VersionInfo {
+    class VersionInfo : public LegionHeapify<VersionInfo> {
     public:
       VersionInfo(void);
       VersionInfo(const VersionInfo &rhs);
