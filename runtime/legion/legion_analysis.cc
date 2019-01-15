@@ -9052,7 +9052,7 @@ namespace Legion {
       // Figure out if we finished refining or whether there
       // is still an unrefined remainder
       IndexPartNode *partition = dis->partition;
-      if (dis->children.size() < partition->total_children)
+      if (dis->children.size() < size_t(partition->total_children))
       {
         std::set<LegionColor> current_colors;
         for (std::map<IndexSpaceNode*,EquivalenceSet*>::const_iterator it =
