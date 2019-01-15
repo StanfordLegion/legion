@@ -2108,6 +2108,7 @@ namespace Legion {
           {
             RezCheck z(rez);
             rez.serialize(root->did);
+            rez.serialize(mask);
             rez.serialize(manager);
             rez.serialize(recorded_event);
           }
