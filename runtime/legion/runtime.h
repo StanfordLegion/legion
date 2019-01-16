@@ -943,7 +943,7 @@ namespace Legion {
     public:
       MessageManager(AddressSpaceID remote, 
                      Runtime *rt, size_t max,
-                     const std::set<Processor> &procs);
+                     const Processor remote_util_group);
       MessageManager(const MessageManager &rhs);
       ~MessageManager(void);
     public:
@@ -960,7 +960,7 @@ namespace Legion {
     private:
       Runtime *const runtime;
       // State for sending messages
-      Processor target;
+      const Processor target;
       VirtualChannel *const channels; 
     };
 
@@ -2136,6 +2136,7 @@ namespace Legion {
       MessageManager* find_messenger(AddressSpaceID sid);
       MessageManager* find_messenger(Processor target);
       AddressSpaceID find_address_space(Processor target) const;
+      void handle_endpoint_creation(Deserializer &derez);
     public:
       void process_mapper_message(Processor target, MapperID map_id,
                                   Processor source, const void *message, 
@@ -2792,6 +2793,10 @@ namespace Legion {
                           const void *args, size_t arglen, 
 			  const void *userdata, size_t userlen,
 			  Processor p);
+      static void endpoint_runtime_task(
+                          const void *args, size_t arglen, 
+			  const void *userdata, size_t userlen,
+			  Processor p);
     protected:
       static void configure_collective_settings(int total_spaces);
     protected:
@@ -2828,6 +2833,8 @@ namespace Legion {
       std::map<Memory,MemoryManager*> memory_managers;
       // Message managers for each of the other runtimes
       MessageManager *message_managers[LEGION_MAX_NUM_NODES];
+      // Pending message manager requests
+      std::map<AddressSpaceID,RtUserEvent> pending_endpoint_requests;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
     protected:
