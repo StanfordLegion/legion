@@ -9081,6 +9081,8 @@ namespace Legion {
             if (current_colors.find(color) != current_colors.end())
               continue;
             IndexSpaceNode *child = partition->get_child(color);
+            if (child->is_empty())
+              continue;
             EquivalenceSet *child_set = 
               add_pending_refinement(child, finalize_mask, 
                                      child, runtime->address_space);
@@ -9097,6 +9099,8 @@ namespace Legion {
             if (!partition->color_space->contains_color(color))
               continue;
             IndexSpaceNode *child = partition->get_child(color);
+            if (child->is_empty())
+              continue;
             EquivalenceSet *child_set = 
               add_pending_refinement(child, finalize_mask, 
                                      child, runtime->address_space);
