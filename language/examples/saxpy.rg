@@ -21,13 +21,7 @@ import "regent"
 
 -- This code has not been optimized and is not high performance.
 
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
+local fabs = regentlib.fabs(double)
 
 task saxpy(is : ispace(int1d), x : region(is, float), y : region(ispace(int1d), float), a : float)
 where
@@ -56,7 +50,7 @@ task test(n : int, np : int)
   end
 
   for i in is do
-    regentlib.assert(abs(y[i] - 0.5) < 0.00001, "test failed")
+    regentlib.assert(fabs(y[i] - 0.5) < 0.00001, "test failed")
   end
 end
 

@@ -6894,37 +6894,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(AddressSpaceID remote,
                                    Runtime *rt, size_t max_message_size,
-                                   const std::set<Processor> &remote_util_procs)
-      : remote_address_space(remote), runtime(rt), channels((VirtualChannel*)
-                      malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
+                                   const Processor remote_util_group)
+      : remote_address_space(remote), runtime(rt), target(remote_util_group), 
+        channels((VirtualChannel*)
+                  malloc(MAX_NUM_VIRTUAL_CHANNELS*sizeof(VirtualChannel))) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(remote != runtime->address_space);
 #endif
-      // Figure out which processor to send to based on our address
-      // space ID.  If there is an explicit utility processor for one
-      // of the processors in our set then we use that.  Otherwise we
-      // round-robin senders onto different target processors on the
-      // remote node to avoid over-burdening any one of them with messages.
-      {
-        unsigned idx = 0;
-        const unsigned target_idx = rt->address_space % 
-                                    remote_util_procs.size();
-        // Iterate over all the processors and either choose a 
-        // utility processor to be our target or get the target processor
-        target = Processor::NO_PROC;
-        for (std::set<Processor>::const_iterator it = 
-              remote_util_procs.begin(); it != 
-              remote_util_procs.end(); it++,idx++)
-        {
-          if (idx == target_idx)
-            target = (*it);
-        }
-#ifdef DEBUG_LEGION
-        assert(target.exists());
-#endif
-      }
       // Initialize our virtual channels 
       for (unsigned idx = 0; idx < MAX_NUM_VIRTUAL_CHANNELS; idx++)
       {
@@ -6935,7 +6913,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     MessageManager::MessageManager(const MessageManager &rhs)
-      : remote_address_space(0), runtime(NULL), channels(NULL)
+      : remote_address_space(0), runtime(NULL),target(rhs.target),channels(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -14052,35 +14030,67 @@ namespace Legion {
       // If we made it here, then we don't have a message manager yet
       // re-take the lock and re-check to see if we don't have a manager
       // If we still don't then we need to make one
-      AutoLock m_lock(message_manager_lock);
-      // Re-check to see if we lost the race, force the compiler
-      // to re-load the value here
-      result = *(((MessageManager**volatile)message_managers)+sid);
-      // If we're still NULL then we need to make the message manager
-      if (result == NULL)
+      RtEvent wait_on;
+      bool send_request = false;
       {
-        // Compute the set of processors in the remote address space
-        std::set<Processor> remote_procs;
-        std::set<Processor> remote_util_procs;
+        AutoLock m_lock(message_manager_lock);
+        // Re-check to see if we lost the race, force the compiler
+        // to re-load the value here
+        result = *(((MessageManager**volatile)message_managers)+sid);
+        if (result != NULL)
+          return result;
+        // Figure out if there is an event to wait on yet
+        std::map<AddressSpace,RtUserEvent>::const_iterator finder = 
+          pending_endpoint_requests.find(sid);
+        if (finder == pending_endpoint_requests.end())
+        {
+          RtUserEvent done = Runtime::create_rt_user_event();
+          pending_endpoint_requests[sid] = done;
+          wait_on = done;
+          send_request = true;
+        }
+        else
+          wait_on = finder->second;
+      }
+      if (send_request)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        // Find a processor on which to send the task
         for (std::map<Processor,AddressSpaceID>::const_iterator it = 
               proc_spaces.begin(); it != proc_spaces.end(); it++)
         {
           if (it->second != sid)
             continue;
-          Processor::Kind k = it->first.kind();
-          if (k == Processor::UTIL_PROC)
-            remote_util_procs.insert(it->first);
-          else
-            remote_procs.insert(it->first);
+#ifdef DEBUG_LEGION
+          found = true;
+#endif
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize<bool>(true); // request
+            rez.serialize(utility_group);
+          }
+          const Realm::ProfilingRequestSet empty_requests;
+          it->first.spawn(LG_ENDPOINT_TASK_ID, rez.get_buffer(),
+              rez.get_used_bytes(), empty_requests);
+          break;
         }
 #ifdef DEBUG_LEGION
-        assert(!remote_procs.empty() || !remote_util_procs.empty());
+        assert(found);
 #endif
-        result = new MessageManager(sid, this, max_message_size,
-            (remote_util_procs.empty() ? remote_procs : remote_util_procs));
-        // Save the result
-        message_managers[sid] = result;
       }
+#ifdef DEBUG_LEGION
+      assert(wait_on.exists());
+#endif
+      if (!wait_on.has_triggered())
+        wait_on.wait();
+      // When we wake up there should be a result
+      result = *(((MessageManager**volatile)message_managers)+sid);
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
       return result;
     }
 
@@ -14101,6 +14111,45 @@ namespace Legion {
       assert(finder != proc_spaces.end());
 #endif
       return finder->second;
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_endpoint_creation(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      bool request;
+      derez.deserialize(request);
+      Processor remote_utility_group;
+      derez.deserialize(remote_utility_group);
+      if (request)
+      {
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize<bool>(false/*request*/);
+          rez.serialize(utility_group);
+          rez.serialize(address_space);
+        }
+        const Realm::ProfilingRequestSet empty_requests;
+        remote_utility_group.spawn(LG_ENDPOINT_TASK_ID, rez.get_buffer(),
+            rez.get_used_bytes(), empty_requests); 
+      }
+      else
+      {
+        AddressSpaceID remote_space;
+        derez.deserialize(remote_space);
+        AutoLock m_lock(message_manager_lock);
+        message_managers[remote_space] = new MessageManager(remote_space, 
+                            this, max_message_size, remote_utility_group);
+        std::map<AddressSpaceID,RtUserEvent>::iterator finder = 
+          pending_endpoint_requests.find(remote_space);
+#ifdef DEBUG_LEGION
+        assert(finder != pending_endpoint_requests.end());
+#endif
+        Runtime::trigger_event(finder->second);
+        pending_endpoint_requests.erase(finder);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -20927,6 +20976,7 @@ namespace Legion {
       CodeDescriptor lg_task(Runtime::legion_runtime_task);
       CodeDescriptor rt_profiling_task(Runtime::profiling_runtime_task);
       CodeDescriptor startup_task(Runtime::startup_runtime_task);
+      CodeDescriptor endpoint_task(Runtime::endpoint_runtime_task);
       Realm::ProfilingRequestSet no_requests;
       // Keep track of all the registration events
       std::set<RtEvent> registered_events;
@@ -20956,6 +21006,9 @@ namespace Legion {
                   no_requests, &it->second, sizeof(it->second))));
           registered_events.insert(RtEvent(
                 it->first.register_task(LG_TASK_ID, lg_task,
+                  no_requests, &it->second, sizeof(it->second))));
+          registered_events.insert(RtEvent(
+                it->first.register_task(LG_ENDPOINT_TASK_ID, endpoint_task,
                   no_requests, &it->second, sizeof(it->second))));
         }
         // Profiling tasks get registered on CPUs and utility processors
@@ -21001,6 +21054,8 @@ namespace Legion {
                       LG_LEGION_PROFILING_ID);
         log_run.print("Legion startup task has Realm ID %d",
                       LG_STARTUP_TASK_ID);
+        log_run.print("Legion endpoint task has Realm ID %d",
+                      LG_ENDPOINT_TASK_ID);
       }
       return Runtime::merge_events(registered_events);
     }
@@ -22046,6 +22101,21 @@ namespace Legion {
       Runtime *runtime = *((Runtime**)userdata);
       implicit_runtime = runtime;
       runtime->startup_runtime(top_level_precondition);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void Runtime::endpoint_runtime_task(
+                                   const void *args, size_t arglen, 
+				   const void *userdata, size_t userlen,
+				   Processor p)
+    //--------------------------------------------------------------------------
+    {
+      Runtime *runtime = *((Runtime**)userdata);
+#ifdef DEBUG_LEGION
+      assert(userlen == sizeof(Runtime**));
+#endif
+      Deserializer derez(args, arglen);
+      runtime->handle_endpoint_creation(derez);
     }
 
 #ifdef TRACE_ALLOCATION

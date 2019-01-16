@@ -6001,6 +6001,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    const Task* Runtime::get_current_task(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        return NULL;
+      return ctx->get_task();
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::raise_region_exception(Context ctx, 
                                                   PhysicalRegion region,
                                                   bool nuclear)

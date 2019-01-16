@@ -6003,6 +6003,14 @@ namespace Legion {
       Processor get_executing_processor(Context ctx);
 
       /**
+       * Return a pointer to the task object for the currently
+       * executing task.
+       * @param ctx enclosing task context
+       * @return a pointer to the Task object for the current task
+       */
+      const Task* get_current_task(Context ctx);
+
+      /**
        * Indicate that data in a particular physical region
        * appears to be incorrect for whatever reason.  This
        * will cause the runtime to trap into an error handler
