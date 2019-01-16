@@ -8732,8 +8732,6 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_perform.begin(); it != to_perform.end(); it++)
         {
-          // Add our resource reference too
-          it->first->add_nested_resource_ref(did);
           // Need the lock in read-only mode when doing the clone
           AutoLock eq(eq_lock,1,false/*exclusive*/);
           AddressSpaceID alt_space = it->first->clone_from(this, it->second);
@@ -8764,9 +8762,14 @@ namespace Legion {
         // Add any new refinements to our set
         if (!to_perform.empty())
         {
+          // References were added to these sets when they were added
+          // to the pending refinement queue, if they are already here
+          // then we can remove the duplicate reference, no need to 
+          // check for deletion since we know we hold another reference
           for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
                 to_perform.begin(); it != to_perform.end(); it++)
-            subsets.insert(it->first, it->second);
+            if (!subsets.insert(it->first, it->second))
+              it->first->remove_nested_resource_ref(did);
           to_perform.clear();
         }
         // See if we have any complete fields that we can clean up now
@@ -8847,13 +8850,23 @@ namespace Legion {
                       delete finder->first;
                     subsets.erase(finder);
                   }
+                  // Also update the complete subsets
+                  finder = complete_subsets.find(*it);
+#ifdef DEBUG_LEGION
+                  assert(finder != complete_subsets.end());
+#endif
+                  finder.filter(fit->set_mask);
+                  if (!finder->second)
+                    complete_subsets.erase(finder);
                 }
                 // Add new references
                 for (std::vector<EquivalenceSet*>::const_iterator it =
                       new_subsets.begin(); it != new_subsets.end(); it++)
                 {
-                  (*it)->add_nested_resource_ref(did);
-                  subsets.insert(*it, fit->set_mask);
+                  if (subsets.insert(*it, fit->set_mask))
+                    (*it)->add_nested_resource_ref(did);
+                  // Also add it to the complete subsets
+                  complete_subsets.insert(*it, fit->set_mask);
                 }
               }
               // Clean up the tree
@@ -9216,7 +9229,8 @@ namespace Legion {
           subset_exprs = new std::map<IndexSpaceExpression*,EquivalenceSet*>();
         // Save it in the set
         (*subset_exprs)[expr] = subset;
-        pending_refinements.insert(subset, mask);
+        if (pending_refinements.insert(subset, mask))
+          subset->add_nested_resource_ref(did);
         refinement_fields |= mask;
       }
       else
@@ -9230,7 +9244,8 @@ namespace Legion {
           const FieldMask diff_mask = mask - finder->second;
           if (!!diff_mask)
           {
-            pending_refinements.insert(subset, diff_mask);
+            if (pending_refinements.insert(subset, diff_mask))
+              subset->add_nested_resource_ref(did);
             refinement_fields |= diff_mask;
           }
           else // It's already refined for all of them, so just return
@@ -9239,7 +9254,8 @@ namespace Legion {
         else
         {
           // Do the normal insert if we couldn't find it
-          pending_refinements.insert(subset, mask);
+          if (pending_refinements.insert(subset, mask))
+            subset->add_nested_resource_ref(did);
           refinement_fields |= mask;
         }
       }
