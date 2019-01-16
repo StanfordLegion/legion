@@ -31,6 +31,8 @@ local std = {}
 
 std.config, std.args = base.config, base.args
 
+local max_dim = std.config["legion-dim"]
+
 local c = base.c
 std.c = c
 
@@ -47,9 +49,9 @@ std.check_cuda_available = cudahelper.check_cuda_available
 
 std.assert_error = base.assert_error
 std.assert = base.assert
-std.domain_from_bounds_1d = base.domain_from_bounds_1d
-std.domain_from_bounds_2d = base.domain_from_bounds_2d
-std.domain_from_bounds_3d = base.domain_from_bounds_3d
+for i = 1, max_dim do
+  std["domain_from_bounds_" .. tostring(i) .. "d"] = base["domain_from_bounds_" .. tostring(i) .. "d"]
+end
 
 -- #####################################
 -- ## Math functions
@@ -1888,8 +1890,8 @@ local function validate_index_base_type(base_type)
     return base_type, 1, false, terralib.sizeof(base_type) * 8
   elseif base_type:isstruct() then
     local entries = base_type:getentries()
-    assert(#entries >= 1 and #entries <= 3,
-           "Multi-dimensional index type expected 1 to 3 fields, got " ..
+    assert(#entries >= 1 and #entries <= max_dim,
+           "Multi-dimensional index type expected 1 to " .. tostring(max_dim) .. " fields, got " ..
              tostring(#entries))
     local num_bits = nil
     for _, entry in ipairs(entries) do
@@ -1913,9 +1915,9 @@ end
 
 local function validate_transform_type(M, N)
   assert(0 < M, "Row count for a transform type must be greater than 0")
-  assert(M <= 3, "Transform types having more than three rows are not supported yet.")
+  assert(M <= max_dim, "Transform types having more than " .. tostring(max_dim) .. " rows are not supported yet.")
   assert(0 < N, "Column count for a transform type must be greater than 0")
-  assert(N <= 3, "Transform types having more than three columns are not supported yet.")
+  assert(N <= max_dim, "Transform types having more than " .. tostring(max_dim) .. " columns are not supported yet.")
   local impl_type_name = "legion_transform_".. tostring(M) .. "x" .. tostring(N) .. "_t"
   local impl_type = c[impl_type_name]
   assert(impl_type ~= nil, impl_type_name .. " does not exist")
@@ -2120,7 +2122,7 @@ function std.index_type(base_type, displayname)
     else
       values = terralib.newlist({index})
     end
-    for _ = #values + 1, 3 do
+    for _ = #values + 1, max_dim do
       values:insert(0)
     end
 
@@ -2214,16 +2216,26 @@ function std.index_type(base_type, displayname)
   return setmetatable(st, index_type)
 end
 
-struct std.__int2d { x : int64, y : int64 }
-struct std.__int3d { x : int64, y : int64, z : int64 }
 std.ptr = std.index_type(opaque, "ptr")
-std.int1d = std.index_type(int64, "int1d")
-std.int2d = std.index_type(std.__int2d, "int2d")
-std.int3d = std.index_type(std.__int3d, "int3d")
-
-std.rect1d = std.rect_type(std.int1d)
-std.rect2d = std.rect_type(std.int2d)
-std.rect3d = std.rect_type(std.int3d)
+if max_dim >= 1 then
+  std.int1d = std.index_type(int64, "int1d")
+  std.rect1d = std.rect_type(std.int1d)
+end
+if max_dim >= 2 then
+  struct std.__int2d { x : int64, y : int64 }
+  std.int2d = std.index_type(std.__int2d, "int2d")
+  std.rect2d = std.rect_type(std.int2d)
+end
+if max_dim >= 3 then
+  struct std.__int3d { x : int64, y : int64, z : int64 }
+  std.int3d = std.index_type(std.__int3d, "int3d")
+  std.rect3d = std.rect_type(std.int3d)
+end
+if max_dim >= 4 then
+  struct std.__int4d { x : int64, y : int64, z : int64, w : int64 }
+  std.int4d = std.index_type(std.__int4d, "int4d")
+  std.rect4d = std.rect_type(std.int4d)
+end
 
 do
   local next_ispace_id = 1
@@ -3409,12 +3421,7 @@ function std.register_variant(variant)
   variants:insert(variant)
 end
 
-local max_dim = 3 -- Maximum dimension of an index space supported in Regent
-
 local function make_ordering_constraint(layout, dim)
-  -- This code would need to be taught about higher dimensions if the
-  -- maximum dimension were ever increased.
-  assert(max_dim == 3)
   assert(dim >= 1 and dim <= max_dim)
 
   local result = terralib.newlist()
