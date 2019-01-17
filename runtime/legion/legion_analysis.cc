@@ -5792,7 +5792,7 @@ namespace Legion {
             ray_mask -= intersections.get_valid_mask();
           }
         }
-        // If we still have fields left, see if wee need a refinement
+        // If we still have fields left, see if we need a refinement
         if (!!ray_mask && (set_expr->expr_id != expr->expr_id) &&
             (expr->get_volume() < set_expr->get_volume()))
         {
@@ -8996,22 +8996,7 @@ namespace Legion {
               eq.reacquire();
             }
           }
-        }
-        // Wait for any update_guards to finish for our refinement_fields
-        while (!update_guards.empty() && 
-                !(refinement_fields * update_guards.get_valid_mask()))
-        {
-          // If there are any mapping guards then defer ourselves
-          // until a later time when there aren't any mapping guards
-#ifdef DEBUG_LEGION
-          assert(!transition_event.exists());
-#endif
-          transition_event = Runtime::create_rt_user_event();
-          const RtEvent wait_on = transition_event;
-          eq.release();
-          wait_on.wait();
-          eq.reacquire();
-        }
+        } 
         // See if we have more refinements to do
         if (pending_refinements.empty())
         {
@@ -9023,6 +9008,25 @@ namespace Legion {
         }
         else // there are more refinements to do so we go around again
         {
+          // Wait for any update_guards to finish for our pending refinements
+          while (!update_guards.empty() && 
+                  !(pending_refinements.get_valid_mask() *
+                    update_guards.get_valid_mask()))
+          {
+            // If there are any mapping guards then defer ourselves
+            // until a later time when there aren't any mapping guards
+#ifdef DEBUG_LEGION
+            assert(!transition_event.exists());
+#endif
+            transition_event = Runtime::create_rt_user_event();
+            const RtEvent wait_on = transition_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
+          }
+#ifdef DEBUG_LEGION
+          assert(!(pending_refinements.get_valid_mask() - refinement_fields));
+#endif
           // Make sure that we're in the refining state
           eq_state = REFINING_STATE;
           to_perform.swap(pending_refinements);
