@@ -654,7 +654,7 @@ function optimize_config_options.top_task(cx, node)
   if std.config["inner"] and not inner and
     node.annotations.inner:is(ast.annotation.Demand)
   then
-    report.error(inner_node, "task is not a valid inner task")
+    report.error(inner_node or node, "task is not a valid inner task")
   end
 
   if std.config["idempotent"] and not idempotent and
