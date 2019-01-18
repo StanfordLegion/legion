@@ -5065,7 +5065,7 @@ namespace Legion {
             // If we're not the logical owner but we are the owner
             // then we have a valid remote lease of the subsets
             is_owner() ? VALID_STATE : INVALID_STATE), 
-        subset_exprs(NULL), lru_index(0)
+        subset_exprs(NULL), sample_count(0)
     //--------------------------------------------------------------------------
     {
       set_expr->add_expression_reference();
@@ -5086,10 +5086,6 @@ namespace Legion {
       }
       if (is_logical_owner() && !is_owner())
         remote_subsets.insert(owner_space);
-      // Initialize this to the array of all local addresses since if
-      // we're using the buffer we are the logical owner space
-      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
-        previous_requests[idx] = local_space;
 #ifdef LEGION_GC
       log_garbage.info("GC Equivalence Set %lld %d", did, local_space);
 #endif
@@ -6487,9 +6483,6 @@ namespace Legion {
         }
         disjoint_partition_refinements.clear();
       }
-      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
-        rez.serialize(previous_requests[idx]);
-      rez.serialize(lru_index);
       if (late_references != NULL)
       {
         // Launch a task to remove the references once the migration is done
@@ -6683,9 +6676,6 @@ namespace Legion {
         derez.deserialize(mask);
         disjoint_partition_refinements.insert(dis, mask);
       }
-      for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
-        derez.deserialize(previous_requests[idx]);
-      derez.deserialize(lru_index);
       // Make all the events we'll need to wait on
       RtEvent ready_for_references, guards_done;
       if (!deferred_reference_events.empty())
@@ -7313,104 +7303,131 @@ namespace Legion {
 #ifndef DISABLE_EQUIVALENCE_SET_MIGRATION
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
+      assert(user_samples.size() == user_counts.size());
 #endif
-      // No matter what update the previous requests data structure
-      previous_requests[lru_index++] = eq_source;
-      if (lru_index == NUM_PREVIOUS)
-        lru_index = 0;
-      // Don't do any migrations if we have any pending refinements
-      if (!pending_refinements.empty() || !!refining_fields)
-        return;
-      bool migrate = false;
-      // If we don't agree the current owner, see if we should migrate
-      if (eq_source != logical_owner_space)
+      // Record our user in the set of previous users
+      bool found = false;
+      for (unsigned idx = 0; idx < user_samples.size(); idx++)
       {
-        // Check two properties:
-        // 1. At least one of the last users is the current owner
-        // 2. All the previous users are the same and it's not the current owner
-        bool all_the_same = true;
-        bool has_previous_owner = false;
-        for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
+        if (user_samples[idx] != eq_source)
+          continue;
+        found = true;
+        user_counts[idx]++;
+        break;
+      }
+      if (!found)
+      {
+        user_samples.push_back(eq_source);
+        user_counts.push_back(1);
+      }
+      // Increase the sample count and if we haven't done enough
+      // for a test then we can return and keep going
+      if (++sample_count < SAMPLES_PER_MIGRATION_TEST)
+      {
+        // Check to see if the request bounced off a stale owner 
+        // and we should send the update message
+        if ((eq_source != remote_tracker.previous) &&
+            (eq_source != local_space))
         {
-          if (previous_requests[idx] == logical_owner_space)
-          {
-            // We'll never migrate if one of the previous 
-            // users is still the owner
-            all_the_same = false;
-            has_previous_owner = true;
-            break;
-          }
-          else if (previous_requests[idx] != previous_requests[0])
-            all_the_same = false;
-        }
-        if (all_the_same || !has_previous_owner)
-        {
-          migrate = true;
-          if (!all_the_same)
-          {
-            // None of the previous users were from the owner so 
-            // let's move to a node with the majority of the 
-            // previous users
-            std::map<AddressSpaceID,unsigned> counts;
-            for (unsigned idx = 0; idx < NUM_PREVIOUS; idx++)
-            {
-              std::map<AddressSpaceID,unsigned>::iterator finder = 
-                counts.find(previous_requests[idx]);
-              if (finder == counts.end())
-                counts[previous_requests[idx]] = 1;
-              else
-                finder->second++;
-            }
-            unsigned max = 0;
-            for (std::map<AddressSpaceID,unsigned>::const_iterator it = 
-                  counts.begin(); it != counts.end(); it++)
-            {
-              if (it->second > max)
-              {
-                logical_owner_space = it->first;
-                max = it->second;
-              }
-            }
-          }
-          else // They all go to the same place
-            logical_owner_space = eq_source;
-        }
-        if (migrate)
-        {
-          // Add ourselves and remove the new owner from remote subsets
-          remote_subsets.insert(local_space);
-          remote_subsets.erase(logical_owner_space);
-          // We can switch our eq_state to being remote valid
-          eq_state = VALID_STATE;
-          RtUserEvent done_migration = Runtime::create_rt_user_event();
-          // Do the migration
+          RtUserEvent notification_event = Runtime::create_rt_user_event();
           Serializer rez;
           {
             RezCheck z(rez);
             rez.serialize(did);
-            rez.serialize(done_migration);
-            pack_migration(rez, done_migration);
+            rez.serialize(logical_owner_space);
+            rez.serialize(notification_event);
           }
-          runtime->send_equivalence_set_migration(logical_owner_space, rez);
-          applied_events.insert(done_migration);
+          runtime->send_equivalence_set_owner_update(eq_source, rez);
+          applied_events.insert(notification_event);
         }
+        return;
       }
-      // If the request bounced of a stale logical owner, then send 
-      // a message to update the source with the current logical owner
-      if (!migrate && (eq_source != remote_tracker.previous) &&
-          (eq_source != local_space))
+      // Issue a warning and don't migrate if we hit this case
+      if (user_samples.size() == SAMPLES_PER_MIGRATION_TEST)
       {
-        RtUserEvent notification_event = Runtime::create_rt_user_event();
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(did);
-          rez.serialize(logical_owner_space);
-          rez.serialize(notification_event);
-        }
-        runtime->send_equivalence_set_owner_update(eq_source, rez);
-        applied_events.insert(notification_event);
+        REPORT_LEGION_WARNING(LEGION_WARNING_LARGE_EQUIVALENCE_SET_NODE_USAGE,
+            "Internal runtime performance warning: equivalence set %lld has "
+            "%zd different users which is the same as the sampling rate of "
+            "%d. Please report this application use case to the Legion "
+            "developers mailing list.", did, user_samples.size(),
+            SAMPLES_PER_MIGRATION_TEST)
+        // Reset the data structures for the next run
+        user_samples.clear();
+        user_counts.clear();
+        sample_count = 0;
+        return;
       }
+      // Don't do any migrations if we have any pending refinements
+      if (!pending_refinements.empty() || !!refining_fields)
+      {
+        // Reset the data structures for the next run
+        user_samples.clear();
+        user_counts.clear();
+        sample_count = 0;
+        return;
+      }
+#ifdef DEBUG_LEGION
+      assert(!user_samples.empty());
+#endif
+      // Figure out which node(s) has/have the most uses 
+      // Make sure that the current owner node is sticky
+      // if it is tied for the most uses
+      unsigned max = user_counts[0]; 
+      AddressSpaceID max_user = user_samples[0];
+      for (unsigned idx = 1; idx < user_samples.size(); idx++)
+      {
+        if (user_counts[idx] < max)
+          continue;
+        if ((user_counts[idx] == max) && 
+            (user_samples[idx] != logical_owner_space))
+          continue;
+        max = user_counts[idx];
+        max_user = user_samples[idx];
+      }
+      // Reset the data structures for the next run
+      user_samples.clear();
+      user_counts.clear();
+      sample_count = 0;
+      // Then decide if we need to do the migration
+      if (max_user == logical_owner_space)
+      {
+        // No need to do the migration in this case
+        // Check to see if the request bounced off a stale owner 
+        // and we should send the update message
+        if ((eq_source != remote_tracker.previous) &&
+            (eq_source != local_space))
+        {
+          RtUserEvent notification_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(did);
+            rez.serialize(logical_owner_space);
+            rez.serialize(notification_event);
+          }
+          runtime->send_equivalence_set_owner_update(eq_source, rez);
+          applied_events.insert(notification_event);
+        }
+        return;
+      }
+      // At this point we've decided to do the migration
+      logical_owner_space = max_user;
+      // Add ourselves and remove the new owner from remote subsets
+      remote_subsets.insert(local_space);
+      remote_subsets.erase(logical_owner_space);
+      // We can switch our eq_state to being remote valid
+      eq_state = VALID_STATE;
+      RtUserEvent done_migration = Runtime::create_rt_user_event();
+      // Do the migration
+      Serializer rez;
+      {
+        RezCheck z(rez);
+        rez.serialize(did);
+        rez.serialize(done_migration);
+        pack_migration(rez, done_migration);
+      }
+      runtime->send_equivalence_set_migration(logical_owner_space, rez);
+      applied_events.insert(done_migration);
 #endif
     }
 

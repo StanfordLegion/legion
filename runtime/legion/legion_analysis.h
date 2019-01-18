@@ -1318,10 +1318,15 @@ namespace Legion {
       // For detecting when we are slicing a disjoint partition
       FieldMaskSet<DisjointPartitionRefinement> disjoint_partition_refinements;
     protected:
-      static const unsigned NUM_PREVIOUS = 7;
-      // Meta data for tracking when we should migrate the equivalence set
-      AddressSpaceID previous_requests[NUM_PREVIOUS]; 
-      unsigned lru_index;
+      // Uses these for determining when we should do migration
+      // There is an implicit assumption here that equivalence sets
+      // are only used be a small number of nodes that is less than
+      // the smaples per migration count, if it ever exceeds this 
+      // then we'll issue a warning
+      static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      std::vector<AddressSpaceID> user_samples;
+      std::vector<unsigned> user_counts;
+      unsigned sample_count;
     public:
       static const VersionID init_version = 1;
     };
