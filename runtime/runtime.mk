@@ -450,6 +450,10 @@ else
 CC_FLAGS	+= -O2 -fno-strict-aliasing #-ggdb
 endif
 
+# Set maximum number of dimensions
+ifneq ($(strip ${MAX_DIM}),)
+CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)
+endif
 
 # Manage the output setting
 CC_FLAGS	+= -DCOMPILE_TIME_MIN_LEVEL=$(OUTPUT_LEVEL)
