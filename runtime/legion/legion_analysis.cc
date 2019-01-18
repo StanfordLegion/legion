@@ -2253,6 +2253,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyFillAggregator::CopyUpdate::compute_source_preconditions(
                      RegionTreeForest *forest,
+#ifdef DEBUG_LEGION
+                     const bool copy_across,
+#endif
                      const std::map<InstanceView*,EventFieldExprs> &src_pre,
                      LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
     //--------------------------------------------------------------------------
@@ -2282,7 +2285,7 @@ namespace Legion {
           // that are using just a part of it, should be all or nothing, with
           // the exception of copy across operations in which case it doesn't
           // matter because we don't need precise preconditions there
-          if (across_helper == NULL)
+          if (copy_across)
             assert(expr_overlap->get_volume() == expr->get_volume());
 #endif
           // Overlap in both so record it
@@ -2319,6 +2322,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void CopyFillAggregator::FillUpdate::compute_source_preconditions(
                      RegionTreeForest *forest,
+#ifdef DEBUG_LEGION
+                     const bool copy_across,
+#endif
                      const std::map<InstanceView*,EventFieldExprs> &src_pre,
                      LegionMap<ApEvent,FieldMask>::aligned &preconditions) const
     //--------------------------------------------------------------------------
@@ -2924,7 +2930,7 @@ namespace Legion {
                 // be no users that are using just a part of it, should 
                 // be all or nothing, unless this is a copy across in 
                 // which case it doesn't matter
-                if (it->first->across_helper == NULL)
+                if (src_index != dst_index)
                   assert(expr_overlap->get_volume() == 
                           it->first->expr->get_volume());
 #endif
@@ -2957,7 +2963,11 @@ namespace Legion {
             }
           }
           // The compute the source preconditions for this update
-          it->first->compute_source_preconditions(forest,src_pre,preconditions);
+          it->first->compute_source_preconditions(forest,
+#ifdef DEBUG_LEGION
+                                                  (src_index != dst_index),
+#endif
+                                                  src_pre, preconditions);
           if (preconditions.empty())
             // NO precondition so enter it with a no event
             update_groups[ApEvent::NO_AP_EVENT].insert(it->first, 
