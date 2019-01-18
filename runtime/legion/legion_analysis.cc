@@ -7727,7 +7727,17 @@ namespace Legion {
       user_counts.clear();
       sample_count = 0;
       // Then decide if we need to do the migration
-      if (max_user == logical_owner_space)
+      // If the max_user is the logical_owner_space that is easy
+      // since we don't need to move anything
+      // We also check for the ping-pong case of two nodes that are
+      // about evenly balance, make sure one has a 2/3 majority count
+      // before migrating
+      if ((max_user == logical_owner_space) ||
+          // Everything below here is the test for ping pong cases
+          ((user_samples.size() == 2) && 
+           ((user_samples[0] == logical_owner_space) ||
+            (user_samples[1] == logical_owner_space)) &&
+           (max < (2 * SAMPLES_PER_MIGRATION_TEST / 3))))
       {
         // No need to do the migration in this case
         // Check to see if the request bounced off a stale owner 
