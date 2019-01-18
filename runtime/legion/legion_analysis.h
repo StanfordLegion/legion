@@ -544,6 +544,9 @@ namespace Legion {
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const = 0;
         virtual void compute_source_preconditions(RegionTreeForest *forest,
+#ifdef DEBUG_LEGION
+               const bool copy_across,
+#endif
                const std::map<InstanceView*,EventFieldExprs> &src_pre,
                LegionMap<ApEvent,FieldMask>::aligned &preconditions) const = 0;
         virtual void sort_updates(std::map<InstanceView*,
@@ -572,6 +575,9 @@ namespace Legion {
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
         virtual void compute_source_preconditions(RegionTreeForest *forest,
+#ifdef DEBUG_LEGION
+                   const bool copy_across,
+#endif
                    const std::map<InstanceView*,EventFieldExprs> &src_pre,
                    LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
@@ -598,6 +604,9 @@ namespace Legion {
         virtual void record_source_expressions(
                         InstanceFieldExprs &src_exprs) const;
         virtual void compute_source_preconditions(RegionTreeForest *forest,
+#ifdef DEBUG_LEGION
+                   const bool copy_across,
+#endif
                    const std::map<InstanceView*,EventFieldExprs> &src_pre,
                    LegionMap<ApEvent,FieldMask>::aligned &preconditions) const;
         virtual void sort_updates(std::map<InstanceView*,
