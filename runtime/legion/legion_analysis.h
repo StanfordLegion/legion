@@ -1020,7 +1020,6 @@ namespace Legion {
         // all mappings to finish and then goes to refined once any 
         // refinements have been done
         MAPPING_STATE, // subsets is stable and no refinements being performed
-        PENDING_REFINED_STATE, // waiting for mappings to drain
         REFINING_STATE, // running the refinement task
         // Remote copies start in the invalid state, go to pending valid
         // while waiting for a lease on the current subsets, valid once they 
@@ -1059,7 +1058,7 @@ namespace Legion {
       inline bool is_refined(const FieldMask &mask) const
         { 
           return (!subsets.empty() && !(subsets.get_valid_mask() * mask)) ||
-                  ((eq_state == REFINING_STATE) && !(refinement_fields * mask));
+                  !(refining_fields * mask);
         }
     public:
       // From distributed collectable
@@ -1284,7 +1283,7 @@ namespace Legion {
       // Track the current state of this equivalence state
       EqState eq_state;
       // Fields that are being refined
-      FieldMask refinement_fields;
+      FieldMask refining_fields;
       // Track any pending update operations that have yet to be done
       FieldMaskSet<CopyFillAggregator> update_guards;
       // Keep track of the refinements that need to be done
