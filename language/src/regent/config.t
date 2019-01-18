@@ -64,6 +64,9 @@ local default_options = {
   ["vectorize"] = true,
   ["vectorize-unsafe"] = false,
 
+  -- Legion runtime compile options:
+  ["legion-dim"] = 3, -- Set this to the value of LEGION_MAX_DIM.
+
   -- Legion runtime optimization flags:
   ["legion-leaf"] = true,
   ["legion-inner"] = true,

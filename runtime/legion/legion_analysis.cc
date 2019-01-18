@@ -2277,6 +2277,14 @@ namespace Legion {
             forest->intersect_index_spaces(expr, it->first);
           if (expr_overlap->is_empty())
             continue;
+#ifdef DEBUG_LEGION
+          // Since this is an equivalence set update there should be no users 
+          // that are using just a part of it, should be all or nothing, with
+          // the exception of copy across operations in which case it doesn't
+          // matter because we don't need precise preconditions there
+          if (across_helper == NULL)
+            assert(expr_overlap->get_volume() == expr->get_volume());
+#endif
           // Overlap in both so record it
           LegionMap<ApEvent,FieldMask>::aligned::iterator
             event_finder = preconditions.find(eit->first);
@@ -2767,6 +2775,10 @@ namespace Legion {
             // Update the destinations first
             if (!has_dst_preconditions)
             {
+#ifdef DEBUG_LEGION
+              // We should not have an across helper in this case
+              assert(it->first->across_helper == NULL);
+#endif
               FieldMaskSet<IndexSpaceExpression>::iterator finder = 
                 dst_expr.find(it->first->expr);
               if (finder == dst_expr.end())
@@ -2907,6 +2919,15 @@ namespace Legion {
                   forest->intersect_index_spaces(eit->first, it->first->expr);
                 if (expr_overlap->is_empty())
                   continue;
+#ifdef DEBUG_LEGION
+                // Since this is an equivalence set update there should 
+                // be no users that are using just a part of it, should 
+                // be all or nothing, unless this is a copy across in 
+                // which case it doesn't matter
+                if (it->first->across_helper == NULL)
+                  assert(expr_overlap->get_volume() == 
+                          it->first->expr->get_volume());
+#endif
                 // Overlap on both so add it to the set
                 LegionMap<ApEvent,FieldMask>::aligned::iterator finder = 
                   preconditions.find(pit->first);
@@ -2993,6 +3014,9 @@ namespace Legion {
             Runtime::merge_events(&trace_info, precondition, eit->first) :
             eit->first;
           const FieldMaskSet<Update> &group = eit->second;
+#ifdef DEBUG_LEGION
+          assert(!group.empty());
+#endif
           if (group.size() == 1)
           {
             // Only one update so no need to try to group or merge 
@@ -4424,7 +4448,7 @@ namespace Legion {
               copy_applied, copy_remote, output_aggregator, applied,
               remote_ready, effects_done);
           runtime->issue_runtime_meta_task(args,
-              LG_THROUGHPUT_DEFERRED_PRIORITY, wait_on);
+              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
           return;
         }
       }
@@ -5590,12 +5614,6 @@ namespace Legion {
       AutoLock eq(eq_lock);
       if (update_guards.empty())
         return;
-#ifdef DEBUG_LEGION
-      // Put this assertion after the test above in case we were migrated
-      assert((eq_state == MAPPING_STATE) || 
-             (eq_state == PENDING_REFINED_STATE) ||
-             (update_guards.get_valid_mask() * refinement_fields));
-#endif
       FieldMaskSet<CopyFillAggregator>::iterator finder = 
         update_guards.find(aggregator);
       if (finder == update_guards.end())
@@ -5603,9 +5621,10 @@ namespace Legion {
       update_guards.erase(finder);
       if (update_guards.size() > 1)
         update_guards.tighten_valid_mask();
-      if ((eq_state == PENDING_REFINED_STATE) && 
+      if ((eq_state == REFINING_STATE) && 
           transition_event.exists() && (update_guards.empty() ||
-            (update_guards.get_valid_mask() * refinement_fields)))
+            (update_guards.get_valid_mask() * 
+             pending_refinements.get_valid_mask())))
       {
         Runtime::trigger_event(transition_event);
         transition_event = RtUserEvent::NO_RT_USER_EVENT;
@@ -5688,15 +5707,22 @@ namespace Legion {
         }
       }
       // See if we need to wait for any refinements to finish
-      while (refinement_event.exists() && 
-              !(mask * refinement_fields))
+      if (!(mask * pending_refinements.get_valid_mask()) ||
+              !(mask * refining_fields))
       {
-        RtEvent wait_on = refinement_event;
+#ifdef DEBUG_LEGION
+        assert(refinement_event.exists());
+#endif
+        const RtEvent wait_on = refinement_event;
         eq.release();
         if (!wait_on.has_triggered())
           wait_on.wait();
         eq.reacquire();
       }
+#ifdef DEBUG_LEGION
+      assert(mask * refining_fields);
+      assert(mask * pending_refinements.get_valid_mask());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -5810,17 +5836,16 @@ namespace Legion {
           return;
         }
         else if ((eq_state == REFINING_STATE) && 
-                  !(ray_mask * refinement_fields))
+                  !(ray_mask * refining_fields))
         {
-#ifdef DEBUG_LEGION
-          assert(refinement_event.exists());
-#endif
+          if (!transition_event.exists())
+            transition_event = Runtime::create_rt_user_event();
           // If we're refining then we also need to defer this until 
-          // the refinements are done
+          // the refinements that interfere with us are done
           DeferRayTraceArgs args(this, target, expr, handle, source, 
                                  trace_done, deferral_event, ray_mask);
           runtime->issue_runtime_meta_task(args,
-                            LG_THROUGHPUT_DEFERRED_PRIORITY, refinement_event);
+                            LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
           return;
         }
         // First check to see which fields are in a disjoint refinement
@@ -6130,7 +6155,7 @@ namespace Legion {
             ray_mask -= intersections.get_valid_mask();
           }
         }
-        // If we still have fields left, see if wee need a refinement
+        // If we still have fields left, see if we need a refinement
         if (!!ray_mask && (set_expr->expr_id != expr->expr_id) &&
             (expr->get_volume() < set_expr->get_volume()))
         {
@@ -7316,8 +7341,8 @@ namespace Legion {
           *remove_mask |= to_traverse.get_valid_mask();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
-          it->first->update_set(remote_tracker, alt_sets, NULL, local_space, 
-              op, index, usage, it->second, target_instances, target_views, 
+          it->first->update_set(remote_tracker, alt_sets, NULL, source,
+              op, index, usage, it->second, target_instances, target_views,
               input_aggregators, output_aggregator, applied_events,
               guard_events, initialized, false/*original set*/);
         eq.reacquire();
@@ -7622,7 +7647,7 @@ namespace Legion {
       if (lru_index == NUM_PREVIOUS)
         lru_index = 0;
       // Don't do any migrations if we have any pending refinements
-      if (!!refinement_fields)
+      if (!pending_refinements.empty() || !!refining_fields)
         return;
       bool migrate = false;
       // If we don't agree the current owner, see if we should migrate
@@ -7805,7 +7830,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->acquire_restrictions(remote_tracker, alt_sets, NULL, 
-              local_space, op, it->second, instances, inst_exprs, 
+              source, op, it->second, instances, inst_exprs, 
               applied_events, false/*original set*/);
         eq.reacquire();
         // Return if our acquire user mask is empty
@@ -7931,7 +7956,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->release_restrictions(remote_tracker, alt_sets, NULL,
-              local_space, op, it->second, release_aggregator, instances, 
+              source, op, it->second, release_aggregator, instances, 
               inst_exprs, ready_events, false/*original set*/);
         eq.reacquire();
         // Return if ourt release mask is empty
@@ -8096,7 +8121,7 @@ namespace Legion {
           if (subset_overlap->is_empty())
             continue;
           it->first->issue_across_copies(remote_tracker, alt_sets, NULL,
-              local_space, op, src_index, dst_index, usage, it->second, 
+              source, op, src_index, dst_index, usage, it->second, 
               target_instances, target_views, subset_overlap, aggregator, 
               pred_guard, redop, initialized_fields, applied_events, 
               src_indexes, dst_indexes, across_helpers, false/*original set*/);
@@ -8375,7 +8400,7 @@ namespace Legion {
           *remove_mask |= to_traverse.get_valid_mask();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
-          it->first->overwrite_set(remote_tracker, alt_sets, NULL, local_space,
+          it->first->overwrite_set(remote_tracker, alt_sets, NULL, source,
               op, index, view, it->second, output_aggregator, ready_events, 
               pred_guard, add_restriction, false/*original set*/);
         eq.reacquire();
@@ -8573,7 +8598,7 @@ namespace Legion {
           *remove_mask |= to_traverse.get_valid_mask();
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
-          it->first->filter_set(remote_tracker, alt_sets, NULL, local_space,
+          it->first->filter_set(remote_tracker, alt_sets, NULL, source,
               op, inst_view, it->second, applied_events, registration_view,
               remove_restriction, false/*original set*/);
         eq.reacquire();
@@ -9096,10 +9121,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(is_logical_owner());
         assert(refinement_event.exists());
+        assert(eq_state == REFINING_STATE);
 #endif
-        // Add any new refinements to our set
+        // Add any new refinements to our set and record any
+        // potentially complete fields
+        FieldMask complete_mask;
         if (!to_perform.empty())
         {
+#ifdef DEBUG_LEGION
+          // These masks should be identical
+          assert(refining_fields == to_perform.get_valid_mask());
+          // There should be no more guards that overlap with 
+          // the fields that are being refined
+          assert(update_guards.get_valid_mask() * refining_fields);
+#endif
+          complete_mask = refining_fields;
+          refining_fields.clear();
           // References were added to these sets when they were added
           // to the pending refinement queue, if they are already here
           // then we can remove the duplicate reference, no need to 
@@ -9109,9 +9146,17 @@ namespace Legion {
             if (!subsets.insert(it->first, it->second))
               it->first->remove_nested_resource_ref(did);
           to_perform.clear();
+          // See if there was anyone waiting for us to be done
+          if (transition_event.exists())
+          {
+            Runtime::trigger_event(transition_event);
+            transition_event = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
-        // See if we have any complete fields that we can clean up now
-        FieldMask complete_mask = subsets.get_valid_mask();
+#ifdef DEBUG_LEGION
+        assert(!refining_fields);
+        assert(!transition_event.exists());
+#endif
         // Fields which are still being refined are not complete
         while (!!complete_mask)
         {
@@ -9334,22 +9379,7 @@ namespace Legion {
               eq.reacquire();
             }
           }
-        }
-        // Wait for any update_guards to finish for our refinement_fields
-        while (!update_guards.empty() && 
-                !(refinement_fields * update_guards.get_valid_mask()))
-        {
-          // If there are any mapping guards then defer ourselves
-          // until a later time when there aren't any mapping guards
-#ifdef DEBUG_LEGION
-          assert(!transition_event.exists());
-#endif
-          transition_event = Runtime::create_rt_user_event();
-          const RtEvent wait_on = transition_event;
-          eq.release();
-          wait_on.wait();
-          eq.reacquire();
-        }
+        } 
         // See if we have more refinements to do
         if (pending_refinements.empty())
         {
@@ -9357,12 +9387,29 @@ namespace Legion {
           eq_state = MAPPING_STATE;
           to_trigger = refinement_event;
           refinement_event = RtUserEvent::NO_RT_USER_EVENT;
-          refinement_fields.clear();
         }
         else // there are more refinements to do so we go around again
         {
-          // Make sure that we're in the refining state
-          eq_state = REFINING_STATE;
+          // Wait for any update_guards to finish for our pending refinements
+          while (!update_guards.empty() && 
+                  !(pending_refinements.get_valid_mask() *
+                    update_guards.get_valid_mask()))
+          {
+            // If there are any mapping guards then defer ourselves
+            // until a later time when there aren't any mapping guards
+#ifdef DEBUG_LEGION
+            assert(!transition_event.exists());
+#endif
+            transition_event = Runtime::create_rt_user_event();
+            const RtEvent wait_on = transition_event;
+            eq.release();
+            wait_on.wait();
+            eq.reacquire();
+          }
+#ifdef DEBUG_LEGION
+          assert(!refining_fields); // should be empty prior to this
+#endif
+          refining_fields = pending_refinements.get_valid_mask();
           to_perform.swap(pending_refinements);
         }
       } while (!to_perform.empty());
@@ -9573,7 +9620,6 @@ namespace Legion {
         (*subset_exprs)[expr] = subset;
         if (pending_refinements.insert(subset, mask))
           subset->add_nested_resource_ref(did);
-        refinement_fields |= mask;
       }
       else
       {
@@ -9588,7 +9634,6 @@ namespace Legion {
           {
             if (pending_refinements.insert(subset, diff_mask))
               subset->add_nested_resource_ref(did);
-            refinement_fields |= diff_mask;
           }
           else // It's already refined for all of them, so just return
             return subset;
@@ -9598,24 +9643,25 @@ namespace Legion {
           // Do the normal insert if we couldn't find it
           if (pending_refinements.insert(subset, mask))
             subset->add_nested_resource_ref(did);
-          refinement_fields |= mask;
         }
       }
+      // Launch the refinement task if there isn't one already running
       if (eq_state == MAPPING_STATE)
       {
 #ifdef DEBUG_LEGION
         assert(!transition_event.exists());
         assert(!refinement_event.exists());
+        assert(!refining_fields); // should be empty
 #endif
         refinement_event = Runtime::create_rt_user_event();
-        eq_state = PENDING_REFINED_STATE;
+        eq_state = REFINING_STATE;
         // Launch the refinement task to be performed
         RefinementTaskArgs args(this);
         // If we have outstanding guard events then make a transition event
         // for them to trigger when the last one has been removed such
         // that the refinement task will not start before it's ready
-        if (!update_guards.empty() && 
-            !(refinement_fields * update_guards.get_valid_mask()))
+        if (!update_guards.empty() && !(pending_refinements.get_valid_mask() 
+                                            * update_guards.get_valid_mask()))
           transition_event = Runtime::create_rt_user_event();
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
@@ -9706,8 +9752,10 @@ namespace Legion {
       {
         FieldMask complete_mask = subsets.get_valid_mask();
         // Any fields for which we have partial refinements cannot be sent yet
-        if (!!refinement_fields)
-          complete_mask -= refinement_fields;
+        if (!pending_refinements.empty())
+          complete_mask -= pending_refinements.get_valid_mask();
+        if (!!refining_fields)
+          complete_mask -= refining_fields;
         if (!unrefined_remainders.empty())
           complete_mask -= unrefined_remainders.get_valid_mask();
         if (!!disjoint_partition_refinements.empty())
@@ -10228,34 +10276,73 @@ namespace Legion {
       // If we don't have equivalence classes for this region yet we 
       // either need to compute them or request them from the owner
       FieldMask remaining_mask(version_mask);
+      bool has_waiter = false;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        // Get any fields that are already ready
-        if (version_info != NULL)
+        // Check to see if any computations of equivalence sets are in progress
+        // If so we'll skip out early and go down the slow path which should
+        // be a fairly rare thing to do
+        if (!equivalence_sets_ready.empty())
         {
-          if (!(version_mask * equivalence_sets.get_valid_mask()))
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+                equivalence_sets_ready.begin(); it != 
+                equivalence_sets_ready.end(); it++)
           {
-            for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-                  equivalence_sets.begin(); it != equivalence_sets.end(); it++)
-            {
-              const FieldMask overlap = it->second & version_mask;
-              if (!overlap)
-                continue;
-              version_info->record_equivalence_set(this, version_number,
-                                                   it->first, overlap);
-            }
+            if (remaining_mask * it->second)
+              continue;
+            // Skip out earlier if we have at least one thing to wait
+            // for since we're going to have to go down the slow path
+            has_waiter = true;
+            break;
           }
         }
-        remaining_mask -= equivalence_sets.get_valid_mask();
-        // If we got all our fields then we are done
-        if (!remaining_mask)
-          return RtEvent::NO_RT_EVENT;
+        // If we have a waiter, then don't bother doing this
+        if (!has_waiter)
+        {
+          // Get any fields that are already ready
+          if (version_info != NULL)
+          {
+            if (!(version_mask * equivalence_sets.get_valid_mask()))
+            {
+              for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                   equivalence_sets.begin(); it != equivalence_sets.end(); it++)
+              {
+                const FieldMask overlap = it->second & version_mask;
+                if (!overlap)
+                  continue;
+                version_info->record_equivalence_set(this, version_number,
+                                                     it->first, overlap);
+              }
+            }
+          }
+          remaining_mask -= equivalence_sets.get_valid_mask();
+          // If we got all our fields then we are done
+          if (!remaining_mask)
+            return RtEvent::NO_RT_EVENT;
+        }
       }
       // Retake the lock in exclusive mode and make sure we don't lose the race
       RtUserEvent compute_event;
       std::set<RtEvent> wait_on;
       {
+        FieldMask waiting_mask;
         AutoLock m_lock(manager_lock);
+        if (!equivalence_sets_ready.empty())
+        {
+          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
+                equivalence_sets_ready.begin(); it != 
+                equivalence_sets_ready.end(); it++)
+          {
+            const FieldMask overlap = remaining_mask & it->second;
+            if (!overlap)
+              continue;
+            wait_on.insert(it->first);
+            waiting_mask |= overlap;
+            remaining_mask -= overlap;
+            if (!remaining_mask)
+              break;
+          }
+        }
         // Get any fields that are already ready
         if (!(remaining_mask * equivalence_sets.get_valid_mask()))
         {
@@ -10275,26 +10362,15 @@ namespace Legion {
           if (!remaining_mask) // We're done if we got all our fields
             return RtEvent::NO_RT_EVENT;
         }
+        // If we have waiting fields then update them now
+        if (!!waiting_mask)
+          remaining_mask |= waiting_mask;
 #ifdef DEBUG_LEGION
         assert(!!remaining_mask);
 #endif
         // Record that our version info is waiting for these fields
         if (version_info != NULL)
           waiting_infos.insert(version_info, remaining_mask);
-        if (!equivalence_sets_ready.empty())
-        {
-          for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator it =
-                equivalence_sets_ready.begin(); it != 
-                equivalence_sets_ready.end(); it++)
-          {
-            if (remaining_mask * it->second)
-              continue;
-            wait_on.insert(it->first);
-            remaining_mask -= it->second;
-            if (!remaining_mask)
-              break;
-          }
-        }
         if (!!remaining_mask)
         {
           compute_event = Runtime::create_rt_user_event();
