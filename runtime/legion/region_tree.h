@@ -439,7 +439,7 @@ namespace Legion {
       void handle_defer_registration(const void *args);
       ApEvent acquire_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
-                                   Operation *op, unsigned index,
+                                   AcquireOp *op, unsigned index,
                                    ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
@@ -451,7 +451,7 @@ namespace Legion {
                                    const bool need_restricted_insts);
       ApEvent release_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
-                                   Operation *op, unsigned index,
+                                   ReleaseOp *op, unsigned index,
                                    ApEvent precondition, ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
@@ -466,7 +466,7 @@ namespace Legion {
                           VersionInfo &src_version_info,
                           VersionInfo &dst_version_info,
                           const InstanceSet &src_targets,
-                          const InstanceSet &dst_targets, Operation *op,
+                          const InstanceSet &dst_targets, CopyOp *op,
                           unsigned src_index, unsigned dst_index,
                           ApEvent precondition, PredEvent pred_guard,
                           const PhysicalTraceInfo &trace_info,
@@ -477,7 +477,7 @@ namespace Legion {
                           const LegionVector<IndirectRecord>::aligned &records,
                             const InstanceRef &idx_target,
                             const InstanceSet &dst_targets,
-                            Operation *op, unsigned dst_index,
+                            CopyOp *op, unsigned dst_index,
                             const ApEvent precondition, 
                             const PredEvent pred_guard,
                             const PhysicalTraceInfo &trace_info);
@@ -487,7 +487,7 @@ namespace Legion {
                              const InstanceSet &src_targets,
                              const InstanceRef &idx_target,
                           const LegionVector<IndirectRecord>::aligned &records,
-                             Operation *op, unsigned src_index,
+                             CopyOp *op, unsigned src_index,
                              const ApEvent precondition, 
                              const PredEvent pred_guard,
                              const PhysicalTraceInfo &trace_info);
@@ -503,10 +503,9 @@ namespace Legion {
                               const PredEvent pred_guard,
                               const PhysicalTraceInfo &trace_info);
       // This takes ownership of the value buffer
-      ApEvent fill_fields(Operation *op,
+      ApEvent fill_fields(FillOp *op,
                           const RegionRequirement &req,
-                          const unsigned index,
-                          const void *value, size_t value_size,
+                          const unsigned index, FillView *fill_view,
                           VersionInfo &version_info, ApEvent precondition,
                           PredEvent true_guard,
                           const PhysicalTraceInfo &trace_info,

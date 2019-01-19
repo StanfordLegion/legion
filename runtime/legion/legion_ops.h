@@ -2597,6 +2597,7 @@ namespace Legion {
       virtual void resolve_false(bool speculated, bool launched);
     public:
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void trigger_complete(void);
       virtual void trigger_commit(void);
     public:
       void check_fill_privilege(void);
@@ -2613,6 +2614,7 @@ namespace Legion {
       void *value;
       size_t value_size;
       Future future;
+      FillView *fill_view;
       std::set<RtEvent> map_applied_conditions;
       PredEvent true_guard, false_guard;
     };

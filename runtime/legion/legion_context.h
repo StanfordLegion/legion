@@ -979,6 +979,9 @@ namespace Legion {
     public:
       virtual InstanceView* create_instance_top_view(PhysicalManager *manager,
                              AddressSpaceID source, RtEvent *ready = NULL);
+      virtual FillView* find_or_create_fill_view(FillOp *op, 
+                             std::set<RtEvent> &map_applied_events,
+                             const void *value, const size_t value_size);
       static void handle_remote_view_creation(const void *args);
       void notify_instance_deletion(PhysicalManager *deleted); 
       static void handle_create_top_view_request(Deserializer &derez, 
@@ -1137,6 +1140,11 @@ namespace Legion {
     protected:
       // Track information for locally created regions
       std::set<LogicalRegion> local_regions;
+    protected:
+      // Cache for fill views
+      mutable LocalLock     fill_view_lock;            
+      std::list<FillView*>  fill_view_cache;
+      static const size_t MAX_FILL_VIEW_CACHE_SIZE = 64;
     };
 
     /**

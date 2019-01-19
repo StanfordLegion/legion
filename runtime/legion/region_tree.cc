@@ -2066,7 +2066,7 @@ namespace Legion {
     ApEvent RegionTreeForest::acquire_restrictions(
                                          const RegionRequirement &req,
                                          VersionInfo &version_info,
-                                         Operation *op, unsigned index,
+                                         AcquireOp *op, unsigned index,
                                          ApEvent term_event,
                                          InstanceSet &restricted_instances,
                                          const PhysicalTraceInfo &trace_info,
@@ -2170,7 +2170,7 @@ namespace Legion {
     ApEvent RegionTreeForest::release_restrictions(
                                          const RegionRequirement &req,
                                          VersionInfo &version_info,
-                                         Operation *op, unsigned index,
+                                         ReleaseOp *op, unsigned index,
                                          ApEvent precondition,
                                          ApEvent term_event,
                                          InstanceSet &restricted_instances,
@@ -2287,7 +2287,7 @@ namespace Legion {
                                         VersionInfo &dst_version_info,
                                         const InstanceSet &src_targets,
                                         const InstanceSet &dst_targets,
-                                        Operation *op, 
+                                        CopyOp *op, 
                                         unsigned src_index, unsigned dst_index,
                                         ApEvent precondition, PredEvent guard, 
                                         const PhysicalTraceInfo &trace_info,
@@ -2595,7 +2595,7 @@ namespace Legion {
                     const LegionVector<IndirectRecord>::aligned &src_records,
                                             const InstanceRef &idx_target,
                                             const InstanceSet &dst_targets,
-                                            Operation *op, unsigned dst_index,
+                                            CopyOp *op, unsigned dst_index,
                                             const ApEvent precondition, 
                                             const PredEvent pred_guard,
                                             const PhysicalTraceInfo &trace_info)
@@ -2718,7 +2718,7 @@ namespace Legion {
                                              const InstanceSet &src_targets,
                                              const InstanceRef &idx_target,
                     const LegionVector<IndirectRecord>::aligned &dst_records,
-                                             Operation *op, unsigned src_index,
+                                             CopyOp *op, unsigned src_index,
                                              const ApEvent precondition, 
                                              const PredEvent pred_guard,
                                             const PhysicalTraceInfo &trace_info)
@@ -2952,10 +2952,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ApEvent RegionTreeForest::fill_fields(Operation *op,
+    ApEvent RegionTreeForest::fill_fields(FillOp *op,
                                           const RegionRequirement &req,
                                           const unsigned index,
-                                          const void *value, size_t value_size,
+                                          FillView *fill_view,
                                           VersionInfo &version_info,
                                           ApEvent precondition,
                                           PredEvent true_guard, 
@@ -2967,18 +2967,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(req.handle_type == SINGULAR);
 #endif
-      // Make the fill instance
-      DistributedID did = runtime->get_available_distributed_id();
-      FillView::FillViewValue *fill_value = 
-        new FillView::FillViewValue(value, value_size);
-      FillView *fill_view = 
-        new FillView(this, did, runtime->address_space,
-                     fill_value, true/*register now*/
-#ifdef LEGION_SPY
-                     , op->get_unique_op_id()
-
-#endif
-                     );
 #if 0
       if (trace_info.recording)
         trace_info.tpl->record_fill_view(fill_view, fill_mask);

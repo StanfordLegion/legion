@@ -12336,6 +12336,7 @@ namespace Legion {
       activate_memoizable();
       value = NULL;
       value_size = 0;
+      fill_view = NULL;
       true_guard = PredEvent::NO_PRED_EVENT;
       false_guard = PredEvent::NO_PRED_EVENT;
     }
@@ -12562,12 +12563,24 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(value != NULL);
+        assert(fill_view == NULL);
 #endif
         // This is NULL for now until we implement tracing for fills
         ApEvent init_precondition = compute_init_precondition(trace_info);
+        // Ask the enclosing context to find or create the fill view
+#if DEBUG_LEGION
+        InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
+        assert(context != NULL);
+#else
+        InnerContext *context = static_cast<InnerContext*>(parent_ctx);
+#endif
+        // This comes back with a reference to prevent collection
+        // that we need to free after we have been mapped
+        fill_view = context->find_or_create_fill_view(this, 
+                      map_applied_conditions, value, value_size);
         ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                       value, value_size, version_info, 
+                                       fill_view, version_info, 
                                        init_precondition, true_guard,
                                        trace_info, map_applied_conditions);
         if (runtime->legion_spy_enabled)
@@ -12624,6 +12637,9 @@ namespace Legion {
     void FillOp::deferred_execute(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(fill_view == NULL);
+#endif
       const PhysicalTraceInfo trace_info(this, false/*need init*/);
       // Make a copy of the future value since the region tree
       // will want to take ownership of the buffer
@@ -12632,9 +12648,20 @@ namespace Legion {
       memcpy(result, future.impl->get_untyped_result(), result_size);
       // This is NULL for now until we implement tracing for fills
       ApEvent init_precondition = compute_init_precondition(trace_info);
+      // Ask the enclosing context to find or create the fill view
+#if DEBUG_LEGION
+      InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
+      assert(context != NULL);
+#else
+      InnerContext *context = static_cast<InnerContext*>(parent_ctx);
+#endif
+      // This comes back with a reference to prevent collection
+      // that we need to free after we have been mapped
+      fill_view = context->find_or_create_fill_view(this, 
+                    map_applied_conditions, result, result_size);
       ApEvent done_event = 
           runtime->forest->fill_fields(this, requirement, 0/*idx*/, 
-                                       result, result_size, version_info,
+                                       fill_view, version_info,
                                        init_precondition, true_guard,
                                        trace_info, map_applied_conditions);
 #ifdef LEGION_SPY
@@ -12672,6 +12699,20 @@ namespace Legion {
       assert(idx == 0);
 #endif
       return parent_req_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::trigger_complete(void)
+    //--------------------------------------------------------------------------
+    {
+      // See if we have a fill view on which we can remove a reference
+      if (fill_view != NULL)
+      {
+        if (fill_view->remove_base_valid_ref(MAPPING_ACQUIRE_REF))
+          delete fill_view;
+        fill_view = NULL;
+      }
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
