@@ -670,6 +670,14 @@ namespace Legion {
         FillViewValue& operator=(const FillViewValue &rhs)
         { assert(false); return *this; }
       public:
+        inline bool matches(const void *other, const size_t size)
+        {
+          if (value_size != size)
+            return false;
+          // Compare the bytes
+          return (memcmp(other, value, value_size) == 0);
+        }
+      public:
         const void *const value;
         const size_t value_size;
       };
