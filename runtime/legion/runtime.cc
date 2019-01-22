@@ -21887,6 +21887,11 @@ namespace Legion {
             enqueue_args->manager->add_to_ready_queue(enqueue_args->task);
             break;
           }
+        case LG_DEFERRED_TASK_COMPLETE_TASK_ID:
+          {
+            TaskOp::handle_deferred_task_complete(args); 
+            break;
+          }
         case LG_DEFER_MAPPER_MESSAGE_TASK_ID:
           {
             MapperManager::handle_deferred_message(args);

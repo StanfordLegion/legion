@@ -220,6 +220,17 @@ namespace Legion {
         ProcessorManager *const manager;
         TaskOp *const task;
       };
+      struct DeferredTaskCompleteArgs : 
+        public LgTaskArgs<DeferredTaskCompleteArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFERRED_TASK_COMPLETE_TASK_ID;
+      public:
+        DeferredTaskCompleteArgs(TaskOp *t)
+          : LgTaskArgs<DeferredTaskCompleteArgs>(t->get_unique_op_id()),
+            task(t) { }
+      public:
+        TaskOp *const task;
+      };
     public:
       TaskOp(Runtime *rt);
       virtual ~TaskOp(void);
@@ -343,11 +354,13 @@ namespace Legion {
       // Tasks have two requirements to complete:
       // - all speculation must be resolved
       // - all children must be complete
-      virtual void trigger_task_complete(void) = 0;
+      virtual void trigger_task_complete(bool deferred = false) = 0;
       // Tasks have two requirements to commit:
       // - all commit dependences must be satisfied (trigger_commit)
       // - all children must commit (children_committed)
       virtual void trigger_task_commit(void) = 0;
+    public:
+      static void handle_deferred_task_complete(const void *args);
     protected:
       // Early mapped regions
       std::map<unsigned/*idx*/,InstanceSet>     early_mapped_regions;
@@ -500,7 +513,7 @@ namespace Legion {
       virtual void trigger_mapping(void); 
     protected:
       friend class ShardManager;
-      virtual void trigger_task_complete(void) = 0;
+      virtual void trigger_task_complete(bool deferred = false) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
@@ -607,7 +620,7 @@ namespace Legion {
     public:
       virtual void trigger_mapping(void);
     protected:
-      virtual void trigger_task_complete(void) = 0;
+      virtual void trigger_task_complete(bool deferred = false) = 0;
       virtual void trigger_task_commit(void) = 0;
     public:
       virtual bool pack_task(Serializer &rez, Processor target) = 0;
@@ -702,7 +715,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
       virtual void handle_future(const void *res, 
@@ -797,7 +810,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     public:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
@@ -881,7 +894,7 @@ namespace Legion {
       // Override these methods from operation class
       virtual void trigger_mapping(void); 
     protected:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
       virtual VersionInfo& get_version_info(unsigned idx);
@@ -978,7 +991,7 @@ namespace Legion {
       virtual ApEvent get_task_completion(void) const;
       virtual TaskKind get_task_kind(void) const;
     protected:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
       virtual bool pack_task(Serializer &rez, Processor target);
@@ -1117,7 +1130,7 @@ namespace Legion {
       void check_target_processors(void) const;
       void update_target_processor(void);
     protected:
-      virtual void trigger_task_complete(void);
+      virtual void trigger_task_complete(bool deferred = false);
       virtual void trigger_task_commit(void);
     public:
       virtual void record_reference_mutation_effect(RtEvent event);

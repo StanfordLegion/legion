@@ -2233,6 +2233,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    /*static*/ void TaskOp::handle_deferred_task_complete(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferredTaskCompleteArgs *dargs = 
+        (const DeferredTaskCompleteArgs*)args;
+      dargs->task->trigger_task_complete(true/*deferred*/);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void TaskOp::log_requirement(UniqueID uid, unsigned idx,
                                             const RegionRequirement &req)
     //--------------------------------------------------------------------------
@@ -5434,7 +5443,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void IndividualTask::trigger_task_complete(void)
+    void IndividualTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDIVIDUAL_TRIGGER_COMPLETE_CALL);
@@ -6268,7 +6277,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PointTask::trigger_task_complete(void)
+    void PointTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, POINT_TASK_COMPLETE_CALL);
@@ -6721,7 +6730,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ShardTask::trigger_task_complete(void)
+    void ShardTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       // First invoke the method on the shard manager 
@@ -7684,7 +7693,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexTask::trigger_task_complete(void)
+    void IndexTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, INDEX_COMPLETE_CALL);
@@ -8869,7 +8878,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::trigger_task_complete(void)
+    void SliceTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       trigger_slice_complete();

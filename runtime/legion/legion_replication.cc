@@ -247,6 +247,7 @@ namespace Legion {
       mapped_collective_id = UINT_MAX;
       future_collective_id = UINT_MAX;
       mapped_collective = NULL;
+      future_collective = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL; 
 #endif
@@ -262,6 +263,8 @@ namespace Legion {
 #endif
       if (mapped_collective != NULL)
         delete mapped_collective;
+      if (future_collective != NULL)
+        delete future_collective;
       deactivate_individual_task();
       runtime->free_repl_individual_task(this);
     }
@@ -390,7 +393,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndividualTask::trigger_task_complete(void)
+    void ReplIndividualTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -405,18 +408,45 @@ namespace Legion {
       {
         if (owner_shard == repl_ctx->owner_shard->shard_id)
         {
-          FutureBroadcast future_collective(repl_ctx, 
-                                            future_collective_id, owner_shard);
-          future_collective.broadcast_future(future_store, future_size);
+#ifdef DEBUG_LEGION
+          assert(!deferred);
+          assert(future_collective == NULL);
+#endif
+          future_collective = 
+            new FutureBroadcast(repl_ctx, future_collective_id, owner_shard);
+          future_collective->broadcast_future(future_store, future_size);
         }
         else
         {
-          FutureBroadcast future_collective(repl_ctx, 
-                                            future_collective_id, owner_shard);
-          future_collective.receive_future(result.impl);
+          if (deferred)
+          {
+#ifdef DEBUG_LEGION
+            assert(future_collective != NULL);
+#endif
+            future_collective->receive_future(result.impl);
+          }
+          else
+          {
+#ifdef DEBUG_LEGION
+            assert(future_collective == NULL);
+#endif
+            future_collective = 
+              new FutureBroadcast(repl_ctx, future_collective_id, owner_shard);
+            const RtEvent future_ready = 
+              future_collective->perform_collective_wait(false/*block*/);
+            if (future_ready.exists() && !future_ready.has_triggered())
+            {
+              DeferredTaskCompleteArgs args(this);
+              runtime->issue_runtime_meta_task(args,
+                  LG_LATENCY_DEFERRED_PRIORITY, future_ready);
+              return;
+            }
+            // Otherwise we fall through and we can do the receive now 
+            future_collective->receive_future(result.impl);
+          }
         }
       }
-      IndividualTask::trigger_task_complete();
+      IndividualTask::trigger_task_complete(deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -617,7 +647,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplIndexTask::trigger_task_complete(void)
+    void ReplIndexTask::trigger_task_complete(bool deferred /*=false*/)
     //--------------------------------------------------------------------------
     {
       // If we have a reduction operator, exchange the future results
@@ -626,17 +656,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(reduction_collective != NULL);
 #endif
-        // Grab the reduction state buffer and then reinitialize it so
-        // that all the shards can be applied to it in the same order 
-        // so that we have bit equivalence across the shards
-        void *shard_buffer = reduction_state;
-        reduction_state = NULL;
-        initialize_reduction_state();
-        // The collective takes ownership of the buffer here
-        reduction_collective->reduce_futures(shard_buffer, this);
+        if (!deferred)
+        {
+          // First time through so start the exchange
+          // The collective takes ownership of the buffer here
+          const RtEvent futures_ready = 
+            reduction_collective->exchange_futures(reduction_state);
+          // Reinitialize the reduction state buffer so
+          // that all the shards can be applied to it in the same order 
+          // so that we have bit equivalence across the shards
+          reduction_state = NULL;
+          initialize_reduction_state();
+          // Now see if we need to defer this or not
+          if (futures_ready.exists() && !futures_ready.has_triggered())
+          {
+            DeferredTaskCompleteArgs args(this);
+            runtime->issue_runtime_meta_task(args,
+                LG_LATENCY_DEFERRED_PRIORITY, futures_ready);
+            return;
+          }
+        }
+        // Otherwise we fall through and we can just do our exchange
+        reduction_collective->reduce_futures(this);
       }
       // Then we do the base class thing
-      IndexTask::trigger_task_complete();
+      IndexTask::trigger_task_complete(deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -7203,7 +7247,6 @@ namespace Legion {
     void FutureBroadcast::receive_future(FutureImpl *f)
     //--------------------------------------------------------------------------
     {
-      perform_collective_wait();
       if (result != NULL)
       {
         f->set_result(result, result_size, true/*own*/);
@@ -7289,7 +7332,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureExchange::reduce_futures(void *value, ReplIndexTask *target)
+    RtEvent FutureExchange::exchange_futures(void *value)
     //--------------------------------------------------------------------------
     {
       {
@@ -7299,7 +7342,14 @@ namespace Legion {
 #endif
         results[local_shard] = value;
       }
-      perform_collective_sync();
+      perform_collective_async();
+      return perform_collective_wait(false/*block*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FutureExchange::reduce_futures(ReplIndexTask *target)
+    //--------------------------------------------------------------------------
+    {
       // Now we apply the shard results in order to ensure that we get
       // the same bitwise order across all the shards
       // No need for the lock anymore since we know we're done
