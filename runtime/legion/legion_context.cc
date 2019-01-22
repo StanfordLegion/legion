@@ -6155,7 +6155,7 @@ namespace Legion {
 #ifndef LEGION_SPY
       // See if we can find this in the cache first
       AutoLock f_lock(fill_view_lock);
-      for (std::list<FillView*>::const_iterator it = 
+      for (std::list<FillView*>::iterator it = 
             fill_view_cache.begin(); it != fill_view_cache.end(); it++)
       {
         if (!(*it)->value->matches(value, value_size))
