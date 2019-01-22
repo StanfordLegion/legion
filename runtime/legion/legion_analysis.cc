@@ -5987,23 +5987,41 @@ namespace Legion {
         // If we have a refinement to do then we need to wait for that
         // to be done before we continue our traversal
         if (refinement_done.exists() && !refinement_done.has_triggered())
-          refinement_done.wait();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-             pending_to_traverse.begin(); it != pending_to_traverse.end(); it++)
         {
-          RtUserEvent done = Runtime::create_rt_user_event();
-          std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator
-            finder = to_traverse_exprs.find(it->first);
-#ifdef DEBUG_LEGION
-          assert(finder != to_traverse_exprs.end());
-#endif
-          const IndexSpace subset_handle = 
-            (handle.exists() && 
-              (finder->second->get_volume() == expr->get_volume())) ? handle :
-                IndexSpace::NO_SPACE;
-          it->first->ray_trace_equivalence_sets(target, finder->second, 
-              it->second, subset_handle, source, done);
+          // Defer this until the refinements are done
+          FieldMaskSet<EquivalenceSet> *copy_traverse = 
+            new FieldMaskSet<EquivalenceSet>();
+          copy_traverse->swap(pending_to_traverse);
+          std::map<EquivalenceSet*,IndexSpaceExpression*> *copy_exprs = 
+            new std::map<EquivalenceSet*,IndexSpaceExpression*>();
+          copy_exprs->swap(to_traverse_exprs);
+          const RtUserEvent done = Runtime::create_rt_user_event();
+          DeferRayTraceFinishArgs args(target, source, copy_traverse,
+              copy_exprs, expr->get_volume(), handle, done);
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_DEFERRED_PRIORITY, refinement_done);
           done_events.insert(done);
+        }
+        else
+        {
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                pending_to_traverse.begin(); it != 
+                pending_to_traverse.end(); it++)
+          {
+            RtUserEvent done = Runtime::create_rt_user_event();
+            std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator
+              finder = to_traverse_exprs.find(it->first);
+#ifdef DEBUG_LEGION
+            assert(finder != to_traverse_exprs.end());
+#endif
+            const IndexSpace subset_handle = 
+              (handle.exists() && 
+                (finder->second->get_volume() == expr->get_volume())) ? handle :
+                  IndexSpace::NO_SPACE;
+            it->first->ray_trace_equivalence_sets(target, finder->second, 
+                it->second, subset_handle, source, done);
+            done_events.insert(done);
+          }
         }
       }
       if (!done_events.empty())
@@ -9664,6 +9682,38 @@ namespace Legion {
                           dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_ray_trace_finish(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRayTraceFinishArgs *dargs = 
+        (const DeferRayTraceFinishArgs*)args;
+      std::set<RtEvent> done_events;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            dargs->to_traverse->begin(); it != dargs->to_traverse->end(); it++)
+      {
+        RtUserEvent done = Runtime::create_rt_user_event();
+        std::map<EquivalenceSet*,IndexSpaceExpression*>::const_iterator
+          finder = dargs->exprs->find(it->first);
+#ifdef DEBUG_LEGION
+        assert(finder != dargs->exprs->end());
+#endif
+        const IndexSpace subset_handle = 
+          (dargs->handle.exists() && 
+            (finder->second->get_volume() == dargs->volume)) ? dargs->handle :
+              IndexSpace::NO_SPACE;
+        it->first->ray_trace_equivalence_sets(dargs->target, finder->second, 
+            it->second, subset_handle, dargs->source, done);
+        done_events.insert(done);
+      }
+      if (!done_events.empty())
+        Runtime::trigger_event(dargs->done, Runtime::merge_events(done_events));
+      else
+        Runtime::trigger_event(dargs->done);
+      delete dargs->to_traverse;
+      delete dargs->exprs;
     }
 
     //--------------------------------------------------------------------------
