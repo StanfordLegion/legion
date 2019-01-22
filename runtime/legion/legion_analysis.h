@@ -1010,6 +1010,27 @@ namespace Legion {
         const RtUserEvent deferral;
         FieldMask *const ray_mask;
       };
+      struct DeferRayTraceFinishArgs : 
+        public LgTaskArgs<DeferRayTraceFinishArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_RAY_TRACE_FINISH_TASK_ID;
+      public:
+        DeferRayTraceFinishArgs(VersionManager *m, AddressSpaceID src,
+            FieldMaskSet<EquivalenceSet> *to_tv,
+            std::map<EquivalenceSet*,IndexSpaceExpression*> *exs,
+            const size_t v, const IndexSpace h, RtUserEvent d)
+          : LgTaskArgs<DeferRayTraceFinishArgs>(implicit_provenance),
+            target(m), source(src), to_traverse(to_tv), exprs(exs), 
+            volume(v), handle(h), done(d) { }
+      public:
+        VersionManager *const target;
+        const AddressSpaceID source;
+        FieldMaskSet<EquivalenceSet> *const to_traverse;
+        std::map<EquivalenceSet*,IndexSpaceExpression*> *const exprs;
+        const size_t volume;
+        const IndexSpace handle;
+        const RtUserEvent done;
+      };
       struct DeferSubsetRequestArgs : 
         public LgTaskArgs<DeferSubsetRequestArgs> {
       public:
@@ -1285,6 +1306,7 @@ namespace Legion {
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
       static void handle_ray_trace(const void *args);
+      static void handle_ray_trace_finish(const void *args);
       static void handle_subset_request(const void *args);
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);

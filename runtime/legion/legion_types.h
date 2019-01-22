@@ -331,6 +331,7 @@ namespace Legion {
       LG_REFINEMENT_TASK_ID,
       LG_REMOTE_REF_TASK_ID,
       LG_DEFER_RAY_TRACE_TASK_ID,
+      LG_DEFER_RAY_TRACE_FINISH_TASK_ID,
       LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
@@ -418,6 +419,7 @@ namespace Legion {
         "Refinement",                                             \
         "Remove Remote References",                               \
         "Defer Ray Trace",                                        \
+        "Defer Ray Trace Finish",                                 \
         "Defer Subset Request",                                   \
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
