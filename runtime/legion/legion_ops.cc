@@ -12568,7 +12568,7 @@ namespace Legion {
         // This is NULL for now until we implement tracing for fills
         ApEvent init_precondition = compute_init_precondition(trace_info);
         // Ask the enclosing context to find or create the fill view
-#if DEBUG_LEGION
+#ifdef DEBUG_LEGION
         InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
         assert(context != NULL);
 #else
@@ -12649,7 +12649,7 @@ namespace Legion {
       // This is NULL for now until we implement tracing for fills
       ApEvent init_precondition = compute_init_precondition(trace_info);
       // Ask the enclosing context to find or create the fill view
-#if DEBUG_LEGION
+#ifdef DEBUG_LEGION
       InnerContext *context = dynamic_cast<InnerContext*>(parent_ctx);
       assert(context != NULL);
 #else
