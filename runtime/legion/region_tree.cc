@@ -12717,9 +12717,7 @@ namespace Legion {
                 // in which case we need to make sure we don't
                 // need a close because of different sharding functors
                 if (record_close_operations &&
-                    (proj_info.sharding_function != NULL) &&
-                    it->can_elide_close_operation(proj_info, this,
-                                      IS_REDUCE(closer.user.usage)))
+                    (proj_info.sharding_function != NULL))
                 {
                   // We need a close operation here
                   const FieldMask overlap = current_mask & it->valid_fields;
