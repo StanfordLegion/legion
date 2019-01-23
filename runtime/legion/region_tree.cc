@@ -12713,10 +12713,25 @@ namespace Legion {
               }
               else
               {
+                // Check to see if we have a sharding functor
+                // in which case we need to make sure we don't
+                // need a close because of different sharding functors
+                if (record_close_operations &&
+                    (proj_info.sharding_function != NULL) &&
+                    it->can_elide_close_operation(proj_info, this,
+                                      IS_REDUCE(closer.user.usage)))
+                {
+                  // We need a close operation here
+                  const FieldMask overlap = current_mask & it->valid_fields;
+#ifdef DEBUG_LEGION
+                  assert(!!overlap);
+#endif
+                  closer.record_close_operation(overlap);
+                }
                 // Otherwise we are going to a different mode 
                 // no need to do a close since we're staying in
-                // projection mode, but we do need to advance
-                // the projection epochs.
+                // projection mode (except in the sharding function
+                // case described above)
                 it->valid_fields -= current_mask;
                 if (!it->valid_fields)
                   it = state.field_states.erase(it);

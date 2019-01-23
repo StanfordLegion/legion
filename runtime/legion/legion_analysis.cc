@@ -1414,6 +1414,7 @@ namespace Legion {
         // functions are all the same, and the sharding functions are
         // all the same, in which case we know this is totally data
         // parallel and each shard has the same subregion set
+        bool check_expensive = true;
         for (std::set<ProjectionSummary>::const_iterator it = 
               projections.begin(); it != projections.end(); it++)
         {
@@ -1425,6 +1426,9 @@ namespace Legion {
           if (it->sharding != info.sharding_function)
           {
             elide = false;
+            // No need to check expensive here since we know
+            // that we need the close operation no matter what
+            check_expensive = false;
             break;
           }
           if ((it->domain != info.projection_space) && 
@@ -1435,7 +1439,7 @@ namespace Legion {
           }
         }
 
-        if (!elide)
+        if (!elide && check_expensive)
         {
           // Next we're going to need to compute the actual interference
           // set so check to see if we've memoized the result or not
