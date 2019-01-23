@@ -280,12 +280,7 @@ function analyze_var_flow.stat_index_launch_list(cx, node)
 end
 
 function analyze_var_flow.stat_var(cx, node)
-  local value
-  if value then
-    value = analyze_var_flow.expr(cx, value)
-  else
-    value = flow_empty()
-  end
+  local value = node.value and analyze_var_flow.expr(cx, node.value) or flow_empty()
   flow_value_into_var(cx, node.symbol, value)
 end
 
@@ -333,13 +328,13 @@ function analyze_var_flow.stat(cx, node)
     return analyze_var_flow.stat_var(cx, node)
 
   elseif node:is(ast.typed.stat.VarUnpack) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.Return) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.Break) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.Assignment) then
     return analyze_var_flow.stat_assignment(cx, node)
@@ -348,16 +343,16 @@ function analyze_var_flow.stat(cx, node)
     return analyze_var_flow.stat_reduce(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.RawDelete) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.Fence) then
-    return flow_empty()
+    return
 
   elseif node:is(ast.typed.stat.ParallelPrefix) then
-    return flow_empty()
+    return
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
