@@ -67,6 +67,10 @@ end
 
 local analyze_var_flow = {}
 
+function flow_empty()
+  return {}
+end
+
 function flow_future()
   return {[true] = true} -- Represents an unconditional future r-value
 end
@@ -76,41 +80,33 @@ function flow_var(v)
 end
 
 function flow_future_into(cx, lhs) -- Unconditionally flow future into l-value
-  if lhs then
-    for v, _ in pairs(lhs) do
-      local var_flow = cx:get_flow(v)
-      var_flow[true] = true
-    end
+  for v, _ in pairs(lhs) do
+    local var_flow = cx:get_flow(v)
+    var_flow[true] = true
   end
 end
 
 function flow_value_into_var(cx, symbol, value) -- Flow r-value into variable
   local var_flow = cx:get_flow(symbol)
-  if value then
-    for v, _ in pairs(value) do
-      var_flow[v] = true
-    end
+  for v, _ in pairs(value) do
+    var_flow[v] = true
   end
 end
 
 function flow_value_into(cx, lhs, rhs) -- Flow r-value into l-value
-  if lhs and rhs then
-    for lhv, _ in pairs(lhs) do
-      local lhv_flow = cx:get_flow(lhv)
-      for rhv, _ in pairs(rhs) do
-        lhv_flow[rhv] = true
+  for lhv, _ in pairs(lhs) do
+    local lhv_flow = cx:get_flow(lhv)
+    for rhv, _ in pairs(rhs) do
+      lhv_flow[rhv] = true
       end
-    end
   end
 end
 
 function meet_flow(...)
   local flow = {}
   for _, a in ipairs({...}) do
-    if a then
-      for v, _ in pairs(a) do
-        flow[v] = true
-      end
+    for v, _ in pairs(a) do
+      flow[v] = true
     end
   end
   return flow
@@ -126,6 +122,7 @@ function analyze_var_flow.expr_call(cx, node)
   then
     return flow_future()
   end
+  return flow_empty()
 end
 
 function analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
@@ -152,7 +149,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.IndexAccess) or
     node:is(ast.typed.expr.MethodCall)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.Call) then
     return analyze_var_flow.expr_call(cx, node)
@@ -192,7 +189,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.PhaseBarrier) or
     node:is(ast.typed.expr.DynamicCollective)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.DynamicCollectiveGetResult) then
     return analyze_var_flow.expr_dynamic_collective_get_result(cx, node)
@@ -210,7 +207,7 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.AllocateScratchFields) or
     node:is(ast.typed.expr.WithScratchFields)
   then
-    return nil
+    return flow_empty()
 
   elseif node:is(ast.typed.expr.Unary) then
     return analyze_var_flow.expr_unary(cx, node)
@@ -219,7 +216,7 @@ function analyze_var_flow.expr(cx, node)
     return analyze_var_flow.expr_binary(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
-    return nil
+    return flow_empty()
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
@@ -269,21 +266,25 @@ end
 function analyze_var_flow.stat_index_launch_num(cx, node)
   node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
-    analyze_var_flow.expr(cx, node.reduce_lhs)
+    analyze_var_flow.expr(cx, node.reduce_lhs) or
+    flow_empty()
   flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_index_launch_list(cx, node)
   node.preamble:map(function(stat) analyze_var_flow.stat(cx, stat) end)
   local reduce_lhs = node.reduce_lhs and
-    analyze_var_flow.expr(cx, node.reduce_lhs)
+    analyze_var_flow.expr(cx, node.reduce_lhs) or
+    flow_empty()
   flow_future_into(cx, reduce_lhs)
 end
 
 function analyze_var_flow.stat_var(cx, node)
-  local value = node.value
+  local value
   if value then
     value = analyze_var_flow.expr(cx, value)
+  else
+    value = flow_empty()
   end
   flow_value_into_var(cx, node.symbol, value)
 end
@@ -332,13 +333,13 @@ function analyze_var_flow.stat(cx, node)
     return analyze_var_flow.stat_var(cx, node)
 
   elseif node:is(ast.typed.stat.VarUnpack) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.Return) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.Break) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.Assignment) then
     return analyze_var_flow.stat_assignment(cx, node)
@@ -347,16 +348,16 @@ function analyze_var_flow.stat(cx, node)
     return analyze_var_flow.stat_reduce(cx, node)
 
   elseif node:is(ast.typed.stat.Expr) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.RawDelete) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.Fence) then
-    return
+    return flow_empty()
 
   elseif node:is(ast.typed.stat.ParallelPrefix) then
-    return
+    return flow_empty()
 
   else
     assert(false, "unexpected node type " .. tostring(node:type()))
