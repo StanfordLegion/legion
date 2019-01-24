@@ -209,8 +209,12 @@ namespace Legion {
       std::vector<int> stage_notifications;
       std::vector<bool> sent_stages;
       // Handle a small race on deciding who gets to
-      // trigger the done event
+      // trigger the done event, only the last one of these
+      // will get to do the trigger to avoid any races
+      unsigned pending_send_ready_stages;
+#ifdef DEBUG_LEGION
       bool done_triggered;
+#endif
     };
 
     /**

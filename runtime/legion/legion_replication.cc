@@ -5921,7 +5921,10 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        done_triggered(false)
+        pending_send_ready_stages(0)
+#ifdef DEBUG_LEGION
+        , done_triggered(false)
+#endif
     //--------------------------------------------------------------------------
     { 
       initialize_collective(); 
@@ -5938,7 +5941,10 @@ namespace Legion {
             ctx->get_shard_collective_participating_shards()),
         shard_collective_last_radix(ctx->get_shard_collective_last_radix()),
         participating(int(local_shard) < shard_collective_participating_shards),
-        done_triggered(false)
+        pending_send_ready_stages(0)
+#ifdef DEBUG_LEGION
+        , done_triggered(false)
+#endif
     //--------------------------------------------------------------------------
     {
       initialize_collective();
@@ -6077,7 +6083,9 @@ namespace Legion {
 #endif
       // Trigger the user event 
       Runtime::trigger_event(done_event);
+#ifdef DEBUG_LEGION
       done_triggered = true;
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6112,6 +6120,9 @@ namespace Legion {
           assert(stage_notifications[0] < shard_collective_radix);
 #endif
         stage_notifications[0]++;
+        // Increment our guard to prevent deletion of the collective
+        // object while we are still traversing
+        pending_send_ready_stages++;
       }
       return send_ready_stages(0/*start stage*/);
     }
@@ -6162,7 +6173,14 @@ namespace Legion {
           // we can send this stage
           if ((stage > 0) && 
               (stage_notifications[stage-1] < shard_collective_radix))
+          {
+            // Remove our guard before exiting early
+#ifdef DEBUG_LEGION
+            assert(pending_send_ready_stages > 0);
+#endif
+            pending_send_ready_stages--;
             return false;
+          }
           // If we get here then we can send the stage
           sent_stages[stage] = true;
         }
@@ -6199,10 +6217,17 @@ namespace Legion {
       // If we make it here, then we sent the last stage, check to see
       // if we've seen all the notifications for it
       AutoLock c_lock(collective_lock);
-      if ((stage_notifications.back() == shard_collective_last_radix) && 
-          !done_triggered)
+      // Remove our pending guard and then check to see if we are done
+#ifdef DEBUG_LEGION
+      assert(pending_send_ready_stages > 0);
+#endif
+      if (((--pending_send_ready_stages) == 0) &&
+          (stage_notifications.back() == shard_collective_last_radix))
       {
+#ifdef DEBUG_LEGION
+        assert(!done_triggered);
         done_triggered = true;
+#endif
         return true;
       }
       else
@@ -6226,6 +6251,9 @@ namespace Legion {
           assert(stage_notifications[stage] < shard_collective_last_radix);
 #endif
         stage_notifications[stage]++;
+        // Increment our guard to prevent deletion of the collective
+        // object while we are still traversing
+        pending_send_ready_stages++;
       }
     }
 
