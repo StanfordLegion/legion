@@ -2678,6 +2678,13 @@ do
   terra st.metamethods.__mul(a : st, b : st)
     return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
   end
+  terra st.metamethods.__div(a : st, b : st)
+    var denom = b.real * b.real + b.imag * b.imag
+    return st {
+      real = (a.real * b.real + a.imag * b.imag) / denom
+      imag = (a.imag * b.real - a.real * b.imag) / denom
+    }
+  end
 
   st.metamethods.__cast = function(from, to, expr)
     if to == st and std.validate_implicit_cast(from, double) then
