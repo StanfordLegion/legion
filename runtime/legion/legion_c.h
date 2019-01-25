@@ -2592,6 +2592,41 @@ extern "C" {
     legion_future_t f,
     legion_predicate_t pred /* = legion_predicate_true() */);
 
+  /**
+   * @see Legion::Runtime::fill_field()
+   * Same as above except using index fills
+   */
+  void
+  legion_runtime_index_fill_field(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    const void *value,
+    size_t value_size,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
+  /**
+   * @see Legion::Runtime::fill_field()
+   * Same as above except using index fills
+   */
+  void
+  legion_runtime_index_fill_field_future(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_partition_t handle,
+    legion_logical_region_t parent,
+    legion_field_id_t fid,
+    legion_future_t f,
+    legion_projection_id_t proj /* = 0 */,
+    legion_predicate_t pred /* = legion_predicate_true() */,
+    legion_mapper_id_t id /* = 0 */,
+    legion_mapping_tag_id_t launcher_tag /* = 0 */);
+
   // -----------------------------------------------------------------------
   // File Operations
   // -----------------------------------------------------------------------
