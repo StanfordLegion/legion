@@ -876,7 +876,7 @@ function drawTimeline() {
     })
     .attr("height", state.thickness)
     .style("opacity", function(d) {
-      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null) {
+      if (!state.searchEnabled || searchRegex[currentPos].exec(d.title) != null || searchRegex[currentPos].exec(d.initiation) != null) {
         return d.opacity;
       }
       else return 0.05;
