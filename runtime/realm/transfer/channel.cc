@@ -3947,8 +3947,11 @@ namespace Realm {
 	if(!src_iter_ready.has_triggered() || !dst_iter_ready.has_triggered()) {
 	  Event wait_on = Event::merge_events(src_iter_ready, dst_iter_ready);
 	  log_new_dma.info() << "xd metadata wait: xd=" << _guid << " ready=" << wait_on;
-	  Realm::EventImpl::add_waiter(wait_on, new DeferredXDEnqueue(xferDes_queue,
-								      xd));
+          if (wait_on.exists())
+            Realm::EventImpl::add_waiter(wait_on, new DeferredXDEnqueue(xferDes_queue,
+                                                                        xd));
+          else
+            xferDes_queue->enqueue_xferDes_local(xd);
 	} else
 	  xferDes_queue->enqueue_xferDes_local(xd);
       } else {
