@@ -2951,6 +2951,8 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
     protected:
       void compute_parent_index(void);
     public:
