@@ -3024,10 +3024,13 @@ namespace Legion {
       virtual void deactivate(void);
       virtual const char* get_logging_name(void) const = 0;
       virtual OpKind get_operation_kind(void) const = 0;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
       // This should be the only mapper call that we need to handle
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking) = 0;
+
       virtual void add_copy_profiling_request(
                             Realm::ProfilingRequestSet &reqeusts);
       virtual void report_uninitialized_usage(const unsigned index,

@@ -15539,6 +15539,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                      RemoteOp::get_acquired_instances_ref(void)
+    //--------------------------------------------------------------------------
+    {
+      // We shouldn't actually be acquiring anything here so we just
+      // need to make sure that we don't assert
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteOp::add_copy_profiling_request(
                                            Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
