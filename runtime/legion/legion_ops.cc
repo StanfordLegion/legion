@@ -561,16 +561,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation:: add_copy_profiling_request(
+    void Operation::add_copy_profiling_request(
                                            Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      // Do nothing
+      // Should only be called for inherited types
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
     void Operation::handle_profiling_response(
                                        const Realm::ProfilingResponse &response)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be called for inherited types
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::handle_profiling_update(int count)
     //--------------------------------------------------------------------------
     {
       // Should only be called for inherited types
@@ -1264,12 +1273,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::pack_remote_operation(Serializer &rez) const
+    void Operation::pack_remote_operation(Serializer &rez, 
+                                          AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      // should only be called on derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void Operation::pack_local_remote_operation(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(parent_ctx != NULL);
 #endif
+      rez.serialize(get_operation_kind());
       rez.serialize(this);
       rez.serialize(runtime->address_space);
       rez.serialize(unique_op_id);
@@ -1356,6 +1375,173 @@ namespace Legion {
         }
       }
       return true;
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // External Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::pack_mappable(const Mappable &mappable,
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(mappable.map_id);
+      rez.serialize(mappable.tag);
+      rez.serialize(mappable.mapper_data_size);
+      if (mappable.mapper_data_size > 0)
+        rez.serialize(mappable.mapper_data, mappable.mapper_data_size);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::pack_index_space_requirement(
+                              const IndexSpaceRequirement &req, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(req.handle);
+      rez.serialize(req.privilege);
+      rez.serialize(req.parent);
+      // no need to send verified
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::unpack_index_space_requirement(
+                                IndexSpaceRequirement &req, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(req.handle);
+      derez.deserialize(req.privilege);
+      derez.deserialize(req.parent);
+      req.verified = true;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::pack_region_requirement(
+                                  const RegionRequirement &req, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(req.region);
+      rez.serialize(req.partition);
+      rez.serialize(req.privilege_fields.size());
+      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
+            it != req.privilege_fields.end(); it++)
+      {
+        rez.serialize(*it);
+      }
+      rez.serialize(req.instance_fields.size());
+      for (std::vector<FieldID>::const_iterator it = 
+            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
+      {
+        rez.serialize(*it);
+      }
+      rez.serialize(req.privilege);
+      rez.serialize(req.prop);
+      rez.serialize(req.parent);
+      rez.serialize(req.redop);
+      rez.serialize(req.tag);
+      rez.serialize(req.flags);
+      rez.serialize(req.handle_type);
+      rez.serialize(req.projection);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::unpack_mappable(Mappable &mappable,
+                                                      Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(mappable.map_id);
+      derez.deserialize(mappable.tag);
+      derez.deserialize(mappable.mapper_data_size);
+      if (mappable.mapper_data_size > 0)
+      {
+        // If we already have mapper data, then we are going to replace it
+        if (mappable.mapper_data != NULL)
+          free(mappable.mapper_data);
+        mappable.mapper_data = malloc(mappable.mapper_data_size);
+        derez.deserialize(mappable.mapper_data, mappable.mapper_data_size);
+      }
+      else if (mappable.mapper_data != NULL)
+      {
+        // If we freed it remotely then we can free it here too
+        free(mappable.mapper_data);
+        mappable.mapper_data = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::unpack_region_requirement(
+                                    RegionRequirement &req, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(req.region);
+      derez.deserialize(req.partition);
+      size_t num_privilege_fields;
+      derez.deserialize(num_privilege_fields);
+      for (unsigned idx = 0; idx < num_privilege_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        req.privilege_fields.insert(fid);
+      }
+      size_t num_instance_fields;
+      derez.deserialize(num_instance_fields);
+      for (unsigned idx = 0; idx < num_instance_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        req.instance_fields.push_back(fid);
+      }
+      derez.deserialize(req.privilege);
+      derez.deserialize(req.prop);
+      derez.deserialize(req.parent);
+      derez.deserialize(req.redop);
+      derez.deserialize(req.tag);
+      derez.deserialize(req.flags);
+      derez.deserialize(req.handle_type);
+      derez.deserialize(req.projection);
+      req.flags |= VERIFIED_FLAG;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::pack_grant(const Grant &grant, 
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      grant.impl->pack_grant(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::unpack_grant(Grant &grant, 
+                                                   Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // Create a new grant impl object to perform the unpack
+      grant = Grant(new GrantImpl());
+      grant.impl->unpack_grant(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::pack_phase_barrier(
+                                  const PhaseBarrier &barrier, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(barrier.phase_barrier);
+    }  
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ExternalMappable::unpack_phase_barrier(
+                                    PhaseBarrier &barrier, Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(barrier.phase_barrier);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2015,19 +2201,79 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // External Mapping
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalMapping::ExternalMapping(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalMapping::pack_external_mapping(Serializer &rez, 
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      pack_region_requirement(requirement, rez);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      rez.serialize(layout_constraint_id);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalMapping::unpack_external_mapping(Deserializer &derez,
+                                                  Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      unpack_region_requirement(requirement, derez);
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      derez.deserialize(layout_constraint_id);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Map Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     MapOp::MapOp(Runtime *rt)
-      : InlineMapping(), Operation(rt)
+      : ExternalMapping(), Operation(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     MapOp::MapOp(const MapOp &rhs)
-      : InlineMapping(), Operation(NULL)
+      : ExternalMapping(), Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2497,6 +2743,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     int MapOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -2934,14 +3187,138 @@ namespace Legion {
       Mapping::Mapper::InlineProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_inline_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       // If this was the last one, we can trigger our events
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapOp::pack_remote_operation(Serializer &rez, 
+                                      AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_mapping(rez, target);
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // External Copy 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalCopy::ExternalCopy(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalCopy::pack_external_copy(Serializer &rez,
+                                          AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize<size_t>(src_requirements.size());
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+        pack_region_requirement(src_requirements[idx], rez);
+      rez.serialize<size_t>(dst_requirements.size());
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+        pack_region_requirement(dst_requirements[idx], rez);
+      rez.serialize<size_t>(src_indirect_requirements.size());
+      for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+        pack_region_requirement(src_indirect_requirements[idx], rez);
+      rez.serialize<size_t>(dst_indirect_requirements.size());
+      for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+        pack_region_requirement(dst_indirect_requirements[idx], rez);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      rez.serialize<bool>(is_index_space);
+      rez.serialize(index_domain);
+      rez.serialize(index_point);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalCopy::unpack_external_copy(Deserializer &derez,
+                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      size_t num_srcs;
+      derez.deserialize(num_srcs);
+      src_requirements.resize(num_srcs);
+      for (unsigned idx = 0; idx < num_srcs; idx++)
+        unpack_region_requirement(src_requirements[idx], derez);
+      size_t num_dsts;
+      derez.deserialize(num_dsts);
+      dst_requirements.resize(num_dsts);
+      for (unsigned idx = 0; idx < num_dsts; idx++)
+        unpack_region_requirement(dst_requirements[idx], derez);
+      size_t num_indirect_srcs;
+      derez.deserialize(num_indirect_srcs);
+      src_indirect_requirements.resize(num_indirect_srcs);
+      for (unsigned idx = 0; idx < num_indirect_srcs; idx++)
+        unpack_region_requirement(src_indirect_requirements[idx], derez);
+      size_t num_indirect_dsts;
+      derez.deserialize(num_indirect_dsts);
+      dst_indirect_requirements.resize(num_indirect_dsts);
+      for (unsigned idx = 0; idx < num_indirect_dsts; idx++)
+        unpack_region_requirement(dst_indirect_requirements[idx], derez);
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      derez.deserialize<bool>(is_index_space);
+      derez.deserialize(index_domain);
+      derez.deserialize(index_point);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2950,7 +3327,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(Runtime *rt)
-      : Copy(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalCopy(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -2958,7 +3335,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyOp::CopyOp(const CopyOp &rhs)
-      : Copy(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalCopy(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4394,6 +4771,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     int CopyOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -4922,14 +5306,44 @@ namespace Legion {
       Mapping::Mapper::CopyProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_copy_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       // If we're the last one then we trigger the result
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyOp::pack_remote_operation(Serializer &rez, 
+                                       AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_copy(rez, target);
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -6863,6 +7277,36 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // External Close 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalClose::ExternalClose(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalClose::pack_external_close(Serializer &rez, 
+                                            AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_region_requirement(requirement, rez);
+      rez.serialize(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalClose::unpack_external_close(Deserializer &derez,
+                                              Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      unpack_region_requirement(requirement, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Close Operation 
     /////////////////////////////////////////////////////////////
 
@@ -6909,6 +7353,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void CloseOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
     }
 
     //--------------------------------------------------------------------------
@@ -7412,13 +7863,43 @@ namespace Legion {
       Mapping::Mapper::CloseProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_close_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void PostCloseOp::pack_remote_operation(Serializer &rez, 
+                                            AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_close(rez, target);
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -7534,19 +8015,91 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // External Acquire
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalAcquire::ExternalAcquire(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalAcquire::pack_external_acquire(Serializer &rez,
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(logical_region);
+      rez.serialize(parent_region);
+      rez.serialize<size_t>(fields.size());
+      for (std::set<FieldID>::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+        rez.serialize(*it);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalAcquire::unpack_external_acquire(Deserializer &derez,
+                                                  Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(logical_region);
+      derez.deserialize(parent_region);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        fields.insert(fid);
+      }
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Acquire Operation 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(Runtime *rt)
-      : Acquire(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     AcquireOp::AcquireOp(const AcquireOp &rhs)
-      : Acquire(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalAcquire(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -7909,6 +8462,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AcquireOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     int AcquireOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -8187,13 +8747,115 @@ namespace Legion {
       Mapping::Mapper::AcquireProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_acquire_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireOp::pack_remote_operation(Serializer &rez, 
+                                          AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_acquire(rez, target);
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
+    // External Release 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalRelease::ExternalRelease(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalRelease::pack_external_release(Serializer &rez,
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(logical_region);
+      rez.serialize(parent_region);
+      rez.serialize<size_t>(fields.size());
+      for (std::set<FieldID>::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+        rez.serialize(*it);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalRelease::unpack_external_release(Deserializer &derez,
+                                                  Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      derez.deserialize(logical_region);
+      derez.deserialize(parent_region);
+      size_t num_fields;
+      derez.deserialize(num_fields);
+      for (unsigned idx = 0; idx < num_fields; idx++)
+      {
+        FieldID fid;
+        derez.deserialize(fid);
+        fields.insert(fid);
+      }
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8202,14 +8864,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(Runtime *rt)
-      : Release(), MemoizableOp<SpeculativeOp>(rt)
+      : ExternalRelease(), MemoizableOp<SpeculativeOp>(rt)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     ReleaseOp::ReleaseOp(const ReleaseOp &rhs)
-      : Release(), MemoizableOp<SpeculativeOp>(NULL)
+      : ExternalRelease(), MemoizableOp<SpeculativeOp>(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -8591,6 +9253,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ReleaseOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     int ReleaseOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
@@ -8872,13 +9541,43 @@ namespace Legion {
       Mapping::Mapper::ReleaseProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_release_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseOp::pack_remote_operation(Serializer &rez, 
+                                          AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_release(rez, target);
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -11100,19 +11799,59 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // External Partition
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalPartition::ExternalPartition(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalPartition::pack_external_partition(Serializer &rez,
+                                                    AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      pack_region_requirement(requirement, rez);
+      rez.serialize<bool>(is_index_space);
+      rez.serialize(index_domain);
+      rez.serialize(index_point);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalPartition::unpack_external_partition(Deserializer &derez,
+                                                      Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      unpack_region_requirement(requirement, derez);
+      derez.deserialize<bool>(is_index_space);
+      derez.deserialize(index_domain);
+      derez.deserialize(index_point);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Dependent Partition Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(Runtime *rt)
-      : Operation(rt), thunk(NULL)
+      : ExternalPartition(), Operation(rt), thunk(NULL)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     DependentPartitionOp::DependentPartitionOp(const DependentPartitionOp &rhs)
-      : Operation(NULL)
+      : ExternalPartition(), Operation(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -11676,9 +12415,12 @@ namespace Legion {
       }
       mapper->invoke_map_partition(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
@@ -11926,10 +12668,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
     int DependentPartitionOp::get_depth(void) const
     //--------------------------------------------------------------------------
     {
       return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    Mappable* DependentPartitionOp::get_mappable(void)
+    //--------------------------------------------------------------------------
+    {
+      return this;
     }
 
     //--------------------------------------------------------------------------
@@ -11953,6 +12709,7 @@ namespace Legion {
       commit_request = false;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -12060,7 +12817,7 @@ namespace Legion {
       ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base));
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));
@@ -12080,14 +12837,45 @@ namespace Legion {
       Mapping::Mapper::PartitionProfilingInfo info;
       info.profiling_responses.attach_realm_profiling_response(response);
       mapper->invoke_partition_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       // If this was the last one, we can trigger our events
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
+    }
+
+    //--------------------------------------------------------------------------
+    void DependentPartitionOp::pack_remote_operation(Serializer &rez, 
+                                                    AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_partition(rez, target);
+      rez.serialize<PartitionKind>(get_partition_kind());
+      rez.serialize<size_t>(profiling_requests.size());
+      if (!profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+          rez.serialize(profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -12253,13 +13041,77 @@ namespace Legion {
       requirement.handle_type = SINGULAR;
     }
 
+    /////////////////////////////////////////////////////////////
+    // External Fill
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    ExternalFill::ExternalFill(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalFill::pack_external_fill(Serializer &rez,
+                                          AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      pack_region_requirement(requirement, rez);
+      rez.serialize(grants.size());
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        pack_grant(grants[idx], rez);
+      rez.serialize(wait_barriers.size());
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        pack_phase_barrier(wait_barriers[idx], rez);
+      rez.serialize(arrive_barriers.size());
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        pack_phase_barrier(arrive_barriers[idx], rez);
+      rez.serialize<bool>(is_index_space);
+      rez.serialize(index_domain);
+      rez.serialize(index_point);
+      pack_mappable(*this, rez);
+      rez.serialize<unsigned>(get_context_index());
+    }
+
+    //--------------------------------------------------------------------------
+    void ExternalFill::unpack_external_fill(Deserializer &derez,
+                                            Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      unpack_region_requirement(requirement, derez);
+      size_t num_grants;
+      derez.deserialize(num_grants);
+      grants.resize(num_grants);
+      for (unsigned idx = 0; idx < grants.size(); idx++)
+        unpack_grant(grants[idx], derez);
+      size_t num_wait_barriers;
+      derez.deserialize(num_wait_barriers);
+      wait_barriers.resize(num_wait_barriers);
+      for (unsigned idx = 0; idx < wait_barriers.size(); idx++)
+        unpack_phase_barrier(wait_barriers[idx], derez);
+      size_t num_arrive_barriers;
+      derez.deserialize(num_arrive_barriers);
+      arrive_barriers.resize(num_arrive_barriers);
+      for (unsigned idx = 0; idx < arrive_barriers.size(); idx++)
+        unpack_phase_barrier(arrive_barriers[idx], derez);
+      derez.deserialize<bool>(is_index_space);
+      derez.deserialize(index_domain);
+      derez.deserialize(index_point);
+      unpack_mappable(*this, derez);
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    }
+
     ///////////////////////////////////////////////////////////// 
     // Fill Op 
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(Runtime *rt)
-      : MemoizableOp<SpeculativeOp>(rt), Fill()
+      : MemoizableOp<SpeculativeOp>(rt), ExternalFill()
     //--------------------------------------------------------------------------
     {
       this->is_index_space = false;
@@ -12267,7 +13119,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FillOp::FillOp(const FillOp &rhs)
-      : MemoizableOp<SpeculativeOp>(NULL), Fill()
+      : MemoizableOp<SpeculativeOp>(NULL), ExternalFill()
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -12421,6 +13273,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return context_index; 
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
     }
 
     //--------------------------------------------------------------------------
@@ -12935,6 +13794,15 @@ namespace Legion {
 #endif
       complete_mapping();
       complete_execution();
+    }
+
+    //--------------------------------------------------------------------------
+    void FillOp::pack_remote_operation(Serializer &rez, 
+                                       AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_fill(rez, target);
     }
 
     ///////////////////////////////////////////////////////////// 
@@ -14487,15 +15355,18 @@ namespace Legion {
     {
       result.impl->complete_future(); 
       complete_operation();
-    }
+    } 
 
     ///////////////////////////////////////////////////////////// 
     // Remote Op 
     /////////////////////////////////////////////////////////////
 
+    /*static*/ const int RemoteOp::REMOTE_PROFILING_MAX_COUNT;
+
     //--------------------------------------------------------------------------
     RemoteOp::RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
-      : Operation(rt), remote_ptr(ptr), source(src)
+      : Operation(rt), remote_ptr(ptr), source(src), mapper(NULL),
+        available_profiling_requests(0)
     //--------------------------------------------------------------------------
     {
     }
@@ -14513,6 +15384,14 @@ namespace Legion {
     RemoteOp::~RemoteOp(void)
     //--------------------------------------------------------------------------
     {
+      if (available_profiling_requests > 0)
+      {
+        Serializer rez;
+        rez.serialize(remote_ptr);
+        rez.serialize<int>(-available_profiling_requests);
+        rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
+        runtime->send_remote_op_profiling_count_update(source, rez);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -14522,10 +15401,25 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    } 
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::pack_remote_base(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(parent_ctx != NULL);
+#endif
+      rez.serialize(get_operation_kind());
+      rez.serialize(remote_ptr);
+      rez.serialize(source);
+      rez.serialize(unique_op_id);
+      rez.serialize(parent_ctx->get_unique_id());
+      rez.serialize<bool>(tracing);
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::unpack(Deserializer &derez, Runtime *runtime)
+    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
@@ -14533,6 +15427,50 @@ namespace Legion {
       derez.deserialize(parent_uid);
       parent_ctx = runtime->find_context(parent_uid);
       derez.deserialize<bool>(tracing);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::pack_profiling_requests(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(profiling_requests.size());
+      if (profiling_requests.empty())
+        return;
+      for (unsigned idx = 0; idx < profiling_requests.size(); idx++)
+        rez.serialize(profiling_requests[idx]);
+      rez.serialize(profiling_priority);
+      rez.serialize(profiling_target);
+      // Send a message to the owner with an update for the extra counts
+      RtUserEvent done_event = Runtime::create_rt_user_event();
+      Serializer rez2;
+      rez2.serialize(remote_ptr);
+      rez2.serialize(REMOTE_PROFILING_MAX_COUNT);
+      rez2.serialize(done_event);
+      runtime->send_remote_op_profiling_count_update(source, rez2);
+      rez.serialize(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteOp::unpack_profiling_requests(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      size_t num_requests;
+      derez.deserialize(num_requests);
+      if (num_requests == 0)
+        return;
+      profiling_requests.resize(num_requests);
+      for (unsigned idx = 0; idx < num_requests; idx++)
+        derez.deserialize(profiling_requests[idx]);
+      derez.deserialize(profiling_priority);
+      derez.deserialize(profiling_target);
+      // This is the event saying when our count update has made it
+      // to the owner node so we can resume
+      RtEvent ready;
+      derez.deserialize(ready);
+      available_profiling_requests = REMOTE_PROFILING_MAX_COUNT;
+      // Wait for this event to trigger if necessary
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -14549,50 +15487,6 @@ namespace Legion {
     {
       // should never be called
       assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    const char* RemoteOp::get_logging_name(void) const
-    //--------------------------------------------------------------------------
-    {
-      return op_names[REMOTE_OP_KIND];
-    }
-
-    //--------------------------------------------------------------------------
-    Operation::OpKind RemoteOp::get_operation_kind(void) const
-    //--------------------------------------------------------------------------
-    {
-      return REMOTE_OP_KIND;
-    }
-
-    //--------------------------------------------------------------------------
-    void RemoteOp::select_sources(const InstanceRef &target,
-                                  const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking)
-    //--------------------------------------------------------------------------
-    {
-      if (source == runtime->address_space)
-      {
-        // If we're on the owner node we can just do this
-        remote_ptr->select_sources(target, sources, ranking);
-        return;
-      }
-      // Ship this back to the owner node to do the mapper call there for now
-      Serializer rez;
-      // Make a user event that we'll wait on for the result to be ready
-      RtUserEvent done_event = Runtime::create_rt_user_event();
-      {
-        RezCheck z(rez);
-        rez.serialize(remote_ptr);
-        target.pack_reference(rez);
-        sources.pack_references(rez);
-        rez.serialize(&ranking);
-        rez.serialize(done_event);
-      }
-      // Send the message and wait for the result to come back to us
-      runtime->send_remote_op_select_sources_request(source, rez);
-      // When we return from this call the ranking is populated
-      done_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -14629,91 +15523,88 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::pack_remote_operation(Serializer &rez) const
+    void RemoteOp::add_copy_profiling_request(
+                                           Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
     {
-      rez.serialize(remote_ptr);
-      rez.serialize(source);
-      rez.serialize(unique_op_id);
-      rez.serialize(parent_ctx->get_unique_id());
-      rez.serialize<bool>(tracing);
+      // Nothing to do if we don't have any profiling requests
+      if (profiling_requests.empty())
+        return;
+      // Send the result back to the owner node
+      ProfilingResponseBase base(remote_ptr);
+      Realm::ProfilingRequest &request = requests.add_request( 
+          profiling_target, LG_LEGION_PROFILING_ID, 
+          &base, sizeof(base), profiling_priority);
+      for (std::vector<ProfilingMeasurementID>::const_iterator it = 
+            profiling_requests.begin(); it != profiling_requests.end(); it++)
+        request.add_measurement((Realm::ProfilingMeasurementID)(*it));
+      int previous = __sync_fetch_and_add(&available_profiling_requests, -1);
+      if (previous == 0)
+        assert(false); // Very bad if we ever hit this
     }
 
     //--------------------------------------------------------------------------
     /*static*/ RemoteOp* RemoteOp::unpack_remote_operation(Deserializer &derez,
-                                                           Runtime *runtime)
+                              Runtime *runtime, std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
+      Operation::OpKind kind;
+      derez.deserialize(kind);
       Operation *remote_ptr;
       derez.deserialize(remote_ptr);
       AddressSpaceID source;
       derez.deserialize(source);
-      RemoteOp *result = new RemoteOp(runtime, remote_ptr, source);
-      result->unpack(derez, runtime);
+      RemoteOp *result = NULL;
+      switch (kind)
+      {
+        case TASK_OP_KIND:
+          {
+            result = new RemoteTaskOp(runtime, remote_ptr, source);
+            break;
+          }
+        case MAP_OP_KIND:
+          {
+            result = new RemoteMapOp(runtime, remote_ptr, source);
+            break;
+          }
+        case COPY_OP_KIND:
+          {
+            result = new RemoteCopyOp(runtime, remote_ptr, source);
+            break;
+          }
+        case POST_CLOSE_OP_KIND:
+          {
+            result = new RemoteCloseOp(runtime, remote_ptr, source);
+            break;
+          }
+        case ACQUIRE_OP_KIND:
+          {
+            result = new RemoteAcquireOp(runtime, remote_ptr, source);
+            break;
+          }
+        case RELEASE_OP_KIND:
+          {
+            result = new RemoteReleaseOp(runtime, remote_ptr, source);
+            break;
+          }
+        case DEPENDENT_PARTITION_OP_KIND:
+          {
+            result = new RemotePartitionOp(runtime, remote_ptr, source);
+            break;
+          }
+        case FILL_OP_KIND:
+          {
+            result = new RemoteFillOp(runtime, remote_ptr, source);
+            break;
+          }
+        default:
+          assert(false);
+      }
+      // Do the rest of the unpack
+      result->unpack_remote_base(derez, runtime);
+      WrapperReferenceMutator mutator(ready_events);
+      result->unpack(derez, mutator);
       return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteOp::handle_remote_sources_request(Deserializer &derez,
-                                        Runtime *runtime, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      Operation *op;
-      derez.deserialize(op);
-      std::set<RtEvent> ready_events;
-      RtEvent target_ready;
-      InstanceRef target;
-      target.unpack_reference(runtime, derez, target_ready);
-      if (target_ready.exists())
-        ready_events.insert(target_ready);
-      InstanceSet sources;
-      sources.unpack_references(runtime, derez, ready_events);
-      void *remote_ranking; // remote pointer, never dereference
-      derez.deserialize(remote_ranking);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      // Wait for the results to be ready if necessary
-      if (!ready_events.empty())
-      {
-        RtEvent wait_on = Runtime::merge_events(ready_events);
-        wait_on.wait();
-      }
-      // Now we can do the actual call
-      std::vector<unsigned> ranking;
-      op->select_sources(target, sources, ranking);
-      if (!ranking.empty())
-      {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(remote_ranking);
-          rez.serialize<size_t>(ranking.size());
-          for (unsigned idx = 0; idx < ranking.size(); idx++)
-            rez.serialize(ranking[idx]);
-          rez.serialize(done_event);
-        }
-        runtime->send_remote_op_select_sources_response(source, rez);
-      }
-      else // optimization: if we have no ranking, just trigger the event
-        Runtime::trigger_event(done_event);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/void RemoteOp::handle_remote_sources_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      std::vector<unsigned> *ranking;
-      derez.deserialize(ranking);
-      size_t num_rankings;
-      derez.deserialize(num_rankings);
-      ranking->resize(num_rankings);
-      for (unsigned idx = 0; idx < num_rankings; idx++)
-        derez.deserialize((*ranking)[idx]);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
-      Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -14737,6 +15628,830 @@ namespace Legion {
       derez.advance_pointer(length);
       op->report_uninitialized_usage(index, handle, usage, field_string);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_report_profiling_count_update(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      Operation *op;
+      derez.deserialize(op);
+      int update_count;
+      derez.deserialize(update_count);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+
+      op->handle_profiling_update(update_count);
+      if (done_event.exists())
+        Runtime::trigger_event(done_event);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Map Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteMapOp::RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : ExternalMapping(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteMapOp::RemoteMapOp(const RemoteMapOp &rhs)
+      : ExternalMapping(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteMapOp::~RemoteMapOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteMapOp& RemoteMapOp::operator=(const RemoteMapOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteMapOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteMapOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMapOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteMapOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteMapOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[MAP_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteMapOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return MAP_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMapOp::select_sources(const InstanceRef &target,
+                                     const InstanceSet &sources,
+                                     std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectInlineSrcInput input;
+      Mapper::SelectInlineSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_inline_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    } 
+
+    //--------------------------------------------------------------------------
+    void RemoteMapOp::pack_remote_operation(Serializer &rez,
+                                            AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_mapping(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteMapOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_mapping(derez, runtime);
+      unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Copy Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteCopyOp::RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : ExternalCopy(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCopyOp::RemoteCopyOp(const RemoteCopyOp &rhs)
+      : ExternalCopy(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCopyOp::~RemoteCopyOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCopyOp& RemoteCopyOp::operator=(const RemoteCopyOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteCopyOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteCopyOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCopyOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteCopyOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteCopyOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[COPY_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteCopyOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return COPY_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCopyOp::select_sources(const InstanceRef &target,
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectCopySrcInput input;
+      Mapper::SelectCopySrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_copy_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCopyOp::pack_remote_operation(Serializer &rez,
+                                             AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_copy(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCopyOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_copy(derez, runtime);
+      unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Close Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteCloseOp::RemoteCloseOp(Runtime *rt, Operation *ptr,AddressSpaceID src)
+      : ExternalClose(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCloseOp::RemoteCloseOp(const RemoteCloseOp &rhs)
+      : ExternalClose(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCloseOp::~RemoteCloseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteCloseOp& RemoteCloseOp::operator=(const RemoteCloseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteCloseOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteCloseOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCloseOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteCloseOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteCloseOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[POST_CLOSE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteCloseOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return POST_CLOSE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCloseOp::select_sources(const InstanceRef &target,
+                                       const InstanceSet &sources,
+                                       std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectCloseSrcInput input;
+      Mapper::SelectCloseSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_close_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCloseOp::pack_remote_operation(Serializer &rez,
+                                              AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_close(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteCloseOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_close(derez, runtime);
+      unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Acquire Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteAcquireOp::RemoteAcquireOp(Runtime *rt, 
+                                     Operation *ptr, AddressSpaceID src)
+      : ExternalAcquire(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAcquireOp::RemoteAcquireOp(const RemoteAcquireOp &rhs)
+      : ExternalAcquire(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAcquireOp::~RemoteAcquireOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAcquireOp& RemoteAcquireOp::operator=(const RemoteAcquireOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteAcquireOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteAcquireOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAcquireOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteAcquireOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteAcquireOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ACQUIRE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteAcquireOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ACQUIRE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAcquireOp::select_sources(const InstanceRef &target,
+                                         const InstanceSet &sources,
+                                         std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAcquireOp::pack_remote_operation(Serializer &rez,
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_acquire(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAcquireOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_acquire(derez, runtime);
+      unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Release Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteReleaseOp::RemoteReleaseOp(Runtime *rt, 
+                                     Operation *ptr, AddressSpaceID src)
+      : ExternalRelease(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReleaseOp::RemoteReleaseOp(const RemoteReleaseOp &rhs)
+      : ExternalRelease(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReleaseOp::~RemoteReleaseOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteReleaseOp& RemoteReleaseOp::operator=(const RemoteReleaseOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteReleaseOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteReleaseOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReleaseOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteReleaseOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteReleaseOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[RELEASE_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteReleaseOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return RELEASE_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReleaseOp::select_sources(const InstanceRef &target,
+                                         const InstanceSet &sources,
+                                         std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectReleaseSrcInput input;
+      Mapper::SelectReleaseSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_release_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReleaseOp::pack_remote_operation(Serializer &rez,
+                                                AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_release(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteReleaseOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_release(derez, runtime);
+      unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Fill Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteFillOp::RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : ExternalFill(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteFillOp::RemoteFillOp(const RemoteFillOp &rhs)
+      : ExternalFill(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteFillOp::~RemoteFillOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteFillOp& RemoteFillOp::operator=(const RemoteFillOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteFillOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteFillOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteFillOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteFillOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteFillOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[FILL_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteFillOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return FILL_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteFillOp::select_sources(const InstanceRef &target,
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteFillOp::pack_remote_operation(Serializer &rez,
+                                             AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_fill(rez, target);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteFillOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_fill(derez, runtime);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Partition Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemotePartitionOp::RemotePartitionOp(Runtime *rt, 
+                                     Operation *ptr, AddressSpaceID src)
+      : ExternalPartition(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemotePartitionOp::RemotePartitionOp(const RemotePartitionOp &rhs)
+      : ExternalPartition(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemotePartitionOp::~RemotePartitionOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemotePartitionOp& RemotePartitionOp::operator=(
+                                                   const RemotePartitionOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemotePartitionOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemotePartitionOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemotePartitionOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemotePartitionOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    Partition::PartitionKind RemotePartitionOp::get_partition_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return part_kind;
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemotePartitionOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DEPENDENT_PARTITION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemotePartitionOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DEPENDENT_PARTITION_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemotePartitionOp::select_sources(const InstanceRef &target,
+                                           const InstanceSet &sources,
+                                           std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectPartitionSrcInput input;
+      Mapper::SelectPartitionSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_partition_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemotePartitionOp::pack_remote_operation(Serializer &rez,
+                                                  AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_partition(rez, target);
+      rez.serialize(part_kind);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemotePartitionOp::unpack(Deserializer &derez,
+                                   ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_partition(derez, runtime);
+      derez.deserialize(part_kind);
+      unpack_profiling_requests(derez);
     }
  
   }; // namespace Internal 

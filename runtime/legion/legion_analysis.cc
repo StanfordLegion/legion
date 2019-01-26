@@ -3191,7 +3191,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(handle);
           rez.serialize(usage);
@@ -3258,7 +3258,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(usage);
           rez.serialize(term_event);
@@ -3318,7 +3318,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(usage);
           rez.serialize(precondition);
@@ -3385,7 +3385,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           rez.serialize(src_index);
           rez.serialize(dst_index);
           rez.serialize(src_usage);
@@ -3462,7 +3462,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
           rez.serialize(usage);
           if (local_view != NULL)
@@ -3518,7 +3518,7 @@ namespace Legion {
             rez.serialize(it->mask);
             rez.serialize(it->source);
           }
-          op->pack_remote_operation(rez);
+          op->pack_remote_operation(rez, rit->first);
           if (inst_view != NULL)
           {
             inst_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
@@ -3983,7 +3983,8 @@ namespace Legion {
         user_mask |= eq_masks[idx];
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       LogicalRegion handle;
@@ -4281,7 +4282,8 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       RegionUsage usage;
@@ -4415,7 +4417,8 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       RegionUsage usage;
@@ -4564,7 +4567,8 @@ namespace Legion {
         src_mask |= eq_masks[idx];
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned src_index, dst_index;
       derez.deserialize(src_index);
       derez.deserialize(dst_index);
@@ -4816,7 +4820,8 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
       RegionUsage usage;
@@ -4976,7 +4981,8 @@ namespace Legion {
         derez.deserialize(eq_masks[idx]);
         derez.deserialize(sources[idx]);
       }
-      RemoteOp *op = RemoteOp::unpack_remote_operation(derez, runtime);
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       DistributedID view_did;
       derez.deserialize(view_did);
       InstanceView *inst_view = NULL;

@@ -713,9 +713,8 @@ namespace Legion {
       SEND_LIBRARY_PROJECTION_RESPONSE,
       SEND_LIBRARY_TASK_REQUEST,
       SEND_LIBRARY_TASK_RESPONSE,
-      SEND_REMOTE_OP_SOURCES_REQUEST,
-      SEND_REMOTE_OP_SOURCES_RESPONSE,
       SEND_REMOTE_OP_REPORT_UNINIT,
+      SEND_REMOTE_OP_PROFILING_COUNT_UPDATE,
       SEND_SHUTDOWN_NOTIFICATION,
       SEND_SHUTDOWN_RESPONSE,
       LAST_SEND_KIND, // This one must be last
@@ -859,9 +858,8 @@ namespace Legion {
         "Send Library Projection Response",                           \
         "Send Library Task Request",                                  \
         "Send Library Task Response",                                 \
-        "Remote Op Sources Request",                                  \
-        "Remote Op Sources Response",                                 \
         "Remote Op Report Uninitialized",                             \
+        "Remote Op Profiling Count Update",                           \
         "Send Shutdown Notification",                                 \
         "Send Shutdown Response",                                     \
       };
@@ -1273,11 +1271,20 @@ namespace Legion {
     class AttachOp;
     class DetachOp;
     class TimingOp;
+    class ExternalMappable;
     class RemoteOp;
-    class TaskOp;
+    class RemoteMapOp;
+    class RemoteCopyOp;
+    class RemoteCloseOp;
+    class RemoteAcquireOp;
+    class RemoteReleaseOp;
+    class RemoteFillOp;
+    class RemotePartitionOp;
 
     // legion_tasks.h
     class ExternalTask;
+    class TaskOp;
+    class RemoteTaskOp;
     class SingleTask;
     class MultiTask;
     class IndividualTask;
@@ -1493,6 +1500,7 @@ namespace Legion {
     friend class Internal::DetachOp;                        \
     friend class Internal::TimingOp;                        \
     friend class Internal::TraceSummaryOp;                  \
+    friend class Internal::ExternalMappable;                \
     friend class Internal::ExternalTask;                    \
     friend class Internal::TaskOp;                          \
     friend class Internal::SingleTask;                      \

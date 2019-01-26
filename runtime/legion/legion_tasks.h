@@ -92,39 +92,20 @@ namespace Legion {
 
     /**
      * \class ExternalTask
-     * An extentions of the external Task with some
-     * methods that help us internally for packing
-     * and unpacking them.
+     * An extention of the external-facing Task to help
+     * with packing and unpacking them
      */
-    class ExternalTask : public Task {
+    class ExternalTask : public Task, public ExternalMappable {
     public:
       ExternalTask(void);
     public:
-      void pack_external_task(Serializer &rez, AddressSpaceID target);
+      void pack_external_task(Serializer &rez, AddressSpaceID target) const;
       void unpack_external_task(Deserializer &derez, Runtime *runtime,
                                 ReferenceMutator *mutator);
     public:
       virtual void set_context_index(unsigned index) = 0;
     protected:
       AllocManager *arg_manager;
-    public:
-      static void pack_index_space_requirement(
-          const IndexSpaceRequirement &req, Serializer &rez);
-      static void pack_region_requirement(
-          const RegionRequirement &req, Serializer &rez);
-      static void pack_grant(
-          const Grant &grant, Serializer &rez);
-      static void pack_phase_barrier(
-          const PhaseBarrier &barrier, Serializer &rez);
-    public:
-      static void unpack_index_space_requirement(
-          IndexSpaceRequirement &req, Deserializer &derez);
-      static void unpack_region_requirement(
-          RegionRequirement &req, Deserializer &derez);
-      static void unpack_grant(
-          Grant &grant, Deserializer &derez);
-      static void unpack_phase_barrier(
-          PhaseBarrier &barrier, Deserializer &derez);
     };
 
     /**
@@ -227,6 +208,9 @@ namespace Legion {
       virtual unsigned get_context_index(void) const;
       virtual void set_context_index(unsigned index);
       virtual const char* get_task_name(void) const;
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void pack_profiling_requests(Serializer &rez) const;
     public:
       bool is_remote(void) const;
       inline bool is_stolen(void) const { return (steal_count > 0); }
@@ -392,6 +376,35 @@ namespace Legion {
     };
 
     /**
+     * \class RemoteTaskOp
+     * This is a remote copy of a TaskOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteTaskOp : public ExternalTask, public RemoteOp {
+    public:
+      RemoteTaskOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteTaskOp(const RemoteTaskOp &rhs);
+      virtual ~RemoteTaskOp(void);
+    public:
+      RemoteTaskOp& operator=(const RemoteTaskOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual int get_depth(void) const;
+      virtual const char* get_task_name(void) const;
+      virtual void set_context_index(unsigned index);
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
      * \class SingleTask
      * This is the parent type for each of the single class
      * kinds of classes.  It also serves as the type that
@@ -462,10 +475,12 @@ namespace Legion {
       void unpack_single_task(Deserializer &derez, 
                               std::set<RtEvent> &ready_events);
     public:
+      virtual void pack_profiling_requests(Serializer &rez) const;
       virtual void add_copy_profiling_request(
                                       Realm::ProfilingRequestSet &requests);
       virtual void handle_profiling_response(
                                 const Realm::ProfilingResponse &respone);
+      virtual void handle_profiling_update(int count);
     public:
       virtual void activate(void) = 0;
       virtual void deactivate(void) = 0;
@@ -539,8 +554,8 @@ namespace Legion {
       std::vector<ProfilingMeasurementID> task_profiling_requests;
       std::vector<ProfilingMeasurementID> copy_profiling_requests;
       int                                      profiling_priority;
-      int                          outstanding_profiling_requests;
-      RtUserEvent                              profiling_reported;
+      mutable int                  outstanding_profiling_requests;
+      mutable RtUserEvent                      profiling_reported;
 #ifdef DEBUG_LEGION
     protected:
       // For checking that premapped instances didn't change during mapping
