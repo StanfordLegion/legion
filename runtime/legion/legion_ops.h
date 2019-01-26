@@ -2747,6 +2747,8 @@ namespace Legion {
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
