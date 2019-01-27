@@ -1297,6 +1297,7 @@ namespace Legion {
       struct MapPartitionOutput {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
+        TaskPriority                            profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_partition(const MapperContext        ctx,

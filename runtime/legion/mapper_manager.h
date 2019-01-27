@@ -102,6 +102,10 @@ namespace Legion {
                                       Mapper::SelectTaskSrcInput *input,
                                       Mapper::SelectTaskSrcOutput *output,
                                       MappingCallInfo *info = NULL);
+      void invoke_select_task_sources(RemoteTaskOp *task, 
+                                      Mapper::SelectTaskSrcInput *input,
+                                      Mapper::SelectTaskSrcOutput *output,
+                                      MappingCallInfo *info = NULL);
       void invoke_task_speculate(TaskOp *task, 
                                  Mapper::SpeculativeOutput *output,
                                  MappingCallInfo *info = NULL);
@@ -120,6 +124,10 @@ namespace Legion {
                                         Mapper::SelectInlineSrcInput *input,
                                         Mapper::SelectInlineSrcOutput *output,
                                         MappingCallInfo *info = NULL);
+      void invoke_select_inline_sources(RemoteMapOp *op, 
+                                        Mapper::SelectInlineSrcInput *input,
+                                        Mapper::SelectInlineSrcOutput *output,
+                                        MappingCallInfo *info = NULL);
       void invoke_inline_report_profiling(MapOp *op, 
                                           Mapper::InlineProfilingInfo *input,
                                           MappingCallInfo *info = NULL);
@@ -129,6 +137,10 @@ namespace Legion {
                            Mapper::MapCopyOutput *output,
                            MappingCallInfo *info = NULL);
       void invoke_select_copy_sources(CopyOp *op,
+                                      Mapper::SelectCopySrcInput *input,
+                                      Mapper::SelectCopySrcOutput *output,
+                                      MappingCallInfo *info = NULL);
+      void invoke_select_copy_sources(RemoteCopyOp *op,
                                       Mapper::SelectCopySrcInput *input,
                                       Mapper::SelectCopySrcOutput *output,
                                       MappingCallInfo *info = NULL);
@@ -143,6 +155,10 @@ namespace Legion {
                               MappingCallInfo *info = NULL);
     public: // Close mapper calls
       void invoke_select_close_sources(CloseOp *op,
+                                       Mapper::SelectCloseSrcInput *input,
+                                       Mapper::SelectCloseSrcOutput *output,
+                                       MappingCallInfo *info = NULL);
+      void invoke_select_close_sources(RemoteCloseOp *op,
                                        Mapper::SelectCloseSrcInput *input,
                                        Mapper::SelectCloseSrcOutput *output,
                                        MappingCallInfo *info = NULL);
@@ -177,6 +193,10 @@ namespace Legion {
                                          Mapper::SelectReleaseSrcInput *input,
                                          Mapper::SelectReleaseSrcOutput *output,
                                          MappingCallInfo *info = NULL);
+      void invoke_select_release_sources(RemoteReleaseOp *op,
+                                         Mapper::SelectReleaseSrcInput *input,
+                                         Mapper::SelectReleaseSrcOutput *output,
+                                         MappingCallInfo *info = NULL);
       void invoke_release_speculate(ReleaseOp *op,
                                     Mapper::SpeculativeOutput *output,
                                     MappingCallInfo *info = NULL);
@@ -197,6 +217,10 @@ namespace Legion {
                           Mapper::MapPartitionOutput *output,
                           MappingCallInfo *info = NULL);
       void invoke_select_partition_sources(DependentPartitionOp *op,
+                          Mapper::SelectPartitionSrcInput *input,
+                          Mapper::SelectPartitionSrcOutput *output,
+                          MappingCallInfo *info = NULL);
+      void invoke_select_partition_sources(RemotePartitionOp *op,
                           Mapper::SelectPartitionSrcInput *input,
                           Mapper::SelectPartitionSrcOutput *output,
                           MappingCallInfo *info = NULL);

@@ -414,7 +414,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ExternalTask::pack_external_task(Serializer &rez,AddressSpaceID target)
+    void ExternalTask::pack_external_task(Serializer &rez,
+                                          AddressSpaceID target) const
     //--------------------------------------------------------------------------
     {
       RezCheck z(rez);
@@ -441,11 +442,7 @@ namespace Legion {
       rez.serialize<bool>((arg_manager != NULL));
       rez.serialize(arglen);
       rez.serialize(args,arglen);
-      rez.serialize(map_id);
-      rez.serialize(tag);
-      rez.serialize(mapper_data_size);
-      if (mapper_data_size > 0)
-        rez.serialize(mapper_data, mapper_data_size);
+      pack_mappable(*this, rez);
       rez.serialize(is_index_space);
       rez.serialize(must_epoch_task);
       rez.serialize(index_domain);
@@ -523,23 +520,7 @@ namespace Legion {
           args = legion_malloc(TASK_ARGS_ALLOC, arglen);
         derez.deserialize(args,arglen);
       }
-      derez.deserialize(map_id);
-      derez.deserialize(tag);
-      derez.deserialize(mapper_data_size);
-      if (mapper_data_size > 0)
-      {
-        // If we already have mapper data, then we are going to replace it
-        if (mapper_data != NULL)
-          free(mapper_data);
-        mapper_data = malloc(mapper_data_size);
-        derez.deserialize(mapper_data, mapper_data_size);
-      }
-      else if (mapper_data != NULL)
-      {
-        // If we freed it remotely then we can free it here too
-        free(mapper_data);
-        mapper_data = NULL;
-      }
+      unpack_mappable(*this, derez); 
       derez.deserialize(is_index_space);
       derez.deserialize(must_epoch_task);
       derez.deserialize(index_domain);
@@ -554,133 +535,10 @@ namespace Legion {
       derez.deserialize(orig_proc);
       derez.deserialize(steal_count);
       derez.deserialize(speculated);
-      unsigned ctx_index;
-      derez.deserialize(ctx_index);
-      set_context_index(ctx_index);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::pack_index_space_requirement(
-                              const IndexSpaceRequirement &req, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(req.handle);
-      rez.serialize(req.privilege);
-      rez.serialize(req.parent);
-      // no need to send verified
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::unpack_index_space_requirement(
-                                IndexSpaceRequirement &req, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(req.handle);
-      derez.deserialize(req.privilege);
-      derez.deserialize(req.parent);
-      req.verified = true;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::pack_region_requirement(
-                                  const RegionRequirement &req, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(req.region);
-      rez.serialize(req.partition);
-      rez.serialize(req.privilege_fields.size());
-      for (std::set<FieldID>::const_iterator it = req.privilege_fields.begin();
-            it != req.privilege_fields.end(); it++)
-      {
-        rez.serialize(*it);
-      }
-      rez.serialize(req.instance_fields.size());
-      for (std::vector<FieldID>::const_iterator it = 
-            req.instance_fields.begin(); it != req.instance_fields.end(); it++)
-      {
-        rez.serialize(*it);
-      }
-      rez.serialize(req.privilege);
-      rez.serialize(req.prop);
-      rez.serialize(req.parent);
-      rez.serialize(req.redop);
-      rez.serialize(req.tag);
-      rez.serialize(req.flags);
-      rez.serialize(req.handle_type);
-      rez.serialize(req.projection);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::unpack_region_requirement(
-                                    RegionRequirement &req, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(req.region);
-      derez.deserialize(req.partition);
-      size_t num_privilege_fields;
-      derez.deserialize(num_privilege_fields);
-      for (unsigned idx = 0; idx < num_privilege_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        req.privilege_fields.insert(fid);
-      }
-      size_t num_instance_fields;
-      derez.deserialize(num_instance_fields);
-      for (unsigned idx = 0; idx < num_instance_fields; idx++)
-      {
-        FieldID fid;
-        derez.deserialize(fid);
-        req.instance_fields.push_back(fid);
-      }
-      derez.deserialize(req.privilege);
-      derez.deserialize(req.prop);
-      derez.deserialize(req.parent);
-      derez.deserialize(req.redop);
-      derez.deserialize(req.tag);
-      derez.deserialize(req.flags);
-      derez.deserialize(req.handle_type);
-      derez.deserialize(req.projection);
-      req.flags |= VERIFIED_FLAG;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::pack_grant(const Grant &grant,Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      grant.impl->pack_grant(rez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::unpack_grant(Grant &grant,Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      // Create a new grant impl object to perform the unpack
-      grant = Grant(new GrantImpl());
-      grant.impl->unpack_grant(derez);
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::pack_phase_barrier(
-                                  const PhaseBarrier &barrier, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      RezCheck z(rez);
-      rez.serialize(barrier.phase_barrier);
-    }  
-
-    //--------------------------------------------------------------------------
-    /*static*/ void ExternalTask::unpack_phase_barrier(
-                                    PhaseBarrier &barrier, Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      DerezCheck z(derez);
-      derez.deserialize(barrier.phase_barrier);
-    }
+      unsigned index;
+      derez.deserialize(index);
+      set_context_index(index);
+    } 
 
     /////////////////////////////////////////////////////////////
     // Task Operation 
@@ -736,6 +594,23 @@ namespace Legion {
     {
       TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
       return impl->get_name();
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskOp::pack_remote_operation(Serializer &rez,
+                                       AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+      pack_external_task(rez, target);
+      pack_profiling_requests(rez);
+    }
+    
+    //--------------------------------------------------------------------------
+    void TaskOp::pack_profiling_requests(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(0);
     }
 
     //--------------------------------------------------------------------------
@@ -2262,6 +2137,132 @@ namespace Legion {
       LegionSpy::log_requirement_fields(uid, idx, req.privilege_fields);
       if (proj)
         LegionSpy::log_requirement_projection(uid, idx, req.projection);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Task Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteTaskOp::RemoteTaskOp(Runtime *rt, Operation *ptr, AddressSpaceID src)
+      : ExternalTask(), RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTaskOp::RemoteTaskOp(const RemoteTaskOp &rhs)
+      : ExternalTask(), RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTaskOp::~RemoteTaskOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteTaskOp& RemoteTaskOp::operator=(const RemoteTaskOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteTaskOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteTaskOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTaskOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteTaskOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteTaskOp::get_task_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      TaskImpl *impl = runtime->find_or_create_task_impl(task_id);
+      return impl->get_name();
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteTaskOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[TASK_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteTaskOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return TASK_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTaskOp::select_sources(const InstanceRef &target,
+                                      const InstanceSet &sources,
+                                      std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      if (source == runtime->address_space)
+      {
+        // If we're on the owner node we can just do this
+        remote_ptr->select_sources(target, sources, ranking);
+        return;
+      }
+      Mapper::SelectTaskSrcInput input;
+      Mapper::SelectTaskSrcOutput output;
+      prepare_for_mapping(sources, input.source_instances); 
+      prepare_for_mapping(target, input.target);
+      if (mapper == NULL)
+        mapper = runtime->find_mapper(map_id);
+      mapper->invoke_select_task_sources(this, &input, &output);
+      compute_ranking(mapper, output.chosen_ranking, sources, ranking);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTaskOp::pack_remote_operation(Serializer &rez,
+                                             AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+      pack_external_task(rez, target);
+      pack_profiling_requests(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteTaskOp::unpack(Deserializer &derez,
+                              ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      unpack_external_task(derez, runtime, &mutator);
+      unpack_profiling_requests(derez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -4362,6 +4363,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SingleTask::pack_profiling_requests(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize<size_t>(copy_profiling_requests.size());
+      if (!copy_profiling_requests.empty())
+      {
+        for (unsigned idx = 0; idx < copy_profiling_requests.size(); idx++)
+          rez.serialize(copy_profiling_requests[idx]);
+        rez.serialize(profiling_priority);
+        rez.serialize(runtime->find_utility_group());
+        rez.serialize(RtEvent::NO_RT_EVENT);
+        int previous = __sync_fetch_and_add(&outstanding_profiling_requests,
+                                        RemoteOp::REMOTE_PROFILING_MAX_COUNT);
+        if ((previous == 1) && !profiling_reported.exists())
+          profiling_reported = Runtime::create_rt_user_event();
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void SingleTask::add_copy_profiling_request(
                                            Realm::ProfilingRequestSet &requests)
     //--------------------------------------------------------------------------
@@ -4409,14 +4429,22 @@ namespace Legion {
       else
         info.task_response = false;
       mapper->invoke_task_report_profiling(this, &info);
+      handle_profiling_update(-1);
+    } 
+
+    //--------------------------------------------------------------------------
+    void SingleTask::handle_profiling_update(int count)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
       assert(outstanding_profiling_requests > 0);
       assert(profiling_reported.exists());
 #endif
-      int remaining = __sync_add_and_fetch(&outstanding_profiling_requests, -1);
+      const int remaining = 
+        __sync_add_and_fetch(&outstanding_profiling_requests, count);
       if (remaining == 0)
         Runtime::trigger_event(profiling_reported);
-    } 
+    }
 
     //--------------------------------------------------------------------------
     InnerContext* SingleTask::initialize_inner_execution_context(VariantImpl *v)

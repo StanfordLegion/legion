@@ -2188,6 +2188,7 @@ namespace Legion {
       static MapperID generate_static_mapper_id(void);
       void add_mapper(MapperID map_id, Mapper *mapper, Processor proc);
       void replace_default_mapper(Mapper *mapper, Processor proc);
+      MapperManager* find_mapper(MapperID map_id);
       MapperManager* find_mapper(Processor target, MapperID map_id);
       static MapperManager* wrap_mapper(Runtime *runtime, Mapper *mapper,
                                         MapperID map_id, Processor proc);
@@ -2518,12 +2519,10 @@ namespace Legion {
                                           Serializer &rez);
       void send_library_task_request(AddressSpaceID target, Serializer &rez);
       void send_library_task_response(AddressSpaceID target, Serializer &rez);
-      void send_remote_op_select_sources_request(AddressSpaceID target,
-                                                 Serializer &rez);
-      void send_remote_op_select_sources_response(AddressSpaceID target,
-                                                  Serializer &rez);
       void send_remote_op_report_uninitialized(AddressSpaceID target,
                                                Serializer &rez);
+      void send_remote_op_profiling_count_update(AddressSpaceID target,
+                                                 Serializer &rez);
       void send_shutdown_notification(AddressSpaceID target, Serializer &rez);
       void send_shutdown_response(AddressSpaceID target, Serializer &rez);
     public:
@@ -2751,10 +2750,8 @@ namespace Legion {
       void handle_library_task_request(Deserializer &derez,
                                        AddressSpaceID source);
       void handle_library_task_response(Deserializer &derez);
-      void handle_remote_op_sources_request(Deserializer &derez,
-                                            AddressSpaceID source);
-      void handle_remote_op_sources_response(Deserializer &derez);
       void handle_remote_op_report_uninitialized(Deserializer &derez);
+      void handle_remote_op_profiling_count_update(Deserializer &derez);
       void handle_shutdown_notification(Deserializer &derez, 
                                         AddressSpaceID source);
       void handle_shutdown_response(Deserializer &derez);

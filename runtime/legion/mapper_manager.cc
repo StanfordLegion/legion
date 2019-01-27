@@ -286,6 +286,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_task_sources(RemoteTaskOp *task, 
+                                    Mapper::SelectTaskSrcInput *input,
+                                    Mapper::SelectTaskSrcOutput *output,
+                                    MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(TASK_SELECT_SOURCES_CALL,
+                                 task, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemoteTaskOp, Mapper::SelectTaskSrcInput,
+            Mapper::SelectTaskSrcOutput, 
+            &MapperManager::invoke_select_task_sources>
+              continuation(this, task, input, output, info);
+          continuation.defer(runtime, continuation_precondition, task);
+          return;
+        }
+      }
+      mapper->select_task_sources(info, *task, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_task_speculate(TaskOp *task,
                                               Mapper::SpeculativeOutput *output,
                                               MappingCallInfo *info)
@@ -412,6 +438,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_inline_sources(RemoteMapOp *op, 
+                                      Mapper::SelectInlineSrcInput *input,
+                                      Mapper::SelectInlineSrcOutput *output,
+                                      MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(INLINE_SELECT_SOURCES_CALL,
+                                 op, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemoteMapOp, Mapper::SelectInlineSrcInput,
+                              Mapper::SelectInlineSrcOutput, 
+                              &MapperManager::invoke_select_inline_sources>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_inline_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_inline_report_profiling(MapOp *op, 
                                      Mapper::InlineProfilingInfo *input,
                                      MappingCallInfo *info)
@@ -475,6 +527,32 @@ namespace Legion {
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CopyOp, Mapper::SelectCopySrcInput,
+            Mapper::SelectCopySrcOutput, 
+            &MapperManager::invoke_select_copy_sources>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_copy_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_copy_sources(RemoteCopyOp *op,
+                                    Mapper::SelectCopySrcInput *input,
+                                    Mapper::SelectCopySrcOutput *output,
+                                    MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(COPY_SELECT_SOURCES_CALL,
+                                 op, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemoteCopyOp, Mapper::SelectCopySrcInput,
             Mapper::SelectCopySrcOutput, 
             &MapperManager::invoke_select_copy_sources>
               continuation(this, op, input, output, info);
@@ -575,6 +653,32 @@ namespace Legion {
         if (continuation_precondition.exists())
         {
           MapperContinuation3<CloseOp, Mapper::SelectCloseSrcInput,
+            Mapper::SelectCloseSrcOutput, 
+            &MapperManager::invoke_select_close_sources>
+              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_close_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_close_sources(RemoteCloseOp *op,
+                                         Mapper::SelectCloseSrcInput *input,
+                                         Mapper::SelectCloseSrcOutput *output,
+                                         MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(CLOSE_SELECT_SOURCES_CALL,
+                                 op, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemoteCloseOp, Mapper::SelectCloseSrcInput,
             Mapper::SelectCloseSrcOutput, 
             &MapperManager::invoke_select_close_sources>
               continuation(this, op, input, output, info);
@@ -787,6 +891,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_release_sources(RemoteReleaseOp *op,
+                                       Mapper::SelectReleaseSrcInput *input,
+                                       Mapper::SelectReleaseSrcOutput *output,
+                                       MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(RELEASE_SELECT_SOURCES_CALL,
+                                 op, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemoteReleaseOp, Mapper::SelectReleaseSrcInput,
+                              Mapper::SelectReleaseSrcOutput, 
+                              &MapperManager::invoke_select_release_sources>
+                                continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_release_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
     void MapperManager::invoke_release_speculate(ReleaseOp *op,
                                              Mapper::SpeculativeOutput *output,
                                              MappingCallInfo *info)
@@ -931,6 +1061,33 @@ namespace Legion {
         if (continuation_precondition.exists())
         {
           MapperContinuation3<DependentPartitionOp, 
+                            Mapper::SelectPartitionSrcInput,
+                            Mapper::SelectPartitionSrcOutput, 
+                            &MapperManager::invoke_select_partition_sources>
+                              continuation(this, op, input, output, info);
+          continuation.defer(runtime, continuation_precondition, op);
+          return;
+        }
+      }
+      mapper->select_partition_sources(info, *op, *input, *output);
+      finish_mapper_call(info);
+    }
+
+    //--------------------------------------------------------------------------
+    void MapperManager::invoke_select_partition_sources(RemotePartitionOp *op,
+                                  Mapper::SelectPartitionSrcInput *input,
+                                  Mapper::SelectPartitionSrcOutput *output,
+                                  MappingCallInfo *info)
+    //--------------------------------------------------------------------------
+    {
+      if (info == NULL)
+      {
+        RtEvent continuation_precondition;
+        info = begin_mapper_call(PARTITION_SELECT_SOURCES_CALL,
+                                 op, continuation_precondition);
+        if (continuation_precondition.exists())
+        {
+          MapperContinuation3<RemotePartitionOp, 
                             Mapper::SelectPartitionSrcInput,
                             Mapper::SelectPartitionSrcOutput, 
                             &MapperManager::invoke_select_partition_sources>

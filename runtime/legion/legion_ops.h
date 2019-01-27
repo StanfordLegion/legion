@@ -64,7 +64,6 @@ namespace Legion {
         ATTACH_OP_KIND,
         DETACH_OP_KIND,
         TIMING_OP_KIND,
-        REMOTE_OP_KIND,
         TRACE_CAPTURE_OP_KIND,
         TRACE_COMPLETE_OP_KIND,
         TRACE_REPLAY_OP_KIND,
@@ -98,14 +97,13 @@ namespace Legion {
         "Attach",                   \
         "Detach",                   \
         "Timing",                   \
-        "Remote",                   \
         "Trace Capture",            \
         "Trace Complete",           \
         "Trace Replay",             \
         "Trace Begin",              \
         "Trace Summary",            \
         "Task",                     \
-      }
+      } 
     public:
       struct TriggerOpArgs : public LgTaskArgs<TriggerOpArgs> {
       public:
@@ -387,6 +385,7 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_update(int count);
       // Compute the initial precondition for this operation
       virtual ApEvent compute_init_precondition(const PhysicalTraceInfo &info);
     protected:
@@ -534,7 +533,9 @@ namespace Legion {
 #endif
     public:
       // Pack the needed parts of this operation for a remote operation
-      virtual void pack_remote_operation(Serializer &rez) const;
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      void pack_local_remote_operation(Serializer &rez) const;
     public:
       Runtime *const runtime;
     protected:
@@ -611,6 +612,37 @@ namespace Legion {
       // Dependence trackers for detecting when it is safe to map and commit
       MappingDependenceTracker *mapping_tracker;
       CommitDependenceTracker  *commit_tracker;
+    };
+
+    /**
+     * \class ExternalMappable
+     * This is class that provides some basic functionality for
+     * packing and unpacking the data structures used by 
+     * external facing operations
+     */
+    class ExternalMappable {
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      static void pack_mappable(const Mappable &mappable, Serializer &rez);
+      static void pack_index_space_requirement(
+          const IndexSpaceRequirement &req, Serializer &rez);
+      static void pack_region_requirement(
+          const RegionRequirement &req, Serializer &rez);
+      static void pack_grant(
+          const Grant &grant, Serializer &rez);
+      static void pack_phase_barrier(
+          const PhaseBarrier &barrier, Serializer &rez);
+    public:
+      static void unpack_mappable(Mappable &mappable, Deserializer &derez);
+      static void unpack_index_space_requirement(
+          IndexSpaceRequirement &req, Deserializer &derez);
+      static void unpack_region_requirement(
+          RegionRequirement &req, Deserializer &derez);
+      static void unpack_grant(
+          Grant &grant, Deserializer &derez);
+      static void unpack_phase_barrier(
+          PhaseBarrier &barrier, Deserializer &derez);
     };
 
     /**
@@ -811,6 +843,21 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalMapping
+     * An extension of the external-facing InlineMapping to help 
+     * with packing and unpacking them
+     */
+    class ExternalMapping : public InlineMapping, public ExternalMappable {
+    public:
+      ExternalMapping(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_mapping(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_mapping(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class MapOp
      * Mapping operations are used for computing inline mapping
      * operations.  Mapping operations will always update a
@@ -825,7 +872,7 @@ namespace Legion {
      * will result in the entire enclosing task context
      * being restarted.
      */
-    class MapOp : public InlineMapping, public Operation,
+    class MapOp : public ExternalMapping, public Operation,
                   public LegionHeapify<MapOp> {
     public:
       static const AllocationType alloc_type = MAP_OP_ALLOC;
@@ -870,6 +917,7 @@ namespace Legion {
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
     protected:
       void check_privilege(void);
@@ -879,6 +927,9 @@ namespace Legion {
                             Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                       const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       bool remap_region;
       ApUserEvent termination_event;
@@ -894,8 +945,23 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
+    };
+
+    /**
+     * \class ExternalCopy
+     * An extension of the external-facing Copy to help 
+     * with packing and unpacking them
+     */
+    class ExternalCopy : public Copy, public ExternalMappable {
+    public:
+      ExternalCopy(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_copy(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_copy(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -905,7 +971,7 @@ namespace Legion {
      * from different region trees in an efficient way by
      * using the low-level runtime copy facilities. 
      */
-    class CopyOp : public Copy, public MemoizableOp<SpeculativeOp>,
+    class CopyOp : public ExternalCopy, public MemoizableOp<SpeculativeOp>,
                    public LegionHeapify<CopyOp> {
     public:
       static const AllocationType alloc_type = COPY_OP_ALLOC;
@@ -991,6 +1057,7 @@ namespace Legion {
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
     protected:
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
@@ -1030,7 +1097,10 @@ namespace Legion {
                                       Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                 const Realm::ProfilingResponse &response);
-      // Separate function for this so it can be called by base classes
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      // Separate function for this so it can be called by derived classes
       RtEvent perform_local_versioning_analysis(void);
     public:
       std::vector<RegionTreePath>           src_privilege_paths;
@@ -1058,8 +1128,8 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1346,6 +1416,21 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalClose
+     * An extension of the external-facing Close to help 
+     * with packing and unpacking them
+     */
+    class ExternalClose : public Close, public ExternalMappable {
+    public:
+      ExternalClose(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_close(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_close(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class CloseOp
      * Close operations are only visible internally inside
      * the runtime and are issued to help close up the 
@@ -1353,7 +1438,7 @@ namespace Legion {
      * operations that both inherit from this class:
      * InterCloseOp and PostCloseOp.
      */
-    class CloseOp : public Close, public InternalOp {
+    class CloseOp : public ExternalClose, public InternalOp {
     public:
       static const AllocationType alloc_type = CLOSE_OP_ALLOC;
     public:
@@ -1365,6 +1450,7 @@ namespace Legion {
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual Mappable* get_mappable(void);
     public:
@@ -1463,6 +1549,9 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       unsigned parent_idx;
       InstanceSet target_instances;
@@ -1473,8 +1562,8 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -1508,12 +1597,27 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalAcquire
+     * An extension of the external-facing Acquire to help 
+     * with packing and unpacking them
+     */
+    class ExternalAcquire : public Acquire, public ExternalMappable {
+    public:
+      ExternalAcquire(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_acquire(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_acquire(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class AcquireOp
      * Acquire operations are used for performing
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class AcquireOp : public Acquire, public MemoizableOp<SpeculativeOp>,
+    class AcquireOp : public ExternalAcquire,public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<AcquireOp> {
     public:
       static const AllocationType alloc_type = ACQUIRE_OP_ALLOC;
@@ -1552,6 +1656,7 @@ namespace Legion {
     public: 
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1571,6 +1676,9 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1583,8 +1691,23 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
+    };
+
+    /**
+     * \class ExternalRelease
+     * An extension of the external-facing Release to help 
+     * with packing and unpacking them
+     */
+    class ExternalRelease: public Release, public ExternalMappable {
+    public:
+      ExternalRelease(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_release(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_release(Deserializer &derez, Runtime *runtime);
     };
 
     /**
@@ -1593,7 +1716,7 @@ namespace Legion {
      * user-level software coherence when tasks own
      * regions with simultaneous coherence.
      */
-    class ReleaseOp : public Release, public MemoizableOp<SpeculativeOp>,
+    class ReleaseOp : public ExternalRelease,public MemoizableOp<SpeculativeOp>,
                       public LegionHeapify<ReleaseOp> {
     public:
       static const AllocationType alloc_type = RELEASE_OP_ALLOC;
@@ -1635,6 +1758,7 @@ namespace Legion {
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
     public:
       const RegionRequirement& get_requirement(void) const;
@@ -1654,6 +1778,9 @@ namespace Legion {
                                           Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
                                     const Realm::ProfilingResponse &response);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       RegionRequirement requirement;
       RegionTreePath    privilege_path;
@@ -1666,8 +1793,8 @@ namespace Legion {
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
       int                                 profiling_priority;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -2347,12 +2474,27 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalPartition
+     * An extension of the external-facing Partition to help 
+     * with packing and unpacking them
+     */
+    class ExternalPartition: public Partition, public ExternalMappable {
+    public:
+      ExternalPartition(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_partition(Serializer &rez,AddressSpaceID target) const;
+      void unpack_external_partition(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class DependentPartitionOp
      * An operation for creating different kinds of partitions
      * which are dependent on mapping a region in order to compute
      * the resulting partition.
      */
-    class DependentPartitionOp : public Partition, public Operation,
+    class DependentPartitionOp : public ExternalPartition, public Operation,
                                  public LegionHeapify<DependentPartitionOp> {
     public:
       static const AllocationType alloc_type = DEPENDENT_PARTITION_OP_ALLOC;
@@ -2501,7 +2643,9 @@ namespace Legion {
       virtual PartitionKind get_partition_kind(void) const;
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
+      virtual Mappable* get_mappable(void);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2524,6 +2668,9 @@ namespace Legion {
       // Report a profiling result for this operation
       virtual void handle_profiling_response(
                                   const Realm::ProfilingResponse &result);
+      virtual void handle_profiling_update(int count);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       void compute_parent_index(void);
       void select_partition_projection(void);
@@ -2557,8 +2704,9 @@ namespace Legion {
 #endif
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
-      int                     outstanding_profiling_requests;
-      RtUserEvent                         profiling_reported;
+      int                                 profiling_priority;
+      mutable int             outstanding_profiling_requests;
+      mutable RtUserEvent                 profiling_reported;
     };
 
     /**
@@ -2586,6 +2734,7 @@ namespace Legion {
                                     const InstanceSet &mapped_instances,
                                     const PhysicalTraceInfo &trace_info);
       virtual void trigger_commit(void);
+      virtual PartitionKind get_partition_kind(void) const;
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
@@ -2595,11 +2744,26 @@ namespace Legion {
     };
 
     /**
+     * \class ExternalFill
+     * An extension of the external-facing Fill to help 
+     * with packing and unpacking them
+     */
+    class ExternalFill : public Fill, public ExternalMappable {
+    public:
+      ExternalFill(void);
+    public:
+      virtual void set_context_index(unsigned index) = 0;
+    public:
+      void pack_external_fill(Serializer &rez, AddressSpaceID target) const;
+      void unpack_external_fill(Deserializer &derez, Runtime *runtime);
+    };
+
+    /**
      * \class FillOp
      * Fill operations are used to initialize a field to a
      * specific value for a particular logical region.
      */
-    class FillOp : public MemoizableOp<SpeculativeOp>, public Fill,
+    class FillOp : public MemoizableOp<SpeculativeOp>, public ExternalFill,
                    public LegionHeapify<FillOp> {
     public:
       static const AllocationType alloc_type = FILL_OP_ALLOC;
@@ -2625,9 +2789,12 @@ namespace Legion {
       virtual Mappable* get_mappable(void);
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
     public:
       virtual bool has_prepipeline_stage(void) const
         { return need_prepipeline_stage; }
@@ -2652,6 +2819,9 @@ namespace Legion {
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);
+    public:
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     public:
       RegionTreePath privilege_path;
       VersionInfo version_info;
@@ -2840,6 +3010,10 @@ namespace Legion {
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
                                   std::vector<unsigned> &ranking);
+      virtual void add_copy_profiling_request(
+                                        Realm::ProfilingRequestSet &reqeusts);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       void compute_parent_index(void);
     public:
@@ -2888,10 +3062,16 @@ namespace Legion {
     /**
      * \class RemoteOp
      * This operation is a shim for operations on remote nodes
-     * and is used by remote composite view traversals to handle
+     * and is used by remote physical analysis traversals to handle
      * any requests they might have of the original operation.
      */
     class RemoteOp : public Operation {
+    public:
+      // If we have to create a remote operation for something that wants
+      // profiling responses we use this as an upper bound on how many
+      // profiling requests will be issued on the remote node to avoid
+      // the count going back to zero too early
+      static const int REMOTE_PROFILING_MAX_COUNT = 10000;
     public:
       RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteOp(const RemoteOp &rhs);
@@ -2899,33 +3079,277 @@ namespace Legion {
     public:
       RemoteOp& operator=(const RemoteOp &rhs);
     public:
-      void unpack(Deserializer &derez, Runtime *runtime);
+      virtual void unpack(Deserializer &derez,
+                          ReferenceMutator &mutator) = 0;
     public:
       virtual void activate(void);
       virtual void deactivate(void);
-      virtual const char* get_logging_name(void) const;
-      virtual OpKind get_operation_kind(void) const;
+      virtual const char* get_logging_name(void) const = 0;
+      virtual OpKind get_operation_kind(void) const = 0;
+      virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
+                                       get_acquired_instances_ref(void);
       // This should be the only mapper call that we need to handle
       virtual void select_sources(const InstanceRef &target,
                                   const InstanceSet &sources,
-                                  std::vector<unsigned> &ranking);
+                                  std::vector<unsigned> &ranking) = 0;
+
+      virtual void add_copy_profiling_request(
+                            Realm::ProfilingRequestSet &reqeusts);
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
                                               const char *field_string);
-      virtual void pack_remote_operation(Serializer &rez) const;
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const = 0;
     public:
+      void pack_remote_base(Serializer &rez) const;
+      void unpack_remote_base(Deserializer &derez, Runtime *runtime);
+      void pack_profiling_requests(Serializer &rez) const;
+      void unpack_profiling_requests(Deserializer &derez);
+      // Caller takes ownership of this object and must delete it when done
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
-                                               Runtime *runtime);
-      static void handle_remote_sources_request(Deserializer &derez,
-                            Runtime *runtime, AddressSpaceID source);
-      static void handle_remote_sources_response(Deserializer &derez);
+                         Runtime *runtime, std::set<RtEvent> &ready_events);
       static void handle_report_uninitialized(Deserializer &derez);
+      static void handle_report_profiling_count_update(Deserializer &derez);
     public:
       // This is a pointer to an operation on a remote node
       // it should never be dereferenced
       Operation *const remote_ptr;
       const AddressSpaceID source;
+    protected:
+      MapperManager *mapper;
+    protected:
+      std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
+      mutable int               available_profiling_requests;
+      Processor                           profiling_target;
+    };
+
+    /**
+     * \class RemoteMapOp
+     * This is a remote copy of a MapOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteMapOp : public ExternalMapping, public RemoteOp {
+    public:
+      RemoteMapOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteMapOp(const RemoteMapOp &rhs);
+      virtual ~RemoteMapOp(void);
+    public:
+      RemoteMapOp& operator=(const RemoteMapOp &rhs); 
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking); 
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteCopyOp
+     * This is a remote copy of a CopyOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteCopyOp : public ExternalCopy, public RemoteOp {
+    public:
+      RemoteCopyOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteCopyOp(const RemoteCopyOp &rhs);
+      virtual ~RemoteCopyOp(void);
+    public:
+      RemoteCopyOp& operator=(const RemoteCopyOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteCloseOp
+     * This is a remote copy of a CloseOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteCloseOp : public ExternalClose, public RemoteOp {
+    public:
+      RemoteCloseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteCloseOp(const RemoteCloseOp &rhs);
+      virtual ~RemoteCloseOp(void);
+    public:
+      RemoteCloseOp& operator=(const RemoteCloseOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteAcquireOp
+     * This is a remote copy of a AcquireOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteAcquireOp : public ExternalAcquire, public RemoteOp {
+    public:
+      RemoteAcquireOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteAcquireOp(const RemoteAcquireOp &rhs);
+      virtual ~RemoteAcquireOp(void);
+    public:
+      RemoteAcquireOp& operator=(const RemoteAcquireOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteReleaseOp
+     * This is a remote copy of a ReleaseOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteReleaseOp : public ExternalRelease, public RemoteOp {
+    public:
+      RemoteReleaseOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteReleaseOp(const RemoteReleaseOp &rhs);
+      virtual ~RemoteReleaseOp(void);
+    public:
+      RemoteReleaseOp& operator=(const RemoteReleaseOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteFillOp
+     * This is a remote copy of a FillOp to be used
+     * for mapper calls and other operations
+     */
+    class RemoteFillOp : public ExternalFill, public RemoteOp {
+    public:
+      RemoteFillOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteFillOp(const RemoteFillOp &rhs);
+      virtual ~RemoteFillOp(void);
+    public:
+      RemoteFillOp& operator=(const RemoteFillOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemotePartitionOp
+     * This is a remote copy of a DependentPartitionOp to be
+     * used for mapper calls and other operations
+     */
+    class RemotePartitionOp : public ExternalPartition, public RemoteOp {
+    public:
+      RemotePartitionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemotePartitionOp(const RemotePartitionOp &rhs);
+      virtual ~RemotePartitionOp(void);
+    public:
+      RemotePartitionOp& operator=(const RemotePartitionOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+      virtual PartitionKind get_partition_kind(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    protected:
+      PartitionKind part_kind;
+    };
+
+    /**
+     * \class RemoteDetachOp
+     * This is a remote copy of a DetachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDetachOp : public RemoteOp {
+    public:
+      RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDetachOp(const RemoteDetachOp &rhs);
+      virtual ~RemoteDetachOp(void);
+    public:
+      RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
   }; //namespace Internal 

@@ -6793,20 +6793,14 @@ namespace Legion {
               runtime->handle_library_task_response(derez);
               break;
             }
-          case SEND_REMOTE_OP_SOURCES_REQUEST:
-            {
-              runtime->handle_remote_op_sources_request(derez, 
-                                        remote_address_space);
-              break;
-            }
-          case SEND_REMOTE_OP_SOURCES_RESPONSE:
-            {
-              runtime->handle_remote_op_sources_response(derez);
-              break;
-            }
           case SEND_REMOTE_OP_REPORT_UNINIT:
             {
               runtime->handle_remote_op_report_uninitialized(derez);
+              break;
+            }
+          case SEND_REMOTE_OP_PROFILING_COUNT_UPDATE:
+            {
+              runtime->handle_remote_op_profiling_count_update(derez);
               break;
             }
           case SEND_SHUTDOWN_NOTIFICATION:
@@ -13117,6 +13111,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    MapperManager* Runtime::find_mapper(MapperID map_id)
+    //--------------------------------------------------------------------------
+    {
+      for (std::map<Processor,ProcessorManager*>::const_iterator it = 
+            proc_managers.begin(); it != proc_managers.end(); it++)
+      {
+        MapperManager *result = it->second->find_mapper(map_id);
+        if (result != NULL)
+          return result;
+      }
+      return NULL;
+    }
+
+    //--------------------------------------------------------------------------
     MapperManager* Runtime::find_mapper(Processor target, MapperID map_id)
     //--------------------------------------------------------------------------
     {
@@ -15769,30 +15777,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_remote_op_select_sources_request(AddressSpaceID target,
-                                                        Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_REQUEST,
-                                        MAPPER_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::send_remote_op_select_sources_response(AddressSpaceID target,
-                                                         Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez, SEND_REMOTE_OP_SOURCES_RESPONSE,
-                       MAPPER_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_remote_op_report_uninitialized(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_REMOTE_OP_REPORT_UNINIT,
                                       DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_remote_op_profiling_count_update(AddressSpaceID target,
+                                                        Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, 
+          SEND_REMOTE_OP_PROFILING_COUNT_UPDATE, 
+          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -17281,25 +17281,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_remote_op_sources_request(Deserializer &derez,
-                                                   AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RemoteOp::handle_remote_sources_request(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_remote_op_sources_response(Deserializer &derez)
-    //--------------------------------------------------------------------------
-    {
-      RemoteOp::handle_remote_sources_response(derez);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::handle_remote_op_report_uninitialized(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
       RemoteOp::handle_report_uninitialized(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_remote_op_profiling_count_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      RemoteOp::handle_report_profiling_count_update(derez);
     }
 
     //--------------------------------------------------------------------------
