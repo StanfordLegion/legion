@@ -13022,6 +13022,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Partition::PartitionKind PointDepPartOp::get_partition_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(owner != NULL);
+#endif
+      return owner->get_partition_kind();
+    }
+
+    //--------------------------------------------------------------------------
     const DomainPoint& PointDepPartOp::get_domain_point(void) const
     //--------------------------------------------------------------------------
     {

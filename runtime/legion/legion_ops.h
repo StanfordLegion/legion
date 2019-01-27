@@ -2689,6 +2689,7 @@ namespace Legion {
                                     const InstanceSet &mapped_instances,
                                     const PhysicalTraceInfo &trace_info);
       virtual void trigger_commit(void);
+      virtual PartitionKind get_partition_kind(void) const;
     public:
       // From ProjectionPoint
       virtual const DomainPoint& get_domain_point(void) const;
