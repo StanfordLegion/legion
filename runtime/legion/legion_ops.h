@@ -2956,6 +2956,8 @@ namespace Legion {
                                   std::vector<unsigned> &ranking);
       virtual void add_copy_profiling_request(
                                         Realm::ProfilingRequestSet &reqeusts);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       void compute_parent_index(void);
     public:
@@ -3261,6 +3263,34 @@ namespace Legion {
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     protected:
       PartitionKind part_kind;
+    };
+
+    /**
+     * \class RemoteDetachOp
+     * This is a remote copy of a DetachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDetachOp : public RemoteOp {
+    public:
+      RemoteDetachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDetachOp(const RemoteDetachOp &rhs);
+      virtual ~RemoteDetachOp(void);
+    public:
+      RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
   }; //namespace Internal 

@@ -15192,6 +15192,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DetachOp::pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
+    }
+
+    //--------------------------------------------------------------------------
     void DetachOp::compute_parent_index(void)
     //--------------------------------------------------------------------------
     {
@@ -15631,6 +15639,11 @@ namespace Legion {
         case FILL_OP_KIND:
           {
             result = new RemoteFillOp(runtime, remote_ptr, source);
+            break;
+          }
+        case DETACH_OP_KIND:
+          {
+            result = new RemoteDetachOp(runtime, remote_ptr, source);
             break;
           }
         default:
@@ -16488,6 +16501,108 @@ namespace Legion {
       unpack_external_partition(derez, runtime);
       derez.deserialize(part_kind);
       unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Detach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteDetachOp::RemoteDetachOp(Runtime *rt, 
+                                   Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDetachOp::RemoteDetachOp(const RemoteDetachOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDetachOp::~RemoteDetachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDetachOp& RemoteDetachOp::operator=(const RemoteDetachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteDetachOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteDetachOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDetachOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteDetachOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteDetachOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DETACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteDetachOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DETACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDetachOp::select_sources(const InstanceRef &target,
+                                        const InstanceSet &sources,
+                                        std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: invoke the mapper
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDetachOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDetachOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
     }
  
   }; // namespace Internal 
