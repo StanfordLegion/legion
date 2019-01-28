@@ -485,7 +485,13 @@ namespace Legion {
     void IndexSpaceOperationT<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(realm_index_space.is_valid());
+#endif
       tight_index_space = realm_index_space.tighten();
+#ifdef DEBUG_LEGION
+      assert(tight_index_space.is_valid());
+#endif
       // Small memory fence to propagate writes before setting the flag
       __sync_synchronize();
       is_index_space_tight = true;
@@ -1611,7 +1617,13 @@ namespace Legion {
         
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(realm_index_space.is_valid());
+#endif
       Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
+#ifdef DEBUG_LEGION
+      assert(tight_space.is_valid());
+#endif
       Realm::IndexSpace<DIM,T> old_space;
       // Now take the lock and set everything
       {
