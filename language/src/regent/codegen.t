@@ -9692,14 +9692,25 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
-local function unpack_param_helper(cx, node, param_type, params_map_type, i)
+local unpack_param_helper = terralib.memoize(function(param_type)
+  local cx = context.new_global_scope()
+
   -- Inputs/outputs:
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
-  local params_map = terralib.newsymbol(params_map_type, "params_map_type")
+  local params_map = terralib.newsymbol(&uint64, "params_map")
+  local param_i = terralib.newsymbol(uint64, "param_i")
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local future_count = terralib.newsymbol(int32, "future_count")
   local future_i = terralib.newsymbol(&int32, "future_i")
+
+  -- Hack: this isn't used, but some APIs require nodes so we have to provide one.
+  local dummy_node = ast.typed.expr.Internal {
+    value = false,
+    expr_type = opaque,
+    annotations = ast.default_annotations(),
+    span = ast.trivial_span(),
+  }
 
   -- Generate code to unpack a future.
   local future = terralib.newsymbol(c.legion_future_t, "future")
@@ -9709,25 +9720,25 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
     ast.typed.expr.FutureGetResult {
       value = ast.typed.expr.Internal {
         value = values.value(
-          node,
+          dummy_node,
           expr.just(quote end, `([future_type]{ __result = [future] })),
           future_type),
         expr_type = future_type,
-        annotations = node.annotations,
-        span = node.span,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
       },
       expr_type = param_type,
-      annotations = node.annotations,
-      span = node.span,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
   }):read(cx)
 
   -- Generate code to unpack a non-future.
   local deser_actions, deser_value = std.deserialize(
     param_type, fixed_ptr, data_ptr)
 
-  local terra unpack_param([c_task], [params_map], [fixed_ptr], [data_ptr],
+  local terra unpack_param([c_task], [params_map], [param_i], [fixed_ptr], [data_ptr],
                            [future_count], [future_i])
-    if ([params_map][(uint64([i])-1)/64] and (uint64(1) << ((uint64([i])-1)%64))) == 0 then
+    if ([params_map][([param_i])/64] and (uint64(1) << ([param_i]%64))) == 0 then
       [deser_actions]
       return [deser_value]
     else
@@ -9742,7 +9753,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   end
   unpack_param:setinlined(false)
   return unpack_param
-end
+end)
 
 local function setup_regent_calling_convention_metadata(node, task)
   local params_struct_type = terralib.types.newstruct()
@@ -9956,11 +9967,11 @@ function codegen.top_task(cx, node)
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
-      local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
+      local helper = unpack_param_helper(param_type)
 
       local actions = quote
         var [param_symbol] = [helper](
-          [c_task], [params_map_symbol], &args.[param:getlabel()], &[data_ptr],
+          [c_task], [params_map_symbol], [i-1], &args.[param:getlabel()], &[data_ptr],
           [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
