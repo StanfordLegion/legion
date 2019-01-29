@@ -485,7 +485,13 @@ namespace Legion {
     void IndexSpaceOperationT<DIM,T>::tighten_index_space(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(realm_index_space.is_valid());
+#endif
       tight_index_space = realm_index_space.tighten();
+#ifdef DEBUG_LEGION
+      assert(tight_index_space.is_valid());
+#endif
       // Small memory fence to propagate writes before setting the flag
       __sync_synchronize();
       is_index_space_tight = true;
@@ -770,10 +776,32 @@ namespace Legion {
               spaces, this->realm_index_space, requests, precondition));
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
-      IndexSpaceExpression::TightenIndexSpaceArgs args(this);
-      this->tight_index_space_ready = 
-        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY, 
-                      Runtime::protect_event(this->realm_index_space_ready));
+      const RtEvent valid_event(this->realm_index_space.make_valid());
+      // See if both the events needed for the tighten call are done
+      if (!this->realm_index_space_ready.has_triggered() || 
+          !valid_event.has_triggered())
+      {
+        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+        if (!this->realm_index_space_ready.has_triggered())
+        {
+          if (!valid_event.has_triggered())
+            this->tight_index_space_ready = 
+              ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_WORK_PRIORITY, Runtime::merge_events(valid_event,
+                    Runtime::protect_event(this->realm_index_space_ready)));
+          else
+            this->tight_index_space_ready = 
+              ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_WORK_PRIORITY,
+                  Runtime::protect_event(this->realm_index_space_ready));
+        }
+        else
+          this->tight_index_space_ready = 
+            ctx->runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_WORK_PRIORITY, valid_event);
+      }
+      else // We can do the tighten call now
+        this->tighten_index_space();
       if (ctx->runtime->legion_spy_enabled)
       {
         std::vector<IndexSpaceExprID> sources(this->sub_expressions.size()); 
@@ -864,10 +892,32 @@ namespace Legion {
               spaces, this->realm_index_space, requests, precondition));
       // Then launch the tighten call for it too since we know we're
       // going to want this eventually
-      IndexSpaceExpression::TightenIndexSpaceArgs args(this);
-      this->tight_index_space_ready = 
-        ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                      Runtime::protect_event(this->realm_index_space_ready));
+      const RtEvent valid_event(this->realm_index_space.make_valid());
+      // See if both the events needed for the tighten call are done
+      if (!this->realm_index_space_ready.has_triggered() || 
+          !valid_event.has_triggered())
+      {
+        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+        if (!this->realm_index_space_ready.has_triggered())
+        {
+          if (!valid_event.has_triggered())
+            this->tight_index_space_ready = 
+              ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_WORK_PRIORITY, Runtime::merge_events(valid_event,
+                    Runtime::protect_event(this->realm_index_space_ready)));
+          else
+            this->tight_index_space_ready = 
+              ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_WORK_PRIORITY,
+                  Runtime::protect_event(this->realm_index_space_ready));
+        }
+        else
+          this->tight_index_space_ready = 
+            ctx->runtime->issue_runtime_meta_task(args, 
+                LG_LATENCY_WORK_PRIORITY, valid_event);
+      }
+      else // We can do the tighten call now
+        this->tighten_index_space();
       if (ctx->runtime->legion_spy_enabled)
       {
         std::vector<IndexSpaceExprID> sources(this->sub_expressions.size()); 
@@ -968,10 +1018,32 @@ namespace Legion {
                               this->realm_index_space, requests, precondition));
         // Then launch the tighten call for it too since we know we're
         // going to want this eventually
-        IndexSpaceExpression::TightenIndexSpaceArgs args(this);
-        this->tight_index_space_ready = 
-          ctx->runtime->issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY,
-                        Runtime::protect_event(this->realm_index_space_ready));
+        const RtEvent valid_event(this->realm_index_space.make_valid());
+        // See if both the events needed for the tighten call are done
+        if (!this->realm_index_space_ready.has_triggered() || 
+            !valid_event.has_triggered())
+        {
+          IndexSpaceExpression::TightenIndexSpaceArgs args(this);
+          if (!this->realm_index_space_ready.has_triggered())
+          {
+            if (!valid_event.has_triggered())
+              this->tight_index_space_ready = 
+                ctx->runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_WORK_PRIORITY, Runtime::merge_events(valid_event,
+                      Runtime::protect_event(this->realm_index_space_ready)));
+            else
+              this->tight_index_space_ready = 
+                ctx->runtime->issue_runtime_meta_task(args, 
+                    LG_LATENCY_WORK_PRIORITY,
+                    Runtime::protect_event(this->realm_index_space_ready));
+          }
+          else
+            this->tight_index_space_ready = 
+              ctx->runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_WORK_PRIORITY, valid_event);
+        }
+        else // We can do the tighten call now
+          this->tighten_index_space();
       }
       if (ctx->runtime->legion_spy_enabled)
         LegionSpy::log_index_space_difference(this->expr_id,
@@ -1522,15 +1594,35 @@ namespace Legion {
       assert(!tight_index_space);
       assert(!tight_index_space_set.has_triggered());
 #endif
-      if (!index_space_ready.has_triggered())
+      const RtEvent valid_event(realm_index_space.make_valid());
+      if (!index_space_ready.has_triggered() || !valid_event.has_triggered())
       {
         // If this index space isn't ready yet, then we have to defer this 
         TightenIndexSpaceArgs args(this);
-        context->runtime->issue_runtime_meta_task(args,LG_LATENCY_WORK_PRIORITY,
-                                     Runtime::protect_event(index_space_ready));
+        if (!index_space_ready.has_triggered())
+        {
+          if (!valid_event.has_triggered())
+            context->runtime->issue_runtime_meta_task(args,
+                LG_LATENCY_WORK_PRIORITY, Runtime::merge_events(valid_event,
+                  Runtime::protect_event(index_space_ready)));
+          else
+            context->runtime->issue_runtime_meta_task(args,
+                LG_LATENCY_WORK_PRIORITY,
+                Runtime::protect_event(index_space_ready));
+        }
+        else
+          context->runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_WORK_PRIORITY, valid_event);
+        
         return;
       }
+#ifdef DEBUG_LEGION
+      assert(realm_index_space.is_valid());
+#endif
       Realm::IndexSpace<DIM,T> tight_space = realm_index_space.tighten();
+#ifdef DEBUG_LEGION
+      assert(tight_space.is_valid());
+#endif
       Realm::IndexSpace<DIM,T> old_space;
       // Now take the lock and set everything
       {
@@ -1858,10 +1950,6 @@ namespace Legion {
         return volume;
       Realm::IndexSpace<DIM,T> volume_space;
       get_realm_index_space(volume_space, true/*tight*/);
-      // Make sure this is local before we ask for the volume
-      const RtEvent valid(volume_space.make_valid());
-      if (valid.exists() && !valid.has_triggered())
-        valid.wait();
       volume = volume_space.volume();
       __sync_synchronize();
       has_volume = true;

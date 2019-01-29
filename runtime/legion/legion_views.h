@@ -102,6 +102,29 @@ namespace Legion {
                                                               EventFieldUsers;
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
+      struct DeferFindCopyPreconditionArgs : 
+        public LgTaskArgs<DeferFindCopyPreconditionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_FIND_COPY_PRE_TASK_ID;
+      public:
+        DeferFindCopyPreconditionArgs(LogicalView *v, bool read,
+            const FieldMask &m, IndexSpaceExpression *x, UniqueID uid,
+            unsigned idx, AddressSpaceID s, CopyFillAggregator *a,RtUserEvent d)
+          : LgTaskArgs<DeferFindCopyPreconditionArgs>(uid),
+            view(v), reading(read), copy_mask(new FieldMask(m)), copy_expr(x),
+            op_id(uid), index(idx), source(s), aggregator(a), done_event(d) { }
+      public:
+        LogicalView *const view;
+        const bool reading;
+        FieldMask *const copy_mask;
+        IndexSpaceExpression *const copy_expr;
+        const UniqueID op_id;
+        const unsigned index;
+        const AddressSpaceID source;
+        CopyFillAggregator *const aggregator;
+        const RtUserEvent done_event;
+      };
+    public:
       InstanceView(RegionTreeForest *ctx, DistributedID did,
                    AddressSpaceID owner_proc, AddressSpaceID logical_owner, 
                    UniqueID owner_context, bool register_now); 
@@ -168,6 +191,8 @@ namespace Legion {
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
+      static void handle_view_find_copy_pre_request(const void *args, 
+                                                    Runtime *runtime);
       static void handle_view_find_copy_pre_response(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_add_copy_user(Deserializer &derez,

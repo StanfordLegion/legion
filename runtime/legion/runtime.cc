@@ -21925,6 +21925,11 @@ namespace Legion {
             targs->task->handle_misspeculation();
             break;
           }
+        case LG_DEFER_FIND_COPY_PRE_TASK_ID:
+          {
+            InstanceView::handle_view_find_copy_pre_request(args, runtime);
+            break;
+          }
         case LG_DEFER_PHI_VIEW_REF_TASK_ID:
           {
             PhiView::handle_deferred_view_ref(args);
