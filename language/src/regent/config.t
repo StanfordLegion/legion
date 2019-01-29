@@ -90,6 +90,7 @@ local default_options = {
   ["no-dynamic-branches"] = true,
   ["no-dynamic-branches-assert"] = false,
   ["pretty"] = false,
+  ["pretty-verbose"] = false,
   ["layout-constraints"] = true,
   ["trace"] = true,
   ["validate"] = true,
