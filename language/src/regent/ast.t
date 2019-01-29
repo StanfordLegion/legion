@@ -518,10 +518,10 @@ ast.typed.stat:leaf("Internal", {"actions"}) -- internal use only
 ast.typed.stat:leaf("If", {"cond", "then_block", "elseif_blocks", "else_block"})
 ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
-ast.typed.stat:leaf("ForNum", {"symbol", "values", "block"})
+ast.typed.stat:leaf("ForNum", {"symbol", "values", "block", "metadata"})
 ast.typed.stat:leaf("ForNumVectorized", {"symbol", "values", "block",
                                          "orig_block", "vector_width"})
-ast.typed.stat:leaf("ForList", {"symbol", "value", "block"})
+ast.typed.stat:leaf("ForList", {"symbol", "value", "block", "metadata"})
 ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
                                           "orig_block", "vector_width"})
 ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
@@ -538,8 +538,8 @@ ast.typed.stat:leaf("Var", {"symbol", "type", "value"})
 ast.typed.stat:leaf("VarUnpack", {"symbols", "fields", "field_types", "value"})
 ast.typed.stat:leaf("Return", {"value"})
 ast.typed.stat:leaf("Break")
-ast.typed.stat:leaf("Assignment", {"lhs", "rhs"})
-ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs"})
+ast.typed.stat:leaf("Assignment", {"lhs", "rhs", "metadata"})
+ast.typed.stat:leaf("Reduce", {"op", "lhs", "rhs", "metadata"})
 ast.typed.stat:leaf("Expr", {"expr"})
 ast.typed.stat:leaf("RawDelete", {"value"})
 ast.typed.stat:leaf("Fence", {"kind", "blocking"})
@@ -559,5 +559,11 @@ ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "constraints", "body", "config_options",
                              "region_divergence", "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
+
+-- Metadata for Parallel Code Generation
+
+ast:inner("metadata")
+ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
+ast.metadata:leaf("Stat", {"atomic", "scalar"})
 
 return ast

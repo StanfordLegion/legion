@@ -1394,6 +1394,7 @@ local function handle_future_field_assignment(cx, lhs, rhs)
     ast.typed.stat.Assignment {
       lhs = rewrap_field_access(lhs, symbol_value),
       rhs = rhs,
+      metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
     },
@@ -1405,6 +1406,7 @@ local function handle_future_field_assignment(cx, lhs, rhs)
         annotations = ast.default_annotations(),
         span = lhs.span,
       },
+      metadata = false,
       annotations = ast.default_annotations(),
       span = lhs.span,
     },

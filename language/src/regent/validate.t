@@ -291,6 +291,7 @@ local node_vars_are_valid = {
   [ast.condition_kind]    = continue,
   [ast.disjointness_kind] = continue,
   [ast.fence_kind]        = continue,
+  [ast.metadata]          = continue,
 }
 
 local validate_vars_node = ast.make_single_dispatch(

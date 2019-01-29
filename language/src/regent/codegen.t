@@ -5349,6 +5349,7 @@ function codegen.expr_list_ispace(cx, node)
       stats = terralib.newlist({loop_body}),
       span = node.span,
     },
+    metadata = false,
     annotations = ast.default_annotations(),
     span = node.span,
   }
@@ -8189,6 +8190,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
+        metadata = false,
         span = node.span,
         annotations = node.annotations,
       })
@@ -8743,6 +8745,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       op = node.reduce_op,
       lhs = node.reduce_lhs,
       rhs = rhs,
+      metadata = false,
       annotations = node.annotations,
       span = node.span,
     }
