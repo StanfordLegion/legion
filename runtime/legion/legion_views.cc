@@ -177,8 +177,9 @@ namespace Legion {
       // that add users, but only non-modifying calls like this
       DeferFindCopyPreconditionArgs args(view, reading, copy_mask, copy_expr,
                          op_id, index, source, remote_aggregator, done_event);
-      // Use message priority here since this was originally a message
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,ready);
+      // One-up the message priority here to keep us ahead of any other
+      // messages which might have been enqueued.
+      runtime->issue_runtime_meta_task(args,LG_LATENCY_RESPONSE_PRIORITY,ready);
     }
 
     //--------------------------------------------------------------------------
