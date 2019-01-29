@@ -21,13 +21,10 @@ __demand(__parallel, __cuda)
 task gpu_task(r : region(ispace(int1d), float))
 where reads writes(r)
 do
-  var ts_start = regentlib.c.legion_get_current_time_in_micros()
   var x : float = 0
   for e in r do
     x += @e
   end
-  var ts_end = regentlib.c.legion_get_current_time_in_micros()
-  regentlib.c.printf("kernel time: %lld us\n", ts_end - ts_start)
 end
 
 task main()

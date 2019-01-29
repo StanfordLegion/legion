@@ -40,7 +40,6 @@ task stencil1(interior : region(ispace(int2d), fs),
                     r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in interior do
     var center = e
     var idx1 = e + {-2,  0}
@@ -53,8 +52,6 @@ do
       r[center].g = 0.5 * (r[center].f + v1 + v2 + r[idx4].f)
     end
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
 __demand(__parallel, __cuda)
@@ -62,7 +59,6 @@ task stencil2(interior : region(ispace(int2d), fs),
                     r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.g), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in interior do
     var center = e
     var idx1 = e + {-1,  0}
@@ -75,15 +71,12 @@ do
       r[center].g += 0.3 * (v1 + v2)
     end
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("parallel version: %lu us\n", ts_end - ts_start)
 end
 
 task stencil_serial(interior : region(ispace(int2d), fs),
                            r : region(ispace(int2d), fs))
 where reads(r.f), reads writes(r.h), interior <= r
 do
-  var ts_start = c.legion_get_current_time_in_micros()
   for e in interior do
     r[e].h = 0.5 * (r[e].f +
                     r[e + {-2, 0}].f + r[e + {0, -1}].f +
@@ -92,8 +85,6 @@ do
                      r[e + {-1, 0}].f + r[e + {0, -1}].f +
                      r[e + { 1, 0}].f + r[e + {0,  1}].f)
   end
-  var ts_end = c.legion_get_current_time_in_micros()
-  c.printf("serial version: %lu us\n", ts_end - ts_start)
 end
 
 __demand(__parallel, __cuda)
