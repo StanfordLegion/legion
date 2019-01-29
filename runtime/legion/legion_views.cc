@@ -170,16 +170,33 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
-      if (ready.exists() && !ready.has_triggered())
-        ready.wait();
+      // There are often many parallel copy requests coming from remote nodes
+      // which could be handled in parallel, so if we always launch a meta task 
+      // to handle these since they are often expensive and we don't want to
+      // block the virtual channel. Note that we can't do this with methods
+      // that add users, but only non-modifying calls like this
+      DeferFindCopyPreconditionArgs args(view, reading, copy_mask, copy_expr,
+                         op_id, index, source, remote_aggregator, done_event);
+      // Use message priority here since this was originally a message
+      runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,ready);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceView::handle_view_find_copy_pre_request(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferFindCopyPreconditionArgs *dargs = 
+        (const DeferFindCopyPreconditionArgs*)args;
 #ifdef DEBUG_LEGION
-      assert(view->is_instance_view());
+      assert(dargs->view->is_instance_view());
 #endif
-      InstanceView *inst_view = view->as_instance_view();
+      InstanceView *inst_view = dargs->view->as_instance_view();
       const PhysicalTraceInfo trace_info(NULL);
       EventFieldExprs preconditions;
-      inst_view->find_copy_preconditions_remote(reading, copy_mask, copy_expr, 
-                                      op_id, index, preconditions, trace_info);
+      inst_view->find_copy_preconditions_remote(dargs->reading,
+          *dargs->copy_mask, dargs->copy_expr, dargs->op_id, dargs->index, 
+          preconditions, trace_info);
       // Send back the response unless the preconditions are empty in
       // which case we can just trigger the done event
       if (!preconditions.empty())
@@ -188,7 +205,7 @@ namespace Legion {
         Serializer rez;
         {
           RezCheck z2(rez);
-          rez.serialize(did);
+          rez.serialize(inst_view->did);
           rez.serialize<size_t>(preconditions.size());
           for (EventFieldExprs::const_iterator eit = preconditions.begin();
                 eit != preconditions.end(); eit++)
@@ -199,18 +216,20 @@ namespace Legion {
             for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
                   exprs.begin(); it != exprs.end(); it++)
             {
-              it->first->pack_expression(rez, source);
+              it->first->pack_expression(rez, dargs->source);
               rez.serialize(it->second);
             }
           }
-          rez.serialize(remote_aggregator);
-          rez.serialize<bool>(reading);
-          rez.serialize(done_event);
+          rez.serialize(dargs->aggregator);
+          rez.serialize<bool>(dargs->reading);
+          rez.serialize(dargs->done_event);
         }
-        runtime->send_view_find_copy_preconditions_response(source, rez);
+        runtime->send_view_find_copy_preconditions_response(dargs->source, rez);
       }
       else
-        Runtime::trigger_event(done_event);
+        Runtime::trigger_event(dargs->done_event);
+      // Clean up the mask we allocated
+      delete dargs->copy_mask;
     }
 
     //--------------------------------------------------------------------------
