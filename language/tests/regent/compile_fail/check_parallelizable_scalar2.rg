@@ -13,35 +13,20 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops15.rg:40: vectorization failed: found a loop-carried dependence
---     e.p1.v = e.p2.v
---      ^
+--check_parallelizable_scalar2.rg:30: vectorization failed: found a loop-carried dependence
+--    @e = v
+--         ^
 
 import "regent"
 
-fspace fs2
-{
-  v : float,
-}
-
-fspace fs1(r : region(fs2), s : region(fs2))
-{
-  p1 : ptr(fs2, r),
-  p2 : ptr(fs2, r, s),
-}
-
-task f(r : region(fs2), s : region(fs2), t : region(fs1(r, s)))
-where
-  reads(r.v, s.v, t.p1, t.p2),
-  writes(r.v, s.v)
-do
+task f(r : region(ispace(int1d), int))
+where reads writes(r) do
+  var v = 0
   __demand(__vectorize)
-  for e in t do
-    e.p1.v = e.p2.v
+  for e in r do
+    -- scalar reduction is allowed in a parallelizable loop
+    v += 1
+    -- however, reading the variable that is being reduced is not parallelizable
+    @e = v
   end
 end
-
--- FIXME: This test was supposed to check this case. Put this back once the vectorizer gets fixed.
--- vectorize_loops15.rg:40: vectorization failed: loop body has aliasing update of path region(fs2()).v
---     e.p1.v = e.p2.v
---     ^

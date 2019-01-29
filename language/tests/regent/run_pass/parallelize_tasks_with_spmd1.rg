@@ -23,13 +23,7 @@ import "regent"
 
 -- This code has not been optimized and is not high performance.
 
-terra abs(a : double) : double
-  if a < 0 then
-    return -a
-  else
-    return a
-  end
-end
+local abs = regentlib.fabs(double)
 
 __demand(__parallel)
 task saxpy(x : region(ispace(int1d), float), y : region(ispace(int1d), float), a : float)

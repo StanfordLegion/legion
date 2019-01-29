@@ -13,33 +13,14 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops18.rg:42: vectorization failed: found a loop-carried dependence
---       e.p1.v += t
---              ^
+-- check_parallelizable_inadmissible2.rg:25: partition driven auto-parallelization failed: found an inadmissible statement
+--   __parallel_prefix(r, r, +, 1)
+--                   ^
 
 import "regent"
 
-fspace fs2
-{
-  v : float,
-}
-
-fspace fs1(r : region(fs2))
-{
-  p1 : ptr(fs2, r),
-  p2 : ptr(fs2, r),
-}
-
-task f(r2 : region(fs2), r : region(fs1(r2)))
-where
-  reads(r2.v, r.p1, r.p2),
-  writes(r2.v)
-do
-  __demand(__vectorize)
-  for e in r do
-    var t = e.p2.v
-    for idx = 0, 10 do
-      e.p1.v += t
-    end
-  end
+__demand(__parallel)
+task f(r : region(ispace(int1d), int))
+where reads writes(r) do
+  __parallel_prefix(r, r, +, 1)
 end
