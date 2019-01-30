@@ -443,12 +443,13 @@ function analyze_access.expr_regent_cast(cx, node, privilege)
 end
 
 local whitelist = {
+  [sizeof]                                  = true,
   [array]                                   = true,
+  [arrayof]                                 = true,
+  [vector]                                  = true,
+  [vectorof]                                = true,
   [std.assert]                              = true,
-  [std.c.legion_get_current_time_in_micros] = true,
-  [std.c.legion_get_current_time_in_nanos]  = true,
-  [std.c.srand48_r]                         = true,
-  [std.c.drand48_r]                         = true,
+  [std.assert_error]                        = true,
 }
 
 local function is_admissible_function(fn)
