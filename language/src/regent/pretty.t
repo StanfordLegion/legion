@@ -240,6 +240,28 @@ function pretty.annotations(cx, node)
   return text.Lines { lines = result }
 end
 
+function pretty.metadata(cx, node)
+  if node:is(ast.metadata.Loop) then
+    local result = terralib.newlist()
+    result:insertall({"-- parallelizable: ", tostring(node.parallelizable)})
+    if node.reductions and #node.reductions > 0 then
+      result:insert(", reductions: ")
+      result:insert(commas(node.reductions:map(function(reduction)
+        return tostring(reduction)
+      end)))
+    end
+    return text.Lines { lines = terralib.newlist({ join(result) }) }
+  elseif node:is(ast.metadata.Stat) then
+    return text.Lines {
+      lines = terralib.newlist({
+        join({"-- ", "atomic: ", tostring(node.atomic),
+              ", scalar: ", tostring(node.scalar)})}),
+    }
+  else
+    assert(false)
+  end
+end
+
 function pretty.expr_condition(cx, node)
   return join({
       join(node.conditions:map(tostring), true), "(", pretty.expr(cx, node.value), ")"})
@@ -907,6 +929,9 @@ end
 function pretty.stat_for_num(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
+  if std.config["pretty-verbose"] and node.metadata then
+    result:insert(pretty.metadata(cx, node.metadata))
+  end
   local values = pretty.expr_list(cx, node.values)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
@@ -937,6 +962,9 @@ end
 function pretty.stat_for_list(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
+  if std.config["pretty-verbose"] and node.metadata then
+    result:insert(pretty.metadata(cx, node.metadata))
+  end
   local value = pretty.expr(cx, node.value)
   local cx = cx:new_local_scope()
   cx:record_var(node, node.symbol)
@@ -1076,6 +1104,9 @@ end
 function pretty.stat_assignment(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
+  if std.config["pretty-verbose"] and node.metadata then
+    result:insert(pretty.metadata(cx, node.metadata))
+  end
   result:insert(join({pretty.expr(cx, node.lhs), "=", pretty.expr(cx, node.rhs)}, true))
   return text.Lines { lines = result }
 end
@@ -1083,6 +1114,9 @@ end
 function pretty.stat_reduce(cx, node)
   local result = terralib.newlist()
   result:insert(pretty.annotations(cx, node.annotations))
+  if std.config["pretty-verbose"] and node.metadata then
+    result:insert(pretty.metadata(cx, node.metadata))
+  end
   result:insert(join({pretty.expr(cx, node.lhs), node.op .. "=", pretty.expr(cx, node.rhs)}, true))
   return text.Lines { lines = result }
 end

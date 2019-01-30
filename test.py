@@ -281,7 +281,7 @@ def run_test_external(launcher, root_dir, tmp_dir, bin_dir, env, thread_count):
         ('SOLEIL_DIR', soleil_dir),
         ('CC', 'gcc'),
     ])
-    cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
+    #cmd(['make', '-C', os.path.join(soleil_dir, 'src')], env=soleil_env)
     # FIXME: Actually run it
 
     # TaskAMR

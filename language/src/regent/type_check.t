@@ -3295,6 +3295,7 @@ function type_check.stat_for_num(cx, node)
     symbol = node.symbol,
     values = values,
     block = type_check.block(cx, node.block),
+    metadata = false,
     annotations = node.annotations,
     span = node.span,
   }
@@ -3359,6 +3360,7 @@ function type_check.stat_for_list(cx, node)
     symbol = node.symbol,
     value = value,
     block = type_check.block(cx, node.block),
+    metadata = false,
     annotations = node.annotations,
     span = node.span,
   }
@@ -3555,6 +3557,7 @@ function type_check.stat_assignment(cx, node)
   return ast.typed.stat.Assignment {
     lhs = lhs,
     rhs = rhs,
+    metadata = false,
     annotations = node.annotations,
     span = node.span,
   }
@@ -3576,6 +3579,7 @@ function type_check.stat_reduce(cx, node)
     op = node.op,
     lhs = lhs,
     rhs = rhs,
+    metadata = false,
     annotations = node.annotations,
     span = node.span,
   }

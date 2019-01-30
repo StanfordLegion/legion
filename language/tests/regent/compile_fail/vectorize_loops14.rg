@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops14.rg:45: vectorization failed: loop body has aliasing update of path region(fs3()).v
+-- vectorize_loops14.rg:45: vectorization failed: found a loop-carried dependence
 --     e.p1.p.v += e.p2.p.v
---     ^
+--      ^
 
 import "regent"
 
