@@ -664,6 +664,9 @@ namespace Legion {
       }
       else
       {
+        // Add a reference to the future to prevent it from being
+        // collected until the response comes back
+        add_base_resource_ref(RUNTIME_REF);
         // not the owner so send a message to the owner
         Serializer rez;
         rez.serialize(did);
@@ -708,6 +711,10 @@ namespace Legion {
 #endif
       future->unpack_future(derez);
       future->complete_future();
+      // Now we can remove the reference that we added from before we
+      // sent the subscription message
+      if (future->remove_base_resource_ref(RUNTIME_REF))
+        delete future;
     }
 
     //--------------------------------------------------------------------------

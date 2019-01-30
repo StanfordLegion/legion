@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops18.rg:42: vectorization failed: loop body has aliasing update of path region(fs2()).v
+-- vectorize_loops18.rg:42: vectorization failed: found a loop-carried dependence
 --       e.p1.v += t
---       ^
+--              ^
 
 import "regent"
 
@@ -43,8 +43,3 @@ do
     end
   end
 end
-
--- FIXME: This test was supposed to check this case. Put this back once the vectorizer gets fixed.
--- vectorize_loops18.rg:42: vectorization failed: loop body has aliasing update of path region(fs2()).v
---     e.p1.v += t
---     ^

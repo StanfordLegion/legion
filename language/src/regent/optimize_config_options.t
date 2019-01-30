@@ -193,6 +193,7 @@ local node_is_leaf = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_leaf_node = ast.make_single_dispatch(
@@ -323,6 +324,7 @@ local node_is_inner = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_inner_node = ast.make_single_dispatch(
@@ -454,6 +456,7 @@ local node_is_idempotent = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_idempotent_node = ast.make_single_dispatch(
@@ -593,6 +596,7 @@ local node_is_replicable = {
   [ast.condition_kind]          = always_true,
   [ast.disjointness_kind]       = always_true,
   [ast.fence_kind]              = always_true,
+  [ast.metadata]                = always_true,
 }
 
 local analyze_replicable_node = ast.make_single_dispatch(
@@ -654,7 +658,7 @@ function optimize_config_options.top_task(cx, node)
   if std.config["inner"] and not inner and
     node.annotations.inner:is(ast.annotation.Demand)
   then
-    report.error(inner_node, "task is not a valid inner task")
+    report.error(inner_node or node, "task is not a valid inner task")
   end
 
   if std.config["idempotent"] and not idempotent and

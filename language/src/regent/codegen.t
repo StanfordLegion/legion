@@ -804,7 +804,7 @@ end
 local value = {}
 value.__index = value
 
-function values.value(node, value_expr, value_type, field_path, centered)
+function values.value(node, value_expr, value_type, field_path)
   if not ast.is_node(node) then
     error("value requires an AST node", 2)
   end
@@ -821,17 +821,12 @@ function values.value(node, value_expr, value_type, field_path, centered)
     error("value requires a valid field_path", 2)
   end
 
-  if centered == nil then
-    centered = false
-  end
-
   return setmetatable(
     {
       node = node,
       expr = value_expr,
       value_type = value_type,
       field_path = field_path,
-      centered = centered,
     },
     value)
 end
@@ -867,7 +862,7 @@ function value:__get_field(cx, node, value_type, field_name)
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", "__ptr", field_name))
   else
     return self:new(
-      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name), self.centered)
+      node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
   end
 end
 
@@ -968,7 +963,7 @@ ref.__index = ref
 local aref = setmetatable({}, { __index = value })
 aref.__index = aref
 
-function values.ref(node, value_expr, value_type, field_path, centered)
+function values.ref(node, value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or
     not (std.is_bounded_type(value_type) or std.is_vptr(value_type)) then
     error("ref requires a legion ptr type", 2)
@@ -979,11 +974,11 @@ function values.ref(node, value_expr, value_type, field_path, centered)
   else
     meta = ref
   end
-  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), meta)
+  return setmetatable(values.value(node, value_expr, value_type, field_path), meta)
 end
 
-function ref:new(node, value_expr, value_type, field_path, centered)
-  return values.ref(node, value_expr, value_type, field_path, centered)
+function ref:new(node, value_expr, value_type, field_path)
+  return values.ref(node, value_expr, value_type, field_path)
 end
 
 local function get_element_pointer(cx, node, region_types, index_type, field_type,
@@ -1296,7 +1291,7 @@ local reduction_fold = {
   ["min"] = "min",
 }
 
-function ref:reduce(cx, value, op, expr_type)
+function ref:reduce(cx, value, op, expr_type, atomic)
   if expr_type and (std.is_ref(expr_type) or std.is_rawref(expr_type)) then
     expr_type = std.as_read(expr_type)
   end
@@ -1342,11 +1337,11 @@ function ref:reduce(cx, value, op, expr_type)
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
-         elseif cx.variant:is_openmp() and not self.centered then
+         elseif cx.variant:is_openmp() and atomic then
            return quote
              [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
            end
-         elseif cx.variant:is_cuda() and not self.centered then
+         elseif cx.variant:is_cuda() and atomic then
            return quote
              [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
            end
@@ -1387,7 +1382,7 @@ function ref:get_index(cx, node, index, result_type)
   end
   assert(not std.is_list(value_type)) -- Shouldn't be an l-value anyway.
   local result = expr.just(quote [actions] end, `([value][ [index.value] ]))
-  return values.rawref(node, result, &result_type, data.newtuple(), self.centered)
+  return values.rawref(node, result, &result_type, data.newtuple())
 end
 
 function aref:__ref(cx, index)
@@ -1859,16 +1854,11 @@ end
 -- equivalent to a pointer rvalue which has been dereferenced. Note
 -- that value_type is still the pointer type, not the reference
 -- type.
-function values.rawref(node, value_expr, value_type, field_path, centered)
+function values.rawref(node, value_expr, value_type, field_path)
   if not terralib.types.istype(value_type) or not value_type:ispointer() then
     error("rawref requires a pointer type, got " .. tostring(value_type), 2)
   end
-  -- TODO: This is safe only when the parallelizability checker rejects
-  --       CUDA demanded tasks that try to reduce to an arbitrary array in a loop
-  if centered == nil then
-    centered = true
-  end
-  return setmetatable(values.value(node, value_expr, value_type, field_path, centered), rawref)
+  return setmetatable(values.value(node, value_expr, value_type, field_path), rawref)
 end
 
 function rawref:new(node, value_expr, value_type, field_path)
@@ -1901,7 +1891,7 @@ function rawref:write(cx, value)
   return expr.just(actions, quote end)
 end
 
-function rawref:reduce(cx, value, op)
+function rawref:reduce(cx, value, op, expr_type, atomic)
   local ref_expr = self:__ref(cx)
   local cleanup = make_cleanup_item(cx, ref_expr.value, self.value_type.type)
   local value_expr = value:read(cx)
@@ -1916,13 +1906,13 @@ function rawref:reduce(cx, value, op)
 
   local fold_op = reduction_fold[op]
 
-  if cx.variant:is_openmp() and not self.centered then
+  if cx.variant:is_openmp() and atomic then
     actions = quote
       [actions];
       [openmphelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
       [cleanup];
     end
-  elseif cx.variant:is_cuda() and not self.centered then
+  elseif cx.variant:is_cuda() and atomic then
     actions = quote
       [actions];
       [cudahelper.generate_atomic_update(fold_op, self.value_type.type)](&[ref_expr.value], [value_expr.value])
@@ -5349,6 +5339,7 @@ function codegen.expr_list_ispace(cx, node)
       stats = terralib.newlist({loop_body}),
       span = node.span,
     },
+    metadata = false,
     annotations = ast.default_annotations(),
     span = node.span,
   }
@@ -7185,10 +7176,7 @@ function codegen.expr_deref(cx, node)
     return values.rawptr(node, value, value_type)
   elseif std.is_bounded_type(value_type) then
     assert(value_type:is_ptr())
-    -- TODO: The access might not be centered when the loop body casts
-    --       an index value to a bounded type, although here we blindly
-    --       consider pointer dereferences as centered.
-    return values.ref(node, value, value_type, nil, true)
+    return values.ref(node, value, value_type)
   elseif std.is_vptr(value_type) then
     return values.vref(node, value, value_type)
   else
@@ -8189,6 +8177,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
+        metadata = false,
         span = node.span,
         annotations = node.annotations,
       })
@@ -8743,6 +8732,7 @@ local function stat_index_launch_setup(cx, node, domain, actions)
       op = node.reduce_op,
       lhs = node.reduce_lhs,
       rhs = rhs,
+      metadata = false,
       annotations = node.annotations,
       span = node.span,
     }
@@ -9001,6 +8991,7 @@ function codegen.stat_reduce(cx, node)
   local actions = terralib.newlist()
   local lhs = codegen.expr(cx, node.lhs)
   local rhs = codegen.expr(cx, node.rhs)
+  local atomic = node.metadata and node.metadata.atomic
 
   local rhs_expr = rhs:read(cx, node.rhs.expr_type)
 
@@ -9010,7 +9001,7 @@ function codegen.stat_reduce(cx, node)
     expr.just(quote end, rhs_expr.value),
     std.as_read(node.rhs.expr_type))
 
-  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type).actions)
+  actions:insert(lhs:reduce(cx, rhs, node.op, node.lhs.expr_type, atomic).actions)
 
   return quote [actions] end
 end
@@ -9692,14 +9683,25 @@ local function filter_fields(fields, privileges)
   return fields
 end
 
-local function unpack_param_helper(cx, node, param_type, params_map_type, i)
+local unpack_param_helper = terralib.memoize(function(param_type)
+  local cx = context.new_global_scope()
+
   -- Inputs/outputs:
   local c_task = terralib.newsymbol(c.legion_task_t, "task")
-  local params_map = terralib.newsymbol(params_map_type, "params_map_type")
+  local params_map = terralib.newsymbol(&uint64, "params_map")
+  local param_i = terralib.newsymbol(uint64, "param_i")
   local fixed_ptr = terralib.newsymbol(&opaque, "fixed_ptr")
   local data_ptr = terralib.newsymbol(&&uint8, "data_ptr")
   local future_count = terralib.newsymbol(int32, "future_count")
   local future_i = terralib.newsymbol(&int32, "future_i")
+
+  -- Hack: this isn't used, but some APIs require nodes so we have to provide one.
+  local dummy_node = ast.typed.expr.Internal {
+    value = false,
+    expr_type = opaque,
+    annotations = ast.default_annotations(),
+    span = ast.trivial_span(),
+  }
 
   -- Generate code to unpack a future.
   local future = terralib.newsymbol(c.legion_future_t, "future")
@@ -9709,25 +9711,25 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
     ast.typed.expr.FutureGetResult {
       value = ast.typed.expr.Internal {
         value = values.value(
-          node,
+          dummy_node,
           expr.just(quote end, `([future_type]{ __result = [future] })),
           future_type),
         expr_type = future_type,
-        annotations = node.annotations,
-        span = node.span,
+        annotations = ast.default_annotations(),
+        span = ast.trivial_span(),
       },
       expr_type = param_type,
-      annotations = node.annotations,
-      span = node.span,
+      annotations = ast.default_annotations(),
+      span = ast.trivial_span(),
   }):read(cx)
 
   -- Generate code to unpack a non-future.
   local deser_actions, deser_value = std.deserialize(
     param_type, fixed_ptr, data_ptr)
 
-  local terra unpack_param([c_task], [params_map], [fixed_ptr], [data_ptr],
+  local terra unpack_param([c_task], [params_map], [param_i], [fixed_ptr], [data_ptr],
                            [future_count], [future_i])
-    if ([params_map][(uint64([i])-1)/64] and (uint64(1) << ((uint64([i])-1)%64))) == 0 then
+    if ([params_map][([param_i])/64] and (uint64(1) << ([param_i]%64))) == 0 then
       [deser_actions]
       return [deser_value]
     else
@@ -9742,7 +9744,7 @@ local function unpack_param_helper(cx, node, param_type, params_map_type, i)
   end
   unpack_param:setinlined(false)
   return unpack_param
-end
+end)
 
 local function setup_regent_calling_convention_metadata(node, task)
   local params_struct_type = terralib.types.newstruct()
@@ -9956,11 +9958,11 @@ function codegen.top_task(cx, node)
       local param_type = node.params[i].param_type
       local param_symbol = param:getsymbol()
 
-      local helper = unpack_param_helper(cx, node, param_type, params_map_type, i)
+      local helper = unpack_param_helper(param_type)
 
       local actions = quote
         var [param_symbol] = [helper](
-          [c_task], [params_map_symbol], &args.[param:getlabel()], &[data_ptr],
+          [c_task], [params_map_symbol], [i-1], &args.[param:getlabel()], &[data_ptr],
           [future_count], &[future_i])
       end
       if std.is_ispace(param_type) and not cx:has_ispace(param_type) then
