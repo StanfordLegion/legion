@@ -1011,10 +1011,11 @@ namespace Legion {
                             bool phase_one);
     public:
       const AddressSpaceID remote_address_space;
-    private:
+    public:
       Runtime *const runtime;
       // State for sending messages
       const Processor target;
+    private:
       VirtualChannel *const channels; 
     };
 
@@ -3109,6 +3110,8 @@ namespace Legion {
       std::map<AddressSpaceID,RtUserEvent> pending_endpoint_requests;
       // For every processor map it to its address space
       const std::map<Processor,AddressSpaceID> proc_spaces;
+      // For every endpoint processor map to its address space
+      std::map<Processor,AddressSpaceID> endpoint_spaces;
     protected:
       // The task table 
       mutable LocalLock task_variant_lock;

@@ -116,8 +116,9 @@ function loop_context:__newindex (field, value)
   error ("loop_context has no field '" .. field .. "' (in assignment)", 2)
 end
 
-function loop_context.new_scope(loop, loop_var)
+function loop_context.new_scope(task, loop, loop_var)
   local cx = {
+    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
     loop = loop,
     loop_var = loop_var,
     needs_iterator = loop_var and loop:is(ast.typed.stat.ForList),
@@ -133,10 +134,12 @@ function loop_context.new_scope(loop, loop_var)
     --                           both read and used for scalar reduction
     private = data.newmap(),
     -- Remebers scalar variables used for reductions
-    -- * reductions[v] == true ==> private[v] == nil
+    -- * reductions[v] == true ==> private[v] == SHARED_REDUCE
     reductions = data.newmap(),
-    -- * privileges[region][field] = { privilege, all private }
+    -- * privileges[region][field] = { privilege, all private, any private }
     privileges = data.newmap(),
+    -- * arrays[array] = { privilege, all private }
+    array_accesses = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
   }
@@ -225,6 +228,7 @@ function loop_context:update_center(symbol, value)
 end
 
 function loop_context:update_privilege(node, region_type, field_path, new_priv, private)
+  local field_path = field_path or data.newtuple()
   local privileges = self.privileges[region_type]
   if not privileges then
     privileges = data.newmap()
@@ -243,12 +247,23 @@ function loop_context:update_privilege(node, region_type, field_path, new_priv, 
   end
 end
 
-function loop_context:update_privileges(node, ref_type, new_priv, private)
-  local bounds = ref_type:bounds()
-  local field_path = ref_type.field_path
-  bounds:map(function(bound)
-    self:update_privilege(node, bound, field_path, new_priv, private)
+function loop_context:update_privileges(node, regions, field_path, new_priv, private)
+  regions:map(function(region_type)
+    self:update_privilege(node, region_type, field_path, new_priv, private)
   end)
+end
+
+function loop_context:update_array_access(node, symbol, new_priv, private)
+  local privilege, all_private =
+    unpack(self.array_accesses[symbol] or { nil, true })
+  privilege = std.meet_privilege(privilege, new_priv)
+  all_private = all_private and private
+  self.array_accesses[symbol] = { privilege, all_private }
+  if (privilege == "reads_writes" or privilege == std.writes) and
+     not all_private
+  then
+    self:mark_serial(node)
+  end
 end
 
 -- Context that maintains parallelizability of the whole task
@@ -272,13 +287,13 @@ function context.new_task_scope(task)
     task = task,
     demand_cuda = std.config["cuda"] and
                   task.annotations.cuda:is(ast.annotation.Demand),
-    contexts = terralib.newlist({loop_context.new_scope(task, false)}),
+    contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
   return setmetatable(cx, context)
 end
 
 function context:push_loop_context(loop, loop_symbol)
-  self.contexts:insert(loop_context.new_scope(loop, loop_symbol))
+  self.contexts:insert(loop_context.new_scope(self.task, loop, loop_symbol))
 end
 
 function context:pop_loop_context(node)
@@ -287,8 +302,8 @@ function context:pop_loop_context(node)
 
   -- Propagate all region accesses in the scope to the outer ones
   for region, privileges in cx.privileges:items() do
-    for field, pair in privileges:items() do
-      local privilege, all_private, any_private = unpack(pair)
+    for field, tuple in privileges:items() do
+      local privilege, all_private, any_private = unpack(tuple)
       if any_private then
         self:forall_context(function(cx)
           cx:update_privilege(node, region, field, privilege, false)
@@ -298,14 +313,38 @@ function context:pop_loop_context(node)
     end
   end
 
-  -- When the task demands CUDA code generation, we only keep the innermost
-  -- parallelizable for list loop.
-  if self.demand_cuda and cx:is_parallelizable() and cx.needs_iterator then
-    self:forall_context(function(cx)
-      cx:mark_serial(node)
-      return false
-    end)
+  -- Propagate all array accesses in the scope to the outer ones
+  for symbol, tuple in cx.array_accesses:items() do
+    local privilege, all_private, any_private = unpack(tuple)
+    if not cx.private[symbol] then
+      self:forall_context(function(cx)
+        local private = cx:is_private(symbol) == PRIVATE
+        cx:update_array_access(node, symbol, privilege, private)
+        return private
+      end)
+    end
   end
+
+  if self.demand_cuda and cx:is_parallelizable() then
+    -- When the task demands CUDA code generation, we only keep the innermost
+    -- parallelizable for list loop.
+    if cx.needs_iterator then
+      self:forall_context(function(cx)
+        cx:mark_serial(node)
+        return false
+      end)
+    end
+    -- When the task demands CUDA code generation and the loop have accesses
+    -- to arrays defined outside, we mark it inadmissible.
+    for symbol, tuple in cx.array_accesses:items() do
+      if not cx.private[symbol] then
+        cx:mark_inadmissible(node)
+        break
+      end
+    end
+  end
+
+  return cx
 end
 
 function context:current_context()
@@ -321,10 +360,6 @@ function context:mark_serial(node)
   self:current_context():mark_serial(node)
 end
 
-function context:get_metadata()
-  return self:current_context():get_metadata()
-end
-
 function context:forall_context(f)
   for idx = #self.contexts, 1, -1 do
     local stop = f(self.contexts[idx])
@@ -338,7 +373,7 @@ end
 
 local analyze_access = {}
 
-function analyze_access.expr_id(cx, node, privilege)
+function analyze_access.expr_id(cx, node, privilege, field_path)
   local symbol = node.value
   local private = cx:is_private(symbol)
   local center = cx:is_center(symbol)
@@ -375,87 +410,94 @@ function analyze_access.expr_id(cx, node, privilege)
   end
 end
 
-function analyze_access.expr_field_access(cx, node, privilege)
-  local expr_type = node.expr_type
-  if std.is_ref(expr_type) then
-    local deref = node
-    while deref:is(ast.typed.expr.FieldAccess) do
-      deref = deref.value
-    end
-    local private, center = analyze_access.expr(cx, deref, nil)
-    cx:update_privileges(node, expr_type, privilege, private)
-    return private, center
-  else
-    return analyze_access.expr(cx, node.value, privilege)
-  end
+function analyze_access.expr_field_access(cx, node, privilege, field_path)
+  local field_path = field_path or node.expr_type.field_path
+  return analyze_access.expr(cx, node.value, privilege, field_path)
 end
 
-function analyze_access.expr_deref(cx, node, privilege)
+function analyze_access.expr_deref(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  local private, center = analyze_access.expr(cx, node.value)
+  local private, center = analyze_access.expr(cx, node.value, privilege)
   if std.is_ref(expr_type) then
-    cx:update_privileges(node, expr_type, privilege, center)
+    cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
+  elseif std.as_read(node.value.expr_type):ispointer() then
+    -- We disallow any raw pointer dereferences in a parallelizable loop
+    -- as we do not know about their aliasing.
+    cx:mark_inadmissible(node)
   end
   return center, false
 end
 
-function analyze_access.expr_index_access(cx, node, privilege)
+function analyze_access.expr_index_access(cx, node, privilege, field_path)
   local expr_type = node.expr_type
   if std.is_ref(expr_type) then
     analyze_access.expr(cx, node.value, nil)
-    local private, center =
-      analyze_access.expr(cx, node.index, std.reads)
-    cx:update_privileges(node, expr_type, privilege, center)
+    local private, center = analyze_access.expr(cx, node.index, std.reads)
+    cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
     return center, false
   else
-    -- We don't do accurate analysis for array accesses,
-    -- because the primary parallelization target is a loop
-    -- iterating over region elements.
-    local value_private, value_center =
-      analyze_access.expr(cx, node.value, privilege)
-    local index_private, index_center =
+    local value_type = std.as_read(node.value.expr_type)
+    local value_symbol =
+      node.value:is(ast.typed.expr.ID) and node.value.value or false
+    if value_type:isarray() and value_symbol then
+      local value_private, value_center =
+        analyze_access.expr(cx, node.value)
+      local index_private, index_center =
+        analyze_access.expr(cx, node.index, std.reads)
+      local private = value_private or index_center
+      cx:update_array_access(node, value_symbol, privilege, private)
+      return private, false
+    elseif value_type:ispointer() then
+      -- We disallow any raw pointer dereferences in a parallelizable loop
+      -- as we do not know about their aliasing.
+      cx:mark_inadmissible(node)
+      return false, false
+    else
       analyze_access.expr(cx, node.index, std.reads)
-    return value_private or index_center, false
+      return analyze_access.expr(cx, node.value, privilege)
+    end
+    assert(false)
   end
 end
 
-function analyze_access.expr_constant(cx, node, privilege)
+function analyze_access.expr_constant(cx, node, privilege, field_path)
   return true, false
 end
 
-function analyze_access.expr_binary(cx, node, privilege)
+function analyze_access.expr_binary(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.lhs, privilege)
   analyze_access.expr(cx, node.rhs, privilege)
   return false, false
 end
 
-function analyze_access.expr_unary(cx, node, privilege)
+function analyze_access.expr_unary(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.rhs, privilege)
   return false, false
 end
 
-function analyze_access.expr_cast(cx, node, privilege)
+function analyze_access.expr_cast(cx, node, privilege, field_path)
   return analyze_access.expr(cx, node.arg, privilege)
 end
 
-function analyze_access.expr_regent_cast(cx, node, privilege)
+function analyze_access.expr_regent_cast(cx, node, privilege, field_path)
   return analyze_access.expr(cx, node.value, privilege)
 end
 
 local whitelist = {
+  [sizeof]                                  = true,
   [array]                                   = true,
+  [arrayof]                                 = true,
+  [vector]                                  = true,
+  [vectorof]                                = true,
   [std.assert]                              = true,
-  [std.c.legion_get_current_time_in_micros] = true,
-  [std.c.legion_get_current_time_in_nanos]  = true,
-  [std.c.srand48_r]                         = true,
-  [std.c.drand48_r]                         = true,
+  [std.assert_error]                        = true,
 }
 
 local function is_admissible_function(fn)
   return std.is_math_fn(fn) or whitelist[fn]
 end
 
-function analyze_access.expr_call(cx, node, privilege)
+function analyze_access.expr_call(cx, node, privilege, field_path)
   if not is_admissible_function(node.fn.value) then
     cx:mark_inadmissible(node)
   end
@@ -465,19 +507,19 @@ function analyze_access.expr_call(cx, node, privilege)
   return false, false
 end
 
-function analyze_access.expr_isnull(cx, node, privilege)
+function analyze_access.expr_isnull(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.pointer, std.reads)
   return false, false
 end
 
-function analyze_access.expr_ctor(cx, node, privilege)
+function analyze_access.expr_ctor(cx, node, privilege, field_path)
   node.fields:map(function(field)
     analyze_access.expr(cx, field.value, std.reads)
   end)
   return false, false
 end
 
-function analyze_access.expr_not_analyzable(cx, node, privilege)
+function analyze_access.expr_not_analyzable(cx, node, privilege, field_path)
   cx:mark_inadmissible(node)
   return false, false
 end
@@ -505,8 +547,8 @@ local analyze_access_expr = ast.make_single_dispatch(
   analyze_access_expr_table,
   {ast.typed.expr})
 
-function analyze_access.expr(cx, node, privilege)
-  return analyze_access_expr(cx)(node, privilege)
+function analyze_access.expr(cx, node, privilege, field_path)
+  return analyze_access_expr(cx)(node, privilege, field_path)
 end
 
 local function check_demand(cx, node, annotations, type)
@@ -530,23 +572,22 @@ local function check_demands(cx, node)
 end
 
 function analyze_access.stat_for_list(cx, node)
-  local symbol_type = node.symbol:gettype()
-  local candidate = std.is_index_type(symbol_type) or
-                    std.is_bounded_type(symbol_type)
-  if not candidate then cx:mark_inadmissible(node) end
-
   cx:forall_context(function(cx)
     return analyze_access.expr(cx, node.value, std.reads)
   end)
 
+  local symbol_type = node.symbol:gettype()
+  local candidate = std.is_index_type(symbol_type) or
+                    std.is_bounded_type(symbol_type)
   cx:push_loop_context(node, candidate and node.symbol)
+  if not candidate then cx:mark_inadmissible(node) end
   local block = analyze_access.block(cx, node.block)
+  local cx = cx:pop_loop_context(node)
   local node = node {
     block = block,
     metadata = candidate and cx:get_metadata(),
   }
-  check_demands(cx:current_context(), node)
-  cx:pop_loop_context(node)
+  check_demands(cx, node)
   return node
 end
 
@@ -561,12 +602,12 @@ function analyze_access.stat_for_num(cx, node)
 
   cx:push_loop_context(node, not has_stride and node.symbol)
   local block = analyze_access.block(cx, node.block)
+  local cx = cx:pop_loop_context(node)
   local node = node {
     block = block,
     metadata = not has_stride and cx:get_metadata(),
   }
-  check_demands(cx:current_context(), node)
-  cx:pop_loop_context(node)
+  check_demands(cx, node)
   return node
 end
 
