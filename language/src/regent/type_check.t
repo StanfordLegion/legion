@@ -497,6 +497,16 @@ function type_check.expr_field_access(cx, node)
           annotations = node.value.annotations,
         }
       })
+  elseif std.as_read(value_type):ispointer() then
+    return type_check.expr(
+      cx,
+      node {
+        value = ast.specialized.expr.Deref {
+          value = node.value,
+          span = node.value.span,
+          annotations = node.value.annotations,
+        }
+      })
   end
 
   local unpack_type = value_type

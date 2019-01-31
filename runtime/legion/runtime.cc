@@ -13017,8 +13017,16 @@ namespace Legion {
     {
       std::map<Processor,AddressSpaceID>::const_iterator finder = 
         proc_spaces.find(target);
+      if (finder != proc_spaces.end())
+        return finder->second;
 #ifdef DEBUG_LEGION
-      assert(finder != proc_spaces.end());
+      // If we get here then this better be a processor group
+      assert(target.kind() == Processor::PROC_GROUP);
+#endif
+      AutoLock m_lock(message_manager_lock,1,false/*exclusive*/);
+      finder = endpoint_spaces.find(target);
+#ifdef DEBUG_LEGION
+      assert(finder != endpoint_spaces.end());
 #endif
       return finder->second;
     }
@@ -13052,6 +13060,8 @@ namespace Legion {
         AutoLock m_lock(message_manager_lock);
         message_managers[remote_space] = new MessageManager(remote_space, 
                             this, max_message_size, remote_utility_group);
+        // Also update the endpoint spaces
+        endpoint_spaces[remote_utility_group] = remote_space;
         std::map<AddressSpaceID,RtUserEvent>::iterator finder = 
           pending_endpoint_requests.find(remote_space);
 #ifdef DEBUG_LEGION
