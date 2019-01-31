@@ -62,7 +62,6 @@ local default_options = {
   ["openmp-strict"] = false,
   ["skip-empty-tasks"] = true,
   ["vectorize"] = true,
-  ["vectorize-unsafe"] = false,
 
   -- Legion runtime compile options:
   ["legion-dim"] = 3, -- Set this to the value of LEGION_MAX_DIM.

@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops8.rg:32: vectorization failed: loop body has a break statement
---    break
---        ^
+-- vectorize_loops8.rg:32: vectorization failed: found an inadmissible statement
+--     break
+--         ^
 
 import "regent"
 
@@ -24,13 +24,11 @@ fspace fs
   v : float,
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   __demand(__vectorize)
   for e in r do
     break
   end
 end
-
-regentlib.start(toplevel)

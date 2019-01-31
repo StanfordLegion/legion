@@ -91,10 +91,7 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
-local permitted_for_num_annotations = terralib.newlist({"parallel", "spmd", "trace"})
-if std.config["vectorize-unsafe"] then
-  permitted_for_num_annotations:insert("vectorize")
-end
+local permitted_for_num_annotations = terralib.newlist({"parallel", "spmd", "trace", "vectorize"})
 
 local node_allow_annotations = {
   -- Expressions:

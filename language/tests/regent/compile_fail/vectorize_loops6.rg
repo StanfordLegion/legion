@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops6.rg:33: vectorization failed: loop body has a non-scalar loop condition
---    for i = 0, e.v do x = x + i end
---      ^
+-- vectorize_loops6.rg:33: vectorization failed: found a loop-carried dependence
+--     for i = 0, e.v do x = x + i end
+--                       ^
 
 import "regent"
 
@@ -24,14 +24,12 @@ fspace fs
   v : int,
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   var x : int = 0
   __demand(__vectorize)
   for e in r do
     for i = 0, e.v do x = x + i end
   end
 end
-
-regentlib.start(toplevel)
