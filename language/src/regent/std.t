@@ -79,7 +79,8 @@ function std.reduces(op)
 end
 
 function std.is_reduce(privilege)
-  return privilege:is(ast.privilege_kind.Reduces)
+  return privilege ~= nil and privilege ~= "reads_writes" and
+         privilege:is(ast.privilege_kind.Reduces)
 end
 
 -- Coherence Modes
