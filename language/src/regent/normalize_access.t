@@ -256,6 +256,30 @@ function normalize_access.stat_assignment_or_reduce(stats, stat)
   })
 end
 
+function normalize_access.stat_return(stats, stat)
+  if stat.value and not stat.value:is(ast.typed.expr.ID) then
+    local value = stat.value
+    local temp_var = std.newsymbol(std.as_read(value.expr_type))
+    stats:insert(ast.typed.stat.Var {
+      symbol = temp_var,
+      type = std.as_read(temp_var:gettype()),
+      value = value,
+      span = stat.span,
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(stat {
+      value = ast.typed.expr.ID {
+        value = temp_var,
+        expr_type = temp_var:gettype(),
+        span = value.span,
+        annotations = ast.default_annotations(),
+      }
+    })
+  else
+    stats:insert(stat)
+  end
+end
+
 function normalize_access.pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_access_stat_table = {
@@ -270,8 +294,8 @@ local normalize_access_stat_table = {
   [ast.typed.stat.VarUnpack]       = normalize_access.stat_var_unpack,
   [ast.typed.stat.Assignment]      = normalize_access.stat_assignment_or_reduce,
   [ast.typed.stat.Reduce]          = normalize_access.stat_assignment_or_reduce,
+  [ast.typed.stat.Return]          = normalize_access.stat_return,
 
-  [ast.typed.stat.Return]          = normalize_access.pass_through_stat,
   [ast.typed.stat.Break]           = normalize_access.pass_through_stat,
   [ast.typed.stat.Expr]            = normalize_access.pass_through_stat,
   [ast.typed.stat.ParallelPrefix]  = normalize_access.pass_through_stat,
