@@ -460,7 +460,7 @@ namespace Legion {
           // We dominate in this case so we can do filtering
           FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
-            find_current_preconditions(usage, user_mask,
+            find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        preconditions, dead_events, 
                                        current_to_filter, observed,
@@ -472,7 +472,7 @@ namespace Legion {
               find_previous_filter_users(dominated, previous_to_filter);
             const FieldMask previous_mask = user_mask - dominated;
             if (!!previous_mask)
-              find_previous_preconditions(usage, previous_mask,
+              find_previous_preconditions(usage, previous_mask, user_expr,
                                           term_event, op_id, index,
                                           preconditions,dead_events,trace_info);
           }
@@ -482,7 +482,7 @@ namespace Legion {
           FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
           {
-            find_current_preconditions(usage, user_mask,
+            find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
                                        preconditions, dead_events, 
                                        current_to_filter, observed,
@@ -495,7 +495,7 @@ namespace Legion {
             const FieldMask dominated = observed - non_dominated;
             const FieldMask previous_mask = user_mask - dominated;
             if (!!previous_mask)
-              find_previous_preconditions(usage, previous_mask,
+              find_previous_preconditions(usage, previous_mask, user_expr,
                                           term_event, op_id, index,
                                           preconditions,dead_events,trace_info);
           }
@@ -729,7 +729,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExprView* ExprView::add_initial_user(PhysicalUser *user,
+    ExprView* ExprView::add_covering_user(PhysicalUser *user,
            const FieldMask &user_mask, const ApEvent term_event,
            IndexSpaceExpression *user_expr, const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
@@ -792,7 +792,7 @@ namespace Legion {
             for (unsigned idx = 0; idx < dominating_subviews.size(); idx++)
             {
               size_t volume = 0;
-              ExprView *result = dominating_subviews[idx]->find_initial_user(
+              ExprView *result = dominating_subviews[idx]->find_covering_user(
                   user, user_mask, term_event, user_expr, trace_info, volume);
               // If we find it in one of the sub-trees then we are done
               if (result != NULL)
@@ -849,17 +849,17 @@ namespace Legion {
           subviews.insert(to_traverse, subview_mask);
         }
       }
-      return to_traverse->add_initial_user(user, user_mask, term_event, 
-                                           user_expr, trace_info);
+      return to_traverse->add_covering_user(user, user_mask, term_event, 
+                                            user_expr, trace_info);
     }
 
     //--------------------------------------------------------------------------
-    ExprView* ExprView::find_initial_user(PhysicalUser *user, 
-                                          const FieldMask &user_mask,
-                                          const ApEvent term_event,
-                                          IndexSpaceExpression *user_expr,
-                                          const PhysicalTraceInfo &trace_info,
-                                          size_t &bound_volume)
+    ExprView* ExprView::find_covering_user(PhysicalUser *user, 
+                                           const FieldMask &user_mask,
+                                           const ApEvent term_event,
+                                           IndexSpaceExpression *user_expr,
+                                           const PhysicalTraceInfo &trace_info,
+                                           size_t &bound_volume)
     //--------------------------------------------------------------------------
     {
       // Handle the base case first
@@ -908,7 +908,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < dominating_subviews.size(); idx++)
           {
             size_t volume = 0;
-            ExprView *result = dominating_subviews[idx]->find_initial_user(
+            ExprView *result = dominating_subviews[idx]->find_covering_user(
                 user, user_mask, term_event, user_expr, trace_info, volume);
             // If we find it in one of the sub-trees then we are done
             if (result != NULL)
@@ -934,8 +934,165 @@ namespace Legion {
         bound_volume = view_volume;
         return NULL;
       }
-      return to_traverse->find_initial_user(user, user_mask, term_event,
+      return to_traverse->find_covering_user(user, user_mask, term_event,
                                     user_expr, trace_info, bound_volume);
+    }
+
+    //--------------------------------------------------------------------------
+    ExprView* ExprView::add_partial_user(const RegionUsage &usage,
+                                         UniqueID op_id, unsigned index,
+                                         FieldMask user_mask,
+                                         const ApEvent term_event,
+                                         IndexSpaceExpression *user_expr,
+                                         const size_t user_volume,
+                                         const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    {
+      // We're going to try to put this user as far down the ExprView tree
+      // as we can in order to avoid doing unnecessary intersection tests later
+      FieldMaskSet<ExprView> to_traverse;
+      std::map<ExprView*,IndexSpaceExpression*> to_traverse_exprs;
+      FieldMaskSet<IndexSpaceExpression> intersect_exprs;
+      {
+        // Find all the intersecting subviews to see if we can 
+        // continue the traversal
+        AutoLock v_lock(view_lock,1,false/*exclusive*/); 
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
+        {
+          // If the fields don't overlap then we don't care
+          const FieldMask overlap_mask = it->second & user_mask;
+          if (!overlap_mask)
+            continue;
+          IndexSpaceExpression *overlap =
+            context->intersect_index_spaces(user_expr, it->first->view_expr);
+          const size_t overlap_volume = overlap->get_volume();
+          if (overlap_volume == 0)
+            continue;
+          to_traverse.insert(it->first, overlap_mask);
+          if (overlap_volume == it->first->view_volume)
+          {
+            // User dominates the subview
+            intersect_exprs.insert(it->first->view_expr, overlap_mask);
+            to_traverse_exprs[it->first] = it->first->view_expr;
+          }
+          else if (overlap_volume == user_volume)
+          {
+            // Subview dominates the user
+            intersect_exprs.insert(user_expr, overlap_mask);
+            to_traverse_exprs[it->first] = user_expr;
+          }
+          else
+          {
+            // Intersect only case
+            intersect_exprs.insert(overlap, overlap_mask);
+            to_traverse_exprs[it->first] = overlap;
+          }
+        }
+      }
+      // Now we need to sort these into field sets and see if any of
+      // them dominate the user expression
+      bool need_below = false;
+      if (!intersect_exprs.empty())
+      {
+        LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
+        intersect_exprs.compute_field_sets(FieldMask(), field_sets);
+        std::vector<IndexSpaceExpression*> remainders(field_sets.size());
+        unsigned index = 0;
+        // Compute all the remainders, avoid blocking until we've
+        // computed all of them
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = field_sets.begin(); 
+              it != field_sets.end(); it++, index++)
+        {
+          IndexSpaceExpression *union_expr = 
+            context->union_index_spaces(it->elements);
+          remainders[index] = 
+            context->subtract_index_spaces(user_expr, union_expr);
+        }
+        index = 0;
+        for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
+              const_iterator it = field_sets.begin(); 
+              it != field_sets.end(); it++, index++)
+        {
+          // Skip any that aren't empty since we might as well 
+          // register them here since we're going to have to 
+          // register part of it here anyway
+          if (!remainders[index]->is_empty())
+            continue;
+          // We're going to handle these fields below
+          user_mask -= it->set_mask;
+          need_below = true;
+        }
+      }
+      // If we still have local fields, make a user and record it here
+      if (!!user_mask)
+      {
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index,
+                                              true/*copy*/, false/*covers*/);
+        add_current_user(user, term_event, user_mask, trace_info);
+      }
+      ExprView *single_view = NULL;
+      bool single_traversal = true;
+      if (need_below)
+      {
+        PhysicalUser *cover_user = NULL;
+        // Traverse down any subviews that we need to
+        for (FieldMaskSet<ExprView>::iterator it = 
+              to_traverse.begin(); it != to_traverse.end(); it++)
+        {
+          // Skip any local fields that we already handled
+          if (!!user_mask)
+          {
+            it.filter(user_mask);
+            if (!it->second)
+              continue;
+          }
+          std::map<ExprView*,IndexSpaceExpression*>::const_iterator
+            finder = to_traverse_exprs.find(it->first); 
+#ifdef DEBUG_LEGION
+          assert(finder != to_traverse_exprs.end());
+#endif
+          // Check for the cases where we dominated perfectly
+          if (finder->second == it->first->view_expr)
+          {
+            if (cover_user == NULL)
+            {
+              cover_user = new PhysicalUser(usage, it->first->view_expr,
+                              op_id, index, true/*copy*/, true/*covers*/);
+              cover_user->add_reference();
+            }
+            it->first->add_current_user(cover_user, term_event,
+                                        it->second, trace_info);
+            if (single_view != NULL)
+              single_view = NULL;
+            else if (single_traversal)
+            {
+              single_view = it->first;
+              single_traversal = false;
+            }
+          }
+          else
+          {
+            // Continue the traversal on this node
+            ExprView *below = it->first->add_partial_user(usage, op_id, index,
+                it->second, term_event, finder->second, 
+                finder->second->get_volume(), trace_info);
+            if (single_view != NULL)
+              single_view = NULL;
+            else if (single_traversal)
+            {
+              single_view = below;
+              single_traversal = false;
+            }
+          }
+        }
+        if ((cover_user != NULL) && cover_user->remove_reference())
+          delete cover_user; 
+      }
+      if (!!user_mask)
+        return NULL;
+      return single_view;
     }
 
     //--------------------------------------------------------------------------
@@ -1204,6 +1361,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ExprView::find_current_preconditions(const RegionUsage &usage,
                                               const FieldMask &user_mask,
+                                              IndexSpaceExpression *user_expr,
                                               ApEvent term_event,
                                               const UniqueID op_id,
                                               const unsigned index,
@@ -1250,23 +1408,30 @@ namespace Legion {
           const FieldMask user_overlap = user_mask & it->second;
           if (!user_overlap)
             continue;
-          if (has_local_precondition<false>(it->first, usage, op_id, index))
+          bool dominates = true;
+          if (has_local_precondition<false>(it->first, usage, user_expr, 
+                                            op_id, index, dominates))
           {
-            observed |= user_overlap;
             preconditions.insert(cit->first);
-            if (to_filter == filter_users.end())
+            if (dominates)
             {
-              filter_users[cit->first].insert(it->first, user_overlap);
-              to_filter = filter_users.find(cit->first);
+              observed |= user_overlap;
+              if (to_filter == filter_users.end())
+              {
+                filter_users[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_users.find(cit->first);
+              }
+              else
+              {
+#ifdef DEBUG_LEGION
+                assert(to_filter->second.find(it->first) == 
+                        to_filter->second.end());
+#endif
+                to_filter->second.insert(it->first, user_overlap);
+              }
             }
             else
-            {
-#ifdef DEBUG_LEGION
-              assert(to_filter->second.find(it->first) == 
-                      to_filter->second.end());
-#endif
-              to_filter->second.insert(it->first, user_overlap);
-            }
+              non_dominated |= user_overlap;
           }
           else
             non_dominated |= user_overlap;
@@ -1277,6 +1442,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ExprView::find_previous_preconditions(const RegionUsage &usage,
                                                const FieldMask &user_mask,
+                                               IndexSpaceExpression *user_expr,
                                                ApEvent term_event,
                                                const UniqueID op_id,
                                                const unsigned index,
@@ -1317,7 +1483,8 @@ namespace Legion {
         {
           if (user_mask * it->second)
             continue;
-          if (has_local_precondition<false>(it->first, usage, op_id, index))
+          if (has_local_precondition<false>(it->first, usage, user_expr, 
+                                            op_id, index))
             preconditions.insert(pit->first);
         }
       }
@@ -1374,9 +1541,10 @@ namespace Legion {
           const FieldMask user_overlap = user_mask & it->second;
           if (!user_overlap)
             continue;
-          if (has_local_precondition<true>(it->first, usage, op_id, index)) 
+          bool dominated = true;
+          if (has_local_precondition<true>(it->first, usage, user_expr,
+                                           op_id, index, dominated)) 
           {
-            observed |= user_overlap;
             if (finder == preconditions.end())
             {
               preconditions[cit->first].insert(user_expr, user_overlap);
@@ -1384,13 +1552,20 @@ namespace Legion {
             }
             else
               finder->second.insert(user_expr, user_overlap);
-            if (to_filter == filter_events.end())
+            if (dominated)
             {
-              filter_events[cit->first].insert(it->first, user_overlap);
-              to_filter = filter_events.find(cit->first);
+              observed |= user_overlap;
+              
+              if (to_filter == filter_events.end())
+              {
+                filter_events[cit->first].insert(it->first, user_overlap);
+                to_filter = filter_events.find(cit->first);
+              }
+              else
+                to_filter->second.insert(it->first, user_overlap);
             }
             else
-              to_filter->second.insert(it->first, user_overlap);
+              non_dominated |= user_overlap;
           }
           else
             non_dominated |= user_overlap;
@@ -1446,7 +1621,8 @@ namespace Legion {
           const FieldMask user_overlap = overlap & it->second;
           if (!user_overlap)
             continue;
-          if (has_local_precondition<true>(it->first, usage, op_id, index)) 
+          if (has_local_precondition<true>(it->first, usage, user_expr, 
+                                           op_id, index))
           {
             if (finder == preconditions.end())
             {
@@ -1630,8 +1806,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
-      PhysicalUser *user = 
-        new PhysicalUser(usage, user_expr, op_id, index, false/*copy user*/);
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy user*/, true/*covers*/);
       // No need to take the lock since we are just initializing
       // See if we have it in the cache
       LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
@@ -1641,7 +1817,7 @@ namespace Legion {
           !(finder->second.invalid_fields * user_mask))
       {
         CacheEntry &entry = expr_cache[user_expr->expr_id];
-        entry.target_view = current_users->add_initial_user(user, user_mask, 
+        entry.target_view = current_users->add_covering_user(user, user_mask,
                                           term_event, user_expr, trace_info);
         entry.invalid_fields -= user_mask;
       }
@@ -1709,8 +1885,8 @@ namespace Legion {
         current_users->find_user_preconditions(usage, user_expr, user_dominates,
                user_mask, term_event, op_id, index, wait_on_events, trace_info);
         // Add our local user
-        add_current_user(usage, user_expr, user_mask, term_event, op_id, index,
-                         false/*copy*/, applied_events, trace_info);
+        add_internal_task_user(usage, user_expr, user_mask, term_event, 
+                               op_id, index, applied_events, trace_info);
         // At this point tasks shouldn't be allowed to wait on themselves
 #ifdef DEBUG_LEGION
         if (term_event.exists())
@@ -1833,8 +2009,8 @@ namespace Legion {
       else
       {
         const RegionUsage usage(reading ? READ_ONLY : READ_WRITE, EXCLUSIVE, 0);
-        add_current_user(usage, copy_expr, copy_mask, term_event, op_id, index, 
-                         true/*copy*/, applied_events, trace_info);
+        add_internal_copy_user(usage, copy_expr, copy_mask, term_event, 
+                               op_id, index, applied_events, trace_info);
       }
     }
  
@@ -1875,17 +2051,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MaterializedView::add_current_user(const RegionUsage &usage,
+    void MaterializedView::add_internal_task_user(const RegionUsage &usage,
                                             IndexSpaceExpression *user_expr,
                                             const FieldMask &user_mask,
                                             ApEvent term_event, UniqueID op_id,
-                                            unsigned index, bool copy_user,
+                                            const unsigned index,
                                             std::set<RtEvent> &applied_events,
                                             const PhysicalTraceInfo &trace_info)
     //--------------------------------------------------------------------------
     {
-      PhysicalUser *user = 
-        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy user*/, true/*covers*/);
       // Hold a reference to this in case it finishes before we're done
       // with the analysis and its get pruned/deleted
       user->add_reference();
@@ -1916,7 +2092,7 @@ namespace Legion {
       if (target_view == NULL)
       {
         // Don't know the view yet so we need to compute it
-        target_view = current_users->add_initial_user(user, user_mask, 
+        target_view = current_users->add_covering_user(user, user_mask, 
                                     term_event, user_expr, trace_info);
         update_cache = true;
       }
@@ -1976,6 +2152,133 @@ namespace Legion {
         entry.target_view = target_view;
         entry.invalid_fields -= user_mask;
       }
+    }
+
+    //--------------------------------------------------------------------------
+    void MaterializedView::add_internal_copy_user(const RegionUsage &usage,
+                                            IndexSpaceExpression *user_expr,
+                                            const FieldMask &user_mask,
+                                            ApEvent term_event, UniqueID op_id,
+                                            const unsigned index,
+                                            std::set<RtEvent> &applied_events,
+                                            const PhysicalTraceInfo &trace_info)
+    //--------------------------------------------------------------------------
+    { 
+      // First we're going to check to see if we can add this directly to 
+      // an existing ExprView with the same expresssion in which case
+      // we'll be able to mark this user as being precise
+      ExprView *target_view = NULL;
+      // Handle an easy case first, if the user_expr is the same as the 
+      // view_expr for the root then this is easy
+      bool update_cache = false;
+      bool update_count = false;
+      if (user_expr != current_users->view_expr)
+      {
+        // Hard case where we will have subviews
+        AutoLock v_lock(view_lock,1,false/*exclusive*/);
+        // See if we can find the entry in the cache and it's valid 
+        // for all of our fields
+        LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
+          finder = expr_cache.find(user_expr->expr_id);
+        if ((finder != expr_cache.end()) && 
+            (finder->second.invalid_fields * user_mask))
+        {
+          target_view = finder->second.target_view;
+          update_cache = true;
+        }
+        // increment the number of outstanding additions
+        __sync_fetch_and_add(&outstanding_additions,1);
+        update_count = true;
+      }
+      else // This is just going to add at the top so never needs to wait
+        target_view = current_users;
+      if (target_view != NULL)
+      {
+        // If we have a target view, then we know we cover it because
+        // the expressions match directly
+        PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                              true/*copy user*/,true/*covers*/);
+        // Hold a reference to this in case it finishes before we're done
+        // with the analysis and its get pruned/deleted
+        user->add_reference();
+        // We already know the view so we can just add the user directly
+        // there and then do any updates that we need to
+        target_view->add_current_user(user, term_event, user_mask, trace_info);
+        if (user->remove_reference())
+          delete user;
+        if (update_cache || update_count)
+        {
+          AutoLock v_lock(view_lock);
+          if (update_count)
+          {
+#ifdef DEBUG_LEGION
+            assert(outstanding_additions > 0);
+#endif
+            if ((--outstanding_additions == 0) && clean_waiting.exists())
+            {
+              // Wake up the clean waiter
+              Runtime::trigger_event(clean_waiting);
+              clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+            }
+          }
+          // Update the timeout and see if we need to clear the cache
+          if (update_cache && !expr_cache.empty())
+          {
+            expr_cache_uses++;
+            // Check for equality guarantees only one thread in here at a time
+            if (expr_cache_uses == expr_cache_timeout)
+            {
+              // Wait until there are are no more outstanding additions
+              while (outstanding_additions > 0)
+              {
+#ifdef DEBUG_LEGION
+                assert(!clean_waiting.exists());
+#endif
+                clean_waiting = Runtime::create_rt_user_event();
+                const RtEvent wait_on = clean_waiting;
+                v_lock.release();
+                wait_on.wait();
+                v_lock.reacquire();
+              }
+              // Now we can clean the cache and the views
+              expr_cache.clear();
+              expr_cache_uses = 0;
+              // Anytime we clean the cache, we also traverse the 
+              // view tree and see if there are any views we can 
+              // remove because they no longer have live users
+              FieldMask dummy_mask;
+              current_users->clean_views(dummy_mask);
+            }
+          }
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(update_count); // this should always be true
+#endif
+        // This is a case where we don't know where to add the copy user
+        // so we need to traverse down and find one
+        target_view = current_users->add_partial_user(usage, op_id, index,
+         user_mask, term_event, user_expr, user_expr->get_volume(), trace_info);
+        AutoLock v_lock(view_lock);
+        // Update the expression cache if the target view is not NULL
+        if (target_view != NULL)
+        {
+          CacheEntry &entry = expr_cache[user_expr->expr_id];
+          entry.target_view = target_view;
+          entry.invalid_fields -= user_mask;
+        }
+#ifdef DEBUG_LEGION
+        assert(outstanding_additions > 0);
+#endif
+        if ((--outstanding_additions == 0) && clean_waiting.exists())
+        {
+          // Wake up the clean waiter
+          Runtime::trigger_event(clean_waiting);
+          clean_waiting = RtUserEvent::NO_RT_USER_EVENT;
+        }
+      } 
     }
 
     //--------------------------------------------------------------------------
@@ -2763,8 +3066,8 @@ namespace Legion {
 #endif
       // We don't use field versions for doing interference tests on
       // reductions so there is no need to record it
-      PhysicalUser *user = 
-        new PhysicalUser(usage, user_expr, op_id, index, false/*copy*/);
+      PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                            false/*copy*/, true/*covers*/);
       user->add_reference();
       add_physical_user(user, IS_READ_ONLY(usage), term_event, user_mask);
       initial_user_events.insert(term_event);
@@ -3159,8 +3462,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
 #endif
-      PhysicalUser *new_user = 
-        new PhysicalUser(usage, user_expr, op_id, index, copy_user);
+      PhysicalUser *new_user = new PhysicalUser(usage, user_expr, op_id, index, 
+                                                copy_user, true/*covers*/);
       new_user->add_reference();
       // No matter what, we retake the lock in exclusive mode so we
       // can handle any clean-up and add our user
