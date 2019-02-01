@@ -10664,6 +10664,28 @@ namespace Legion {
                         typename LegionList<FieldSet<T> >::aligned &output_sets)
     //--------------------------------------------------------------------------
     {
+      // Special cases for empty and size 1 sets
+      if (inputs.empty())
+      {
+        if (!!universe_mask)
+          output_sets.push_back(FieldSet<T>(universe_mask));
+        return;
+      }
+      else if (inputs.size() == 1)
+      {
+        typename LegionMap<T,FieldMask>::aligned::const_iterator first = 
+          inputs.begin();
+        output_sets.push_back(FieldSet<T>(first->second));
+        FieldSet<T> &last = output_sets.back();
+        last.elements.insert(first->first);
+        if (!!universe_mask)
+        {
+          universe_mask -= first->second;
+          if (!!universe_mask)
+            output_sets.push_back(FieldSet<T>(universe_mask));
+        }
+        return;
+      }
       for (typename LegionMap<T,FieldMask>::aligned::const_iterator pit = 
             inputs.begin(); pit != inputs.end(); pit++)
       {
@@ -11431,6 +11453,55 @@ namespace Legion {
                  typename LegionList<FieldSet<T*> >::aligned &output_sets) const
     //--------------------------------------------------------------------------
     {
+      // Handle special cases for single entry and single fields
+      if (empty())
+      {
+        if (!!universe_mask)
+          output_sets.push_back(FieldSet<T*>(universe_mask));
+        return;
+      }
+      else if (single)
+      {
+        output_sets.push_back(FieldSet<T*>(valid_fields));
+        FieldSet<T*> &last = output_sets.back();
+        last.elements.insert(entries.single_entry);
+        if (!!universe_mask)
+        {
+          universe_mask -= valid_fields;
+          if (!!universe_mask)
+            output_sets.push_back(FieldSet<T*>(universe_mask));
+        }
+        return;
+      }
+      else if (valid_fields.pop_count() == 1)
+      {
+        output_sets.push_back(FieldSet<T*>(valid_fields));
+        FieldSet<T*> &last = output_sets.back();
+        bool has_empty = false;
+        for (const_iterator pit = this->begin(); pit != this->end(); pit++)
+        {
+          if (!!pit->second)
+            last.elements.insert(pit->first);
+          else
+            has_empty = true;
+        }
+        if (has_empty)
+        {
+          output_sets.push_back(FieldSet<T*>(FieldMask()));
+          last = output_sets.back();
+          for (const_iterator pit = this->begin(); pit != this->end(); pit++)
+            if (!pit->second)
+              last.elements.insert(pit->first);
+        }
+        if (!!universe_mask)
+        {
+          universe_mask -= valid_fields;
+          if (!!universe_mask)
+            output_sets.push_back(FieldSet<T*>(universe_mask));
+        }
+        return;
+      }
+      // Otherwise we fall through and do the full thing
       for (const_iterator pit = this->begin(); pit != this->end(); pit++)
       {
         bool inserted = false;

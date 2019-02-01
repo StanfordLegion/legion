@@ -70,20 +70,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalUser::PhysicalUser(IndexSpaceExpression *e)
-      : expr(e)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(expr != NULL);
-#endif
-      expr->add_expression_reference();
-    }
-    
-    //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const RegionUsage &u, IndexSpaceExpression *e,
-                               UniqueID id, unsigned x, bool copy)
-      : usage(u), expr(e), op_id(id), index(x), copy_user(copy)
+                               UniqueID id, unsigned x, bool cpy, bool cov)
+      : usage(u), expr(e), op_id(id), index(x), copy_user(cpy), covers(cov)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -94,7 +83,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalUser::PhysicalUser(const PhysicalUser &rhs) 
-      : expr(NULL)
+      : usage(rhs.usage), expr(rhs.expr), op_id(rhs.op_id), index(rhs.index),
+        copy_user(rhs.copy_user), covers(rhs.covers)
     //--------------------------------------------------------------------------
     {
       // should never be called

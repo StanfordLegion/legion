@@ -203,19 +203,19 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = PHYSICAL_USER_ALLOC;
     public:
-      PhysicalUser(IndexSpaceExpression *expr);
       PhysicalUser(const RegionUsage &u, IndexSpaceExpression *expr,
-                   UniqueID op_id, unsigned index, bool copy);
+                   UniqueID op_id, unsigned index, bool copy, bool covers);
       PhysicalUser(const PhysicalUser &rhs);
       ~PhysicalUser(void);
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
-      RegionUsage usage;
+      const RegionUsage usage;
       IndexSpaceExpression *const expr;
-      UniqueID op_id;
-      unsigned index; // region requirement index
-      bool copy_user; // is this from a copy or an operation
+      const UniqueID op_id;
+      const unsigned index; // region requirement index
+      const bool copy_user; // is this from a copy or an operation
+      const bool covers; // whether the expr covers the ExprView its in
     };  
 
     /**

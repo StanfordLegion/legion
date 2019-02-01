@@ -270,15 +270,24 @@ namespace Legion {
                                    UniqueID op_id, unsigned index,
                                    EventFieldExprs &preconditions,
                                    const PhysicalTraceInfo &trace_info);
-      ExprView* add_initial_user(PhysicalUser *user, const FieldMask &user_mask,
+      ExprView* add_covering_user(PhysicalUser *user, 
+                                  const FieldMask &user_mask,
+                                  const ApEvent term_event,
+                                  IndexSpaceExpression *user_expr,
+                                  const PhysicalTraceInfo &trace_info);
+      ExprView* find_covering_user(PhysicalUser *user, 
+                                   const FieldMask &user_mask,
+                                   const ApEvent term_event,
+                                   IndexSpaceExpression *user_expr,
+                                   const PhysicalTraceInfo &trace_info,
+                                   size_t &bound_volume);
+      ExprView* add_partial_user(const RegionUsage &usage,
+                                 UniqueID op_id, unsigned index,
+                                 FieldMask user_mask,
                                  const ApEvent term_event,
                                  IndexSpaceExpression *user_expr,
+                                 const size_t user_volume,
                                  const PhysicalTraceInfo &trace_info);
-      ExprView* find_initial_user(PhysicalUser *user, const FieldMask &user_mask,
-                                 const ApEvent term_event,
-                                 IndexSpaceExpression *user_expr,
-                                 const PhysicalTraceInfo &trace_info,
-                                 size_t &bound_volume);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
           const FieldMask &user_mask, const PhysicalTraceInfo &trace_info);
       // TODO: Optimize this so that we prune out intermediate nodes in 
@@ -290,6 +299,7 @@ namespace Legion {
     protected:
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -301,6 +311,7 @@ namespace Legion {
                                       const PhysicalTraceInfo &trace_info);
       void find_previous_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
+                                      IndexSpaceExpression *user_expr,
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
@@ -333,6 +344,14 @@ namespace Legion {
       template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
+                                      IndexSpaceExpression *user_expr,
+                                      const UniqueID op_id,
+                                      const unsigned index,
+                                      bool &dominates);
+      template<bool COPY_USER>
+      inline bool has_local_precondition(PhysicalUser *prev_user,
+                                      const RegionUsage &next_user,
+                                      IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index);
     protected:
@@ -471,13 +490,21 @@ namespace Legion {
       virtual void notify_invalid(ReferenceMutator *mutator);
     public:
       virtual void send_view(AddressSpaceID target); 
-      void add_current_user(const RegionUsage &usage,
-                            IndexSpaceExpression *user_expr,
-                            const FieldMask &user_mask,
-                            ApEvent term_event, UniqueID op_id, 
-                            unsigned index, bool copy_user,
-                            std::set<RtEvent> &applied_events,
-                            const PhysicalTraceInfo &trace_info);
+    protected:
+      void add_internal_task_user(const RegionUsage &usage,
+                                  IndexSpaceExpression *user_expr,
+                                  const FieldMask &user_mask,
+                                  ApEvent term_event, UniqueID op_id, 
+                                  const unsigned index,
+                                  std::set<RtEvent> &applied_events,
+                                  const PhysicalTraceInfo &trace_info);
+      void add_internal_copy_user(const RegionUsage &usage,
+                                  IndexSpaceExpression *user_expr,
+                                  const FieldMask &user_mask,
+                                  ApEvent term_event, UniqueID op_id, 
+                                  const unsigned index,
+                                  std::set<RtEvent> &applied_events,
+                                  const PhysicalTraceInfo &trace_info);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -1100,6 +1127,54 @@ namespace Legion {
     template<bool COPY_USER>
     inline bool ExprView::has_local_precondition(PhysicalUser *user,
                                                  const RegionUsage &next_user,
+                                                 IndexSpaceExpression *expr,
+                                                 const UniqueID op_id,
+                                                 const unsigned index,
+                                                 bool &dominates)
+    //--------------------------------------------------------------------------
+    {
+      // We order these tests in a entirely based on cost
+
+      // Different region requirements of the same operation 
+      // Copies from different region requirements though still 
+      // need to wait on each other correctly
+      if ((op_id == user->op_id) && (index != user->index) && 
+          (!COPY_USER || !user->copy_user))
+        return false;
+      // Now do a dependence test for privilege non-interference
+      DependenceType dt = check_dependence_type(user->usage, next_user);
+      switch (dt)
+      {
+        case NO_DEPENDENCE:
+        case ATOMIC_DEPENDENCE:
+        case SIMULTANEOUS_DEPENDENCE:
+          return false;
+        case TRUE_DEPENDENCE:
+        case ANTI_DEPENDENCE:
+          break;
+        default:
+          assert(false); // should never get here
+      }
+      // If the user doesn't cover the expression for this view then
+      // we need to do an extra intersection test, this should only
+      // happen with copy users at the moment
+      if (!user->covers)
+      {
+        IndexSpaceExpression *overlap = 
+          context->intersect_index_spaces(expr, user->expr);
+        if (overlap->is_empty())
+          return false;
+        if (overlap->get_volume() < user->expr->get_volume())
+          dominates = false;
+      }
+      return true;
+    }
+
+    //--------------------------------------------------------------------------
+    template<bool COPY_USER>
+    inline bool ExprView::has_local_precondition(PhysicalUser *user,
+                                                 const RegionUsage &next_user,
+                                                 IndexSpaceExpression *expr,
                                                  const UniqueID op_id,
                                                  const unsigned index)
     //--------------------------------------------------------------------------
@@ -1125,6 +1200,16 @@ namespace Legion {
           break;
         default:
           assert(false); // should never get here
+      }
+      // If the user doesn't cover the expression for this view then
+      // we need to do an extra intersection test, this should only
+      // happen with copy users at the moment
+      if (!user->covers)
+      {
+        IndexSpaceExpression *overlap = 
+          context->intersect_index_spaces(expr, user->expr);
+        if (overlap->is_empty())
+          return false;
       }
       return true;
     }
