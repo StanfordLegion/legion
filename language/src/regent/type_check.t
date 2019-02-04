@@ -3159,6 +3159,25 @@ function type_check.expr_import_region(cx, node)
       tostring(field_ids_type))
   end
 
+  -- Hack: Stuff the ispace type back into the ispace symbol so it is
+  -- accessible to the region type.
+  if not ispace_symbol:hastype() then
+    ispace_symbol:settype(ispace_type)
+  end
+  assert(std.type_eq(ispace_symbol:gettype(), ispace_type))
+
+  std.add_privilege(cx, std.reads, region, data.newtuple())
+  std.add_privilege(cx, std.writes, region, data.newtuple())
+  -- Freshly imported regions are considered as disjoint from all
+  -- other regions.
+  for other_region, _ in cx.region_universe:items() do
+    assert(not std.type_eq(region, other_region))
+    if std.type_maybe_eq(region:fspace(), other_region:fspace()) then
+      std.add_constraint(cx, region, other_region, std.disjointness, true)
+    end
+  end
+  cx:intern_region(region)
+
   return ast.typed.expr.ImportRegion {
     ispace = ispace,
     value = value,
