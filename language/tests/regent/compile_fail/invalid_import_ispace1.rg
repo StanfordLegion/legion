@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- invalid_import_ispace1.rg:23: the handle is not a 2D index space
+-- invalid_import_ispace1.rg:23: $raw_is is not a 2D index space
 
 import "regent"
 
