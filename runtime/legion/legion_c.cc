@@ -653,6 +653,16 @@ legion_index_space_get_domain(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(runtime->get_index_space_domain(handle));
 }
 
+bool
+legion_index_space_has_parent_index_partition(legion_runtime_t runtime_,
+                                              legion_index_space_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->has_parent_index_partition(handle);
+}
+
 legion_index_partition_t
 legion_index_space_get_parent_index_partition(legion_runtime_t runtime_,
                                               legion_index_space_t handle_)

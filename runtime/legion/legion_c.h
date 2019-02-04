@@ -910,6 +910,14 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
+   * @see Legion::Runtime::has_parent_index_partition()
+   */
+  bool
+  legion_index_space_has_parent_index_partition(legion_runtime_t runtime,
+                                                legion_index_space_t handle);
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see Legion::Runtime::get_parent_index_partition()
    */
   legion_index_partition_t
