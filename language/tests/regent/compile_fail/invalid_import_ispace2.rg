@@ -13,13 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
---
---
---
+-- invalid_import_ispace2.rg:26: cannot import a subspace
 
 import "regent"
-
-local c = regentlib.c
 
 task main()
   var is = ispace(int1d, 10)

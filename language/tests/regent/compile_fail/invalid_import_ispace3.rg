@@ -13,13 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
---
---
---
+-- invalid_import_ispace3.rg:23: cannot import a handle that is already imported
 
 import "regent"
-
-local c = regentlib.c
 
 task main()
   var is = ispace(int1d, 10)
