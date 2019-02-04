@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- fails-with:
--- type_mismatch_import_ispace2.rg:24: type mismatch: expected an index space handle but got int32
+-- type_mismatch_import_ispace2.rg:24: type mismatch in argument 2: expected an index space handle but got int32
 --   var is = __import_ispace(int1d, x)
 --                                   ^
 

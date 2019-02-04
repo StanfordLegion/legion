@@ -3099,14 +3099,14 @@ end
 
 function type_check.expr_import_ispace(cx, node)
   if not std.is_index_type(node.index_type) then
-    report.error(node, "type mismatch: expected index type but got " ..
+    report.error(node, "type mismatch in argument 1: expected index type but got " ..
       tostring(node.index_type))
   end
   local value = type_check.expr(cx, node.value)
   local value_type = std.as_read(value.expr_type)
   if value_type ~= std.c.legion_index_space_t then
     report.error(node.value,
-      "type mismatch: expected an index space handle but got " ..
+      "type mismatch in argument 2: expected an index space handle but got " ..
       tostring(value_type))
   end
   local expr_type = std.ispace(node.index_type)
