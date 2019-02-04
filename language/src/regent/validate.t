@@ -193,6 +193,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Unary]                      = continue,
   [ast.typed.expr.Binary]                     = continue,
   [ast.typed.expr.Deref]                      = continue,
+  [ast.typed.expr.ImportIspace]               = continue,
   [ast.typed.expr.Future]                     = continue,
   [ast.typed.expr.FutureGetResult]            = continue,
   [ast.typed.expr.ParallelizerConstraint]     = continue,

@@ -205,7 +205,8 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.AttachHDF5) or
     node:is(ast.typed.expr.DetachHDF5) or
     node:is(ast.typed.expr.AllocateScratchFields) or
-    node:is(ast.typed.expr.WithScratchFields)
+    node:is(ast.typed.expr.WithScratchFields) or
+    node:is(ast.typed.expr.ImportIspace)
   then
     return flow_empty()
 
@@ -945,6 +946,11 @@ function optimize_futures.expr_deref(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_import_ispace(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
 function optimize_futures.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return optimize_futures.expr_id(cx, node)
@@ -1116,6 +1122,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     return optimize_futures.expr_deref(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return optimize_futures.expr_import_ispace(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

@@ -453,6 +453,8 @@ end
 
 local expr_cast = normalize_expr_factory("args", true, true)
 
+local expr_import_ispace = normalize_expr_factory("value", false, true)
+
 local normalize_expr_table = {
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
   [ast.specialized.expr.StaticCast]                 = expr_regent_cast,
@@ -519,6 +521,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.WithScratchFields]          = pass_through_expr,
   [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
   [ast.specialized.expr.Condition]                  = pass_through_expr,
+  [ast.specialized.expr.ImportIspace]               = expr_import_ispace,
 
   [ast.specialized.expr.LuaTable]                   = pass_through_expr,
 }

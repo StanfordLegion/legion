@@ -1148,6 +1148,15 @@ function specialize.expr_deref(cx, node, allow_lists)
   }
 end
 
+function specialize.expr_import_ispace(cx, node)
+  return ast.specialized.expr.ImportIspace {
+    index_type = node.index_type_expr(cx.env:env()),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1316,6 +1325,9 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.Deref) then
     return specialize.expr_deref(cx, node, allow_lists)
+
+  elseif node:is(ast.unspecialized.expr.ImportIspace) then
+    return specialize.expr_import_ispace(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

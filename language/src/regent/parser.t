@@ -1147,6 +1147,20 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("__import_ispace") then
+    local start = ast.save(p)
+    p:expect("(")
+    local index_type_expr = p:luaexpr()
+    p:expect(",")
+    local value = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.ImportIspace {
+      index_type_expr = index_type_expr,
+      value = value,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   else
     p:error("unexpected token in expression")
   end

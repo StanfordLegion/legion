@@ -3097,6 +3097,27 @@ function type_check.expr_deref(cx, node)
   }
 end
 
+function type_check.expr_import_ispace(cx, node)
+  if not std.is_index_type(node.index_type) then
+    report.error(node, "type mismatch: expected index type but got " ..
+      tostring(node.index_type))
+  end
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_index_space_t then
+    report.error(node.value,
+      "type mismatch: expected an index space handle but got " ..
+      tostring(value_type))
+  end
+  local expr_type = std.ispace(node.index_type)
+  return ast.typed.expr.ImportIspace {
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_parallelizer_constraint(cx, node)
   local lhs = type_check.expr(cx, node.lhs)
   local lhs_type = std.as_read(lhs.expr_type)
@@ -3193,6 +3214,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.Unary]                      = type_check.expr_unary,
   [ast.specialized.expr.Binary]                     = type_check.expr_binary,
   [ast.specialized.expr.Deref]                      = type_check.expr_deref,
+  [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
 
   [ast.specialized.expr.LuaTable] = function(cx, node)
     report.error(node, "unable to specialize value of type table")

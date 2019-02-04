@@ -279,6 +279,7 @@ ast.unspecialized.expr:leaf("Condition", {"conditions", "values"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
 ast.unspecialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.unspecialized.expr:leaf("Deref", {"value"})
+ast.unspecialized.expr:leaf("ImportIspace", {"index_type_expr", "value"})
 
 ast.unspecialized:leaf("Block", {"stats"})
 
@@ -401,6 +402,7 @@ ast.specialized.expr:leaf("Unary", {"op", "rhs"})
 ast.specialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.specialized.expr:leaf("Deref", {"value"})
 ast.specialized.expr:leaf("LuaTable", {"value"})
+ast.specialized.expr:leaf("ImportIspace", {"index_type", "value"})
 
 ast.specialized:leaf("Block", {"stats"})
 
@@ -510,6 +512,7 @@ ast.typed.expr:leaf("Deref", {"value"})
 ast.typed.expr:leaf("Future", {"value"})
 ast.typed.expr:leaf("FutureGetResult", {"value"})
 ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
+ast.typed.expr:leaf("ImportIspace", {"value"})
 
 ast.typed:leaf("Block", {"stats"})
 

@@ -66,6 +66,11 @@ if emergency then
   end
 end
 
+-- == sha256sum("import")[0:7]
+local IMPORT_SEMANTIC_TAG   = 0x68e67653
+-- == sha256sum("import")[8:15]
+local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
+
 local codegen = {}
 
 -- load Legion dynamic library
@@ -3974,6 +3979,12 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
+    do
+      var result = [IMPORT_SEMANTIC_VALUE]
+      var result_size : uint64 = [sizeof(uint32)]
+      std.c.legion_index_space_attach_semantic_information(
+        [cx.runtime], [is], [IMPORT_SEMANTIC_TAG], [&opaque](&result), result_size, false)
+    end
     [bounds_actions]
   end
 
@@ -7268,6 +7279,56 @@ function codegen.expr_future_get_result(cx, node)
   end
 end
 
+function codegen.expr_import_ispace(cx, node)
+  local ispace_type = node.expr_type
+  local value = codegen.expr(cx, node.value):read(cx)
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
+  local i = terralib.newsymbol(ispace_type, "i")
+
+  local it = false
+  if cache_index_iterator then
+    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+  end
+
+  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
+  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
+
+  local actions = quote
+    [value.actions];
+    var [is] = [value.value]
+    var [i] = [ispace_type] { impl = [value.value] }
+    [bounds_actions];
+    [emit_debuginfo(node)];
+    -- Consistency check on the imported index space
+    do
+      std.assert_error([domain].dim == [ispace_type.dim],
+        [get_source_location(node) .. ": the handle is not a " ..
+         ispace_type.dim .. "D index space"])
+      std.assert_error(not
+        std.c.legion_index_space_has_parent_index_partition([cx.runtime], [is]),
+        [get_source_location(node) .. ": cannot import a subspace"])
+      var result : &opaque
+      var result_size : uint64 = 0
+      std.c.legion_index_space_retrieve_semantic_information(
+        [cx.runtime], [is], [IMPORT_SEMANTIC_TAG], &result, &result_size,
+        true, true)
+      std.assert_error(result_size == 0,
+        [get_source_location(node) .. ": cannot import a handle that is already imported"])
+    end
+  end
+  if cache_index_iterator then
+    actions = quote
+      [actions];
+      var [it] = c.legion_terra_cached_index_iterator_create(
+        [cx.runtime], [cx.context], [is])
+    end
+  end
+  return values.value(
+    node,
+    expr.just(actions, i),
+    ispace_type)
+end
+
 function codegen.expr(cx, node)
   if node:is(ast.typed.expr.Internal) then
     return codegen.expr_internal(cx, node)
@@ -7448,6 +7509,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.FutureGetResult) then
     return codegen.expr_future_get_result(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return codegen.expr_import_ispace(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

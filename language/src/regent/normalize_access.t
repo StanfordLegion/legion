@@ -196,6 +196,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.Future]                     = unreachable,
   [ast.typed.expr.FutureGetResult]            = unreachable,
   [ast.typed.expr.ParallelizerConstraint]     = unreachable,
+  [ast.typed.expr.ImportIspace]               = unreachable,
 }
 
 local normalize_access_expr = ast.make_single_dispatch(
