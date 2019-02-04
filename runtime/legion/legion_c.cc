@@ -1519,6 +1519,24 @@ legion_field_space_retrieve_semantic_information(
                        handle, tag, *result, *size, can_fail, wait_until_ready);
 }
 
+bool
+legion_field_space_has_fields(legion_runtime_t runtime_,
+                              legion_context_t ctx_,
+                              legion_field_space_t handle_,
+                              const legion_field_id_t *fields_,
+                              size_t fields_size)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  std::set<FieldID> fields;
+  runtime->get_field_space_fields(ctx, handle, fields);
+  for (size_t idx = 0; idx < fields_size; ++idx)
+    if (fields.find(fields_[idx]) == fields.end()) return false;
+  return true;
+}
+
 void
 legion_field_id_attach_semantic_information(legion_runtime_t runtime_,
                                             legion_field_space_t handle_,
@@ -1599,6 +1617,19 @@ legion_field_id_retrieve_name(legion_runtime_t runtime_,
   FieldSpace handle = CObjectWrapper::unwrap(handle_);
 
   runtime->retrieve_name(handle, id, *result);
+}
+
+size_t
+legion_field_id_get_size(legion_runtime_t runtime_,
+                         legion_context_t ctx_,
+                         legion_field_space_t handle_,
+                         legion_field_id_t id)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  FieldSpace handle = CObjectWrapper::unwrap(handle_);
+
+  return runtime->get_field_size(ctx, handle, id);
 }
 
 // -------------------------------------------------------
