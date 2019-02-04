@@ -1438,7 +1438,7 @@ function type_check.expr_region(cx, node)
   end
 
   local ispace_symbol
-  if ispace:is(ast.specialized.expr.ID) then
+  if ispace:is(ast.typed.expr.ID) then
     ispace_symbol = ispace.value
   else
     ispace_symbol = std.newsymbol()
