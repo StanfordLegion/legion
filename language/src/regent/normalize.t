@@ -455,6 +455,28 @@ local expr_cast = normalize_expr_factory("args", true, true)
 
 local expr_import_ispace = normalize_expr_factory("value", false, true)
 
+local function expr_import_region(stats, expr)
+  local ispace    = normalize.expr(stats, expr.ispace   , true)
+  local value     = normalize.expr(stats, expr.value    , true)
+  local field_ids = normalize.expr(stats, expr.field_ids, true)
+  return expr {
+    ispace = ispace,
+    value = value,
+    field_ids = field_ids,
+  }
+end
+
+local function expr_import_partition(stats, expr)
+  local region = normalize.expr(stats, expr.region, true)
+  local colors = normalize.expr(stats, expr.colors, true)
+  local value  = normalize.expr(stats, expr.value,  true)
+  return expr {
+    region = region,
+    colors = colors,
+    value = value,
+  }
+end
+
 local normalize_expr_table = {
   [ast.specialized.expr.DynamicCast]                = expr_regent_cast,
   [ast.specialized.expr.StaticCast]                 = expr_regent_cast,
@@ -522,6 +544,8 @@ local normalize_expr_table = {
   [ast.specialized.expr.RegionRoot]                 = pass_through_expr,
   [ast.specialized.expr.Condition]                  = pass_through_expr,
   [ast.specialized.expr.ImportIspace]               = expr_import_ispace,
+  [ast.specialized.expr.ImportRegion]               = expr_import_region,
+  [ast.specialized.expr.ImportPartition]            = expr_import_partition,
 
   [ast.specialized.expr.LuaTable]                   = pass_through_expr,
 }

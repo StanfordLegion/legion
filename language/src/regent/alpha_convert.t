@@ -274,6 +274,8 @@ local node_alpha_conversion = {
   [ast.specialized.expr.Binary]                     = pass_through,
   [ast.specialized.expr.Deref]                      = pass_through,
   [ast.specialized.expr.ImportIspace]               = pass_through,
+  [ast.specialized.expr.ImportRegion]               = update_fspace_type,
+  [ast.specialized.expr.ImportPartition]            = pass_through,
 
   [ast.specialized.expr.LuaTable] = function(cx, node, continuation)
     report.error(node, "unable to specialize value of type table")

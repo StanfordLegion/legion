@@ -1157,6 +1157,29 @@ function specialize.expr_import_ispace(cx, node)
   }
 end
 
+function specialize.expr_import_region(cx, node)
+  local fspace_type = node.fspace_type_expr(cx.env:env())
+  return ast.specialized.expr.ImportRegion {
+    ispace = specialize.expr(cx, node.ispace),
+    fspace_type = fspace_type,
+    value = specialize.expr(cx, node.value),
+    field_ids = specialize.expr(cx, node.field_ids),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function specialize.expr_import_partition(cx, node)
+  return ast.specialized.expr.ImportPartition {
+    disjointness = node.disjointness,
+    region = specialize.expr(cx, node.region),
+    colors = specialize.expr(cx, node.colors),
+    value = specialize.expr(cx, node.value),
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function specialize.expr(cx, node, allow_lists)
   if node:is(ast.unspecialized.expr.ID) then
     return specialize.expr_id(cx, node, allow_lists)
@@ -1328,6 +1351,12 @@ function specialize.expr(cx, node, allow_lists)
 
   elseif node:is(ast.unspecialized.expr.ImportIspace) then
     return specialize.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportRegion) then
+    return specialize.expr_import_region(cx, node)
+
+  elseif node:is(ast.unspecialized.expr.ImportPartition) then
+    return specialize.expr_import_partition(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

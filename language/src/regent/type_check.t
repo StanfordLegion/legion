@@ -3118,6 +3118,104 @@ function type_check.expr_import_ispace(cx, node)
   }
 end
 
+function type_check.expr_import_region(cx, node)
+  local ispace = type_check.expr(cx, node.ispace)
+  local ispace_type = std.as_read(ispace.expr_type)
+
+  if not std.is_ispace(ispace_type) then
+    report.error(node.ispace, "type mismatch in argument 1: expected index space but got " ..
+      tostring(ispace_type))
+  end
+
+  if not terralib.types.istype(node.fspace_type) then
+    report.error(node, "type mismatch in argument 2: expected field space but got " ..
+      tostring(node.fspace_type))
+  end
+
+  local ispace_symbol
+  if ispace:is(ast.typed.expr.ID) then
+    ispace_symbol = ispace.value
+  else
+    ispace_symbol = std.newsymbol()
+  end
+  local region = std.region(ispace_symbol, node.fspace_type)
+
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_logical_region_t then
+    report.error(node.value,
+      "type mismatch in argument 3: expected a logical region handle but got " ..
+      tostring(value_type))
+  end
+
+  local field_paths, _ = std.flatten_struct_fields(region:fspace())
+  local expected = std.c.legion_field_id_t[#field_paths]
+
+  local field_ids = type_check.expr(cx, node.field_ids)
+  local field_ids_type = std.as_read(field_ids.expr_type)
+  if field_ids_type ~= expected then
+    report.error(node.field_ids,
+      "type mismatch in argument 4: expected " .. tostring(expected) .. " but got " ..
+      tostring(field_ids_type))
+  end
+
+  return ast.typed.expr.ImportRegion {
+    ispace = ispace,
+    value = value,
+    field_ids = field_ids,
+    expr_type = region,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_import_partition(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.as_read(region.expr_type)
+  if not std.is_region(region_type) then
+    report.error(node.region, "type mismatch in argument 2: expected region but got " ..
+      tostring(region_type))
+  end
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.as_read(colors.expr_type)
+  if not std.is_ispace(colors_type) then
+    report.error(node.colors, "type mismatch in argument 3: expected ispace but got " ..
+      tostring(colors_type))
+  end
+
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_logical_partition_t then
+    report.error(node.value,
+      "type mismatch in argument 4: expected a logical partition handle but got " ..
+      tostring(value_type))
+  end
+
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = std.newsymbol()
+  end
+  local colors_symbol
+  if colors and colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  elseif colors then
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local partition = std.partition(node.disjointness, region_symbol, colors_symbol)
+
+  return ast.typed.expr.ImportPartition {
+    region = region,
+    colors = colors,
+    value = value,
+    expr_type = partition,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_parallelizer_constraint(cx, node)
   local lhs = type_check.expr(cx, node.lhs)
   local lhs_type = std.as_read(lhs.expr_type)
@@ -3215,6 +3313,8 @@ local type_check_expr_node = {
   [ast.specialized.expr.Binary]                     = type_check.expr_binary,
   [ast.specialized.expr.Deref]                      = type_check.expr_deref,
   [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
+  [ast.specialized.expr.ImportRegion]               = type_check.expr_import_region,
+  [ast.specialized.expr.ImportPartition]            = type_check.expr_import_partition,
 
   [ast.specialized.expr.LuaTable] = function(cx, node)
     report.error(node, "unable to specialize value of type table")
