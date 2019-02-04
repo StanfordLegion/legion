@@ -288,6 +288,8 @@ function pretty.expr_constant(cx, node)
   local value = node.value
   if type(node.value) == "string" then
     value = "\"" .. value:gsub("\n", "\\n"):gsub("\t", "\\t"):gsub("\"", "\\\"") .. "\""
+  elseif type(value) == "cdata" and node.expr_type:isfloat() then
+    value = tonumber(value)
   end
   return text.Line { value = tostring(value) }
 end
