@@ -147,25 +147,37 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info) = 0;
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source) = 0;
       virtual RtEvent find_copy_preconditions(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     CopyFillAggregator &aggregator,
-                                    const PhysicalTraceInfo &trace_info) = 0;
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source) = 0;
       virtual void find_copy_preconditions_remote(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     EventFieldExprs &preconditions,
-                                    const PhysicalTraceInfo &trace_info) = 0;
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source) = 0;
       virtual void add_copy_user(bool reading, ApEvent done_event, 
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
                                  std::set<RtEvent> &applied_events,
-                                 const PhysicalTraceInfo &trace_info) = 0;
+                                 const PhysicalTraceInfo &trace_info,
+                                 const AddressSpaceID source) = 0;
+    public:
+      virtual void process_replication_request(AddressSpaceID source,
+                                 const FieldMask &request_mask,
+                                 RtUserEvent done_event);
+      virtual void process_replication_response(RtUserEvent done_event,
+                                 Deserializer &derez);
+      virtual void process_replication_removal(AddressSpaceID source,
+                                 const FieldMask &removal_mask);
     public:
       // Reference counting state change functions
       virtual void notify_active(ReferenceMutator *mutator) = 0;
@@ -187,10 +199,16 @@ namespace Legion {
       static void handle_view_find_copy_pre_request(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_find_copy_pre_request(const void *args, 
-                                                    Runtime *runtime);
+                        Runtime *runtime);
       static void handle_view_find_copy_pre_response(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
       static void handle_view_add_copy_user(Deserializer &derez,
+                        Runtime *runtime, AddressSpaceID source);
+      static void handle_view_replication_request(Deserializer &derez,
+                        Runtime *runtime, AddressSpaceID source);
+      static void handle_view_replication_response(Deserializer &derez,
+                        Runtime *runtime);
+      static void handle_view_replication_removal(Deserializer &derez,
                         Runtime *runtime, AddressSpaceID source);
     public:
       // The ID of the context that made this view
@@ -239,7 +257,7 @@ namespace Legion {
       typedef FieldMaskSet<PhysicalUser> EventUsers;
     public:
       ExprView(RegionTreeForest *ctx, InstanceManager *manager,
-               IndexSpaceExpression *expr); 
+               InstanceView *view, IndexSpaceExpression *expr); 
       ExprView(const ExprView &rhs);
       virtual ~ExprView(void);
     public:
@@ -269,13 +287,14 @@ namespace Legion {
                                   const FieldMask &user_mask,
                                   const ApEvent term_event,
                                   IndexSpaceExpression *user_expr,
-                                  const PhysicalTraceInfo &trace_info);
-      ExprView* find_covering_user(PhysicalUser *user, 
-                                   const FieldMask &user_mask,
-                                   const ApEvent term_event,
-                                   IndexSpaceExpression *user_expr,
-                                   const PhysicalTraceInfo &trace_info,
-                                   size_t &bound_volume);
+                                  const PhysicalTraceInfo &trace_info,
+                                  ExprView *target_view/* can be NULL*/);
+      void find_covering_subviews(IndexSpaceExpression *user_expr,
+                                  const FieldMask &user_mask,
+                                  ExprView *key_view, FieldMask &perfect_mask,
+                                  FieldMaskSet<ExprView> &perfect_views,
+                                  LegionMap<std::pair<size_t,ExprView*>,
+                                    FieldMask>::aligned &bounding_views);
       ExprView* add_partial_user(const RegionUsage &usage,
                                  UniqueID op_id, unsigned index,
                                  FieldMask user_mask,
@@ -291,6 +310,15 @@ namespace Legion {
       // which currently can still happen at the same time
       void clean_views(FieldMask &valid_mask);
       void add_dominated_subview(ExprView *subview, const FieldMask &view_mask);
+    public:
+      void pack_replication(Serializer &rez, 
+                            std::map<PhysicalUser*,unsigned> &indexes,
+                            const FieldMask &pack_mask,
+                            const AddressSpaceID target) const;
+      void unpack_replication(Deserializer &derez,
+                              const AddressSpaceID source,
+                              std::vector<PhysicalUser*> &users);
+      void deactivate_replication(const FieldMask &deactivate_mask);
     protected:
       void find_current_preconditions(const RegionUsage &usage,
                                       const FieldMask &user_mask,
@@ -357,6 +385,7 @@ namespace Legion {
     public:
       RegionTreeForest *const context;
       InstanceManager *const manager;
+      InstanceView *const inst_view;
       IndexSpaceExpression *const view_expr;
       const size_t view_volume;
     protected:
@@ -381,12 +410,6 @@ namespace Legion {
       // the view tree that less frequently filter their sub-users.
       EventFieldUsers current_epoch_users;
       EventFieldUsers previous_epoch_users;
-      // Also keep a set of events for which we have outstanding
-      // garbage collection meta-tasks so we don't launch more than one
-      // We need this even though we have the data structures above because
-      // an event might be filtered out for some fields, so we can't rely
-      // on it to detect when we have outstanding gc meta-tasks
-      std::set<ApEvent> outstanding_gc_events;
     protected:
       // Subviews for fields that have users in subexpressions
       FieldMaskSet<ExprView> subviews;
@@ -403,11 +426,12 @@ namespace Legion {
       static const AllocationType alloc_type = MATERIALIZED_VIEW_ALLOC;
     public:
       // Number of users to be added between cache invalidations
-      static const unsigned expr_cache_timeout = 1024;
+      static const unsigned user_cache_timeout = 1024;
       struct CacheEntry {
       public:
         CacheEntry(void)
-          : invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES)) { }
+          : invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES)),
+            target_view(NULL) { }
       public:
         // Track the invalid fields so we can do intersections
         // and not differences
@@ -459,25 +483,37 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual RtEvent find_copy_preconditions(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     CopyFillAggregator &aggregator,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual void find_copy_preconditions_remote(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     EventFieldExprs &preconditions,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ApEvent term_event, 
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
                                  std::set<RtEvent> &applied_events,
-                                 const PhysicalTraceInfo &trace_info); 
+                                 const PhysicalTraceInfo &trace_info,
+                                 const AddressSpaceID source); 
+    public:
+      virtual void process_replication_request(AddressSpaceID source,
+                                 const FieldMask &request_mask,
+                                 RtUserEvent done_event);
+      virtual void process_replication_response(RtUserEvent done_event,
+                                 Deserializer &derez);
+      virtual void process_replication_removal(AddressSpaceID source,
+                                 const FieldMask &removal_mask);
     public:
       virtual void notify_active(ReferenceMutator *mutator);
       virtual void notify_inactive(ReferenceMutator *mutator);
@@ -500,6 +536,8 @@ namespace Legion {
                                   const unsigned index,
                                   std::set<RtEvent> &applied_events,
                                   const PhysicalTraceInfo &trace_info);
+      void clean_cache(void);
+      void update_remote_replication_state(std::set<RtEvent> &applied_events);
     public:
       void find_atomic_reservations(const FieldMask &mask, 
                                     Operation *op, bool exclusive);
@@ -534,6 +572,25 @@ namespace Legion {
       // added for when we go to invalidate the cache and clean the views
       unsigned outstanding_additions;
       RtUserEvent clean_waiting; 
+    protected:
+      // Track which fields we have replicated clones of our current users
+      // On the owner node this tracks which fields have remote copies
+      // On remote nodes this tracks which fields we have replicated
+      FieldMask replicated_fields;
+      // On the owner node we also need to keep track of our set of 
+      // which nodes have replicated copies for which field
+      union {
+        LegionMap<AddressSpaceID,FieldMask>::aligned *replicated_copies;
+        LegionMap<RtUserEvent,FieldMask>::aligned *replicated_requests;
+      } repl_ptr;
+      // For remote copies we track which fields have seen requests
+      // in the past epoch of user adds so that we can reduce our 
+      // set of replicated fields if we're not actually being
+      // used for copy queries
+      FieldMask remote_copy_pre_fields;
+      unsigned remote_added_users;
+      // Lock for tracking the above data structures
+      mutable LocalLock replicated_lock;
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
@@ -579,25 +636,29 @@ namespace Legion {
                                     const unsigned index,
                                     ApEvent term_event,
                                     std::set<RtEvent> &applied_events,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual RtEvent find_copy_preconditions(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     CopyFillAggregator &aggregator,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual void find_copy_preconditions_remote(bool reading,
                                     const FieldMask &copy_mask,
                                     IndexSpaceExpression *copy_expr,
                                     UniqueID op_id, unsigned index,
                                     EventFieldExprs &preconditions,
-                                    const PhysicalTraceInfo &trace_info);
+                                    const PhysicalTraceInfo &trace_info,
+                                    const AddressSpaceID source);
       virtual void add_copy_user(bool reading, ApEvent term_event, 
                                  const FieldMask &copy_mask,
                                  IndexSpaceExpression *copy_expr,
                                  UniqueID op_id, unsigned index,
                                  std::set<RtEvent> &applied_events,
-                                 const PhysicalTraceInfo &trace_info);
+                                 const PhysicalTraceInfo &trace_info,
+                                 const AddressSpaceID source);
     protected:
       void find_reducing_preconditions(const FieldMask &user_mask,
                                        IndexSpaceExpression *user_expr,

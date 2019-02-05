@@ -110,6 +110,40 @@ namespace Legion {
       return *this;
     }
 
+    //--------------------------------------------------------------------------
+    void PhysicalUser::pack_user(Serializer &rez, 
+                                 const AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      RezCheck z(rez);
+      rez.serialize(usage);
+      expr->pack_expression(rez, target);
+      rez.serialize(op_id);
+      rez.serialize(index);
+      rez.serialize<bool>(copy_user);
+      rez.serialize<bool>(covers);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ PhysicalUser* PhysicalUser::unpack_user(Deserializer &derez,
+                          RegionTreeForest *forest, const AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      RegionUsage usage;
+      derez.deserialize(usage);
+      IndexSpaceExpression *expr = 
+        IndexSpaceExpression::unpack_expression(derez, forest, source);
+      UniqueID op_id;
+      derez.deserialize(op_id);
+      unsigned index;
+      derez.deserialize(index);
+      bool copy_user, covers;
+      derez.deserialize<bool>(copy_user);
+      derez.deserialize<bool>(covers);
+      return new PhysicalUser(usage, expr, op_id, index, copy_user, covers);
+    }
+
     /////////////////////////////////////////////////////////////
     // VersionInfo 
     /////////////////////////////////////////////////////////////
@@ -1807,7 +1841,8 @@ namespace Legion {
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
                                            Operation *o, unsigned idx, 
                                            RtEvent g, bool t, PredEvent p)
-      : WrapperReferenceMutator(effects), forest(f), op(o), src_index(idx), 
+      : WrapperReferenceMutator(effects), forest(f), 
+        local_space(f->runtime->address_space), op(o), src_index(idx), 
         dst_index(idx), guard_precondition(g), 
         guard_postcondition(Runtime::create_rt_user_event()),
         applied_event(Runtime::create_rt_user_event()), 
@@ -1820,7 +1855,8 @@ namespace Legion {
     CopyFillAggregator::CopyFillAggregator(RegionTreeForest *f, 
                                 Operation *o, unsigned src_idx, unsigned dst_idx,
                                 RtEvent g, bool t, PredEvent p)
-      : WrapperReferenceMutator(effects), forest(f), op(o), src_index(src_idx), 
+      : WrapperReferenceMutator(effects), forest(f), 
+        local_space(f->runtime->address_space), op(o), src_index(src_idx), 
         dst_index(dst_idx), guard_precondition(g),
         guard_postcondition(Runtime::create_rt_user_event()),
         applied_event(Runtime::create_rt_user_event()), 
@@ -1831,7 +1867,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyFillAggregator::CopyFillAggregator(const CopyFillAggregator &rhs)
-      : WrapperReferenceMutator(effects), forest(rhs.forest), op(rhs.op),
+      : WrapperReferenceMutator(effects), forest(rhs.forest), 
+        local_space(rhs.local_space), op(rhs.op),
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
         guard_precondition(rhs.guard_precondition),
         guard_postcondition(rhs.guard_postcondition),
@@ -2464,8 +2501,8 @@ namespace Legion {
               IndexSpaceExpression *copy_expr = dit->second.begin()->first;
               const FieldMask &copy_mask = dit->second.get_valid_mask();
               RtEvent pre_ready = dit->first->find_copy_preconditions(
-                                    false/*reading*/, copy_mask, copy_expr,
-                                    op_id, dst_index, *this, trace_info);
+                              false/*reading*/, copy_mask, copy_expr, op_id, 
+                              dst_index, *this, trace_info, local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -2484,8 +2521,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = dit->first->find_copy_preconditions(
-                                      false/*reading*/, copy_mask, copy_expr,
-                                      op_id, dst_index, *this, trace_info);
+                                false/*reading*/, copy_mask, copy_expr, op_id,
+                                dst_index, *this, trace_info, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -2504,8 +2541,8 @@ namespace Legion {
               IndexSpaceExpression *copy_expr = sit->second.begin()->first;
               const FieldMask &copy_mask = sit->second.get_valid_mask();
               RtEvent pre_ready = sit->first->find_copy_preconditions(
-                                    true/*reading*/, copy_mask, copy_expr,
-                                    op_id, src_index, *this, trace_info);
+                            true/*reading*/, copy_mask, copy_expr, op_id, 
+                            src_index, *this, trace_info, local_space);
               if (pre_ready.exists())
                 preconditions_ready.insert(pre_ready);
             }
@@ -2524,8 +2561,8 @@ namespace Legion {
                   *(it->elements.begin()) : 
                   forest->union_index_spaces(it->elements);
                 RtEvent pre_ready = sit->first->find_copy_preconditions(
-                                      true/*reading*/, copy_mask, copy_expr,
-                                      op_id, src_index, *this, trace_info);
+                              true/*reading*/, copy_mask, copy_expr, op_id,
+                              src_index, *this, trace_info, local_space);
                 if (pre_ready.exists())
                   preconditions_ready.insert(pre_ready);
               }
@@ -2767,8 +2804,8 @@ namespace Legion {
             const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(fill_mask);
             target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr,
-                                  op_id, dst_index, effects, trace_info);
+                                  result, dst_mask, fill_expr, op_id, 
+                                  dst_index, effects, trace_info, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
               record_precondition(target, false/*reading*/, result, 
@@ -2777,8 +2814,8 @@ namespace Legion {
           else
           {
             target->add_copy_user(false/*reading*/,
-                                  result, fill_mask, fill_expr,
-                                  op_id, dst_index, effects, trace_info);
+                                  result, fill_mask, fill_expr, op_id, 
+                                  dst_index, effects, trace_info, local_space);
             // Record this for the next iteration if necessary
             if (has_dst_preconditions)
               record_precondition(target, false/*reading*/, result,
@@ -2830,8 +2867,8 @@ namespace Legion {
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
-                                  result, dst_mask, fill_expr,
-                                  op_id, dst_index, effects, trace_info);
+                                  result, dst_mask, fill_expr, op_id, 
+                                  dst_index, effects, trace_info, local_space);
             if (track_events)
               events.insert(result);
             // Record this for the next iteration if necessary
@@ -2892,15 +2929,15 @@ namespace Legion {
           if (result.exists())
           {
             source->add_copy_user(true/*reading*/,
-                                  result, copy_mask, copy_expr,
-                                  op_id, src_index, effects, trace_info);
+                                  result, copy_mask, copy_expr, op_id, 
+                                  src_index, effects, trace_info, local_space);
             if (update->across_helper != NULL)
             {
               const FieldMask dst_mask = 
                 update->across_helper->convert_src_to_dst(copy_mask);
               target->add_copy_user(false/*reading*/,
-                                    result, dst_mask, copy_expr,
-                                    op_id, dst_index, effects, trace_info);
+                                    result, dst_mask, copy_expr, op_id, 
+                                    dst_index, effects, trace_info,local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -2909,8 +2946,8 @@ namespace Legion {
             else
             {
               target->add_copy_user(false/*reading*/,
-                                    result, copy_mask, copy_expr,
-                                    op_id, dst_index, effects, trace_info);
+                                    result, copy_mask, copy_expr, op_id, 
+                                    dst_index, effects, trace_info,local_space);
               // Record this for the next iteration if necessary
               if (has_dst_preconditions)
                 record_precondition(target, false/*reading*/, result,
@@ -2962,11 +2999,11 @@ namespace Legion {
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/,
-                                    result, copy_mask, copy_expr,
-                                    op_id, src_index, effects, trace_info);
+                                    result, copy_mask, copy_expr, op_id, 
+                                    src_index, effects, trace_info,local_space);
               target->add_copy_user(false/*reading*/,
-                                    result, dst_mask, copy_expr,
-                                    op_id, dst_index, effects, trace_info);
+                                    result, dst_mask, copy_expr, op_id, 
+                                    dst_index, effects, trace_info,local_space);
               if (track_events)
                 events.insert(result);
               // Record this for the next iteration if necessary
@@ -4174,7 +4211,8 @@ namespace Legion {
                 continue;
               ApEvent ready = views[idx]->register_user(usage, overlap, 
                                 expr, op_id, index, term_event, 
-                                map_applied_events, trace_info);
+                                map_applied_events, trace_info,
+                                runtime->address_space);
               if (ready.exists())
                 remote_events.insert(ready);
             }
@@ -4195,7 +4233,8 @@ namespace Legion {
                 continue;
               ApEvent ready = views[idx]->register_user(usage, overlap, 
                                 first->first, op_id, index, term_event, 
-                                map_applied_events, trace_info);
+                                map_applied_events, trace_info,
+                                runtime->address_space);
               if (ready.exists())
                 remote_events.insert(ready);
             }
@@ -4330,7 +4369,8 @@ namespace Legion {
               runtime->forest->union_index_spaces(it->elements);
             ApEvent ready = vit->first->register_user(usage, it->set_mask,
                                       expr, op_id, index, term_event,
-                                      map_applied_events, trace_info);
+                                      map_applied_events, trace_info,
+                                      runtime->address_space);
             if (ready.exists())
               acquired_events.insert(ready);
           }
@@ -4341,7 +4381,8 @@ namespace Legion {
             vit->second.begin();
           ApEvent ready = vit->first->register_user(usage, first->second,
                                     first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info);
+                                    map_applied_events, trace_info,
+                                    runtime->address_space);
           if (ready.exists())
             acquired_events.insert(ready);
         }
@@ -4479,7 +4520,8 @@ namespace Legion {
               runtime->forest->union_index_spaces(it->elements);
             ApEvent ready = vit->first->register_user(usage, it->set_mask,
                                       expr, op_id, index, term_event,
-                                      map_applied_events, trace_info);
+                                      map_applied_events, trace_info,
+                                      runtime->address_space);
             if (ready.exists())
               released_events.insert(ready);
           }
@@ -4490,7 +4532,8 @@ namespace Legion {
             vit->second.begin();
           ApEvent ready = vit->first->register_user(usage, first->second,
                                     first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info);
+                                    map_applied_events, trace_info,
+                                    runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
@@ -4907,7 +4950,7 @@ namespace Legion {
               continue;
             const ApEvent ready = local_view->register_user(usage, 
                     it->set_mask, user_expr, op_id, index, term_event,
-                    map_applied_events, trace_info);
+                    map_applied_events, trace_info, runtime->address_space);
             if (ready.exists())
               effects_events.insert(ready);
           }
@@ -4920,7 +4963,7 @@ namespace Legion {
           {
             const ApEvent ready = local_view->register_user(usage, 
                     first->second, first->first, op_id, index, term_event,
-                    map_applied_events, trace_info);
+                    map_applied_events, trace_info, runtime->address_space);
             if (ready.exists())
               effects_events.insert(ready);
           }

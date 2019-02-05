@@ -646,6 +646,9 @@ namespace Legion {
       SEND_VIEW_FIND_COPY_PRE_REQUEST,
       SEND_VIEW_FIND_COPY_PRE_RESPONSE,
       SEND_VIEW_ADD_COPY_USER,
+      SEND_VIEW_REPLICATION_REQUEST,
+      SEND_VIEW_REPLICATION_RESPONSE,
+      SEND_VIEW_REPLICATION_REMOVAL,
       SEND_MANAGER_REQUEST,
       SEND_FUTURE_RESULT,
       SEND_FUTURE_SUBSCRIPTION,
@@ -791,6 +794,9 @@ namespace Legion {
         "Send View Find Copy Preconditions Request",                  \
         "Send View Find Copy Preconditions Response",                 \
         "Send View Add Copy User",                                    \
+        "Send View Replication Request",                              \
+        "Send View Replication Response",                             \
+        "Send View Replication Removal",                              \
         "Send Manager Request",                                       \
         "Send Future Result",                                         \
         "Send Future Subscription",                                   \

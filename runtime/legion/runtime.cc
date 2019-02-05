@@ -6074,6 +6074,23 @@ namespace Legion {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
               break;
             }
+          case SEND_VIEW_REPLICATION_REQUEST:
+            {
+              runtime->handle_view_replication_request(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_RESPONSE:
+            {
+              runtime->handle_view_replication_response(derez);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_REMOVAL:
+            {
+              runtime->handle_view_replication_removal(derez, 
+                                                       remote_address_space);
+              break;
+            }
           case SEND_MANAGER_REQUEST:
             {
               runtime->handle_manager_request(derez, remote_address_space);
@@ -13942,6 +13959,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_request(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REQUEST,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_response(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_RESPONSE,
+                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_removal(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REMOVAL,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -15126,6 +15170,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       InstanceView::handle_view_add_copy_user(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_request(derez, this, source);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_removal(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_removal(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
