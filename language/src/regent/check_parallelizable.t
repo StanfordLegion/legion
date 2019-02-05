@@ -1023,8 +1023,19 @@ function check_parallelizable.top_task(node)
 end
 
 function check_parallelizable.top(node)
-  if node:is(ast.typed.top.Task) and node.config_options.leaf then
-    return check_parallelizable.top_task(node)
+  if node:is(ast.typed.top.Task) then
+    if not node.config_options.leaf then
+      if node.annotations.cuda:is(ast.annotation.Demand) then
+        report.error(node,
+          "option __demand(__cuda) is not permitted for non-leaf task")
+      elseif node.annotations.parallel:is(ast.annotation.Demand) then
+        report.error(node,
+          "option __demand(__parallel) is not permitted for non-leaf task")
+      end
+      return node
+    else
+      return check_parallelizable.top_task(node)
+    end
 
   else
     return node
