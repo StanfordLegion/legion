@@ -924,6 +924,8 @@ namespace Legion {
             if (overlap_volume < it->first->view_volume)
               // We dominate so we can just continue traversing
               dominating_subviews.insert(it->first, overlap_mask);
+            else if (target_view == NULL)
+              target_view = it->first;
 #ifdef DEBUG_LEGION
             else // should already have found a congruent view
               assert(target_view == it->first);
@@ -1557,13 +1559,15 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void ExprView::unpack_replication(Deserializer &derez,
+    void ExprView::unpack_replication(Deserializer &derez, ExprView *root,
                                       const AddressSpaceID source,
                                       std::vector<PhysicalUser*> &users)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       std::set<ApEvent> to_collect;
+      std::map<IndexSpaceExpression*,ExprView*> subview_exprs;
+      size_t num_subviews;
       // Need a read-write lock since we're going to be mutating the structures
       {
         AutoLock v_lock(view_lock);
@@ -1631,8 +1635,22 @@ namespace Legion {
               users[user_index]->add_reference();
           }
         }
-        size_t num_subviews;
+        // Get a copy of the current subviews for when we got to unpack them
+        // We'll use this to see if we already have a known subview, if not
+        // then we'll do a lookup of it
         derez.deserialize(num_subviews);
+        if (num_subviews > 0)
+        {
+          for (FieldMaskSet<ExprView>::const_iterator it = 
+                subviews.begin(); it != subviews.end(); it++)
+            subview_exprs[it->first->view_expr] = it->first;
+        }
+      }
+      // Should not be holding the lock when unpacking the subviews
+      // since we'll need to do congruence tests and it's also expensive
+      if (num_subviews > 0)
+      {
+        FieldMaskSet<ExprView> unpacked_subviews;
         for (unsigned idx = 0; idx < num_subviews; idx++)
         {
           IndexSpaceExpression *subview_expr = 
@@ -1640,27 +1658,32 @@ namespace Legion {
           FieldMask subview_mask;
           derez.deserialize(subview_mask);
           // See if we already have it
+          std::map<IndexSpaceExpression*,ExprView*>::const_iterator finder = 
+            subview_exprs.find(subview_expr);
           ExprView *subview = NULL;
-          for (FieldMaskSet<ExprView>::iterator it = 
-                subviews.begin(); it != subviews.end(); it++)
+          if (finder == subview_exprs.end())
           {
-            if (it->first->view_expr->expr_id != subview_expr->expr_id)
-              continue;
-            subview = it->first;
+            // See if we can find this view in the tree before we make it
+            subview = root->find_congruent_view(subview_expr);
+            // If it's still NULL then we can make it
+            if (subview == NULL)
+              subview = new ExprView(context, manager, inst_view, subview_expr);
+          }
+          else
+            subview = finder->second;
 #ifdef DEBUG_LEGION
-            assert(it->second * subview_mask);
+          assert(subview != NULL);
 #endif
-            it.merge(subview_mask);
-            break;
-          }
-          if (subview == NULL)
-          {
-            subview = new ExprView(context, manager, inst_view, subview_expr);
-            subview->add_reference();
-            subviews.insert(subview, subview_mask);
-          }
-          subview->unpack_replication(derez, source, users); 
+          subview->unpack_replication(derez, root, source, users);
+          unpacked_subviews.insert(subview, subview_mask);
         }
+        // Now take the lock and add the unpacked subviews into expr view
+        AutoLock v_lock(view_lock);
+        for (FieldMaskSet<ExprView>::const_iterator it = 
+              unpacked_subviews.begin(); it != unpacked_subviews.end(); it++)
+          // Add a reference if this is the first time it's been added
+          if (subviews.insert(it->first, it->second))
+            it->first->add_reference();
       }
       if (!to_collect.empty())
       {
@@ -3019,9 +3042,14 @@ namespace Legion {
         current_users->add_reference();
       }
       {
+        // We need to hold the expr lock here since we might have to 
+        // make ExprViews and we need this to be atomic with other
+        // operations that might also try to make ExprView objects
+        AutoLock e_lock(expr_lock);
         std::vector<PhysicalUser*> users;
         // The source is always from the logical owner space
-        current_users->unpack_replication(derez, logical_owner, users);
+        current_users->unpack_replication(derez, current_users, 
+                                          logical_owner, users);
         // Remove references from all our users
         for (unsigned idx = 0; idx < users.size(); idx++)
           if (users[idx]->remove_reference())
@@ -3170,11 +3198,27 @@ namespace Legion {
       bool update_cache = false;
       if (!use_target_view)
       {
+        // If the target view is NULL, do a first pass check to see if
+        // a congruent view has already been made
         if (target_view == NULL)
           target_view = current_users->find_congruent_view(user_expr);
-        // Don't know the view yet so we need to compute it
-        target_view = current_users->add_covering_user(user, user_mask, 
-                        term_event, user_expr, trace_info, target_view);
+        if (target_view == NULL)
+        {
+          // If we still don't know which target_view we're going to 
+          // use then we need to do our traversal with the lock to make
+          // sure that we are serialized with all other view creations 
+          AutoLock e_lock(expr_lock);
+          // Make sure we didn't lose the race
+          target_view = current_users->find_congruent_view(user_expr);
+          // Do the add of our covering user
+          target_view = current_users->add_covering_user(user, user_mask, 
+                          term_event, user_expr, trace_info, target_view);
+        }
+        else
+          // We already know which view to use so there's no need to
+          // hold the lock when doing the traversal
+          target_view = current_users->add_covering_user(user, user_mask, 
+                          term_event, user_expr, trace_info, target_view);
         update_cache = true;
       }
       else

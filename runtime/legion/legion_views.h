@@ -319,7 +319,7 @@ namespace Legion {
                             std::map<PhysicalUser*,unsigned> &indexes,
                             const FieldMask &pack_mask,
                             const AddressSpaceID target) const;
-      void unpack_replication(Deserializer &derez,
+      void unpack_replication(Deserializer &derez, ExprView *root,
                               const AddressSpaceID source,
                               std::vector<PhysicalUser*> &users);
       void deactivate_replication(const FieldMask &deactivate_mask);
@@ -567,6 +567,8 @@ namespace Legion {
       std::map<FieldID,Reservation> atomic_reservations;
       // Use a ExprView DAG to track the current users of this instance
       ExprView *current_users; 
+      // Lock for serializing creation of ExprView objects
+      mutable LocalLock expr_lock;
       // Mapping from user expressions to ExprViews to attach to
       LegionMap<IndexSpaceExprID,CacheEntry>::aligned expr_cache;
       // A timeout counter for the cache so we don't permanently keep growing
@@ -577,6 +579,8 @@ namespace Legion {
       unsigned outstanding_additions;
       RtUserEvent clean_waiting; 
     protected:
+      // Lock for protecting the following replication data structures
+      mutable LocalLock replicated_lock;
       // Track which fields we have replicated clones of our current users
       // On the owner node this tracks which fields have remote copies
       // On remote nodes this tracks which fields we have replicated
@@ -592,9 +596,7 @@ namespace Legion {
       // set of replicated fields if we're not actually being
       // used for copy queries
       FieldMask remote_copy_pre_fields;
-      unsigned remote_added_users;
-      // Lock for tracking the above data structures
-      mutable LocalLock replicated_lock;
+      unsigned remote_added_users; 
       // Keep track of the current version numbers for each field
       // This will allow us to detect when physical instances are no
       // longer valid from a particular view when doing rollbacks for
