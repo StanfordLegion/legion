@@ -987,7 +987,22 @@ local function check_demand_parallel(cx, node)
             " failed: task must return the scalar reduction result")
       end
     end
+    local reduction = false
+    local op = false
+    for symbol, _ in cx.reductions:items() do
+      local privilege, _ = unpack(cx:get_scalar(symbol))
+      reduction = symbol
+      assert(std.is_reduce(privilege))
+      op = privilege.op
+    end
+    node = node {
+      metadata = ast.metadata.Task {
+        reduction = reduction,
+        op = op,
+      }
+    }
   end
+  return node
 end
 
 local check_parallelizable = {}
@@ -1000,7 +1015,7 @@ function check_parallelizable.top_task(node)
     body = analyze_access.block(cx, body)
     node = node { body = body }
 
-    check_demand_parallel(cx:current_context(), node)
+    node = check_demand_parallel(cx:current_context(), node)
     check_region_access_contained.top_task(node)
   end
 

@@ -566,12 +566,13 @@ ast.typed.top:leaf("Fspace", {"name", "fspace"})
 ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
-                             "region_divergence", "prototype"})
+                             "region_divergence", "metadata", "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
 
 -- Metadata for Parallel Code Generation
 
 ast:inner("metadata")
+ast.metadata:leaf("Task", {"reduction", "op"})
 ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
 ast.metadata:leaf("Stat", {"atomic", "scalar"})
 

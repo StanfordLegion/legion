@@ -4028,6 +4028,7 @@ function type_check.top_task(cx, node)
       replicable = false,
     },
     region_divergence = false,
+    metadata = false,
     prototype = prototype,
     annotations = node.annotations,
     span = node.span,
