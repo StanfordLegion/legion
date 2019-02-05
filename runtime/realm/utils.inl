@@ -252,28 +252,28 @@ namespace Realm {
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::bitsliceref<BITFIELD> bitpack<T>::slice()
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::slice()
   {
     return bitsliceref<BITFIELD>(value);
   }
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::constbitsliceref<BITFIELD> bitpack<T>::slice() const
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::slice() const
   {
     return constbitsliceref<BITFIELD>(value);
   }
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::bitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield)
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield)
   {
     return bitsliceref<BITFIELD>(value);
   }
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::constbitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield) const
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield) const
   {
     return constbitsliceref<BITFIELD>(value);
   }
@@ -298,7 +298,7 @@ namespace Realm {
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator=(T field)
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator=(T field)
   {
     target = BITFIELD::insert(target, field);
     return *this;
@@ -306,7 +306,7 @@ namespace Realm {
 
   template <typename T>
   template <typename BITFIELD>
-  inline bitpack<T>::bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator|=(T field)
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator|=(T field)
   {
     target = BITFIELD::bit_or(target, field);
     return *this;
