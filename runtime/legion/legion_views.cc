@@ -1329,6 +1329,13 @@ namespace Legion {
                                FieldMaskSet<ExprView> &clean_set) 
     //--------------------------------------------------------------------------
     {
+      // Handle the base case if we already did it
+      FieldMaskSet<ExprView>::const_iterator finder = clean_set.find(this);
+      if (finder != clean_set.end())
+      {
+        valid_mask = finder->second;
+        return;
+      }
       // No need to hold the lock for this part we know that no one
       // is going to be modifying this data structure at the same time
       FieldMaskSet<ExprView> new_subviews;
@@ -1337,17 +1344,7 @@ namespace Legion {
             it != subviews.end(); it++)
       {
         FieldMask new_mask;
-        // See if we already visited it
-        FieldMaskSet<ExprView>::const_iterator finder = 
-          clean_set.find(it->first);
-        if (finder == clean_set.end())
-        {
-          it->first->clean_views(new_mask, clean_set);
-          // Save this for later
-          clean_set.insert(it->first, new_mask);
-        }
-        else
-          new_mask = finder->second;
+        it->first->clean_views(new_mask, clean_set);
         // Save this as part of the valid mask without filtering
         valid_mask |= new_mask;
         // have to make sure to filter this by the previous set of fields 
@@ -1382,6 +1379,8 @@ namespace Legion {
               previous_epoch_users.end(); it++)
           valid_mask |= it->second.get_valid_mask();
       }
+      // Save this for the future so we don't need to compute it again
+      clean_set.insert(this, valid_mask);
     }
 
     //--------------------------------------------------------------------------
