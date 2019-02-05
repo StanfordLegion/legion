@@ -283,6 +283,9 @@ namespace Legion {
                                    UniqueID op_id, unsigned index,
                                    EventFieldExprs &preconditions,
                                    const PhysicalTraceInfo &trace_info);
+      // Check to see if there is any view with the same shape already
+      // in the ExprView tree, if so return it
+      ExprView* find_congruent_view(IndexSpaceExpression *user_expr);
       ExprView* add_covering_user(PhysicalUser *user, 
                                   const FieldMask &user_mask,
                                   const ApEvent term_event,
@@ -308,8 +311,9 @@ namespace Legion {
       // the tree that are empty and re-balance the tree. The hard part of
       // this is that it will require stopping any precondition searches
       // which currently can still happen at the same time
-      void clean_views(FieldMask &valid_mask);
-      void add_dominated_subview(ExprView *subview, const FieldMask &view_mask);
+      void clean_views(FieldMask &valid_mask,FieldMaskSet<ExprView> &clean_set);
+      // Assume a reference comes down with the subview
+      void add_dominated_subview(ExprView *subview, FieldMask view_mask);
     public:
       void pack_replication(Serializer &rez, 
                             std::map<PhysicalUser*,unsigned> &indexes,
