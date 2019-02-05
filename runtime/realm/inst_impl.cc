@@ -76,13 +76,13 @@ namespace Realm {
 
     AddressSpace RegionInstance::address_space(void) const
     {
-      return ID(id).instance.owner_node;
+      return ID(id).instance_owner_node();
     }
 
     Memory RegionInstance::get_location(void) const
     {
-      return ID::make_memory(ID(id).instance.owner_node,
-			     ID(id).instance.mem_idx).convert<Memory>();
+      return ID::make_memory(ID(id).instance_owner_node(),
+			     ID(id).instance_mem_idx()).convert<Memory>();
     }
 
     /*static*/ Event RegionInstance::create_instance(RegionInstance& inst,
@@ -423,7 +423,7 @@ namespace Realm {
     RegionInstanceImpl::RegionInstanceImpl(RegionInstance _me, Memory _memory)
       : me(_me), memory(_memory) //, lis(0)
     {
-      lock.init(ID(me).convert<Reservation>(), ID(me).instance.creator_node);
+      lock.init(ID(me).convert<Reservation>(), ID(me).instance_creator_node());
       lock.in_use = true;
 
       metadata.inst_offset = (size_t)-1;

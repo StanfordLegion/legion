@@ -298,8 +298,8 @@ namespace Realm {
       log_reservation.info() << "reservation destroyed: rsrv=" << *this;
 
       // a lock has to be destroyed on the node that created it
-      if(ID(*this).rsrv.creator_node != my_node_id) {
-	DestroyLockMessage::send_request(ID(*this).rsrv.creator_node, *this);
+      if(NodeID(ID(*this).rsrv_creator_node()) != my_node_id) {
+	DestroyLockMessage::send_request(ID(*this).rsrv_creator_node(), *this);
 	return;
       }
 
@@ -389,7 +389,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((ID(impl->me).rsrv.creator_node != my_node_id) ||
+	assert((NodeID(ID(impl->me).rsrv_creator_node()) != my_node_id) ||
 	       impl->in_use);
 
 	// case 2: we're the owner, and nobody is holding the lock, so grant
@@ -559,7 +559,7 @@ namespace Realm {
 
 	// it'd be bad if somebody tried to take a lock that had been 
 	//   deleted...  (info is only valid on a lock's home node)
-	assert((ID(me).rsrv.creator_node != my_node_id) ||
+	assert((NodeID(ID(me).rsrv_creator_node()) != my_node_id) ||
 	       in_use);
 
 	// if this is just a placeholder nonblocking acquire, update the retry_count and

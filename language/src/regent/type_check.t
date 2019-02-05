@@ -1438,7 +1438,7 @@ function type_check.expr_region(cx, node)
   end
 
   local ispace_symbol
-  if ispace:is(ast.specialized.expr.ID) then
+  if ispace:is(ast.typed.expr.ID) then
     ispace_symbol = ispace.value
   else
     ispace_symbol = std.newsymbol()
@@ -3069,7 +3069,10 @@ function type_check.expr_deref(cx, node)
   local value = type_check.expr(cx, node.value)
   local value_type = std.check_read(cx, value)
 
-  if not (value_type:ispointer() or std.is_bounded_type(value_type)) then
+  if not (value_type:ispointer() or
+          (std.is_bounded_type(value_type) and
+           std.is_region(value_type:bounds()[1])))
+  then
     report.error(node, "dereference of non-pointer type " .. tostring(value_type))
   end
 
@@ -3089,6 +3092,144 @@ function type_check.expr_deref(cx, node)
   return ast.typed.expr.Deref {
     value = value,
     expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_import_ispace(cx, node)
+  if not std.is_index_type(node.index_type) then
+    report.error(node, "type mismatch in argument 1: expected index type but got " ..
+      tostring(node.index_type))
+  end
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_index_space_t then
+    report.error(node.value,
+      "type mismatch in argument 2: expected an index space handle but got " ..
+      tostring(value_type))
+  end
+  local expr_type = std.ispace(node.index_type)
+  return ast.typed.expr.ImportIspace {
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_import_region(cx, node)
+  local ispace = type_check.expr(cx, node.ispace)
+  local ispace_type = std.as_read(ispace.expr_type)
+
+  if not std.is_ispace(ispace_type) then
+    report.error(node.ispace, "type mismatch in argument 1: expected index space but got " ..
+      tostring(ispace_type))
+  end
+
+  if not terralib.types.istype(node.fspace_type) then
+    report.error(node, "type mismatch in argument 2: expected field space but got " ..
+      tostring(node.fspace_type))
+  end
+
+  local ispace_symbol
+  if ispace:is(ast.typed.expr.ID) then
+    ispace_symbol = ispace.value
+  else
+    ispace_symbol = std.newsymbol()
+  end
+  local region = std.region(ispace_symbol, node.fspace_type)
+
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_logical_region_t then
+    report.error(node.value,
+      "type mismatch in argument 3: expected a logical region handle but got " ..
+      tostring(value_type))
+  end
+
+  local field_paths, _ = std.flatten_struct_fields(region:fspace())
+  local expected = std.c.legion_field_id_t[#field_paths]
+
+  local field_ids = type_check.expr(cx, node.field_ids)
+  local field_ids_type = std.as_read(field_ids.expr_type)
+  if field_ids_type ~= expected then
+    report.error(node.field_ids,
+      "type mismatch in argument 4: expected " .. tostring(expected) .. " but got " ..
+      tostring(field_ids_type))
+  end
+
+  -- Hack: Stuff the ispace type back into the ispace symbol so it is
+  -- accessible to the region type.
+  if not ispace_symbol:hastype() then
+    ispace_symbol:settype(ispace_type)
+  end
+  assert(std.type_eq(ispace_symbol:gettype(), ispace_type))
+
+  std.add_privilege(cx, std.reads, region, data.newtuple())
+  std.add_privilege(cx, std.writes, region, data.newtuple())
+  -- Freshly imported regions are considered as disjoint from all
+  -- other regions.
+  for other_region, _ in cx.region_universe:items() do
+    assert(not std.type_eq(region, other_region))
+    if std.type_maybe_eq(region:fspace(), other_region:fspace()) then
+      std.add_constraint(cx, region, other_region, std.disjointness, true)
+    end
+  end
+  cx:intern_region(region)
+
+  return ast.typed.expr.ImportRegion {
+    ispace = ispace,
+    value = value,
+    field_ids = field_ids,
+    expr_type = region,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
+function type_check.expr_import_partition(cx, node)
+  local region = type_check.expr(cx, node.region)
+  local region_type = std.as_read(region.expr_type)
+  if not std.is_region(region_type) then
+    report.error(node.region, "type mismatch in argument 2: expected region but got " ..
+      tostring(region_type))
+  end
+
+  local colors = type_check.expr(cx, node.colors)
+  local colors_type = std.as_read(colors.expr_type)
+  if not std.is_ispace(colors_type) then
+    report.error(node.colors, "type mismatch in argument 3: expected ispace but got " ..
+      tostring(colors_type))
+  end
+
+  local value = type_check.expr(cx, node.value)
+  local value_type = std.as_read(value.expr_type)
+  if value_type ~= std.c.legion_logical_partition_t then
+    report.error(node.value,
+      "type mismatch in argument 4: expected a logical partition handle but got " ..
+      tostring(value_type))
+  end
+
+  local region_symbol
+  if region:is(ast.typed.expr.ID) then
+    region_symbol = region.value
+  else
+    region_symbol = std.newsymbol()
+  end
+  local colors_symbol
+  if colors and colors:is(ast.typed.expr.ID) then
+    colors_symbol = colors.value
+  elseif colors then
+    colors_symbol = std.newsymbol(colors_type)
+  end
+  local partition = std.partition(node.disjointness, region_symbol, colors_symbol)
+
+  return ast.typed.expr.ImportPartition {
+    region = region,
+    colors = colors,
+    value = value,
+    expr_type = partition,
     annotations = node.annotations,
     span = node.span,
   }
@@ -3190,6 +3331,9 @@ local type_check_expr_node = {
   [ast.specialized.expr.Unary]                      = type_check.expr_unary,
   [ast.specialized.expr.Binary]                     = type_check.expr_binary,
   [ast.specialized.expr.Deref]                      = type_check.expr_deref,
+  [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
+  [ast.specialized.expr.ImportRegion]               = type_check.expr_import_region,
+  [ast.specialized.expr.ImportPartition]            = type_check.expr_import_partition,
 
   [ast.specialized.expr.LuaTable] = function(cx, node)
     report.error(node, "unable to specialize value of type table")
@@ -3884,6 +4028,7 @@ function type_check.top_task(cx, node)
       replicable = false,
     },
     region_divergence = false,
+    metadata = false,
     prototype = prototype,
     annotations = node.annotations,
     span = node.span,

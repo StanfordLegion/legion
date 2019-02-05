@@ -493,7 +493,7 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).event.creator_node;
+      int owner = ID(finish_event).event_creator_node();
 
       if(owner == my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,
@@ -552,7 +552,7 @@ namespace Realm {
 
     if(!found) {
       // not found - who owns this event?
-      int owner = ID(finish_event).event.creator_node;
+      int owner = ID(finish_event).event_creator_node();
 
       if(owner == my_node_id) {
 	// if we're the owner, it's probably for an event that already completed successfully,

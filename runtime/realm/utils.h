@@ -133,6 +133,71 @@ namespace Realm {
   };
 
 
+  template <unsigned _BITS, unsigned _SHIFT>
+  struct bitfield {
+    static const unsigned BITS = _BITS;
+    static const unsigned SHIFT = _SHIFT;
+
+    template <typename T>
+    static T extract(T source);
+
+    template <typename T>
+    static T insert(T target, T field);
+
+    template <typename T>
+    static T bit_or(T target, T field);
+  };
+
+  template <typename T>
+  class bitpack {
+  public:
+    bitpack();  // no initialization
+    bitpack(const bitpack<T>& copy_from);
+    bitpack(T init_val);
+
+    bitpack<T>& operator=(const bitpack<T>& copy_from);
+    bitpack<T>& operator=(T new_val);
+
+    operator T() const;
+
+    template <typename BITFIELD>
+    class bitsliceref {
+    public:
+      bitsliceref(T& _target);
+
+      operator T() const;
+      bitsliceref<BITFIELD>& operator=(T field);
+      bitsliceref<BITFIELD>& operator|=(T field);
+
+    protected:
+      T& target;
+    };
+
+    template <typename BITFIELD>
+    class constbitsliceref {
+    public:
+      constbitsliceref(const T& _target);
+
+      operator T() const;
+
+    protected:
+      const T& target;
+    };
+
+    template <typename BITFIELD>
+    bitsliceref<BITFIELD> slice();
+    template <typename BITFIELD>
+    constbitsliceref<BITFIELD> slice() const;
+
+    template <typename BITFIELD>
+    bitsliceref<BITFIELD> operator[](const BITFIELD& bitfield);
+    template <typename BITFIELD>
+    constbitsliceref<BITFIELD> operator[](const BITFIELD& bitfield) const;
+
+  protected:
+    T value;
+  };
+
 }; // namespace Realm
 
 #include "utils.inl"

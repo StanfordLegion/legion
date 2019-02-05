@@ -1930,7 +1930,7 @@ namespace Realm {
 
     int GPUZCMemory::get_home_node(off_t offset, size_t size)
     {
-      return ID(me).memory.owner_node;
+      return ID(me).memory_owner_node();
     }
 
     // Helper methods for emulating the cuda runtime

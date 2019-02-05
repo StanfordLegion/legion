@@ -85,21 +85,6 @@ local function make_singleton(name)
   return setmetatable(tbl, tbl)
 end
 
-local PRIVATE = make_singleton("private")
-local SHARED_REDUCE = make_singleton("shared_reduce")
-local SHARED_READ = make_singleton("shared_read")
-local MIXED = make_singleton("mixed")
-
-local function join(v1, v2)
-  if v1 == nil then return v2 end
-  if v2 == nil then return v1 end
-  if v1 ~= v2 or v1 == MIXED or v2 == MIXED then
-    return MIXED
-  else
-    return v1
-  end
-end
-
 -- Loop context object that tracks parallelizability of a single loop
 
 local loop_context = {}
@@ -118,36 +103,37 @@ end
 
 function loop_context.new_scope(task, loop, loop_var)
   local cx = {
-    demand_cuda = task.annotations.cuda:is(ast.annotation.Demand),
     loop = loop,
     loop_var = loop_var,
+    demand_vectorize = std.config["vectorize"] and
+                       loop.annotations.vectorize:is(ast.annotation.Demand),
+    demand_openmp = std.config["openmp"] and
+                  loop.annotations.openmp:is(ast.annotation.Demand),
+    demand_cuda = std.config["cuda"] and
+                  task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = std.config["parallelize"] and
+                  task.annotations.parallel:is(ast.annotation.Demand),
     needs_iterator = loop_var and loop:is(ast.typed.stat.ForList),
     -- Tracks variables that have the same value as the loop variable
     centers = data.newmap(),
     -- Tracks variables that are private to each iteration
-    -- * private[v] == PRIVATE ==> variable v is defined in the loop
-    -- * private[v] == SHARED_REDUCE ==> variable v is defined outside the loop and
-    --                                   used for scalar reduction
-    -- * private[v] == SHARED_READ ==> variable v is defined outside the loop and
-    --                                 read in the loop
-    -- * private[v] == MIXED ==> variable v is defined outside the loop and
-    --                           both read and used for scalar reduction
-    private = data.newmap(),
-    -- Remebers scalar variables used for reductions
-    -- * reductions[v] == true ==> private[v] == SHARED_REDUCE
-    reductions = data.newmap(),
+    -- * scalars[symbol] = { privilege, private }
+    scalars = data.newmap(),
     -- * privileges[region][field] = { privilege, all private, any private }
     privileges = data.newmap(),
-    -- * arrays[array] = { privilege, all private }
+    -- * array_accesses[array] = { privilege, all private }
     array_accesses = data.newmap(),
+    -- Remebers variables used for scalar reductions
+    reductions = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
   }
+  cx = setmetatable(cx, loop_context)
   if loop_var then
-    cx.centers[loop_var] = true
-    cx.private[loop_var] = PRIVATE
+    cx:update_center(loop_var, true)
+    cx:update_scalar(loop_var, std.reads, true)
   end
-  return setmetatable(cx, loop_context)
+  return cx
 end
 
 function loop_context:is_parallel()
@@ -184,13 +170,43 @@ function loop_context:get_inadmissible_node()
   return self.admissible[2]
 end
 
+function loop_context:cache_reduction_variables()
+  -- Cache all scalar reduction variables
+  for symbol, pair in self.scalars:items() do
+    local privilege, private = unpack(pair)
+    if not private and std.is_reduce(privilege) then
+      self.reductions[symbol] = true
+    end
+  end
+end
+
+function loop_context:filter_shared_variables(reductions)
+  local result = data.newmap()
+  for symbol, _ in reductions:items() do
+    if not self:is_local_variable(symbol) then
+      result[symbol] = true
+    end
+  end
+  return result
+end
+
+function loop_context:union_reduction_variables(reductions)
+  for symbol, _ in reductions:items() do
+    self.reductions[symbol] = true
+  end
+end
+
+function loop_context:is_reduction_variable(symbol)
+  return self.reductions[symbol] or false
+end
+
 function loop_context:get_metadata()
   assert(self.loop_var)
   local parallelizable = self:is_parallelizable()
   local reductions = parallelizable and terralib.newlist()
   if parallelizable then
-    for k, _ in self.reductions:items() do
-      reductions:insert(k)
+    for symbol, _ in self.reductions:items() do
+      reductions:insert(symbol)
     end
   end
   return ast.metadata.Loop {
@@ -199,32 +215,39 @@ function loop_context:get_metadata()
   }
 end
 
-function loop_context:mark_reduction_variable(variable)
-  self.reductions[variable] = true
-end
-
-function loop_context:unmark_reduction_variable(variable)
-  self.reductions[variable] = false
-end
-
-function loop_context:is_reduction_variable(variable)
-  return self.reductions[variable]
-end
-
-function loop_context:is_private(symbol)
-  return self.private[symbol]
-end
-
 function loop_context:is_center(symbol)
   return self.centers[symbol] or false
 end
 
-function loop_context:update_private(symbol, value)
-  self.private[symbol] = value
+function loop_context:get_scalar(symbol)
+  local pair = self.scalars[symbol]
+  if pair == nil then
+    pair = { nil, false }
+    self.scalars[symbol] = pair
+  end
+  return pair
+end
+
+function loop_context:update_scalar(symbol, privilege, private)
+  self.scalars[symbol] = { privilege, private }
+end
+
+function loop_context:is_local_variable(symbol)
+  return self:get_scalar(symbol)[2]
+end
+
+function loop_context:add_local_variable(symbol)
+  self.scalars[symbol] = { nil, true }
 end
 
 function loop_context:update_center(symbol, value)
   self.centers[symbol] = value
+end
+
+function loop_context:check_privilege(node, privilege, private)
+  if (privilege == "reads_writes" or privilege == std.writes) and not private then
+    self:mark_serial(node)
+  end
 end
 
 function loop_context:update_privilege(node, region_type, field_path, new_priv, private)
@@ -240,11 +263,7 @@ function loop_context:update_privilege(node, region_type, field_path, new_priv, 
   all_private = all_private and private
   any_private = any_private or private
   privileges[field_path] = { privilege, all_private, any_private }
-  if (privilege == "reads_writes" or privilege == std.writes) and
-     not all_private
-  then
-    self:mark_serial(node)
-  end
+  self:check_privilege(node, privilege, all_private)
 end
 
 function loop_context:update_privileges(node, regions, field_path, new_priv, private)
@@ -259,11 +278,7 @@ function loop_context:update_array_access(node, symbol, new_priv, private)
   privilege = std.meet_privilege(privilege, new_priv)
   all_private = all_private and private
   self.array_accesses[symbol] = { privilege, all_private }
-  if (privilege == "reads_writes" or privilege == std.writes) and
-     not all_private
-  then
-    self:mark_serial(node)
-  end
+  self:check_privilege(node, privilege, all_private)
 end
 
 -- Context that maintains parallelizability of the whole task
@@ -287,6 +302,8 @@ function context.new_task_scope(task)
     task = task,
     demand_cuda = std.config["cuda"] and
                   task.annotations.cuda:is(ast.annotation.Demand),
+    demand_parallel = std.config["parallelize"] and
+                      task.annotations.parallel:is(ast.annotation.Demand),
     contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
   return setmetatable(cx, context)
@@ -299,6 +316,7 @@ end
 function context:pop_loop_context(node)
   local cx = self:current_context()
   self.contexts:remove()
+  cx:cache_reduction_variables()
 
   -- Propagate all region accesses in the scope to the outer ones
   for region, privileges in cx.privileges:items() do
@@ -314,16 +332,24 @@ function context:pop_loop_context(node)
   end
 
   -- Propagate all array accesses in the scope to the outer ones
-  for symbol, tuple in cx.array_accesses:items() do
-    local privilege, all_private, any_private = unpack(tuple)
-    if not cx.private[symbol] then
+  for symbol, pair in cx.array_accesses:items() do
+    local privilege, all_private = unpack(pair)
+    if not cx:is_local_variable(symbol) then
       self:forall_context(function(cx)
-        local private = cx:is_private(symbol) == PRIVATE
+        local private = cx:is_local_variable(symbol)
         cx:update_array_access(node, symbol, privilege, private)
         return private
       end)
     end
   end
+
+  -- Propagate all reduction variables accesses in the scope to the outer ones
+  local to_propagate = cx:filter_shared_variables(cx.reductions)
+  self:forall_context(function(cx_outer)
+    cx_outer:union_reduction_variables(to_propagate)
+    to_propagate = cx_outer:filter_shared_variables(cx.reductions)
+    return to_propagate:is_empty()
+  end)
 
   if self.demand_cuda and cx:is_parallelizable() then
     -- When the task demands CUDA code generation, we only keep the innermost
@@ -334,12 +360,18 @@ function context:pop_loop_context(node)
         return false
       end)
     end
-    -- When the task demands CUDA code generation and the loop have accesses
-    -- to arrays defined outside, we mark it inadmissible.
-    for symbol, tuple in cx.array_accesses:items() do
-      if not cx.private[symbol] then
-        cx:mark_inadmissible(node)
-        break
+  end
+
+  if (cx.demand_cuda or cx.demand_openmp) and cx:is_parallelizable() then
+    -- When the loop that demands OpenMP or is in a CUDA task updates
+    -- arrays defined outside, we mark it inadmissible.
+    for symbol, pair in cx.array_accesses:items() do
+      if not cx:is_local_variable(symbol) then
+        local privilege, private = unpack(pair)
+        if privilege and privilege ~= std.reads then
+          cx:mark_inadmissible(node)
+          break
+        end
       end
     end
   end
@@ -373,41 +405,14 @@ end
 
 local analyze_access = {}
 
-function analyze_access.expr_id(cx, node, privilege, field_path)
+function analyze_access.expr_id(cx, node, new_privilege, field_path)
   local symbol = node.value
-  local private = cx:is_private(symbol)
+  local privilege, private = unpack(cx:get_scalar(symbol))
   local center = cx:is_center(symbol)
-
-  -- If the variable is local to the loop, any access is safe
-  if private == PRIVATE then
-    if privilege ~= nil and std.is_reduce(privilege) then
-      cx:mark_reduction_variable(symbol)
-    end
-    return true, center
-  else
-    if privilege == nil then
-      return false, center
-    end
-
-    -- Any write access to a variable defined outside is not parallelizable
-    if privilege == std.writes then
-      private = join(private, MIXED)
-    elseif privilege == std.reads then
-      private = join(private, SHARED_READ)
-    elseif std.is_reduce(privilege) then
-      private = join(private, SHARED_REDUCE)
-    end
-
-    cx:update_private(symbol, private)
-    if private == MIXED then
-      cx:mark_serial(node)
-      cx:unmark_reduction_variable(symbol)
-    elseif private == SHARED_REDUCE then
-      cx:mark_reduction_variable(symbol)
-    end
-
-    return false, center
-  end
+  privilege = std.meet_privilege(privilege, new_privilege)
+  cx:update_scalar(symbol, privilege, private)
+  cx:check_privilege(node, privilege, private)
+  return private, center
 end
 
 function analyze_access.expr_field_access(cx, node, privilege, field_path)
@@ -417,7 +422,7 @@ end
 
 function analyze_access.expr_deref(cx, node, privilege, field_path)
   local expr_type = node.expr_type
-  local private, center = analyze_access.expr(cx, node.value, privilege)
+  local private, center = analyze_access.expr(cx, node.value, std.reads)
   if std.is_ref(expr_type) then
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
   elseif std.as_read(node.value.expr_type):ispointer() then
@@ -551,24 +556,20 @@ function analyze_access.expr(cx, node, privilege, field_path)
   return analyze_access_expr(cx)(node, privilege, field_path)
 end
 
-local function check_demand(cx, node, annotations, type)
-  if std.config[type] and
-     node.annotations[type]:is(ast.annotation.Demand) and
+local function check_demands(cx, node)
+  if (cx.demand_vectorize or cx.demand_openmp) and
      not (node.metadata and node.metadata.parallelizable)
   then
+    local prefix = (cx.demand_vectorize and prefixes["vectorize"]) or
+                   (cx.demand_openmp and prefixes["openmp"])
     if not cx:is_admissible() then
-      report.error(cx:get_inadmissible_node(), prefixes[type] ..
+      report.error(cx:get_inadmissible_node(), prefix ..
           " failed: found an inadmissible statement")
     else
-      report.error(cx:get_serial_node(), prefixes[type] ..
+      report.error(cx:get_serial_node(), prefix ..
           " failed: found a loop-carried dependence")
     end
   end
-end
-
-local function check_demands(cx, node)
-  check_demand(cx, node, node.annotations, "vectorize")
-  check_demand(cx, node, node.annotations, "openmp")
 end
 
 function analyze_access.stat_for_list(cx, node)
@@ -658,7 +659,7 @@ function analyze_access.stat_var(cx, node)
   local cx = cx:current_context()
   local symbol = node.symbol
   cx:update_center(symbol, center)
-  cx:update_private(symbol, PRIVATE)
+  cx:add_local_variable(symbol)
   return node
 end
 
@@ -670,7 +671,7 @@ function analyze_access.stat_var_unpack(cx, node)
   local cx = cx:current_context()
   node.symbols:map(function(symbol)
     cx:update_center(symbol, false)
-    cx:update_private(symbol, PRIVATE)
+    cx:add_local_variable(symbol)
   end)
 
   return node
@@ -714,7 +715,7 @@ function analyze_access.stat_reduce(cx, node)
       analyze_access.expr(cx, node.lhs, std.reduces(node.op))
     if first then
       if node.lhs:is(ast.typed.expr.ID) then
-        scalar = cx:is_reduction_variable(node.lhs.value) or false
+        scalar = not cx:is_local_variable(node.lhs.value)
       end
       atomic = not private
       first = false
@@ -950,25 +951,58 @@ function check_region_access_contained.top_task(node)
   check_region_access_contained.block(cx, node.body)
 end
 
+-- Here we check additional constraints when the task demands
+-- partition driven auto-parallelization.
 local function check_demand_parallel(cx, node)
   if std.config["parallelize"] and
-     node.annotations.parallel:is(ast.annotation.Demand) and
-     not cx:is_admissible()
+     node.annotations.parallel:is(ast.annotation.Demand)
   then
-    local inadmissible_node = cx:get_inadmissible_node()
-    if not inadmissible_node:is(ast.typed.stat.Return) then
-      report.error(inadmissible_node, prefixes["parallel"] ..
-          " failed: found an inadmissible statement")
+    if not cx:is_admissible() then
+      local inadmissible_node = cx:get_inadmissible_node()
+      if not inadmissible_node:is(ast.typed.stat.Return) then
+        report.error(inadmissible_node, prefixes["parallel"] ..
+            " failed: found an inadmissible statement")
+      end
+      local stats = node.body.stats
+      assert(not inadmissible_node.value or
+             inadmissible_node.value:is(ast.typed.expr.ID))
+      local return_variable =
+        (inadmissible_node.value and inadmissible_node.value.value) or
+        false
+      if inadmissible_node ~= stats[#stats] or not return_variable or
+         not cx:is_reduction_variable(return_variable)
+      then
+        report.error(inadmissible_node, prefixes["parallel"] ..
+            " failed: found an inadmissible statement")
+      end
+      for symbol, _ in cx.reductions:items() do
+        if symbol ~= return_variable then
+          report.error(cx.loop, prefixes["parallel"] ..
+              " failed: task can have only up to one scalar reduction variable")
+        end
+      end
+    else
+      if not cx.reductions:is_empty() then
+        report.error(cx.loop, prefixes["parallel"] ..
+            " failed: task must return the scalar reduction result")
+      end
     end
-    local stats = node.body.stats
-    if inadmissible_node ~= stats[#stats] or
-       not inadmissible_node.value or
-       not cx:is_reduction_variable(inadmissible_node.value.value)
-    then
-      report.error(inadmissible_node, prefixes["parallel"] ..
-          " failed: found an inadmissible statement")
+    local reduction = false
+    local op = false
+    for symbol, _ in cx.reductions:items() do
+      local privilege, _ = unpack(cx:get_scalar(symbol))
+      reduction = symbol
+      assert(std.is_reduce(privilege))
+      op = privilege.op
     end
+    node = node {
+      metadata = ast.metadata.Task {
+        reduction = reduction,
+        op = op,
+      }
+    }
   end
+  return node
 end
 
 local check_parallelizable = {}
@@ -981,8 +1015,8 @@ function check_parallelizable.top_task(node)
     body = analyze_access.block(cx, body)
     node = node { body = body }
 
+    node = check_demand_parallel(cx:current_context(), node)
     check_region_access_contained.top_task(node)
-    check_demand_parallel(cx:current_context(), node)
   end
 
   return node

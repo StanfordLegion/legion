@@ -326,7 +326,7 @@ namespace Realm {
   void ImageMicroOp<N,T,N2,T2>::dispatch(PartitioningOperation *op, bool inline_ok)
   {
     // an ImageMicroOp should always be executed on whichever node the field data lives
-    NodeID exec_node = ID(inst).instance.owner_node;
+    NodeID exec_node = ID(inst).instance_owner_node();
 
     if(exec_node != my_node_id) {
       // we're going to ship it elsewhere, which means we always need an AsyncMicroOp to
@@ -455,12 +455,12 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).sparsity.creator_node;
+      target_node = ID(source.sparsity).sparsity_creator_node();
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance.owner_node;
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance.owner_node;
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 
@@ -486,12 +486,12 @@ namespace Realm {
     // get a sparsity ID by round-robin'ing across the nodes that have field data
     int target_node;
     if(!source.dense())
-      target_node = ID(source.sparsity).sparsity.creator_node;
+      target_node = ID(source.sparsity).sparsity_creator_node();
     else
       if(!ptr_data.empty())
-	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance.owner_node;
+	target_node = ID(ptr_data[sources.size() % ptr_data.size()].inst).instance_owner_node();
       else
-	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance.owner_node;
+	target_node = ID(range_data[sources.size() % range_data.size()].inst).instance_owner_node();
     SparsityMap<N,T> sparsity = get_runtime()->get_available_sparsity_impl(target_node)->me.convert<SparsityMap<N,T> >();
     image.sparsity = sparsity;
 

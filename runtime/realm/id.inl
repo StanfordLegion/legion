@@ -64,169 +64,144 @@ namespace Realm {
   /*static*/ inline ID ID::make_event(unsigned creator_node, unsigned gen_event_idx, unsigned generation)
   {
     ID id;
-    id.event.type_tag = FMT_Event::TAG_VALUE;
-    id.event.creator_node = creator_node;
-    id.event.gen_event_idx = gen_event_idx;
-    id.event.generation = generation;
+    id.id = 0;
+    id.event_type_tag() |= FMT_Event::TAG_VALUE;
+    id.event_creator_node() |= creator_node;
+    id.event_gen_event_idx() |= gen_event_idx;
+    id.event_generation() |= generation;
     return id;
   }
 
   inline bool ID::is_event(void) const
   {
-    return this->event.type_tag == FMT_Event::TAG_VALUE;
+    return this->event_type_tag() == FMT_Event::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_barrier(unsigned creator_node, unsigned barrier_idx, unsigned generation)
   {
     ID id;
-    id.barrier.type_tag = FMT_Barrier::TAG_VALUE;
-    id.barrier.creator_node = creator_node;
-    id.barrier.barrier_idx = barrier_idx;
-    id.barrier.generation = generation;
+    id.id = 0;
+    id.barrier_type_tag() |= FMT_Barrier::TAG_VALUE;
+    id.barrier_creator_node() |= creator_node;
+    id.barrier_barrier_idx() |= barrier_idx;
+    id.barrier_generation() |= generation;
     return id;
   }
 
   inline bool ID::is_barrier(void) const
   {
-    return this->barrier.type_tag == FMT_Barrier::TAG_VALUE;
+    return this->barrier_type_tag() == FMT_Barrier::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_reservation(unsigned creator_node, unsigned rsrv_idx)
   {
     ID id;
-    id.rsrv.type_tag = FMT_Reservation::TAG_VALUE;
-    id.rsrv.creator_node = creator_node;
-    id.rsrv.unused = 0;
-    id.rsrv.rsrv_idx = rsrv_idx;
+    id.id = 0;
+    id.rsrv_type_tag() |= FMT_Reservation::TAG_VALUE;
+    id.rsrv_creator_node() |= creator_node;
+    id.rsrv_rsrv_idx() |= rsrv_idx;
     return id;
   }
 
   inline bool ID::is_reservation(void) const
   {
-    return this->rsrv.type_tag == FMT_Reservation::TAG_VALUE;
+    return this->rsrv_type_tag() == FMT_Reservation::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_memory(unsigned owner_node, unsigned mem_idx)
   {
     ID id;
-    id.memory.type_tag = FMT_Memory::TAG_VALUE;
-    id.memory.owner_node = owner_node;
-    id.memory.unused = 0;
-    id.memory.mem_idx = mem_idx;
+    id.id = 0;
+    id.memory_type_tag() |= FMT_Memory::TAG_VALUE;
+    id.memory_owner_node() |= owner_node;
+    id.memory_mem_idx() |= mem_idx;
     return id;
   }
 
   inline bool ID::is_memory(void) const
   {
-    return this->memory.type_tag == FMT_Memory::TAG_VALUE;
+    return this->memory_type_tag() == FMT_Memory::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_ib_memory(unsigned owner_node, unsigned mem_idx)
   {
     ID id;
-    id.memory.type_tag = FMT_IB_Memory::TAG_VALUE;
-    id.memory.owner_node = owner_node;
-    id.memory.unused = 0;
-    id.memory.mem_idx = mem_idx;
+    id.id = 0;
+    id.memory_type_tag() |= FMT_IB_Memory::TAG_VALUE;
+    id.memory_owner_node() |= owner_node;
+    id.memory_mem_idx() |= mem_idx;
     return id;
   }
 
   inline bool ID::is_ib_memory(void) const
   {
-    return this->memory.type_tag == FMT_IB_Memory::TAG_VALUE;
+    return this->memory_type_tag() == FMT_IB_Memory::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx)
   {
     ID id;
-    id.instance.type_tag = FMT_Instance::TAG_VALUE;
-    id.instance.owner_node = owner_node;
-    id.instance.creator_node = creator_node;
-    id.instance.mem_idx = mem_idx;
-    id.instance.inst_idx = inst_idx;
+    id.id = 0;
+    id.instance_type_tag() |= FMT_Instance::TAG_VALUE;
+    id.instance_owner_node() |= owner_node;
+    id.instance_creator_node() |= creator_node;
+    id.instance_mem_idx() |= mem_idx;
+    id.instance_inst_idx() |= inst_idx;
     return id;
   }
 
   inline bool ID::is_instance(void) const
   {
-    return this->instance.type_tag == FMT_Instance::TAG_VALUE;
+    return this->instance_type_tag() == FMT_Instance::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_processor(unsigned owner_node, unsigned proc_idx)
   {
     ID id;
-    id.proc.type_tag = FMT_Processor::TAG_VALUE;
-    id.proc.owner_node = owner_node;
-    id.proc.unused = 0;
-    id.proc.proc_idx = proc_idx;
+    id.id = 0;
+    id.proc_type_tag() |= FMT_Processor::TAG_VALUE;
+    id.proc_owner_node() |= owner_node;
+    id.proc_proc_idx() |= proc_idx;
     return id;
   }
 
   inline bool ID::is_processor(void) const
   {
-    return this->proc.type_tag == FMT_Processor::TAG_VALUE;
+    return this->proc_type_tag() == FMT_Processor::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx)
   {
     ID id;
-    id.pgroup.type_tag = FMT_ProcGroup::TAG_VALUE;
-    id.pgroup.owner_node = owner_node;
-    id.pgroup.creator_node = creator_node;
-    id.pgroup.pgroup_idx = pgroup_idx;
+    id.id = 0;
+    id.pgroup_type_tag() |= FMT_ProcGroup::TAG_VALUE;
+    id.pgroup_owner_node() |= owner_node;
+    id.pgroup_creator_node() |= creator_node;
+    id.pgroup_pgroup_idx() |= pgroup_idx;
     return id;
   }
 
   inline bool ID::is_procgroup(void) const
   {
-    return this->pgroup.type_tag == FMT_ProcGroup::TAG_VALUE;
-  }
-
-  /*static*/ inline ID ID::make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx)
-  {
-    ID id;
-    id.idxspace.type_tag = FMT_IdxSpace::TAG_VALUE;
-    id.idxspace.owner_node = owner_node;
-    id.idxspace.creator_node = creator_node;
-    id.idxspace.idxspace_idx = idxspace_idx;
-    return id;
-  }
-
-  inline bool ID::is_idxspace(void) const
-  {
-    return this->idxspace.type_tag == FMT_IdxSpace::TAG_VALUE;
+    return this->pgroup_type_tag() == FMT_ProcGroup::TAG_VALUE;
   }
 
   /*static*/ inline ID ID::make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx)
   {
     ID id;
-    id.sparsity.type_tag = FMT_Sparsity::TAG_VALUE;
-    id.sparsity.owner_node = owner_node;
-    id.sparsity.creator_node = creator_node;
-    id.sparsity.sparsity_idx = sparsity_idx;
+    id.id = 0;
+    id.sparsity_type_tag() |= FMT_Sparsity::TAG_VALUE;
+    id.sparsity_owner_node() |= owner_node;
+    id.sparsity_creator_node() |= creator_node;
+    id.sparsity_sparsity_idx() |= sparsity_idx;
     return id;
   }
 
   inline bool ID::is_sparsity(void) const
   {
-    return this->sparsity.type_tag == FMT_Sparsity::TAG_VALUE;
+    return this->sparsity_type_tag() == FMT_Sparsity::TAG_VALUE;
   }
 
-  /*static*/ inline ID ID::make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx)
-  {
-    ID id;
-    id.allocator.type_tag = FMT_Allocator::TAG_VALUE;
-    id.allocator.owner_node = owner_node;
-    id.allocator.creator_node = creator_node;
-    id.allocator.allocator_idx = allocator_idx;
-    return id;
-  }
-
-  inline bool ID::is_allocator(void) const
-  {
-    return this->allocator.type_tag == FMT_Allocator::TAG_VALUE;
-  }
-
-  inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << id.id << std::dec; }
+  inline std::ostream& operator<<(std::ostream& os, ID id) { return os << std::hex << static_cast<ID::IDType>(id.id) << std::dec; }
 
 }; // namespace Realm

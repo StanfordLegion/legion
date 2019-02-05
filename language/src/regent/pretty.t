@@ -288,6 +288,8 @@ function pretty.expr_constant(cx, node)
   local value = node.value
   if type(node.value) == "string" then
     value = "\"" .. value:gsub("\n", "\\n"):gsub("\t", "\\t"):gsub("\"", "\\\"") .. "\""
+  elseif type(value) == "cdata" and node.expr_type:isfloat() then
+    value = tonumber(value)
   end
   return text.Line { value = tostring(value) }
 end
@@ -704,6 +706,29 @@ function pretty.expr_future_get_result(cx, node)
   return join({"__future_get_result(", pretty.expr(cx, node.value), ")"})
 end
 
+function pretty.expr_import_ispace(cx, node)
+  return join({
+      "__import_ispace(",
+      commas({tostring(node.expr_type.index_type), pretty.expr(cx, node.value)}),
+      ")"})
+end
+
+function pretty.expr_import_region(cx, node)
+  return join({
+      "__import_region(",
+      commas({pretty.expr(cx, node.ispace), tostring(node.expr_type:fspace()),
+              pretty.expr(cx, node.value), pretty.expr(cx, node.field_ids)}),
+      ")"})
+end
+
+function pretty.expr_import_partition(cx, node)
+  return join({
+      "__import_partition(",
+      commas({tostring(node.expr_type.disjointness), pretty.expr(cx, node.region),
+              pretty.expr(cx, node.colors), pretty.expr(cx, node.value)}),
+      ")"})
+end
+
 function pretty.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return pretty.expr_id(cx, node)
@@ -884,6 +909,15 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.ParallelizerConstraint) then
     return pretty.expr_binary(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return pretty.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportRegion) then
+    return pretty.expr_import_region(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportPartition) then
+    return pretty.expr_import_partition(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

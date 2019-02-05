@@ -91,10 +91,7 @@ local function unreachable(node)
   assert(false, "unreachable")
 end
 
-local permitted_for_num_annotations = terralib.newlist({"parallel", "spmd", "trace"})
-if std.config["vectorize-unsafe"] then
-  permitted_for_num_annotations:insert("vectorize")
-end
+local permitted_for_num_annotations = terralib.newlist({"parallel", "spmd", "trace", "vectorize"})
 
 local node_allow_annotations = {
   -- Expressions:
@@ -162,6 +159,9 @@ local node_allow_annotations = {
   [ast.typed.expr.Binary]                     = deny_all,
   [ast.typed.expr.Deref]                      = deny_all,
   [ast.typed.expr.ParallelizerConstraint]     = deny_all,
+  [ast.typed.expr.ImportIspace]               = deny_all,
+  [ast.typed.expr.ImportRegion]               = deny_all,
+  [ast.typed.expr.ImportPartition]            = deny_all,
 
   [ast.typed.expr.Internal]                   = unreachable,
   [ast.typed.expr.Future]                     = unreachable,

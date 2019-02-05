@@ -205,7 +205,10 @@ function analyze_var_flow.expr(cx, node)
     node:is(ast.typed.expr.AttachHDF5) or
     node:is(ast.typed.expr.DetachHDF5) or
     node:is(ast.typed.expr.AllocateScratchFields) or
-    node:is(ast.typed.expr.WithScratchFields)
+    node:is(ast.typed.expr.WithScratchFields) or
+    node:is(ast.typed.expr.ImportIspace) or
+    node:is(ast.typed.expr.ImportRegion) or
+    node:is(ast.typed.expr.ImportPartition)
   then
     return flow_empty()
 
@@ -945,6 +948,33 @@ function optimize_futures.expr_deref(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_import_ispace(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
+function optimize_futures.expr_import_region(cx, node)
+  local ispace    = concretize(optimize_futures.expr(cx, node.ispace))
+  local value     = concretize(optimize_futures.expr(cx, node.value))
+  local field_ids = concretize(optimize_futures.expr(cx, node.field_ids))
+  return node {
+    ispace = ispace,
+    value = value,
+    field_ids = field_ids,
+  }
+end
+
+function optimize_futures.expr_import_partition(cx, node)
+  local region = concretize(optimize_futures.expr(cx, node.region))
+  local colors = concretize(optimize_futures.expr(cx, node.colors))
+  local value  = concretize(optimize_futures.expr(cx, node.value))
+  return node {
+    region = region,
+    colors = colors,
+    value = value,
+  }
+end
+
 function optimize_futures.expr(cx, node)
   if node:is(ast.typed.expr.ID) then
     return optimize_futures.expr_id(cx, node)
@@ -1116,6 +1146,15 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     return optimize_futures.expr_deref(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return optimize_futures.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportRegion) then
+    return optimize_futures.expr_import_region(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportPartition) then
+    return optimize_futures.expr_import_partition(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))

@@ -910,6 +910,14 @@ extern "C" {
   /**
    * @param handle Caller must have ownership of parameter `handle`.
    *
+   * @see Legion::Runtime::has_parent_index_partition()
+   */
+  bool
+  legion_index_space_has_parent_index_partition(legion_runtime_t runtime,
+                                                legion_index_space_t handle);
+  /**
+   * @param handle Caller must have ownership of parameter `handle`.
+   *
    * @see Legion::Runtime::get_parent_index_partition()
    */
   legion_index_partition_t
@@ -1394,6 +1402,18 @@ extern "C" {
                                            bool wait_until_ready /* = false */);
 
   /**
+   * @param handle Caller must have ownership of parameter `fields`.
+   *
+   * @see Legion::Runtime::get_field_space_fields()
+   */
+  bool
+  legion_field_space_has_fields(legion_runtime_t runtime,
+                                legion_context_t ctx,
+                                legion_field_space_t handle,
+                                const legion_field_id_t *fields,
+                                size_t fields_size);
+
+  /**
    * @see Legion::Runtime::attach_semantic_information()
    */
   void
@@ -1454,6 +1474,15 @@ extern "C" {
                                 legion_field_space_t handle,
                                 legion_field_id_t id,
                                 const char **result);
+
+  /**
+   * @see Legion::Runtime::get_field_size()
+   */
+  size_t
+  legion_field_id_get_size(legion_runtime_t runtime,
+                           legion_context_t ctx,
+                           legion_field_space_t handle,
+                           legion_field_id_t id);
 
   // -----------------------------------------------------------------------
   // Logical Region Operations

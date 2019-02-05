@@ -122,6 +122,9 @@ local node_is_leaf = {
   [ast.typed.expr.Future]                     = always_false,
   [ast.typed.expr.FutureGetResult]            = always_false,
   [ast.typed.expr.ParallelizerConstraint]     = always_false,
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
 
   [ast.typed.expr.ID]              = always_true,
   [ast.typed.expr.Constant]        = always_true,
@@ -281,6 +284,9 @@ local node_is_inner = {
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.ImportIspace]               = always_true,
+  [ast.typed.expr.ImportRegion]               = always_true,
+  [ast.typed.expr.ImportPartition]            = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 
@@ -354,6 +360,10 @@ local node_is_idempotent = {
   [ast.typed.expr.Await]      = always_false,
   [ast.typed.expr.AttachHDF5] = always_false,
   [ast.typed.expr.DetachHDF5] = always_false,
+
+  [ast.typed.expr.ImportIspace]               = always_false,
+  [ast.typed.expr.ImportRegion]               = always_false,
+  [ast.typed.expr.ImportPartition]            = always_false,
 
   [ast.typed.expr.ID]                         = always_true,
   [ast.typed.expr.Constant]                   = always_true,
@@ -554,6 +564,9 @@ local node_is_replicable = {
   [ast.typed.expr.Future]                     = always_true,
   [ast.typed.expr.FutureGetResult]            = always_true,
   [ast.typed.expr.ParallelizerConstraint]     = always_true,
+  [ast.typed.expr.ImportIspace]               = always_true,
+  [ast.typed.expr.ImportRegion]               = always_true,
+  [ast.typed.expr.ImportPartition]            = always_true,
 
   [ast.typed.expr.Internal]                   = unreachable,
 

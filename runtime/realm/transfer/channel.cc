@@ -1458,7 +1458,7 @@ namespace Realm {
         requests = (RemoteWriteRequest*) calloc(max_nr, sizeof(RemoteWriteRequest));
         for (int i = 0; i < max_nr; i++) {
           requests[i].xd = this;
-          requests[i].dst_node = ID(dst_mem->me).memory.owner_node;
+          requests[i].dst_node = ID(dst_mem->me).memory_owner_node();
           enqueue_request(&requests[i]);
         }
       }
@@ -2140,7 +2140,7 @@ namespace Realm {
 	    if(src_mem.kind() != it->src_kind)
 	      continue;
 	    if((it->src_type == SupportedPath::LOCAL_KIND) &&
-	       (ID(src_mem).memory.owner_node != node))
+	       (NodeID(ID(src_mem).memory_owner_node()) != node))
 	      continue;
 	  }
 
@@ -2151,7 +2151,7 @@ namespace Realm {
 	    if(dst_mem.kind() != it->dst_kind)
 	      continue;
 	    if((it->dst_type == SupportedPath::LOCAL_KIND) &&
-	       (ID(dst_mem).memory.owner_node != node))
+	       (NodeID(ID(dst_mem).memory_owner_node()) != node))
 	      continue;
 	  }
 	  
@@ -3823,7 +3823,7 @@ namespace Realm {
                            XferDesFence* _complete_fence,
                            RegionInstance inst)
       {
-	//if (ID(_src_buf.memory).memory.owner_node == my_node_id) {
+	//if (ID(_src_buf.memory).memory_owner_node() == my_node_id) {
 	if(_target_node == my_node_id) {
           // size_t total_field_size = 0;
           // for (unsigned i = 0; i < _oas_vec.size(); i++) {

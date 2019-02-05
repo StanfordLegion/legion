@@ -46,12 +46,12 @@ namespace Realm {
 
   static inline bool is_local_affinity(const Machine::ProcessorMemoryAffinity& pma)
   {
-    return ID(pma.p).proc.owner_node == ID(pma.m).memory.owner_node;
+    return ID(pma.p).proc_owner_node() == ID(pma.m).memory_owner_node();
   }
 
   static inline bool is_local_affinity(const Machine::MemoryMemoryAffinity& mma)
   {
-    return ID(mma.m1).memory.owner_node == ID(mma.m2).memory.owner_node;
+    return ID(mma.m1).memory_owner_node() == ID(mma.m2).memory_owner_node();
   }
 
 
@@ -189,7 +189,7 @@ namespace Realm {
 
   bool MachineNodeInfo::add_processor(Processor p)
   {
-    assert(node == ID(p).proc.owner_node);
+    assert(node == NodeID(ID(p).proc_owner_node()));
     MachineProcInfo *& ptr = procs[p];
     // TODO: see if anything changed?
     if(ptr != 0)
@@ -204,7 +204,7 @@ namespace Realm {
   
   bool MachineNodeInfo::add_memory(Memory m)
   {
-    assert(node == ID(m).memory.owner_node);
+    assert(node == NodeID(ID(m).memory_owner_node()));
     MachineMemInfo *& ptr = mems[m];
     // TODO: see if anything changed?
     if(ptr != 0)
@@ -221,14 +221,14 @@ namespace Realm {
   {
     bool changed = false;
 
-    if(ID(pma.p).proc.owner_node == node) {
+    if(NodeID(ID(pma.p).proc_owner_node()) == node) {
       MachineProcInfo *mpi = procs[pma.p];
       assert(mpi != 0);
       if(mpi->add_proc_mem_affinity(pma))
 	changed = true;
     }
 
-    if(ID(pma.m).memory.owner_node == node) {
+    if(NodeID(ID(pma.m).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[pma.m];
       assert(mmi != 0);
       if(mmi->add_proc_mem_affinity(pma))
@@ -242,14 +242,14 @@ namespace Realm {
   {
     bool changed = false;
 
-    if(ID(mma.m1).memory.owner_node == node) {
+    if(NodeID(ID(mma.m1).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[mma.m1];
       assert(mmi != 0);
       if(mmi->add_mem_mem_affinity(mma))
 	changed = true;
     }
 
-    if(ID(mma.m2).memory.owner_node == node) {
+    if(NodeID(ID(mma.m2).memory_owner_node()) == node) {
       MachineMemInfo *mmi = mems[mma.m2];
       assert(mmi != 0);
       if(mmi->add_mem_mem_affinity(mma))
@@ -455,13 +455,13 @@ namespace Realm {
 		  (fbd >> kind) &&
 		  (fbd >> num_cores));
 	    if(ok) {
-	      assert(ID(p).proc.owner_node == node_id);
-	      assert(ID(p).proc.proc_idx < num_procs);
+	      assert(NodeID(ID(p).proc_owner_node()) == node_id);
+	      assert(ID(p).proc_proc_idx() < num_procs);
 	      log_annc.debug() << "adding proc " << p << " (kind = " << kind
 			       << " num_cores = " << num_cores << ")";
 	      if(remote) {
 		RemoteProcessor *proc = new RemoteProcessor(p, kind, num_cores);
-		n.processors[ID(p).proc.proc_idx] = proc;
+		n.processors[ID(p).proc_proc_idx()] = proc;
 	      }
 	    }
 	  }
@@ -479,14 +479,14 @@ namespace Realm {
 		  (fbd >> size) &&
 		  (fbd >> regbase));
 	    if(ok) {
-	      assert(ID(m).memory.owner_node == node_id);
-	      assert(ID(m).memory.mem_idx < num_memories);
+	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
+	      assert(ID(m).memory_mem_idx() < num_memories);
 	      log_annc.debug() << "adding memory " << m << " (kind = " << kind
 			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
 	      if(remote) {
 		RemoteMemory *mem = new RemoteMemory(m, size, kind,
 						     reinterpret_cast<void *>(regbase));
-		n.memories[ID(m).memory.mem_idx] = mem;
+		n.memories[ID(m).memory_mem_idx()] = mem;
 
 #ifndef REALM_SKIP_INTERNODE_AFFINITIES
 		{
@@ -557,14 +557,14 @@ namespace Realm {
 		  (fbd >> size) &&
 		  (fbd >> regbase));
 	    if(ok) {
-	      assert(ID(m).memory.owner_node == node_id);
-	      assert(ID(m).memory.mem_idx < num_ib_memories);
+	      assert(NodeID(ID(m).memory_owner_node()) == node_id);
+	      assert(ID(m).memory_mem_idx() < num_ib_memories);
 	      log_annc.debug() << "adding ib memory " << m << " (kind = " << kind
 			       << ", size = " << size << ", regbase = " << std::hex << regbase << std::dec << ")";
 	      if(remote) {
 		RemoteMemory *mem = new RemoteMemory(m, size, kind,
 						     reinterpret_cast<void *>(regbase));
-		n.ib_memories[ID(m).memory.mem_idx] = mem;
+		n.ib_memories[ID(m).memory_mem_idx()] = mem;
 	      }
 	    }
 	  }
@@ -640,7 +640,7 @@ namespace Realm {
 	mset.insert((*it).m);
       }
 #else
-      for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+      for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 	  it != nodeinfos.end();
 	  ++it)
 	for(std::map<Memory, MachineMemInfo *>::const_iterator it2 = it->second->mems.begin();
@@ -661,7 +661,7 @@ namespace Realm {
 	pset.insert((*it).p);
       }
 #else
-      for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+      for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 	  it != nodeinfos.end();
 	  ++it)
 	for(std::map<Processor, MachineProcInfo *>::const_iterator it2 = it->second->procs.begin();
@@ -673,7 +673,7 @@ namespace Realm {
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(int node) const
   {
-    std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.find(node);
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.find(node);
     if(it != nodeinfos.end())
       return it->second;
     else
@@ -682,12 +682,12 @@ namespace Realm {
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(Processor p) const
   {
-    return get_nodeinfo(ID(p).proc.owner_node);
+    return get_nodeinfo(ID(p).proc_owner_node());
   }
 
   inline MachineNodeInfo *MachineImpl::get_nodeinfo(Memory m) const
   {
-    return get_nodeinfo(ID(m).memory.owner_node);
+    return get_nodeinfo(ID(m).memory_owner_node());
   }
 
     void MachineImpl::get_local_processors(std::set<Processor>& pset) const
@@ -699,7 +699,7 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if(ID(p).proc.owner_node == my_node_id)
+	if(ID(p).proc_owner_node() == my_node_id)
 	  pset.insert(p);
       }
 #else
@@ -722,7 +722,7 @@ namespace Realm {
 	  it != proc_mem_affinities.end();
 	  it++) {
 	Processor p = (*it).p;
-	if((ID(p).proc.owner_node == my_node_id) && (p.kind() == kind))
+	if((ID(p).proc_owner_node() == my_node_id) && (p.kind() == kind))
 	  pset.insert(p);
       }
 #else
@@ -934,7 +934,7 @@ namespace Realm {
 	    }
 	  } else {
 	    // lookup of every single affinity - blech
-	    for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+	    for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 		it != nodeinfos.end();
 		++it)
 	      for(std::map<Processor, MachineProcInfo *>::const_iterator it2 = it->second->procs.begin();
@@ -1032,7 +1032,7 @@ namespace Realm {
 	    }
 	  } else {
 	    // lookup of every single affinity - blech
-	    for(std::map<int, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
+	    for(std::map<NodeID, MachineNodeInfo *>::const_iterator it = nodeinfos.begin();
 		it != nodeinfos.end();
 		++it)
 	      for(std::map<Memory, MachineMemInfo *>::const_iterator it2 = it->second->mems.begin();
@@ -1063,8 +1063,8 @@ namespace Realm {
 
     proc_mem_affinities.push_back(pma);
 
-    int np = ID(pma.p).proc.owner_node;
-    int mp = ID(pma.m).memory.owner_node;
+    int np = ID(pma.p).proc_owner_node();
+    int mp = ID(pma.m).memory_owner_node();
     {
       MachineNodeInfo *& ptr = nodeinfos[np];
       if(!ptr) ptr = new MachineNodeInfo(np);
@@ -1090,8 +1090,8 @@ namespace Realm {
 
     mem_mem_affinities.push_back(mma);
 
-    int m1p = ID(mma.m1).memory.owner_node;
-    int m2p = ID(mma.m2).memory.owner_node;
+    int m1p = ID(mma.m1).memory_owner_node();
+    int m2p = ID(mma.m2).memory_owner_node();
     {
       MachineNodeInfo *& ptr = nodeinfos[m1p];
       if(!ptr) ptr = new MachineNodeInfo(m1p);
@@ -1194,14 +1194,14 @@ namespace Realm {
   Machine::ProcessorQuery& Machine::ProcessorQuery::same_address_space_as(Processor p)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(p).proc.owner_node);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(p).proc_owner_node());
     return *this;
   }
 
   Machine::ProcessorQuery& Machine::ProcessorQuery::same_address_space_as(Memory m)
   {
     impl = ((ProcessorQueryImpl *)impl)->writeable_reference();
-    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(m).proc.owner_node);
+    ((ProcessorQueryImpl *)impl)->restrict_to_node(ID(m).proc_owner_node());
     return *this;
   }
       
@@ -1301,14 +1301,14 @@ namespace Realm {
   Machine::MemoryQuery& Machine::MemoryQuery::same_address_space_as(Processor p)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(p).proc.owner_node);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(p).proc_owner_node());
     return *this;
   }
 
   Machine::MemoryQuery& Machine::MemoryQuery::same_address_space_as(Memory m)
   {
     impl = ((MemoryQueryImpl *)impl)->writeable_reference();
-    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(m).memory.owner_node);
+    ((MemoryQueryImpl *)impl)->restrict_to_node(ID(m).memory_owner_node());
     return *this;
   }
       
@@ -1663,7 +1663,7 @@ namespace Realm {
           }
         }
         else  {
-          std::map<int, MachineNodeInfo *>::const_iterator it;
+          std::map<NodeID, MachineNodeInfo *>::const_iterator it;
           it = machine->nodeinfos.begin();
           // iterate over all the nodes
           while(it != machine->nodeinfos.end()) {
@@ -1796,9 +1796,9 @@ namespace Realm {
     // enter the first element i.e. after
     cur_cached_list->push_back(after);
     cur_index = 1;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).proc.owner_node);
+    it = machine->nodeinfos.find(ID(after).proc_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
         break;
@@ -1816,7 +1816,7 @@ namespace Realm {
       if(plist) {
         std::map<Processor, MachineProcInfo *>::const_iterator it2;
         // same node?  if so, skip past ones we've done
-        if(it->first == ID(after).proc.owner_node)
+        if(it->first == NodeID(ID(after).proc_owner_node()))
           it2 = plist->upper_bound(after);
         else
           it2 = plist->begin();
@@ -1856,7 +1856,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -1878,7 +1878,7 @@ namespace Realm {
       return pval;
 
     // general case where restricted_node_id or predicates are defined
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -1938,7 +1938,7 @@ namespace Realm {
 	  it++) {
 	Processor p =(*it).p;
 	if(p.id <= after.id) continue;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -1953,9 +1953,9 @@ namespace Realm {
     }
     return lowest;
 #else
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).proc.owner_node);
+    it = machine->nodeinfos.find(ID(after).proc_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
@@ -1973,7 +1973,7 @@ namespace Realm {
       if(plist) {
         std::map<Processor, MachineProcInfo *>::const_iterator it2;
 	// same node?  if so, skip past ones we've done
-	if(it->first == ID(after).proc.owner_node)
+	if(it->first == NodeID(ID(after).proc_owner_node()))
 	  it2 = plist->upper_bound(after);
 	else
 	  it2 = plist->begin();
@@ -2023,7 +2023,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -2042,7 +2042,7 @@ namespace Realm {
     if (cached_query(count))
       return count;
 
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2103,7 +2103,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Processor p =(*it).p;
-	if(is_restricted_node && (ID(p).proc.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(p).proc_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (p.kind() != restricted_kind))
 	  continue;
@@ -2125,7 +2125,7 @@ namespace Realm {
     if (cached_query(pval, QUERY_RANDOM))
       return pval;
     int count = 0;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2490,7 +2490,7 @@ namespace Realm {
       // if not found - dynamically create the cache
       // mem_cache may also be cleared/reset when dealing with resilience/elasticity
       if (!found) {
-        std::map<int, MachineNodeInfo *>::const_iterator it;
+        std::map<NodeID, MachineNodeInfo *>::const_iterator it;
         it = machine->nodeinfos.begin();
         // iterate over all the nodes
         while(it != machine->nodeinfos.end()) {
@@ -2617,9 +2617,9 @@ namespace Realm {
     // enter the first element
     cur_cached_list->push_back(after);
     cur_index = 1;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).memory.owner_node);
+    it = machine->nodeinfos.find(ID(after).memory_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
         break;
@@ -2636,7 +2636,7 @@ namespace Realm {
       if(plist) {
         std::map<Memory, MachineMemInfo *>::const_iterator it2;
         // same node?  if so, skip past ones we've done
-        if(it->first == ID(after).memory.owner_node)
+        if(it->first == NodeID(ID(after).memory_owner_node()))
           it2 = plist->upper_bound(after);
         else
           it2 = plist->begin();
@@ -2675,7 +2675,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2695,7 +2695,7 @@ namespace Realm {
     if (cached_query(mval, QUERY_FIRST))
       return mval;
 
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2754,7 +2754,7 @@ namespace Realm {
 	  it++) {
 	Memory m =(*it).m;
 	if(m.id <= after.id) continue;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2769,9 +2769,9 @@ namespace Realm {
     }
     return lowest;
 #else
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     // start where we left off
-    it = machine->nodeinfos.find(ID(after).memory.owner_node);
+    it = machine->nodeinfos.find(ID(after).memory_owner_node());
     while(it != machine->nodeinfos.end()) {
       if(is_restricted_node && (it->first != restricted_node_id))
 	break;
@@ -2789,7 +2789,7 @@ namespace Realm {
       if(plist) {
         std::map<Memory, MachineMemInfo *>::const_iterator it2;
 	// same node?  if so, skip past ones we've done
-	if(it->first == ID(after).memory.owner_node)
+	if(it->first == NodeID(ID(after).memory_owner_node()))
 	  it2 = plist->upper_bound(after);
 	else
 	  it2 = plist->begin();
@@ -2849,7 +2849,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2867,7 +2867,7 @@ namespace Realm {
     size_t count = 0;
     if (cached_query(count))
       return count;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
@@ -2929,7 +2929,7 @@ namespace Realm {
 	  it != machine->proc_mem_affinities.end();
 	  it++) {
 	Memory m =(*it).m;
-	if(is_restricted_node && (ID(m).memory.owner_node != (unsigned)restricted_node_id))
+	if(is_restricted_node && (ID(m).memory_owner_node() != (unsigned)restricted_node_id))
 	  continue;
 	if(is_restricted_kind && (m.kind() != restricted_kind))
 	  continue;
@@ -2952,7 +2952,7 @@ namespace Realm {
       return mval;
 
     size_t count = 0;
-    std::map<int, MachineNodeInfo *>::const_iterator it;
+    std::map<NodeID, MachineNodeInfo *>::const_iterator it;
     if(is_restricted_node)
       it = machine->nodeinfos.lower_bound(restricted_node_id);
     else
