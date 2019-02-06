@@ -298,13 +298,13 @@ namespace Legion {
                                   FieldMaskSet<ExprView> &perfect_views,
                                   LegionMap<std::pair<size_t,ExprView*>,
                                     FieldMask>::aligned &bounding_views);
-      ExprView* add_partial_user(const RegionUsage &usage,
-                                 UniqueID op_id, unsigned index,
-                                 FieldMask user_mask,
-                                 const ApEvent term_event,
-                                 IndexSpaceExpression *user_expr,
-                                 const size_t user_volume,
-                                 const PhysicalTraceInfo &trace_info);
+      void add_partial_user(const RegionUsage &usage,
+                            UniqueID op_id, unsigned index,
+                            FieldMask user_mask,
+                            const ApEvent term_event,
+                            IndexSpaceExpression *user_expr,
+                            const size_t user_volume,
+                            const PhysicalTraceInfo &trace_info);
       void add_current_user(PhysicalUser *user, const ApEvent term_event,
           const FieldMask &user_mask, const PhysicalTraceInfo &trace_info);
       // TODO: Optimize this so that we prune out intermediate nodes in 
