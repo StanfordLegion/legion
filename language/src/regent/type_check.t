@@ -3971,7 +3971,7 @@ local function is_param_type_inadmissible(param_type)
          param_type == std.c.legion_context_t
 end
 
-function type_check.top_task_param(cx, node, mapping, is_defined)
+function type_check.top_task_param(cx, node, task, mapping, is_defined)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
@@ -3991,8 +3991,10 @@ function type_check.top_task_param(cx, node, mapping, is_defined)
                 tostring(param_type))
   end
 
-  -- Warn for parameters with dangerous types.
-  if is_param_type_dangerous(param_type) then
+  -- Warn for parameters with dangerous types used unless the task is an inline task.
+  if is_param_type_dangerous(param_type) and
+     not (std.config["inline"] and task.annotations.inline:is(ast.annotation.Demand))
+  then
     report.warn(node, "WARNING: parameter " .. tostring(node.symbol) .. " has raw pointer type " ..
                 tostring(param_type) .. ". please consider replacing it with a non-pointer type.")
   end
@@ -4023,7 +4025,7 @@ function type_check.top_task(cx, node)
   local mapping = {}
   local params = node.params:map(
     function(param)
-      return type_check.top_task_param(cx, param, mapping, is_defined)
+      return type_check.top_task_param(cx, param, node, mapping, is_defined)
     end)
   local prototype = node.prototype
   prototype:set_param_symbols(
