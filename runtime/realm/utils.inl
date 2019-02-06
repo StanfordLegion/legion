@@ -158,4 +158,177 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // struct bitfield<_BITS, _SHIFT>
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::extract(T source)
+  {
+    T val = source;
+    if(_SHIFT > 0)
+      val >>= _SHIFT;
+    if(_BITS < (8 * sizeof(T)))
+      val &= ((T(1) << BITS) - 1);
+    return val;
+  }
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::insert(T target, T field)
+  {
+    if(_SHIFT > 0)
+      field <<= _SHIFT;
+
+    if(_BITS < (8 * sizeof(T))) {
+      T mask = ((T(1) << _BITS) - 1);
+      if(_SHIFT > 0)
+	mask <<= _SHIFT;
+      field &= mask;
+      target &= ~mask;
+      target |= field;
+    } else
+      target = field;
+
+    return target;
+  }
+
+  template <unsigned _BITS, unsigned _SHIFT>
+  template <typename T>
+  inline /*static*/ T bitfield<_BITS, _SHIFT>::bit_or(T target, T field)
+  {
+    if(_BITS < (8 * sizeof(T))) {
+      T mask = ((T(1) << _BITS) - 1);
+      field &= mask;
+    }
+
+    if(_SHIFT > 0)
+      field <<= _SHIFT;
+
+    return (target | field);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>
+
+  template <typename T>
+  inline bitpack<T>::bitpack()
+  {
+    // no initialization
+  }
+
+  template <typename T>
+  inline bitpack<T>::bitpack(const bitpack<T>& copy_from)
+    : value(copy_from.value)
+  {}
+
+  template <typename T>
+  inline bitpack<T>::bitpack(T init_val)
+    : value(init_val)
+  {}
+
+  template <typename T>
+  inline bitpack<T>& bitpack<T>::operator=(const bitpack<T>& copy_from)
+  {
+    value = copy_from.value;
+    return *this;
+  }
+
+  template <typename T>
+  inline bitpack<T>& bitpack<T>::operator=(T new_val)
+  {
+    value = new_val;
+    return *this;
+  }
+
+  template <typename T>
+  inline bitpack<T>::operator T() const
+  {
+    return value;
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::slice()
+  {
+    return bitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::slice() const
+  {
+    return constbitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield)
+  {
+    return bitsliceref<BITFIELD>(value);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template constbitsliceref<BITFIELD> bitpack<T>::operator[](const BITFIELD& bitfield) const
+  {
+    return constbitsliceref<BITFIELD>(value);
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>::bitsliceref<BITSLICE>
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::bitsliceref<BITFIELD>::bitsliceref(T& _target)
+    : target(_target)
+  {}
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::bitsliceref<BITFIELD>::operator T() const
+  {
+    return BITFIELD::extract(target);
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator=(T field)
+  {
+    target = BITFIELD::insert(target, field);
+    return *this;
+  }
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline typename bitpack<T>::template bitsliceref<BITFIELD>& bitpack<T>::bitsliceref<BITFIELD>::operator|=(T field)
+  {
+    target = BITFIELD::bit_or(target, field);
+    return *this;
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class bitpack<T>::constbitsliceref<BITSLICE>
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::constbitsliceref<BITFIELD>::constbitsliceref(const T& _target)
+    : target(_target)
+  {}
+
+  template <typename T>
+  template <typename BITFIELD>
+  inline bitpack<T>::constbitsliceref<BITFIELD>::operator T() const
+  {
+    return BITFIELD::extract(target);
+  }
+
+
 }; // namespace Realm

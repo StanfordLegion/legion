@@ -279,6 +279,9 @@ ast.unspecialized.expr:leaf("Condition", {"conditions", "values"})
 ast.unspecialized.expr:leaf("Unary", {"op", "rhs"})
 ast.unspecialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.unspecialized.expr:leaf("Deref", {"value"})
+ast.unspecialized.expr:leaf("ImportIspace", {"index_type_expr", "value"})
+ast.unspecialized.expr:leaf("ImportRegion", {"ispace", "fspace_type_expr", "value", "field_ids"})
+ast.unspecialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
 
 ast.unspecialized:leaf("Block", {"stats"})
 
@@ -401,6 +404,9 @@ ast.specialized.expr:leaf("Unary", {"op", "rhs"})
 ast.specialized.expr:leaf("Binary", {"op", "lhs", "rhs"})
 ast.specialized.expr:leaf("Deref", {"value"})
 ast.specialized.expr:leaf("LuaTable", {"value"})
+ast.specialized.expr:leaf("ImportIspace", {"index_type", "value"})
+ast.specialized.expr:leaf("ImportRegion", {"ispace", "fspace_type", "value", "field_ids"})
+ast.specialized.expr:leaf("ImportPartition", {"disjointness", "region", "colors", "value"})
 
 ast.specialized:leaf("Block", {"stats"})
 
@@ -510,6 +516,9 @@ ast.typed.expr:leaf("Deref", {"value"})
 ast.typed.expr:leaf("Future", {"value"})
 ast.typed.expr:leaf("FutureGetResult", {"value"})
 ast.typed.expr:leaf("ParallelizerConstraint", {"lhs", "op", "rhs"})
+ast.typed.expr:leaf("ImportIspace", {"value"})
+ast.typed.expr:leaf("ImportRegion", {"ispace", "value", "field_ids"})
+ast.typed.expr:leaf("ImportPartition", {"region", "colors", "value"})
 
 ast.typed:leaf("Block", {"stats"})
 
@@ -557,12 +566,13 @@ ast.typed.top:leaf("Fspace", {"name", "fspace"})
 ast.typed.top:leaf("Task", {"name", "params", "return_type", "privileges",
                              "coherence_modes", "flags", "conditions",
                              "constraints", "body", "config_options",
-                             "region_divergence", "prototype"})
+                             "region_divergence", "metadata", "prototype"})
 ast.typed.top:leaf("TaskParam", {"symbol", "param_type", "future"})
 
 -- Metadata for Parallel Code Generation
 
 ast:inner("metadata")
+ast.metadata:leaf("Task", {"reduction", "op"})
 ast.metadata:leaf("Loop", {"parallelizable", "reductions"})
 ast.metadata:leaf("Stat", {"atomic", "scalar"})
 

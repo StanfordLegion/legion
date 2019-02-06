@@ -328,25 +328,23 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+          (implicit_context != NULL))
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
+        if (implicit_context->is_leaf_context())
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
              "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
-             context->get_task_name(), context->get_unique_id());
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id());
         }
       }
-      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
-          !runtime->separate_runtime_instances)
-        Internal::implicit_context->record_blocking_call();
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        TaskContext *context =
-          (producer_op == NULL) ? NULL : producer_op->get_context();
+        TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -363,23 +361,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
-          (producer_op != NULL))
+          (implicit_context != NULL))
       {
-        TaskContext *context = producer_op->get_context();
-        if (!context->is_leaf_context())
-          REPORT_LEGION_WARNING(LEGION_WARNING_FUTURE_NONLEAF, 
+        if (!implicit_context->is_leaf_context())
+          REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
              "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
              "best practices. You may notice a severe performance degradation.",
-             context->get_task_name(), context->get_unique_id())
+             implicit_context->get_task_name(), 
+             implicit_context->get_unique_id())
       }
-      if ((producer_op != NULL) && (Internal::implicit_context != NULL) &&
-          !runtime->separate_runtime_instances)
-        Internal::implicit_context->record_blocking_call();
+      if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
+        implicit_context->record_blocking_call();
       if (!ready_event.has_triggered())
       {
-        TaskContext *context =
-          (producer_op == NULL) ? NULL : producer_op->get_context();
+        TaskContext *context = implicit_context;
         if (context != NULL)
         {
           context->begin_task_wait(false/*from runtime*/);
@@ -6345,6 +6341,23 @@ namespace Legion {
           case SEND_VIEW_ADD_COPY_USER:
             {
               runtime->handle_view_add_copy_user(derez, remote_address_space);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_REQUEST:
+            {
+              runtime->handle_view_replication_request(derez, 
+                                                       remote_address_space);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_RESPONSE:
+            {
+              runtime->handle_view_replication_response(derez);
+              break;
+            }
+          case SEND_VIEW_REPLICATION_REMOVAL:
+            {
+              runtime->handle_view_replication_removal(derez, 
+                                                       remote_address_space);
               break;
             }
           case SEND_MANAGER_REQUEST:
@@ -15055,6 +15068,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_request(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REQUEST,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_response(AddressSpaceID target,
+                                                 Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_RESPONSE,
+                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::send_view_replication_removal(AddressSpaceID target,
+                                                Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez, SEND_VIEW_REPLICATION_REMOVAL,
+                                       UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
@@ -16358,6 +16398,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       PhysicalManager::handle_manager_request(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_request(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_request(derez, this, source);
+    }
+    
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_response(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_response(derez, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_view_replication_removal(Deserializer &derez,
+                                                  AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InstanceView::handle_view_replication_removal(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

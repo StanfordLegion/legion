@@ -24,13 +24,11 @@ fspace fs
   v : float[1],
 }
 
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), fs)
+task f(r : region(fs))
+where reads writes(r)
+do
   __demand(__vectorize)
   for e in r do
     e.v[0] = 1.0
   end
 end
-
-regentlib.start(toplevel)

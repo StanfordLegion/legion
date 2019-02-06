@@ -1198,7 +1198,8 @@ function vectorize_loops.stat_for_num(node)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
   assert(cx.demanded)
 
-  local vectorizable = check_vectorizability.block(cx, node.block)
+  local vectorizable = node.metadata and node.metadata.parallelizable and
+                       check_vectorizability.block(cx, node.block)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_num(cx, node)
   else
@@ -1212,7 +1213,8 @@ function vectorize_loops.stat_for_list(node)
   cx:assign(node.symbol, C)
   cx.demanded = node.annotations.vectorize:is(ast.annotation.Demand)
 
-  local vectorizable = check_vectorizability.block(cx, node.block)
+  local vectorizable = node.metadata and node.metadata.parallelizable and
+                       check_vectorizability.block(cx, node.block)
   if vectorizable and not bounds_checks then
     return vectorize.stat_for_list(cx, node)
   else
@@ -1241,14 +1243,14 @@ function vectorize_loops.stat(node)
 
   elseif node:is(ast.typed.stat.ForNum) then
     if node.annotations.vectorize:is(ast.annotation.Demand) then
-      assert(std.config["vectorize-unsafe"])
       return vectorize_loops.stat_for_num(node)
     else
       return node { block = vectorize_loops.block(node.block) }
     end
 
   elseif node:is(ast.typed.stat.ForList) then
-    if std.is_bounded_type(node.symbol:gettype()) then
+    if std.is_bounded_type(node.symbol:gettype()) or
+       std.is_index_type(node.symbol:gettype()) then
       return vectorize_loops.stat_for_list(node)
     else
       return node { block = vectorize_loops.block(node.block) }

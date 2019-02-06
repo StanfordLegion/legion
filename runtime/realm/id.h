@@ -18,6 +18,9 @@
 #ifndef REALM_ID_H
 #define REALM_ID_H
 
+#include "realm/realm_c.h"
+#include "realm/utils.h"
+
 #include <iostream>
 
 // we use bit-field structures below, and the order of them isn't guaranteed to
@@ -34,7 +37,7 @@ namespace Realm {
 
     class ID {
     public:
-      typedef unsigned long long IDType;
+      typedef ::realm_id_t IDType;
 
       // Realm IDs are 64-bit values that uniquely encode both the type of the referred-to Realm
       //  object and its identity.  Different types use different fields and some need more bits
@@ -49,174 +52,146 @@ namespace Realm {
       // INSTANCE:    tag:4 = 0x6,  owner_node:16,   creator_node:16, mem_idx: 12, inst_idx : 16
       // PROCESSOR:   tag:8 = 0x1d, owner_node:16,   (unused):28, proc_idx: 12
       // PROCGROUP:   tag:8 = 0x1c, owner_node:16,   creator_node:16, pgroup_idx: 24
-      // IDXSPACE:    tag:4 = 0x5,  owner_node:16,   creator_node:16, idxspace_idx: 28
       // SPARSITY:    tag:4 = 0x4,  owner_node:16,   creator_node:16, sparsity_idx: 28
-      // ALLOCATOR:   tag:8 = 0x1b, owner_node:16,   creator_node:16, allocator_idx: 24
 
       static const int NODE_FIELD_WIDTH = 16;
       static const unsigned MAX_NODE_ID = (1U << NODE_FIELD_WIDTH) - 2; // reserve all 1's for special cases
       static const int EVENT_GENERATION_WIDTH = 20;
       static const int INSTANCE_INDEX_WIDTH = 16;
 
+#define ACCESSOR(structname, name, field) \
+      bitpack<IDType>::bitsliceref<structname::field> name ## _ ## field() { return id.slice<structname::field>(); } \
+      bitpack<IDType>::constbitsliceref<structname::field> name ## _ ## field() const { return id.slice<structname::field>(); }
+
       struct FMT_Event {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 1;
-	IDType creator_node : NODE_FIELD_WIDTH;
-	IDType gen_event_idx : 27;
-	IDType generation : EVENT_GENERATION_WIDTH;
-#else
-	IDType generation : EVENT_GENERATION_WIDTH;
-	IDType gen_event_idx : 27;
-	IDType creator_node : NODE_FIELD_WIDTH;
-	IDType type_tag : 1;
-#endif
+	typedef bitfield<1, 63> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 63-NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<63-NODE_FIELD_WIDTH-EVENT_GENERATION_WIDTH,
+			 EVENT_GENERATION_WIDTH> gen_event_idx;
+	typedef bitfield<EVENT_GENERATION_WIDTH, 0> generation;
+
 	static const IDType TAG_VALUE = 1;
       };
 
+      ACCESSOR(FMT_Event, event, type_tag)
+      ACCESSOR(FMT_Event, event, creator_node)
+      ACCESSOR(FMT_Event, event, gen_event_idx)
+      ACCESSOR(FMT_Event, event, generation)
+
+
       struct FMT_Barrier {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 4;
-	IDType creator_node : 16;
-	IDType barrier_idx : 24;
-	IDType generation : EVENT_GENERATION_WIDTH;  // MUST MATCH FMT_Event::generation size
-#else
-	IDType generation : EVENT_GENERATION_WIDTH;  // MUST MATCH FMT_Event::generation size
-	IDType barrier_idx : 24;
-	IDType creator_node : 16;
-	IDType type_tag : 4;
-#endif
-	static const IDType TAG_VALUE = 0x7;
+	typedef bitfield<4, 60> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 60-NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<24,
+			 EVENT_GENERATION_WIDTH> barrier_idx;
+	typedef bitfield<EVENT_GENERATION_WIDTH, 0> generation;  // MUST MATCH FMT_Event::generation size
+
+	static const IDType TAG_VALUE = 7;
       };
 
+      ACCESSOR(FMT_Barrier, barrier, type_tag)
+      ACCESSOR(FMT_Barrier, barrier, creator_node)
+      ACCESSOR(FMT_Barrier, barrier, barrier_idx)
+      ACCESSOR(FMT_Barrier, barrier, generation)
+
       struct FMT_Reservation {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 8;
-	IDType creator_node : 16;
-	IDType unused : 8;
-	IDType rsrv_idx : 32;
-#else
-	IDType rsrv_idx : 32;
-	IDType unused : 8;
-	IDType creator_node : 16;
-	IDType type_tag : 8;
-#endif
+	typedef bitfield<8, 56> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-NODE_FIELD_WIDTH> creator_node;
+	// middle bits unused
+	typedef bitfield<32, 0> rsrv_idx;
+
 	static const IDType TAG_VALUE = 0x1f;
       };
 
+      ACCESSOR(FMT_Reservation, rsrv, type_tag)
+      ACCESSOR(FMT_Reservation, rsrv, creator_node)
+      ACCESSOR(FMT_Reservation, rsrv, rsrv_idx)
+
       struct FMT_Memory {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 8;
-	IDType owner_node : 16;
-	IDType unused : 28;
-	IDType mem_idx : 12;
-#else
-	IDType mem_idx : 12;
-	IDType unused : 28;
-	IDType owner_node : 16;
-	IDType type_tag : 8;
-#endif
+	typedef bitfield<8, 56> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-NODE_FIELD_WIDTH> owner_node;
+	// middle bits unused
+	typedef bitfield<12, 0> mem_idx;
+
 	static const IDType TAG_VALUE = 0x1e;
       };
 
-      struct FMT_IB_Memory {
-#ifdef REALM_REVERSE_ID_FIELDS
-        IDType type_tag : 8;
-        IDType owner_node : 16;
-        IDType unused : 28;
-        IDType mem_idx : 12;
-#else
-        IDType mem_idx : 12;
-        IDType unused : 28;
-        IDType owner_node : 16;
-        IDType type_tag : 8;
-#endif
+      ACCESSOR(FMT_Memory, memory, type_tag)
+      ACCESSOR(FMT_Memory, memory, owner_node)
+      ACCESSOR(FMT_Memory, memory, mem_idx)
+
+      // IB memories use the same encoding as memories, but a different tag
+      struct FMT_IB_Memory : public FMT_Memory {
         static const IDType TAG_VALUE = 0x1a;
       };
 
       struct FMT_Instance {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 4;
-	IDType owner_node : 16;
-	IDType creator_node : 16;
-	IDType mem_idx : 12;
-	IDType inst_idx : INSTANCE_INDEX_WIDTH;
-#else
-	IDType inst_idx : INSTANCE_INDEX_WIDTH;
-	IDType mem_idx : 12;
-	IDType creator_node : 16;
-	IDType owner_node : 16;
-	IDType type_tag : 4;
-#endif
+	typedef bitfield<4, 60> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 60-NODE_FIELD_WIDTH> owner_node;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 60-2*NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<12, INSTANCE_INDEX_WIDTH> mem_idx;
+	typedef bitfield<INSTANCE_INDEX_WIDTH, 0> inst_idx;
+
 	static const IDType TAG_VALUE = 0x6;
       };
 
+      ACCESSOR(FMT_Instance, instance, type_tag)
+      ACCESSOR(FMT_Instance, instance, owner_node)
+      ACCESSOR(FMT_Instance, instance, creator_node)
+      ACCESSOR(FMT_Instance, instance, mem_idx)
+      ACCESSOR(FMT_Instance, instance, inst_idx)
+
       struct FMT_Processor {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 8;
-	IDType owner_node : 16;
-	IDType unused : 28;
-	IDType proc_idx : 12;
-#else
-	IDType proc_idx : 12;
-	IDType unused : 28;
-	IDType owner_node : 16;
-	IDType type_tag : 8;
-#endif
+	typedef bitfield<8, 56> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-NODE_FIELD_WIDTH> owner_node;
+	// middle bits unused
+	typedef bitfield<12, 0> proc_idx;
+
 	static const IDType TAG_VALUE = 0x1d;
       };
 
+      ACCESSOR(FMT_Processor, proc, type_tag)
+      ACCESSOR(FMT_Processor, proc, owner_node)
+      ACCESSOR(FMT_Processor, proc, proc_idx)
+
       struct FMT_ProcGroup {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 8;
-	IDType owner_node : 16;
-	IDType creator_node : 16;
-	IDType pgroup_idx : 24;
-#else
-	IDType pgroup_idx : 24;
-	IDType creator_node : 16;
-	IDType owner_node : 16;
-	IDType type_tag : 8;
-#endif
+	typedef bitfield<8, 56> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-NODE_FIELD_WIDTH> owner_node;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 56-2*NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<24, 0> pgroup_idx;
+
 	static const IDType TAG_VALUE = 0x1c;
       };
 
-      struct FMT_IdxSpace {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 4;
-	IDType owner_node : 16;
-	IDType creator_node : 16;
-	IDType idxspace_idx : 28;
-#else
-	IDType idxspace_idx : 28;
-	IDType creator_node : 16;
-	IDType owner_node : 16;
-	IDType type_tag : 4;
-#endif
-	static const IDType TAG_VALUE = 0x5;
-      };
+      ACCESSOR(FMT_ProcGroup, pgroup, type_tag)
+      ACCESSOR(FMT_ProcGroup, pgroup, owner_node)
+      ACCESSOR(FMT_ProcGroup, pgroup, creator_node)
+      ACCESSOR(FMT_ProcGroup, pgroup, pgroup_idx)
 
       struct FMT_Sparsity {
-	IDType sparsity_idx : 28;
-	IDType creator_node : 16;
-	IDType owner_node : 16;
-	IDType type_tag : 4;
+	typedef bitfield<4, 60> type_tag;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 60-NODE_FIELD_WIDTH> owner_node;
+	typedef bitfield<NODE_FIELD_WIDTH,
+			 60-2*NODE_FIELD_WIDTH> creator_node;
+	typedef bitfield<28, 0> sparsity_idx;
+
 	static const IDType TAG_VALUE = 0x4;
       };
 
-      struct FMT_Allocator {
-#ifdef REALM_REVERSE_ID_FIELDS
-	IDType type_tag : 8;
-	IDType owner_node : 16;
-	IDType creator_node : 16;
-	IDType allocator_idx : 24;
-#else
-	IDType allocator_idx : 24;
-	IDType creator_node : 16;
-	IDType owner_node : 16;
-	IDType type_tag : 8;
-#endif
-	static const IDType TAG_VALUE = 0x1b;
-      };
+      ACCESSOR(FMT_Sparsity, sparsity, type_tag)
+      ACCESSOR(FMT_Sparsity, sparsity, owner_node)
+      ACCESSOR(FMT_Sparsity, sparsity, creator_node)
+      ACCESSOR(FMT_Sparsity, sparsity, sparsity_idx)
 
       static ID make_event(unsigned creator_node, unsigned gen_event_idx, unsigned generation);
       static ID make_barrier(unsigned creator_node, unsigned barrier_idx, unsigned generation);
@@ -226,9 +201,7 @@ namespace Realm {
       static ID make_instance(unsigned owner_node, unsigned creator_node, unsigned mem_idx, unsigned inst_idx);
       static ID make_processor(unsigned owner_node, unsigned proc_idx);
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
-      static ID make_idxspace(unsigned owner_node, unsigned creator_node, unsigned idxspace_idx);
       static ID make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx);
-      static ID make_allocator(unsigned owner_node, unsigned creator_node, unsigned allocator_idx);
 
       bool is_null(void) const;
       bool is_event(void) const;
@@ -239,9 +212,7 @@ namespace Realm {
       bool is_instance(void) const;
       bool is_processor(void) const;
       bool is_procgroup(void) const;
-      bool is_idxspace(void) const;
       bool is_sparsity(void) const;
-      bool is_allocator(void) const;
 
       enum ID_Types {
 	ID_SPECIAL,
@@ -279,20 +250,7 @@ namespace Realm {
       template <class T>
       T convert(void) const;
 
-      union {
-	IDType id;
-	FMT_Event event;
-	FMT_Barrier barrier;
-	FMT_Reservation rsrv;
-	FMT_Memory memory;
-	FMT_IB_Memory ib_memory;
-	FMT_Instance instance;
-	FMT_Processor proc;
-	FMT_ProcGroup pgroup;
-	FMT_IdxSpace idxspace;
-	FMT_Sparsity sparsity;
-	FMT_Allocator allocator;
-      };
+      bitpack<IDType> id;
 
       friend std::ostream& operator<<(std::ostream& os, ID id);
     };

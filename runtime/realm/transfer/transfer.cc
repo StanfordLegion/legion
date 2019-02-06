@@ -1896,8 +1896,8 @@ namespace Realm {
   static NodeID select_dma_node(Memory src_mem, Memory dst_mem,
 				       ReductionOpID redop_id, bool red_fold)
   {
-    NodeID src_node = ID(src_mem).memory.owner_node;
-    NodeID dst_node = ID(dst_mem).memory.owner_node;
+    NodeID src_node = ID(src_mem).memory_owner_node();
+    NodeID dst_node = ID(dst_mem).memory_owner_node();
 
     bool src_is_rdma = get_runtime()->get_memory_impl(src_mem)->kind == MemoryImpl::MKIND_GLOBAL;
     bool dst_is_rdma = get_runtime()->get_memory_impl(dst_mem)->kind == MemoryImpl::MKIND_GLOBAL;
@@ -2029,7 +2029,7 @@ namespace Realm {
 					 wait_on, ev,
 					 0 /*priority*/, requests);
 
-    NodeID src_node = ID(src.inst).instance.owner_node;
+    NodeID src_node = ID(src.inst).instance_owner_node();
     if(src_node == my_node_id) {
       log_dma.debug("performing reduction on local node");
 
@@ -2097,7 +2097,7 @@ namespace Realm {
     FillRequest *r = new FillRequest(td, f, data.base(), data.size(),
 				     wait_on, ev, priority, requests);
 
-    NodeID tgt_node = ID(inst).instance.owner_node;
+    NodeID tgt_node = ID(inst).instance_owner_node();
     if(tgt_node == my_node_id) {
       get_runtime()->optable.add_local_operation(ev, r);
       r->check_readiness(false, dma_queue);

@@ -210,6 +210,10 @@ namespace Legion {
     public:
       PhysicalUser& operator=(const PhysicalUser &rhs);
     public:
+      void pack_user(Serializer &rez, const AddressSpaceID target) const;
+      static PhysicalUser* unpack_user(Deserializer &derez, 
+              RegionTreeForest *forest, const AddressSpaceID source);
+    public:
       const RegionUsage usage;
       IndexSpaceExpression *const expr;
       const UniqueID op_id;
@@ -728,6 +732,7 @@ namespace Legion {
       static void handle_deletion(const void *args);
     public:
       RegionTreeForest *const forest;
+      const AddressSpaceID local_space;
       Operation *const op;
       const unsigned src_index;
       const unsigned dst_index;

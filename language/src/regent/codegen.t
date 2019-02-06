@@ -801,6 +801,76 @@ local function unpack_region(cx, region_expr, region_type, static_region_type)
   return expr.just(actions, r)
 end
 
+-- Utilities for importing raw C/C++ handles to Regent
+
+-- == sha256sum("import")[0:7]
+local IMPORT_SEMANTIC_TAG   = 0x68e67653
+-- == sha256sum("import")[8:15]
+local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
+
+local function tag_imported(cx, handle)
+  local attach = nil
+  local handle_type = handle.type
+  if handle_type == std.c.legion_index_space_t then
+    attach = std.c.legion_index_space_attach_semantic_information
+  elseif handle_type == std.c.legion_logical_region_t then
+    attach = std.c.legion_logical_region_attach_semantic_information
+  elseif handle_type == std.c.legion_logical_partition_t then
+    attach = std.c.legion_logical_partition_attach_semantic_information
+  else
+    assert(false, "unreachable")
+  end
+  return quote
+    do
+      var result = [IMPORT_SEMANTIC_VALUE]
+      var result_size : uint64 = [sizeof(uint32)]
+      [attach]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+        [&opaque](&result), result_size, false)
+    end
+  end
+end
+
+local function check_imported(cx, node, handle)
+  local retrieve = nil
+  local handle_type = handle.type
+  if handle_type == std.c.legion_index_space_t then
+    retrieve = std.c.legion_index_space_retrieve_semantic_information
+  elseif handle_type == std.c.legion_logical_region_t then
+    retrieve = std.c.legion_logical_region_retrieve_semantic_information
+  elseif handle_type == std.c.legion_logical_partition_t then
+    retrieve = std.c.legion_logical_partition_retrieve_semantic_information
+  else
+    assert(false, "unreachable")
+  end
+  return quote
+    do
+      var result : &opaque
+      var result_size : uint64 = 0
+      [retrieve]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+        &result, &result_size, true, true)
+      std.assert_error(result_size == 0,
+        [get_source_location(node) ..
+          ": cannot import a handle that is already imported"])
+    end
+  end
+end
+
+local function eq_struct(st, a, b)
+  local expr = `(true)
+  local entries = st:getentries()
+  for _, entry in ipairs(entries) do
+    local entry_name = entry[1] or entry.field
+    assert(type(entry_name) == "string")
+    local entry_type = entry[2] or entry.type
+    if entry_type:isstruct() then
+      expr = `([expr] and [eq_struct(entry_type, `([a].[entry_name]), `([b].[entry_name]))])
+    else
+      expr = `([expr] and ([a].[entry_name] == [b].[entry_name]))
+    end
+  end
+  return expr
+end
+
 local value = {}
 value.__index = value
 
@@ -3366,6 +3436,7 @@ local lift_cast_to_futures = terralib.memoize(
         replicable = false, 
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -3974,6 +4045,7 @@ function codegen.expr_ispace(cx, node)
   actions = quote
     [actions]
     var [i] = [ispace_type]{ impl = [is] }
+    [tag_imported(cx, is)]
     [bounds_actions]
   end
 
@@ -4088,6 +4160,7 @@ function codegen.expr_region(cx, node)
     c.legion_field_allocator_destroy(fsa)
     var [lr] = c.legion_logical_region_create([cx.runtime], [cx.context], [is], [fs], true)
     var [r] = [region_type]{ impl = [lr] }
+    [tag_imported(cx, lr)]
   end
   local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
   if not cx.variant:get_config_options().inner then
@@ -4203,6 +4276,7 @@ function codegen.expr_partition(cx, node)
     var [ip] = [index_partition_create]([args])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4288,6 +4362,7 @@ function codegen.expr_partition_equal(cx, node)
         -1 --[[ AUTO_GENERATE_ID ]])
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [tag_imported(cx, lp)]
     end
   end
 
@@ -4330,6 +4405,7 @@ function codegen.expr_partition_by_field(cx, node)
       field_id, [colors.value].impl, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4369,6 +4445,7 @@ function codegen.expr_partition_by_restriction(cx, node)
       [transform.value], [extent.value], c.COMPUTE_KIND, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4433,6 +4510,7 @@ function codegen.expr_image(cx, node)
       colors, c.COMPUTE_KIND, -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [parent.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4500,6 +4578,7 @@ function codegen.expr_preimage(cx, node)
       -1)
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], [region.value].impl, [ip])
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4537,6 +4616,7 @@ function codegen.expr_cross_product(cx, node)
     var ip = c.legion_terra_index_cross_product_get_partition([product])
     var [lp] = c.legion_logical_partition_create(
       [cx.runtime], [cx.context], lr.impl, ip)
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -4609,6 +4689,7 @@ function codegen.expr_cross_product_array(cx, node)
     [product].other_color = other_color
     var stop : double = c.legion_get_current_time_in_micros()/double(1e6)
     c.printf("codegen: cross_product_array %e\n", stop - start)
+    [tag_imported(cx, lp)]
   end
 
   return values.value(
@@ -6871,6 +6952,7 @@ local lift_unary_op_to_futures = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -6969,6 +7051,7 @@ local lift_binary_op_to_futures = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),
@@ -7072,6 +7155,7 @@ function codegen.expr_binary(cx, node)
       var [lp] = c.legion_logical_partition_create_by_tree(
         [cx.runtime], [cx.context],
         [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+      [tag_imported(cx, lp)]
     end
 
     return values.value(
@@ -7268,6 +7352,241 @@ function codegen.expr_future_get_result(cx, node)
   end
 end
 
+function codegen.expr_import_ispace(cx, node)
+  local ispace_type = node.expr_type
+  local value = codegen.expr(cx, node.value):read(cx)
+  local is = terralib.newsymbol(c.legion_index_space_t, "is")
+  local i = terralib.newsymbol(ispace_type, "i")
+
+  local it = false
+  if cache_index_iterator then
+    it = terralib.newsymbol(c.legion_terra_cached_index_iterator_t, "it")
+  end
+
+  local bounds_actions, domain, bounds = index_space_bounds(cx, is, ispace_type)
+  cx:add_ispace_root(ispace_type, is, it, domain, bounds)
+
+  local actions = quote
+    [value.actions];
+    [emit_debuginfo(node)];
+    var [is] = [value.value]
+    var [i] = [ispace_type] { impl = [is] }
+    [bounds_actions];
+    -- Consistency check on the imported index space
+    do
+      std.assert_error([domain].dim == [ispace_type.dim],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+          " is not a " ..  ispace_type.dim .. "D index space"])
+      std.assert_error(not
+        std.c.legion_index_space_has_parent_index_partition([cx.runtime], [is]),
+        [get_source_location(node) .. ": cannot import a subspace"])
+    end
+    [check_imported(cx, node, is)]
+    [tag_imported(cx, is)]
+  end
+  if cache_index_iterator then
+    actions = quote
+      [actions];
+      var [it] = c.legion_terra_cached_index_iterator_create(
+        [cx.runtime], [cx.context], [is])
+    end
+  end
+  return values.value(
+    node,
+    expr.just(actions, i),
+    ispace_type)
+end
+
+function codegen.expr_import_region(cx, node)
+  local region_type = std.as_read(node.expr_type)
+  local fspace_type = region_type:fspace()
+  local index_type = region_type:ispace().index_type
+
+  local ispace = codegen.expr(cx, node.ispace):read(cx)
+  local value = codegen.expr(cx, node.value):read(cx)
+  local src_field_ids = codegen.expr(cx, node.field_ids):read(cx)
+
+  local actions = quote
+    [ispace.actions];
+    [value.actions];
+    [src_field_ids.actions];
+    [emit_debuginfo(node)];
+  end
+
+  local r = terralib.newsymbol(region_type, "r")
+  local lr = terralib.newsymbol(c.legion_logical_region_t, "lr")
+  local pr = terralib.newsymbol(c.legion_physical_region_t, "pr")
+
+  local field_ids_type = std.as_read(node.field_ids.expr_type)
+  assert(field_ids_type:isarray())
+  local field_ids_symbol = terralib.newsymbol(field_ids_type, "fids")
+  actions = quote
+    [actions];
+    var [field_ids_symbol]
+    for i = 0, [field_ids_type.N] do
+      [field_ids_symbol][i] = [src_field_ids.value][i]
+    end
+  end
+
+  local field_paths, field_types = std.flatten_struct_fields(fspace_type)
+  local field_privileges = field_paths:map(function(_) return "reads_writes" end)
+  local field_id_offset = 0
+  local field_ids = field_paths:map(function(_)
+    local field_id = `([field_ids_symbol][ [field_id_offset] ])
+    field_id_offset = field_id_offset + 1
+    return field_id
+  end)
+  local fields_are_scratch = field_paths:map(function(_) return false end)
+  local physical_regions = field_paths:map(function(_) return pr end)
+  local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
+    data.zip(field_types, field_paths, field_ids, field_privileges):map(
+      function(field)
+        local field_type, field_path, field_id, field_privilege = unpack(field)
+        return terralib.newlist({
+          physical_region_get_base_pointer(cx, region_type, index_type, field_type, field_path, pr, field_id)})
+  end))))
+  pr_actions = pr_actions or terralib.newlist()
+  base_pointers = base_pointers or terralib.newlist()
+  strides = strides or terralib.newlist()
+
+  cx:add_region_root(region_type, r,
+                     field_paths,
+                     terralib.newlist({field_paths}),
+                     data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_types)),
+                     data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
+                     data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
+                     data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
+                     data.dict(data.zip(field_paths:map(data.hash), strides)))
+
+  -- Consistency check on the imported logical region handle
+  local check_actions = quote
+    std.assert_error(
+      [eq_struct(c.legion_index_space_t, `([ispace.value].impl), `([lr].index_space))],
+      [get_source_location(node) .. ": " .. pretty.entry_expr(node.ispace) ..
+      " is not the index space of " .. pretty.entry_expr(node.value)])
+    std.assert_error(
+      std.c.legion_field_space_has_fields([cx.runtime], [cx.context], [lr].field_space,
+        [field_ids_symbol], [field_ids_type.N]),
+      [get_source_location(node) .. ": found an invalid field id"])
+    [data.zip(field_ids, field_types):map(
+      function(pair)
+        local field_id, field_type = unpack(pair)
+        return quote
+          std.assert_error(
+            std.c.legion_field_id_get_size([cx.runtime], [cx.context], [lr].field_space, [field_id]) ==
+            [sizeof(field_type)],
+            [get_source_location(node) .. ": field size does not match"])
+        end
+      end)]
+  end
+
+  actions = quote
+    [actions];
+    var [lr] = [value.value]
+    var [r] = [region_type] { impl = [lr] }
+    [check_actions];
+    [check_imported(cx, node, lr)];
+    [tag_imported(cx, lr)]
+  end
+
+  local tag = terralib.newsymbol(c.legion_mapping_tag_id_t, "tag")
+  if not cx.variant:get_config_options().inner then
+    actions = quote
+      [actions];
+      var [tag] = 0
+      [codegen_hooks.gen_update_mapping_tag(tag, cx.task)]
+      var il = c.legion_inline_launcher_create_logical_region(
+        [lr], c.READ_WRITE, c.EXCLUSIVE, [lr], 0, false, 0, [tag]);
+      [data.zip(field_ids, field_types):map(
+         function(field)
+           local field_id, field_type = unpack(field)
+           if std.is_regent_array(field_type) then
+             return quote
+               for idx = 0, [field_type.N] do
+                 c.legion_inline_launcher_add_field(il, [field_id] + idx, true)
+               end
+             end
+           else
+             return `(c.legion_inline_launcher_add_field(il, [field_id], true))
+           end
+         end)]
+      var [pr] = c.legion_inline_launcher_execute([cx.runtime], [cx.context], il)
+      c.legion_inline_launcher_destroy(il)
+      c.legion_physical_region_wait_until_valid([pr])
+      [pr_actions]
+    end
+  else
+    actions = quote
+      [actions];
+      c.legion_runtime_unmap_all_regions([cx.runtime], [cx.context])
+      var [pr]
+    end
+  end
+
+  return values.value(
+    node,
+    expr.just(actions, r),
+    region_type)
+end
+
+function codegen.expr_import_partition(cx, node)
+  local partition_type = std.as_read(node.expr_type)
+  local region = codegen.expr(cx, node.region):read(cx)
+  local colors = codegen.expr(cx, node.colors):read(cx)
+  local colors_type = std.as_read(node.colors.expr_type)
+  local value = codegen.expr(cx, node.value):read(cx)
+
+  local actions = quote
+    [region.actions];
+    [colors.actions];
+    [value.actions];
+    [emit_debuginfo(node)];
+  end
+
+  local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
+
+  local check_actions = quote end
+  if partition_type:is_disjoint() then
+    check_actions = quote
+      std.assert_error(
+        c.legion_index_partition_is_disjoint([cx.runtime], [lp].index_partition),
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " is not a disjoint partition"])
+    end
+  end
+  check_actions = quote
+    [check_actions];
+    do
+      var parent = std.c.legion_logical_partition_get_parent_logical_region([cx.runtime], [lp])
+      std.assert_error([eq_struct(c.legion_logical_region_t, `([region.value].impl), parent)],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " is not a logical partition of " .. pretty.entry_expr(node.region)])
+    end
+    do
+      var cs = std.c.legion_index_partition_get_color_space([cx.runtime], [lp].index_partition)
+      var domain = std.c.legion_index_space_get_domain([cx.runtime], cs)
+      std.assert_error(domain.dim == [colors_type.dim],
+        [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
+        " does not have a " .. tostring(colors_type.dim) .. "D color space"])
+    end
+  end
+
+  actions = quote
+    [actions];
+    var [lp] = [value.value]
+    [check_actions];
+    [check_imported(cx, node, lp)];
+    [tag_imported(cx, lp)]
+  end
+
+  return values.value(
+    node,
+    expr.once_only(actions, `([partition_type] { impl = [lp] }), partition_type),
+    partition_type)
+end
+
 function codegen.expr(cx, node)
   if node:is(ast.typed.expr.Internal) then
     return codegen.expr_internal(cx, node)
@@ -7448,6 +7767,15 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.FutureGetResult) then
     return codegen.expr_future_get_result(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportIspace) then
+    return codegen.expr_import_ispace(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportRegion) then
+    return codegen.expr_import_region(cx, node)
+
+  elseif node:is(ast.typed.expr.ImportPartition) then
+    return codegen.expr_import_partition(cx, node)
 
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
@@ -9166,6 +9494,7 @@ local make_dummy_task = terralib.memoize(
         replicable = false,
       },
       region_divergence = false,
+      metadata = false,
       prototype = task,
       annotations = ast.default_annotations(),
       span = ast.trivial_span(),

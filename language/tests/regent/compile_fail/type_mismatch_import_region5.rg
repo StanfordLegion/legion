@@ -13,23 +13,15 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops23.rg:29: vectorization failed: loop body has an inner loop
---    for j in is do
---      ^
+-- type_mismatch_import_region5.rg:26: type mismatch in argument 4: expected uint32[1] but got uint32[2]
+--   var r = __import_region(is, int, raw_r, raw_fids)
+--                                                  ^
 
 import "regent"
 
-task foo() end
-
-task toplevel()
-  var is = ispace(int1d, 10)
-
-  __demand(__vectorize)
-  for i in is do
-    for j in is do
-      foo()
-    end
-  end
+task main()
+  var is = ispace(int1d, 5)
+  var raw_r : regentlib.c.legion_logical_region_t
+  var raw_fids : regentlib.c.legion_field_id_t[2]
+  var r = __import_region(is, int, raw_r, raw_fids)
 end
-
-regentlib.start(toplevel)

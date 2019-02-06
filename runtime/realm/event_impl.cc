@@ -97,7 +97,7 @@ namespace Realm {
     if(!id) return true; // special case: NO_EVENT has always triggered
     EventImpl *e = get_runtime()->get_event_impl(*this);
     bool poisoned = false;
-    if(e->has_triggered(ID(id).event.generation, poisoned)) {
+    if(e->has_triggered(ID(id).event_generation(), poisoned)) {
       // a poisoned event causes an exception because the caller isn't prepared for it
       if(poisoned) {
 #ifdef REALM_USE_EXCEPTIONS
@@ -120,7 +120,7 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return true; // special case: NO_EVENT has always triggered
     EventImpl *e = get_runtime()->get_event_impl(*this);
-    return e->has_triggered(ID(id).event.generation, poisoned);
+    return e->has_triggered(ID(id).event_generation(), poisoned);
   }
 
   // creates an event that won't trigger until all input events have
@@ -260,7 +260,7 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return;  // special case: never wait for NO_EVENT
     EventImpl *e = get_runtime()->get_event_impl(*this);
-    EventImpl::gen_t gen = ID(id).event.generation;
+    EventImpl::gen_t gen = ID(id).event_generation();
 
     // early out case too
     if(e->has_triggered(gen, poisoned)) return;
@@ -314,7 +314,7 @@ namespace Realm {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     if(!id) return;  // special case: never wait for NO_EVENT
     EventImpl *e = get_runtime()->get_event_impl(*this);
-    EventImpl::gen_t gen = ID(id).event.generation;
+    EventImpl::gen_t gen = ID(id).event_generation();
 
     // early out case too
     if(e->has_triggered(gen, poisoned)) return;
@@ -454,7 +454,7 @@ namespace Realm {
   Barrier Barrier::advance_barrier(void) const
   {
     ID nextid(id);
-    nextid.barrier.generation++;
+    nextid.barrier_generation() = ID(id).barrier_generation() + 1;
 
     Barrier nextgen = nextid.convert<Barrier>();
     nextgen.timestamp = 0;
@@ -471,7 +471,7 @@ namespace Realm {
 			 ",%d) %d", id, gen, enclosing.id, enclosing.gen, delta);
 #endif
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
-    impl->adjust_arrival(ID(id).barrier.generation, delta, timestamp, Event::NO_EVENT,
+    impl->adjust_arrival(ID(id).barrier_generation(), delta, timestamp, Event::NO_EVENT,
 			 my_node_id, false /*!forwarded*/,
 			 0, 0);
 
@@ -485,7 +485,7 @@ namespace Realm {
   Barrier Barrier::get_previous_phase(void) const
   {
     ID previd(id);
-    previd.barrier.generation--;
+    previd.barrier_generation() = ID(id).barrier_generation() - 1;
 
     Barrier prevgen = previd.convert<Barrier>();
     prevgen.timestamp = 0;
@@ -505,7 +505,7 @@ namespace Realm {
 #endif
     // arrival uses the timestamp stored in this barrier object
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
-    impl->adjust_arrival(ID(id).barrier.generation, -count, timestamp, wait_on,
+    impl->adjust_arrival(ID(id).barrier_generation(), -count, timestamp, wait_on,
 			 my_node_id, false /*!forwarded*/,
 			 reduce_value, reduce_value_size);
   }
@@ -513,7 +513,7 @@ namespace Realm {
   bool Barrier::get_result(void *value, size_t value_size) const
   {
     BarrierImpl *impl = get_runtime()->get_barrier_impl(*this);
-    return impl->get_result(ID(id).barrier.generation, value, value_size);
+    return impl->get_result(ID(id).barrier_generation(), value, value_size);
   }
 
 
@@ -546,15 +546,15 @@ namespace Realm {
 
 	{
 	  AutoHSLLock al(impl->mutex);
-	  if(impl->generation >= id.event.generation) {
+	  if(impl->generation >= id.event_generation()) {
 	    // already triggered!?
 	    assert(0);
-	  } else if((impl->generation + 1) == id.event.generation) {
+	  } else if((impl->generation + 1) == id.event_generation()) {
 	    // current generation
 	    waiters_copy.assign(impl->current_local_waiters.begin(),
 				impl->current_local_waiters.end());
 	  } else {
-	    std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = impl->future_local_waiters.find(id.event.generation);
+	    std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = impl->future_local_waiters.find(id.event_generation());
 	    if(it != impl->future_local_waiters.end())
 	      waiters_copy.assign(it->second.begin(), it->second.end());
 	  }
@@ -1229,7 +1229,7 @@ namespace Realm {
 #endif
 
       // we may send a trigger message in response to the subscription
-      EventImpl::gen_t subscribe_gen = ID(args.event).event.generation;
+      EventImpl::gen_t subscribe_gen = ID(args.event).event_generation();
       EventImpl::gen_t trigger_gen = 0;
       bool subscription_recorded = false;
 
@@ -1264,7 +1264,7 @@ namespace Realm {
 	log_event.debug() << "event subscription immediate trigger: node=" << args.node
 			  << " event=" << args.event << " (<= " << trigger_gen << ")";
 	ID trig_id(args.event);
-	trig_id.event.generation = trigger_gen;
+	trig_id.event_generation() = trigger_gen;
 	Event triggered = trig_id.convert<Event>();
 
 	// it is legal to use poisoned generation info like this because it is always
@@ -1283,7 +1283,7 @@ namespace Realm {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       log_event.debug() << "remote trigger of event " << args.event << " from node " << args.node;
       GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-      impl->trigger(ID(args.event).event.generation, args.node, args.poisoned);
+      impl->trigger(ID(args.event).event_generation(), args.node, args.poisoned);
     }
 
   template <typename T>
@@ -1423,7 +1423,7 @@ namespace Realm {
 			<< " poisoned=" << ArrayOstreamHelper<EventImpl::gen_t>(new_poisoned_gens, new_poisoned_count);
 
       GenEventImpl *impl = get_runtime()->get_genevent_impl(args.event);
-      impl->process_update(ID(args.event).event.generation, new_poisoned_gens, new_poisoned_count);
+      impl->process_update(ID(args.event).event_generation(), new_poisoned_gens, new_poisoned_count);
     }
 
 
@@ -1777,7 +1777,7 @@ namespace Realm {
 			 << " in=" << args.wait_on << " out=" << args.barrier
 			 << " (" << args.barrier.timestamp << ")";
       BarrierImpl *impl = get_runtime()->get_barrier_impl(args.barrier);
-      EventImpl::gen_t gen = ID(args.barrier).barrier.generation;
+      EventImpl::gen_t gen = ID(args.barrier).barrier_generation();
       NodeID sender = args.sender;
       bool forwarded = false;
       if(args.sender < 0) {
@@ -1869,7 +1869,7 @@ static void *bytedup(const void *data, size_t datalen)
 	log_barrier.info() << "deferred barrier arrival: " << barrier
 			   << " (" << barrier.timestamp << "), delta=" << delta;
 	BarrierImpl *impl = get_runtime()->get_barrier_impl(barrier);
-	impl->adjust_arrival(ID(barrier).barrier.generation, delta, barrier.timestamp, Event::NO_EVENT,
+	impl->adjust_arrival(ID(barrier).barrier_generation(), delta, barrier.timestamp, Event::NO_EVENT,
 			     sender, forwarded,
 			     data, datalen);
         return true;
@@ -1967,7 +1967,11 @@ static void *bytedup(const void *data, size_t datalen)
 	//  trigger here first
         if(owner != my_node_id) {
 	  ID wait_id(wait_on);
-	  int wait_node = (wait_id.is_event() ? wait_id.event.creator_node : wait_id.barrier.creator_node);
+	  int wait_node;
+	  if(wait_id.is_event())
+	    wait_node = wait_id.event_creator_node();
+	  else
+	    wait_node = wait_id.barrier_creator_node();
 	  if(wait_node != (int)my_node_id) {
 	    // let deferral happen on owner node (saves latency if wait_on event
 	    //   gets triggered there)
@@ -2108,7 +2112,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  if(local_notifications.empty() && (remote_notifications.size() == 1) &&
 	     generations.empty() && (gen_subscribed <= generation) &&
 	     (redop == 0) &&
-             (ID(me).barrier.creator_node == my_node_id)) {
+             (NodeID(ID(me).barrier_creator_node()) == my_node_id)) {
 	    log_barrier.info() << "barrier migration: " << me << " -> " << remote_notifications[0].node;
 	    migration_target = remote_notifications[0].node;
 	    owner = migration_target;
@@ -2295,7 +2299,7 @@ static void *bytedup(const void *data, size_t datalen)
     /*static*/ void BarrierSubscribeMessage::handle_request(BarrierSubscribeMessage::RequestArgs args)
     {
       ID id(args.barrier_id);
-      id.barrier.generation = args.subscribe_gen;
+      id.barrier_generation() = args.subscribe_gen;
       Barrier b = id.convert<Barrier>();
       BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 
@@ -2403,7 +2407,7 @@ static void *bytedup(const void *data, size_t datalen)
 		       args.barrier_id, args.previous_gen, args.trigger_gen);
 
       ID id(args.barrier_id);
-      id.barrier.generation = args.trigger_gen;
+      id.barrier_generation() = args.trigger_gen;
       Barrier b = id.convert<Barrier>();
       BarrierImpl *impl = get_runtime()->get_barrier_impl(b);
 

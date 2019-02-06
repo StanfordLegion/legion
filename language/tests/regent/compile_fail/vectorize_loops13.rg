@@ -19,11 +19,11 @@
 
 import "regent"
 
-task toplevel()
-  var is = ispace(int1d, 5)
-  var r = region(is, int)
+task f(r : region(ispace(int1d), int))
+where reads writes(r)
+do
   __demand(__vectorize)
-  for p in is do
+  for p in r.ispace do
     r[p] = [int](p)
   end
   var sum = 0
@@ -32,5 +32,3 @@ task toplevel()
   end
   regentlib.assert(sum == 10, "test failed")
 end
-
-regentlib.start(toplevel)

@@ -13,14 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- annotations_for_num_vectorize.rg:24: option __demand(__vectorize) is not permitted
---   for i = 0, 10 do end
---     ^
+-- type_mismatch_import_region1.rg:27: type mismatch in argument 1: expected index space but got int32
+--   var r = __import_region(x, int, raw_r, raw_fids)
+--                           ^
 
 import "regent"
 
-task f()
-  __demand(__vectorize)
-  for i = 0, 10 do end
+task main()
+  var x : int
+  var is = ispace(int1d, 5)
+  var raw_r : regentlib.c.legion_logical_region_t
+  var raw_fids : regentlib.c.legion_field_id_t[1]
+  var r = __import_region(x, int, raw_r, raw_fids)
 end
-f:compile()

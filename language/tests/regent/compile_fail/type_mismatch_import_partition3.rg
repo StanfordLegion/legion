@@ -13,21 +13,16 @@
 -- limitations under the License.
 
 -- fails-with:
--- vectorize_loops22.rg:31: vectorization failed: loop body has a future access
---     @e = foo()
---             ^
+-- type_mismatch_import_partition3.rg:27: type mismatch in argument 3: expected ispace but got int32
+--   var p = __import_partition(disjoint, r, x, raw_p)
+--                                           ^
 
 import "regent"
 
-task foo()
-  return 1
-end
-
-task toplevel()
-  var n = 8
-  var r = region(ispace(ptr, n), int)
-  __demand(__vectorize)
-  for e in r do
-    @e = foo()
-  end
+task main()
+  var x : int
+  var is = ispace(int1d, 5)
+  var r = region(is, int)
+  var raw_p : regentlib.c.legion_logical_partition_t
+  var p = __import_partition(disjoint, r, x, raw_p)
 end

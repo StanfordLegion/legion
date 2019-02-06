@@ -80,6 +80,17 @@ int main(int argc, const char *argv[])
     assert(hi.is_memory());
   }
 
+  // ib_memory
+  {
+    ID lo = ID::make_ib_memory(0, 0);
+    ID hi = ID::make_ib_memory(-1U, -1U);
+    assert(ranges.count(lo.id) == 0);
+    ranges[lo.id] = hi.id;
+    names[lo.id] = "ib_memory";
+    assert(lo.is_ib_memory());
+    assert(hi.is_ib_memory());
+  }
+
   // instance
   {
     ID lo = ID::make_instance(0, 0, 0, 0);
@@ -113,17 +124,6 @@ int main(int argc, const char *argv[])
     assert(hi.is_procgroup());
   }
 
-  // idxspace
-  {
-    ID lo = ID::make_idxspace(0, 0, 0);
-    ID hi = ID::make_idxspace(-1U, -1U, -1U);
-    assert(ranges.count(lo.id) == 0);
-    ranges[lo.id] = hi.id;
-    names[lo.id] = "idxspace";
-    assert(lo.is_idxspace());
-    assert(hi.is_idxspace());
-  }
-
   // sparsity
   {
     ID lo = ID::make_sparsity(0, 0, 0);
@@ -133,17 +133,6 @@ int main(int argc, const char *argv[])
     names[lo.id] = "sparsity";
     assert(lo.is_sparsity());
     assert(hi.is_sparsity());
-  }
-
-  // allocator
-  {
-    ID lo = ID::make_allocator(0, 0, 0);
-    ID hi = ID::make_allocator(-1U, -1U, -1U);
-    assert(ranges.count(lo.id) == 0);
-    ranges[lo.id] = hi.id;
-    names[lo.id] = "allocator";
-    assert(lo.is_allocator());
-    assert(hi.is_allocator());
   }
 
   ID::IDType prev = 0;

@@ -2664,6 +2664,8 @@ function reduction_analysis.top_task(task_cx, node)
   assert(reduction_op ~= nil)
   -- TODO: convert reductions with - or / into fold-and-reduces
   assert(reduction_op ~= "-" and reduction_op ~= "/")
+  assert(node.metadata.reduction == reduction_var)
+  assert(node.metadata.op == reduction_op)
   task_cx.reduction_info = {
     op = reduction_op,
     symbol = reduction_var,
@@ -3325,6 +3327,7 @@ function parallelize_tasks.top_task(global_cx, node)
       replicable = false,
     },
     region_divergence = false,
+    metadata = false,
     prototype = task,
     annotations = node.annotations {
       parallel = ast.annotation.Forbid { value = false },
@@ -3344,6 +3347,7 @@ function parallelize_tasks.entry(node)
   if node:is(ast.typed.top.Task) then
     if global_context[node.prototype] then return node end
     if node.annotations.parallel:is(ast.annotation.Demand) then
+      assert(node.metadata)
       check_parallelizable.top_task(node)
       local task_name = node.name
       local new_task_code, cx = parallelize_tasks.top_task(global_context, node)

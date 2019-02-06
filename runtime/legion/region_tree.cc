@@ -2115,7 +2115,8 @@ namespace Legion {
               if (!overlap)
                 continue;
               ApEvent ready = target_views[idx]->register_user(usage, overlap, 
-               local_expr,op_id,index,term_event,map_applied_events,trace_info);
+                  local_expr, op_id, index, term_event, map_applied_events,
+                  trace_info, runtime->address_space);
               if (already_set[idx])
                 ready = Runtime::merge_events(&trace_info, ready,
                                               targets[idx].get_ready_event());
@@ -2142,8 +2143,9 @@ namespace Legion {
             const FieldMask overlap = inst_mask & set_mask;
             if (!overlap)
               continue;
-            ApEvent ready = target_views[idx]->register_user(usage, overlap, 
-              local_expr, op_id,index,term_event,map_applied_events,trace_info);
+            ApEvent ready = target_views[idx]->register_user(usage, overlap,
+                local_expr, op_id, index, term_event, map_applied_events,
+                trace_info, runtime->address_space);
             // Record the event as the precondition for the task
             if (remote_ready.exists())
               targets[idx].set_ready_event(
@@ -2339,7 +2341,8 @@ namespace Legion {
               runtime->forest->union_index_spaces(it->elements);
             ApEvent ready = vit->first->register_user(usage, it->set_mask,
                                       expr, op_id, index, term_event,
-                                      map_applied_events, trace_info);
+                                      map_applied_events, trace_info,
+                                      runtime->address_space);
             if (ready.exists())
               acquired_events.insert(ready);
           }
@@ -2350,7 +2353,8 @@ namespace Legion {
             vit->second.begin();
           ApEvent ready = vit->first->register_user(usage, first->second,
                                     first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info);
+                                    map_applied_events, trace_info,
+                                    runtime->address_space);
           if (ready.exists())
             acquired_events.insert(ready);
         }
@@ -2452,7 +2456,8 @@ namespace Legion {
               runtime->forest->union_index_spaces(it->elements);
             ApEvent ready = vit->first->register_user(usage, it->set_mask,
                                       expr, op_id, index, term_event,
-                                      map_applied_events, trace_info);
+                                      map_applied_events, trace_info,
+                                      runtime->address_space);
             if (ready.exists())
               released_events.insert(ready);
           }
@@ -2463,7 +2468,8 @@ namespace Legion {
             vit->second.begin();
           ApEvent ready = vit->first->register_user(usage, first->second,
                                     first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info);
+                                    map_applied_events, trace_info,
+                                    runtime->address_space);
           if (ready.exists())
             released_events.insert(ready);
         }
@@ -3371,7 +3377,7 @@ namespace Legion {
             continue;
           const ApEvent ready = local_view->register_user(usage, 
                   it->set_mask, user_expr, op_id, index, term_event,
-                  map_applied_events, trace_info);
+                  map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             effects_events.insert(ready);
         }
@@ -3384,7 +3390,7 @@ namespace Legion {
         {
           const ApEvent ready = local_view->register_user(usage, 
                   first->second, first->first, op_id, index, term_event,
-                  map_applied_events, trace_info);
+                  map_applied_events, trace_info, runtime->address_space);
           if (ready.exists())
             effects_events.insert(ready);
         }
@@ -3422,8 +3428,8 @@ namespace Legion {
       const RegionUsage usage(req);
       ApEvent done = local_view->register_user(usage, ext_mask, expr,
                                                op_id, index, term_event,
-                                               map_applied_events, 
-                                               trace_info);
+                                               map_applied_events, trace_info,
+                                               runtime->address_space);
       FieldMaskSet<EquivalenceSet> alt_sets;
       FieldMaskSet<EquivalenceSet> to_delete;
       RemoteEqTracker remote_tracker(runtime);
