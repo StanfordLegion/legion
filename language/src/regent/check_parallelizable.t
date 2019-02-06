@@ -424,7 +424,13 @@ function analyze_access.expr_deref(cx, node, privilege, field_path)
   local expr_type = node.expr_type
   local private, center = analyze_access.expr(cx, node.value, std.reads)
   if std.is_ref(expr_type) then
-    cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
+    -- We disallow any multi-region pointer in a parallelizable loop
+    -- when the task demands partition driven auto-parallelization
+    if cx.demand_parallel and #expr_type:bounds() > 1 then
+      cx:mark_inadmissible(node)
+    else
+      cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
+    end
   elseif std.as_read(node.value.expr_type):ispointer() then
     -- We disallow any raw pointer dereferences in a parallelizable loop
     -- as we do not know about their aliasing.
