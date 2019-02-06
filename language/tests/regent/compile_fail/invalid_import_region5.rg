@@ -19,18 +19,18 @@ import "regent"
 
 local c = regentlib.c
 
-task create_logical_region(runtime : regentlib.c.legion_runtime_t)
-  var is = c.legion_index_space_create(runtime, __context(), 1)
-  var fs = c.legion_field_space_create(runtime, __context())
-  var alloc = c.legion_field_allocator_create(runtime, __context(), fs)
+task create_logical_region()
+  var is = c.legion_index_space_create(__runtime(), __context(), 1)
+  var fs = c.legion_field_space_create(__runtime(), __context())
+  var alloc = c.legion_field_allocator_create(__runtime(), __context(), fs)
   c.legion_field_allocator_allocate_field(alloc, [sizeof(int)], 123)
   c.legion_field_allocator_destroy(alloc)
-  var lr = c.legion_logical_region_create(runtime, __context(), is, fs, false)
+  var lr = c.legion_logical_region_create(__runtime(), __context(), is, fs, false)
   return lr
 end
 
 task main()
-  var raw_r = create_logical_region(__runtime())
+  var raw_r = create_logical_region()
   var raw_is = raw_r.index_space
   var raw_fids : c.legion_field_id_t[1] = array(123U)
 
