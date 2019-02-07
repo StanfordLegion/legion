@@ -25,6 +25,7 @@ do
   for e in r do
     x += @e
   end
+  return x
 end
 
 task main()

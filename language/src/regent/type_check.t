@@ -3912,7 +3912,66 @@ function type_check.stat(cx, node)
   return type_check_stat(cx)(node)
 end
 
-function type_check.top_task_param(cx, node, mapping, is_defined)
+local opaque_types = {
+  [std.c.legion_domain_point_iterator_t]       = true,
+  [std.c.legion_coloring_t]                    = true,
+  [std.c.legion_domain_coloring_t]             = true,
+  [std.c.legion_point_coloring_t]              = true,
+  [std.c.legion_domain_point_coloring_t]       = true,
+  [std.c.legion_multi_domain_point_coloring_t] = true,
+  [std.c.legion_index_space_allocator_t]       = true,
+  [std.c.legion_field_allocator_t]             = true,
+  [std.c.legion_argument_map_t]                = true,
+  [std.c.legion_predicate_t]                   = true,
+  [std.c.legion_future_t]                      = true,
+  [std.c.legion_future_map_t]                  = true,
+  [std.c.legion_task_launcher_t]               = true,
+  [std.c.legion_index_launcher_t]              = true,
+  [std.c.legion_inline_launcher_t]             = true,
+  [std.c.legion_copy_launcher_t]               = true,
+  [std.c.legion_index_copy_launcher_t]         = true,
+  [std.c.legion_acquire_launcher_t]            = true,
+  [std.c.legion_release_launcher_t]            = true,
+  [std.c.legion_attach_launcher_t]             = true,
+  [std.c.legion_must_epoch_launcher_t]         = true,
+  [std.c.legion_physical_region_t]             = true,
+  [std.c.legion_index_iterator_t]              = true,
+  [std.c.legion_task_t]                        = true,
+  [std.c.legion_inline_t]                      = true,
+  [std.c.legion_mappable_t]                    = true,
+  [std.c.legion_region_requirement_t]          = true,
+  [std.c.legion_machine_t]                     = true,
+  [std.c.legion_mapper_t]                      = true,
+  [std.c.legion_default_mapper_t]              = true,
+  [std.c.legion_processor_query_t]             = true,
+  [std.c.legion_memory_query_t]                = true,
+  [std.c.legion_machine_query_interface_t]     = true,
+  [std.c.legion_execution_constraint_set_t]    = true,
+  [std.c.legion_layout_constraint_set_t]       = true,
+  [std.c.legion_task_layout_constraint_set_t]  = true,
+  [std.c.legion_physical_instance_t]           = true,
+  [std.c.legion_field_map_t]                   = true,
+}
+
+do
+  for d = 1, std.config["legion-dim"] do
+    local dim = tostring(d)
+    opaque_types[ std.c["legion_rect_in_domain_iterator_" .. dim .. "d_t"] ] = true
+    opaque_types[ std.c["legion_deferred_buffer_char_" .. dim .. "d_t"] ]    = true
+    opaque_types[ std.c["legion_accessor_array_" .. dim .. "d_t"] ]          = true
+  end
+end
+
+local function is_param_type_dangerous(param_type)
+  return opaque_types[param_type] or param_type:ispointer()
+end
+
+local function is_param_type_inadmissible(param_type)
+  return param_type == std.c.legion_runtime_t or
+         param_type == std.c.legion_context_t
+end
+
+function type_check.top_task_param(cx, node, task, mapping, is_defined)
   local param_type = node.symbol:gettype()
   cx.type_env:insert(node, node.symbol, std.rawref(&param_type))
 
@@ -3924,6 +3983,20 @@ function type_check.top_task_param(cx, node, mapping, is_defined)
                   " have the same type, but are required to be distinct")
     end
     mapping[param_type] = node.symbol
+  end
+
+  -- Check for parameters with inadmissible types.
+  if is_param_type_inadmissible(param_type) then
+    report.error(node, "parameter " .. tostring(node.symbol) .. " has inadmissible type " ..
+                tostring(param_type))
+  end
+
+  -- Warn for parameters with dangerous types used unless the task is an inline task.
+  if is_param_type_dangerous(param_type) and
+     not (std.config["inline"] and task.annotations.inline:is(ast.annotation.Demand))
+  then
+    report.warn(node, "WARNING: parameter " .. tostring(node.symbol) .. " has raw pointer type " ..
+                tostring(param_type) .. ". please consider replacing it with a non-pointer type.")
   end
 
   -- Check for use of futures in a defined task.
@@ -3952,7 +4025,7 @@ function type_check.top_task(cx, node)
   local mapping = {}
   local params = node.params:map(
     function(param)
-      return type_check.top_task_param(cx, param, mapping, is_defined)
+      return type_check.top_task_param(cx, param, node, mapping, is_defined)
     end)
   local prototype = node.prototype
   prototype:set_param_symbols(
