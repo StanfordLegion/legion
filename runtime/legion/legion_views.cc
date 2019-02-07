@@ -2527,6 +2527,19 @@ namespace Legion {
           }
           if (!!local_mask)
           {
+            // See if we need to make the current users data structure
+            if (current_users == NULL)
+            {
+              // Prevent races between multiple added users at the same time
+              AutoLock v_lock(view_lock);
+              // See if we lost the race
+              if (current_users == NULL)
+              {
+                current_users = 
+                 new ExprView(context, manager, this, manager->instance_domain);
+                current_users->add_reference();
+              }
+            }
             // Add our local user
             add_internal_task_user(usage, user_expr, local_mask, term_event,
                                    op_id, index, applied_events, trace_info);
@@ -2871,6 +2884,19 @@ namespace Legion {
           // If we have local fields to handle do that here
           if (!!local_mask)
           {
+            // See if we need to make the current users data structure
+            if (current_users == NULL)
+            {
+              // Prevent races between multiple added users at the same time
+              AutoLock v_lock(view_lock);
+              // See if we lost the race
+              if (current_users == NULL)
+              {
+                current_users = 
+                 new ExprView(context, manager, this, manager->instance_domain);
+                current_users->add_reference();
+              }
+            }
             const RegionUsage usage(reading ? READ_ONLY:READ_WRITE,EXCLUSIVE,0);
             add_internal_copy_user(usage, copy_expr, local_mask, term_event, 
                                    op_id, index, applied_events, trace_info);
