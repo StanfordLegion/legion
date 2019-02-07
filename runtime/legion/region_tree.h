@@ -106,13 +106,13 @@ namespace Legion {
                                CopyFillAggregator *&output,
                                const std::set<ApEvent> &remote,
                                std::vector<InstanceView*> &views, 
-                               std::set<RtEvent> &map_applied,
+                               RtUserEvent map_applied,
                                ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
             local_exprs(exprs), req(r), op(o), index(idx), 
             term_event(term), targets(t), trace_info(info),
             output_aggregator(output), remote_ready(remote), 
-            target_views(views), map_applied_events(map_applied),
+            target_views(views), map_applied_done(map_applied),
             result(res) { }
       public:
         const FieldMaskSet<IndexSpaceExpression> &local_exprs;
@@ -125,7 +125,7 @@ namespace Legion {
         CopyFillAggregator *const output_aggregator;
         const std::set<ApEvent> &remote_ready;
         std::vector<InstanceView*> &target_views;
-        std::set<RtEvent> &map_applied_events;
+        RtUserEvent map_applied_done;
         ApEvent &result;
       };
     public:

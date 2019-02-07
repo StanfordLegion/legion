@@ -2042,12 +2042,14 @@ namespace Legion {
                          ApEvent &result)
     //--------------------------------------------------------------------------
     {
+      RtUserEvent map_applied_done = Runtime::create_rt_user_event();
+      map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(local_exprs, req, op,
                                          op->get_unique_op_id(), index,
                                          term_event, targets,
                                          trace_info, output_aggregator,
                                          remote_ready, target_views,
-                                         map_applied_events, result);
+                                         map_applied_done, result);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -2058,10 +2060,16 @@ namespace Legion {
     {
       const DeferPhysicalRegistrationArgs *dargs = 
         (const DeferPhysicalRegistrationArgs*)args;
+      std::set<RtEvent> map_applied_events;
       dargs->result = physical_perform_registration(dargs->local_exprs,
           dargs->req, dargs->op, dargs->index, dargs->term_event, 
           dargs->targets, dargs->trace_info, dargs->output_aggregator, 
-          dargs->remote_ready, dargs->target_views, dargs->map_applied_events);
+          dargs->remote_ready, dargs->target_views, map_applied_events);
+      if (!map_applied_events.empty())
+        Runtime::trigger_event(dargs->map_applied_done,
+            Runtime::merge_events(map_applied_events));
+      else
+        Runtime::trigger_event(dargs->map_applied_done);
     }
 
     //--------------------------------------------------------------------------
