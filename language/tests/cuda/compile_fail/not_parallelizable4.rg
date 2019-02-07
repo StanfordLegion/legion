@@ -12,30 +12,17 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- runs-with:
--- [["-fcuda", "1", "-foverride-demand-cuda", "1", "-ll:gpu", "1", "-fflow", "0" ]]
+-- fails-with:
+-- not_parallelizable4.rg:26: CUDA code generation failed: found a region access outside parallelizable loops
+--     regentlib.assert(@e == 123, "test failed")
+--                      ^
 
 import "regent"
 
 __demand(__cuda)
-task init(r : region(ispace(int1d), int))
-where writes(r) do
-  for e in r do
-    r[(e + 1) % r.bounds] = 123
-  end
-end
-
 task check(r : region(ispace(int1d), int))
-where reads(r) do
+where reads writes(r) do
   for e in r do
     regentlib.assert(@e == 123, "test failed")
   end
 end
-
-task main()
-  var r = region(ispace(int1d, 100), int)
-  init(r)
-  check(r)
-end
-
-regentlib.start(main)

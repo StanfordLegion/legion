@@ -509,7 +509,6 @@ function analyze_access.expr_regent_cast(cx, node, privilege, field_path)
 end
 
 local whitelist = {
-  [sizeof]                                  = true,
   [array]                                   = true,
   [arrayof]                                 = true,
   [vector]                                  = true,
@@ -518,12 +517,16 @@ local whitelist = {
   [std.assert_error]                        = true,
 }
 
-local function is_admissible_function(fn)
-  return std.is_math_fn(fn) or whitelist[fn]
+local function is_admissible_function(cx, fn)
+  if cx.demand_cuda then
+    return std.is_math_fn(fn) or fn == array or fn == arrayof
+  else
+    return std.is_math_fn(fn) or whitelist[fn]
+  end
 end
 
 function analyze_access.expr_call(cx, node, privilege, field_path)
-  if not is_admissible_function(node.fn.value) then
+  if not is_admissible_function(cx, node.fn.value) then
     cx:mark_inadmissible(node)
   end
   node.args:map(function(arg)

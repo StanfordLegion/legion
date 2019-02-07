@@ -283,6 +283,11 @@ function normalize_access.stat_return(stats, stat)
   end
 end
 
+function normalize_access.stat_expr(stats, stat)
+  local expr = normalize_access.expr(stats, stat.expr, false)
+  stats:insert(stat { expr = expr })
+end
+
 function normalize_access.pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_access_stat_table = {
@@ -298,9 +303,9 @@ local normalize_access_stat_table = {
   [ast.typed.stat.Assignment]      = normalize_access.stat_assignment_or_reduce,
   [ast.typed.stat.Reduce]          = normalize_access.stat_assignment_or_reduce,
   [ast.typed.stat.Return]          = normalize_access.stat_return,
+  [ast.typed.stat.Expr]            = normalize_access.stat_expr,
 
   [ast.typed.stat.Break]           = normalize_access.pass_through_stat,
-  [ast.typed.stat.Expr]            = normalize_access.pass_through_stat,
   [ast.typed.stat.ParallelPrefix]  = normalize_access.pass_through_stat,
   [ast.typed.stat.RawDelete]       = normalize_access.pass_through_stat,
   [ast.typed.stat.Fence]           = normalize_access.pass_through_stat,
