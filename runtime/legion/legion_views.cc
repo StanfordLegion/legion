@@ -2502,48 +2502,29 @@ namespace Legion {
           // them here too since the owner isn't going to send us any
           // updates itself, Do this after sending the message to make
           // sure that we see a sound set of local fields
-          FieldMask local_mask;
-          std::set<RtEvent> wait_for;
           AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-          // Iterate until we have nothing left to wait for
-          do 
+          // Only need to add it if it's still replicated or we've
+          // requested for it to be replicated because once we request
+          // it then the owner will stop sending us our own updates
+          FieldMask local_mask = user_mask & replicated_fields;
+          if (repl_ptr.replicated_requests != NULL)
           {
-            if (!wait_for.empty())
-            {
-              const RtEvent wait_on = Runtime::merge_events(wait_for);
-              wait_for.clear();
-              if (wait_on.exists() && !wait_on.has_triggered())
-              {
-                // Have to release the lock when we wait so we can 
-                // handle the responses coming back
-                r_lock.release();
-                wait_on.wait();
-                r_lock.reacquire();
-              }
-              else
-                break;
-            }
-            local_mask = user_mask & replicated_fields;
-            if (repl_ptr.replicated_requests != NULL)
-            {
 #ifdef DEBUG_LEGION
-              assert(!repl_ptr.replicated_requests->empty());
+            assert(!repl_ptr.replicated_requests->empty());
 #endif
-              for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                    it = repl_ptr.replicated_requests->begin();
-                    it != repl_ptr.replicated_requests->end(); it++)
-              {
-                const FieldMask overlap = user_mask & it->second;
-                if (!overlap)
-                  continue;
-                wait_for.insert(it->first);
+            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_requests->begin();
+                  it != repl_ptr.replicated_requests->end(); it++)
+            {
+              const FieldMask overlap = user_mask & it->second;
+              if (!overlap)
+                continue;
 #ifdef DEBUG_LEGION
-                assert(overlap * local_mask);
+              assert(overlap * local_mask);
 #endif
-                local_mask |= overlap;
-              }
+              local_mask |= overlap;
             }
-          } while (!wait_for.empty());
+          }
           if (!!local_mask)
           {
             // Add our local user
@@ -2864,48 +2845,29 @@ namespace Legion {
         // Now see if we have any local fields we need to apply here 
         unsigned current_added_users = 0;
         {
-          FieldMask local_mask;
-          std::set<RtEvent> wait_for;
           AutoLock r_lock(replicated_lock,1,false/*exclusive*/);
-          // Iterate until we have nothing left to wait for
-          do 
+          // Only need to add it if it's still replicated or we've
+          // requested for it to be replicated because once we request
+          // it then the owner will stop sending us our own updates
+          FieldMask local_mask = copy_mask & replicated_fields;
+          if (repl_ptr.replicated_requests != NULL)
           {
-            if (!wait_for.empty())
-            {
-              const RtEvent wait_on = Runtime::merge_events(wait_for);
-              wait_for.clear();
-              if (wait_on.exists() && !wait_on.has_triggered())
-              {
-                // Have to release the lock when we wait so we can 
-                // handle the responses coming back
-                r_lock.release();
-                wait_on.wait();
-                r_lock.reacquire();
-              }
-              else
-                break;
-            }
-            local_mask = copy_mask & replicated_fields;
-            if (repl_ptr.replicated_requests != NULL)
-            {
 #ifdef DEBUG_LEGION
-              assert(!repl_ptr.replicated_requests->empty());
+            assert(!repl_ptr.replicated_requests->empty());
 #endif
-              for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
-                    it = repl_ptr.replicated_requests->begin();
-                    it != repl_ptr.replicated_requests->end(); it++)
-              {
-                const FieldMask overlap = copy_mask & it->second;
-                if (!overlap)
-                  continue;
-                wait_for.insert(it->first);
+            for (LegionMap<RtUserEvent,FieldMask>::aligned::const_iterator
+                  it = repl_ptr.replicated_requests->begin();
+                  it != repl_ptr.replicated_requests->end(); it++)
+            {
+              const FieldMask overlap = copy_mask & it->second;
+              if (!overlap)
+                continue;
 #ifdef DEBUG_LEGION
-                assert(overlap * local_mask);
+              assert(overlap * local_mask);
 #endif
-                local_mask |= overlap;
-              }
+              local_mask |= overlap;
             }
-          } while (!wait_for.empty());
+          }
           // If we have local fields to handle do that here
           if (!!local_mask)
           {
