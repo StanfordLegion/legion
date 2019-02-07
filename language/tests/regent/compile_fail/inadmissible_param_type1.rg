@@ -13,15 +13,11 @@
 -- limitations under the License.
 
 -- fails-with:
--- check_parallelizable_inadmissible6.rg:25: partition driven auto-parallelization failed: found an inadmissible statement
---     x[0] += 1
---      ^
+-- inadmissible_param_type1.rg:22: parameter $runtime has inadmissible type legion_runtime_t
+-- task f(runtime : regentlib.c.legion_runtime_t)
+--              ^
 
 import "regent"
 
-__demand(__parallel)
-task f(x : &int)
-  for i = 0, 10 do
-    x[0] += 1
-  end
+task f(runtime : regentlib.c.legion_runtime_t)
 end
