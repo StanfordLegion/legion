@@ -733,17 +733,22 @@ function analyze_access.stat_reduce(cx, node)
     return analyze_access.expr(cx, node.rhs, std.reads)
   end)
 
+  local lhs_type = std.as_read(node.lhs.expr_type)
+  local rhs_type = std.as_read(node.rhs.expr_type)
   local first = true
   local atomic = nil
   local scalar = false
+  local privilege =
+    (lhs_type:isprimitive() and rhs_type:isprimitive() and std.reduces(node.op)) or
+    "reads_writes"
   cx:forall_context(function(cx)
     local private, center =
-      analyze_access.expr(cx, node.lhs, std.reduces(node.op))
+      analyze_access.expr(cx, node.lhs, privilege)
     if first then
       if node.lhs:is(ast.typed.expr.ID) then
         scalar = not cx:is_local_variable(node.lhs.value)
       end
-      atomic = not private
+      atomic = not private and std.is_reduce(privilege)
       first = false
     end
     return private
