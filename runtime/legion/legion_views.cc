@@ -3433,6 +3433,18 @@ namespace Legion {
       applied_events.insert(done_event);
       // Perform it locally
       {
+        // Anytime we do a deactivate that can influence the valid
+        // set of ExprView objects so we need to clean the cache
+        AutoLock v_lock(view_lock);
+#ifdef DEBUG_LEGION
+        // There should be no outstanding_additions when we're here
+        // because we're already protected by the replication lock
+        assert(outstanding_additions == 0);
+#endif
+        // Clean the cache
+        expr_cache.clear();
+        // Reset the cache use counter
+        expr_cache_uses = 0;
         // Need an exclusive copy of the expr_lock to do this
         AutoLock e_lock(expr_lock);
         current_users->deactivate_replication(deactivate_mask);
