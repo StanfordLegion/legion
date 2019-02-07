@@ -3373,16 +3373,18 @@ namespace Legion {
     void MaterializedView::clean_cache(void)
     //--------------------------------------------------------------------------
     {
+      // Now we can clean the cache and the views
+      expr_cache.clear();
+      // Reset the cache use counter
+      expr_cache_uses = 0;
       // Anytime we clean the cache, we also traverse the 
       // view tree and see if there are any views we can 
       // remove because they no longer have live users
       FieldMask dummy_mask; 
       FieldMaskSet<ExprView> clean_set;
+      // Take the lock in exclusive mode since we might be modifying the tree
+      AutoLock e_lock(expr_lock);
       current_users->clean_views(dummy_mask, clean_set);
-      // Now we can clean the cache and the views
-      expr_cache.clear();
-      // Reset the cache use counter
-      expr_cache_uses = 0;
     }
 
     //--------------------------------------------------------------------------
