@@ -102,6 +102,7 @@ function loop_context:__newindex (field, value)
 end
 
 function loop_context.new_scope(task, loop, loop_var)
+  local needs_iterator = loop_var and loop:is(ast.typed.stat.ForList)
   local cx = {
     loop = loop,
     loop_var = loop_var,
@@ -113,7 +114,7 @@ function loop_context.new_scope(task, loop, loop_var)
                   task.annotations.cuda:is(ast.annotation.Demand),
     demand_parallel = std.config["parallelize"] and
                   task.annotations.parallel:is(ast.annotation.Demand),
-    needs_iterator = loop_var and loop:is(ast.typed.stat.ForList),
+    needs_iterator = needs_iterator,
     -- Tracks variables that have the same value as the loop variable
     centers = data.newmap(),
     -- Tracks variables that are private to each iteration
@@ -127,6 +128,8 @@ function loop_context.new_scope(task, loop, loop_var)
     reductions = data.newmap(),
     admissible = { true, nil },
     parallel = { true, nil },
+    -- True if the loop is the innermost loop that needs an index space iterator
+    innermost = needs_iterator,
   }
   cx = setmetatable(cx, loop_context)
   if loop_var then
@@ -203,6 +206,14 @@ end
 function loop_context:get_metadata()
   assert(self.loop_var)
   local parallelizable = self:is_parallelizable()
+  if std.config["override-demand-cuda"] and self.demand_cuda and
+     not parallelizable and self:is_admissible() and self.innermost
+  then
+    report.warn(self:get_serial_node(),
+        "WARNING: ignoring a potential loop-carried dependence in a task " ..
+        "that demands CUDA. Please check that this loop is indeed parallelizable.")
+    parallelizable = true
+  end
   local reductions = parallelizable and terralib.newlist()
   if parallelizable then
     for symbol, _ in self.reductions:items() do
@@ -210,7 +221,7 @@ function loop_context:get_metadata()
     end
   end
   return ast.metadata.Loop {
-    parallelizable = self:is_parallelizable(),
+    parallelizable = parallelizable,
     reductions = reductions,
   }
 end
@@ -279,6 +290,10 @@ function loop_context:update_array_access(node, symbol, new_priv, private)
   all_private = all_private and private
   self.array_accesses[symbol] = { privilege, all_private }
   self:check_privilege(node, privilege, all_private)
+end
+
+function loop_context:set_innermost(value)
+  self.innermost = value
 end
 
 -- Context that maintains parallelizability of the whole task
@@ -351,15 +366,14 @@ function context:pop_loop_context(node)
     return to_propagate:is_empty()
   end)
 
-  if self.demand_cuda and cx:is_parallelizable() then
+  if cx.demand_cuda and cx.needs_iterator then
     -- When the task demands CUDA code generation, we only keep the innermost
     -- parallelizable for list loop.
-    if cx.needs_iterator then
-      self:forall_context(function(cx)
-        cx:mark_serial(node)
-        return false
-      end)
-    end
+    self:forall_context(function(cx_outer)
+      if cx_outer.needs_iterator then cx_outer:set_innermost(false) end
+      if cx_outer.loop_var then cx_outer:mark_inadmissible(node) end
+      return false
+    end)
   end
 
   if (cx.demand_cuda or cx.demand_openmp) and cx:is_parallelizable() then
@@ -572,8 +586,14 @@ local function check_demands(cx, node)
       report.error(cx:get_inadmissible_node(), prefix ..
           " failed: found an inadmissible statement")
     else
-      report.error(cx:get_serial_node(), prefix ..
-          " failed: found a loop-carried dependence")
+      if cx.demand_vectorize or not std.config["override-demand-openmp"] then
+        report.error(cx:get_serial_node(), prefix ..
+            " failed: found a loop-carried dependence")
+      else
+        report.warn(cx:get_serial_node(),
+            "WARNING: ignoring a potential loop-carried dependence in a loop " ..
+            "that demands OpenMP. Please check that this loop is indeed parallelizable.")
+      end
     end
   end
 end
