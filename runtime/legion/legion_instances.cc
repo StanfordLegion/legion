@@ -1006,14 +1006,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalManager::defer_collect_user(CollectableView *view,
-                                 ApEvent term_event, ReferenceMutator *mutator,
-                                 std::set<ApEvent> &to_collect) 
+                              ApEvent term_event, std::set<ApEvent> &to_collect,
+                              bool &add_ref, bool &remove_ref) 
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
       std::set<ApEvent> &view_events = gc_events[view]; 
       if (view_events.empty())
-        view->add_collectable_reference(mutator);
+        add_ref = true;
       view_events.insert(term_event);
       // If the number of events is too big then prune them out
       if (view_events.size() >= runtime->gc_epoch_size)
@@ -1033,8 +1033,10 @@ namespace Legion {
         if (view_events.empty())
         {
           gc_events.erase(view);
-          if (view->remove_collectable_reference(mutator))
-            delete view;
+          if (add_ref)
+            add_ref = false;
+          else
+            remove_ref = true;
         }
       }
     }

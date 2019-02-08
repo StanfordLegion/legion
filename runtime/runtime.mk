@@ -453,6 +453,7 @@ endif
 # Set maximum number of dimensions
 ifneq ($(strip ${MAX_DIM}),)
 CC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)
+NVCC_FLAGS	+= -DREALM_MAX_DIM=$(MAX_DIM) -DLEGION_MAX_DIM=$(MAX_DIM)
 endif
 
 # Manage the output setting
