@@ -111,6 +111,38 @@ namespace Legion {
     inline static Point<3,T> ONES(void) { return Point<3,T>((T)1); }
   };
 
+  // Specialization for 4-D Points
+  template<typename T>
+  struct Point<4,T> : public Realm::Point<4,T> {
+  public:
+    __CUDA_HD__
+    inline Point(void) : Realm::Point<4,T>() { }
+    __CUDA_HD__
+    inline explicit Point(const T v) : Realm::Point<4,T>(v,v,v,v) { }
+    __CUDA_HD__
+    inline Point(const T v1, const T v2, const T v3, const T v4) 
+      : Realm::Point<4,T>(v1,v2,v3,v4) { }
+    __CUDA_HD__
+    inline explicit Point(const T vals[4]) : Realm::Point<4,T>(vals) { }
+    // copies allow type coercion (assuming the underlying type does)
+    template<typename T2> __CUDA_HD__
+    inline Point(const Point<4,T2> &rhs) : Realm::Point<4,T>(rhs) { }
+    template<typename T2> __CUDA_HD__
+    inline Point(const Realm::Point<4,T2> &rhs) : Realm::Point<4,T>(rhs) { }
+  public:
+    template<typename T2> __CUDA_HD__
+    inline Point<4,T>& operator=(const Point<4,T2> &rhs)
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+    template<typename T2> __CUDA_HD__
+    inline Point<4,T>& operator=(const Realm::Point<4,T2> &rhs)
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+  public:
+    __CUDA_HD__
+    inline static Point<4,T> ZEROES(void) { return Point<4,T>((T)0); }
+    __CUDA_HD__
+    inline static Point<4,T> ONES(void) { return Point<4,T>((T)1); }
+  };
+
   //----------------------------------------------------------------------------
   template<int DIM, typename T> __CUDA_HD__
   inline Point<DIM,T>::Point(void)
