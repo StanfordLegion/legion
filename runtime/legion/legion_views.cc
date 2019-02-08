@@ -477,7 +477,8 @@ namespace Legion {
     ExprView::ExprView(RegionTreeForest *ctx, InstanceManager *man, 
                        InstanceView *view, IndexSpaceExpression *exp) 
       : context(ctx), manager(man), inst_view(view),
-        view_expr(exp), view_volume(view_expr->get_volume())
+        view_expr(exp), view_volume(view_expr->get_volume()),
+        invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES))
     //--------------------------------------------------------------------------
     {
       view_expr->add_expression_reference();
@@ -823,29 +824,29 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExprView* ExprView::find_congruent_view(IndexSpaceExpression *user_expr)
+    ExprView* ExprView::find_congruent_view(IndexSpaceExpression *expr) const
     //--------------------------------------------------------------------------
     {
       // Handle the base case first
-      if ((user_expr == view_expr) || (user_expr->get_volume() == view_volume))
-        return this;
+      if ((expr == view_expr) || (expr->get_volume() == view_volume))
+        return const_cast<ExprView*>(this);
       for (FieldMaskSet<ExprView>::const_iterator it = 
             subviews.begin(); it != subviews.end(); it++)
       {
-        if (it->first->view_expr == user_expr)
+        if (it->first->view_expr == expr)
           return it->first;
         IndexSpaceExpression *overlap =
-          context->intersect_index_spaces(user_expr, it->first->view_expr);
+          context->intersect_index_spaces(expr, it->first->view_expr);
         const size_t overlap_volume = overlap->get_volume();
         if (overlap_volume == 0)
           continue;
         // See if we dominate or just intersect
-        if (overlap_volume == user_expr->get_volume())
+        if (overlap_volume == expr->get_volume())
         {
           // See if we strictly dominate or whether they are equal
           if (overlap_volume < it->first->view_volume)
           {
-            ExprView *result = it->first->find_congruent_view(user_expr);
+            ExprView *result = it->first->find_congruent_view(expr);
             if (result != NULL)
               return result;
           }
@@ -857,87 +858,60 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    ExprView* ExprView::add_covering_user(PhysicalUser *user,
-           const FieldMask &user_mask, const ApEvent term_event,
-           IndexSpaceExpression *user_expr, const PhysicalTraceInfo &trace_info,
-           ExprView *target_view)
+    void ExprView::insert_subview(ExprView *subview, FieldMask &subview_mask)
     //--------------------------------------------------------------------------
     {
-      // Handle the base case first
-      if ((user_expr == view_expr) || (user_expr->get_volume() == view_volume))
-      {
 #ifdef DEBUG_LEGION
-        assert((target_view == NULL) || (target_view == this));
+      assert(this != subview);
 #endif
-        add_current_user(user, term_event, user_mask, trace_info);
-        return this;
-      }
-      // No need for extra reference here because we know that additions
-      // don't race with cleans because of the owner materialized view
-      FieldMaskSet<ExprView> to_traverse;
+      // Iterate over all subviews and see which ones we dominate and which
+      // ones dominate the subview
+      if (!subviews.empty() && !(subviews.get_valid_mask() * subview_mask))
       {
-        FieldMaskSet<ExprView> dominated_subviews;
-        FieldMaskSet<ExprView> dominating_subviews;
+        bool need_tighten = true;
         std::vector<ExprView*> to_delete;
-        FieldMask remainder_mask(user_mask);
-        bool need_tighten = false;
-        // No need for the lock anymore since we're protected by the 
-        // expr_lock at the top of the tree
-        //AutoLock v_lock(view_lock);
-        for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
-              it != subviews.end(); it++)
+        FieldMaskSet<ExprView> dominating_subviews;
+        for (FieldMaskSet<ExprView>::iterator it = 
+              subviews.begin(); it != subviews.end(); it++)
         {
           // See if we intersect on fields
-          const FieldMask overlap_mask = it->second & user_mask;
+          FieldMask overlap_mask = it->second & subview_mask;
           if (!overlap_mask)
             continue;
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(user_expr, it->first->view_expr);
+            context->intersect_index_spaces(subview->view_expr,
+                                            it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect
-          if (overlap_volume == user_expr->get_volume())
+          if (overlap_volume == subview->view_volume)
           {
-            // See if we strictly dominate or whether they are equal
-            if (overlap_volume < it->first->view_volume)
-              // We dominate so we can just continue traversing
-              dominating_subviews.insert(it->first, overlap_mask);
-            else if (target_view == NULL)
-              target_view = it->first;
 #ifdef DEBUG_LEGION
-            else // should already have found a congruent view
-              assert(target_view == it->first);
+            // Should only strictly dominate if they were congruent
+            // then we wouldn't be inserting in the first place
+            assert(overlap_volume < it->first->view_volume);
 #endif
+            // Dominator so we can just continue traversing
+            dominating_subviews.insert(it->first, overlap_mask);
           }
           else if (overlap_volume == it->first->view_volume)
           {
-            dominated_subviews.insert(it->first, overlap_mask);
-            // View is dominated so we know we're going to send this 
-            // down to a new subview we're going to make
-            it.filter(overlap_mask);
-            need_tighten = true;
-            if (!it->second)
-              // Reference will flow down with it
-              to_delete.push_back(it->first);
-            else 
-              // Add a new reference since we know it's going into a new subview
-              it->first->add_reference();
-          }
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<ExprView*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            subviews.erase(*it);
-        }
-        if (need_tighten && (subviews.size() > 1))
-          subviews.tighten_valid_mask();
 #ifdef DEBUG_LEGION
-        // There should never be any overlap in the fields for these sets
-        assert(dominated_subviews.get_valid_mask() * 
-                dominating_subviews.get_valid_mask());
+            assert(overlap_mask * dominating_subviews.get_valid_mask());
 #endif
+            // We dominate this view so we can just pull it 
+            // in underneath of us now
+            it.filter(overlap_mask);
+            subview->insert_subview(it->first, overlap_mask);
+            need_tighten = true;
+            // See if we need to remove this subview
+            if (!it->second)
+              to_delete.push_back(it->first);
+          }
+          // Otherwise it's just a normal intersection
+        }
+        // See if we had any dominators
         if (!dominating_subviews.empty())
         {
           if (dominating_subviews.size() > 1)
@@ -951,172 +925,99 @@ namespace Legion {
                   dominating_subviews.begin(); it != 
                   dominating_subviews.end(); it++)
             {
-              const FieldMask overlap = it->second & remainder_mask;
+              FieldMask overlap = it->second;
+              // Channeling Tuco here
+              it->first->find_tightest_subviews(subview->view_expr, overlap,
+                                                sorted_subviews);
+            }
+            for (LegionMap<std::pair<size_t,ExprView*>,FieldMask>::aligned::
+                  const_iterator it = sorted_subviews.begin(); it !=
+                  sorted_subviews.end(); it++)
+            {
+              FieldMask overlap = it->second & subview_mask;
               if (!overlap)
                 continue;
-              FieldMask perfect_mask;
-              it->first->find_covering_subviews(user_expr, overlap,
-                  it->first, perfect_mask, to_traverse, sorted_subviews);
-              if (!!perfect_mask)
-              {
-                remainder_mask -= perfect_mask;
-                if (!remainder_mask)
-                  break;
-              }
-            }
-            if (!!remainder_mask)
-            {
-              for (LegionMap<std::pair<size_t,ExprView*>,FieldMask>::aligned::
-                    const_iterator it = sorted_subviews.begin(); it !=
-                    sorted_subviews.end(); it++)
-              {
-                const FieldMask overlap = it->second & remainder_mask;
-                if (!overlap)
-                  continue;
-                to_traverse.insert(it->first.second, overlap);
-                remainder_mask -= overlap;
-                if (!remainder_mask)
-                  break;
-              }
+              subview_mask -= overlap;
+              it->first.second->insert_subview(subview, overlap);
+              if (!subview_mask || 
+                  (subview_mask * dominating_subviews.get_valid_mask()))
+                break;
             }
 #ifdef DEBUG_LEGION
-            assert(remainder_mask * dominating_subviews.get_valid_mask());
+            assert(subview_mask * dominating_subviews.get_valid_mask());
 #endif
           }
           else
           {
             FieldMaskSet<ExprView>::const_iterator first = 
               dominating_subviews.begin();
-            to_traverse.insert(first->first, first->second);
-            remainder_mask -= first->second;
+            FieldMask dominated_mask = first->second; 
+            subview_mask -= dominated_mask;
+            first->first->insert_subview(subview, dominated_mask);
           }
         }
-        // See if we still have fields that are going to need to be traversed
-        if (!!remainder_mask)
+        if (!to_delete.empty())
         {
-          if (target_view == NULL)
-            target_view = new ExprView(context, manager, inst_view, user_expr);
-          if (!dominated_subviews.empty())
+          for (std::vector<ExprView*>::const_iterator it = 
+                to_delete.begin(); it != to_delete.end(); it++)
           {
-#ifdef DEBUG_LEGION
-            // All these should be covered by the remainder fields
-            assert(!(dominated_subviews.get_valid_mask() - remainder_mask));
-#endif
-            for (FieldMaskSet<ExprView>::const_iterator it = 
-                  dominated_subviews.begin(); it != 
-                  dominated_subviews.end(); it++)
-              target_view->add_dominated_subview(it->first, it->second);
+            subviews.erase(*it);
+            if ((*it)->remove_reference())
+              delete (*it);
           }
-          // Add it to the set of subviews and include a reference if necessary
-          if (subviews.insert(target_view, remainder_mask))
-            target_view->add_reference();
-          to_traverse.insert(target_view, remainder_mask);
         }
-        else
-        {
-#ifdef DEBUG_LEGION
-          // Should be empty if we didn't have remainder fields
-          assert(dominated_subviews.empty());
-#endif
-        }
-#ifdef DEBUG_LEGION
-        assert(!(user_mask - subviews.get_valid_mask()));
-#endif
+        if (need_tighten)
+          subviews.tighten_valid_mask();
       }
-#ifdef DEBUG_LEGION
-      assert(!to_traverse.empty());
-      assert(to_traverse.get_valid_mask() == user_mask);
-#endif
-      if (to_traverse.size() > 1)
-      {
-        for (FieldMaskSet<ExprView>::const_iterator it = 
-              to_traverse.begin(); it != to_traverse.end(); it++)
-          target_view = it->first->add_covering_user(user, it->second,
-                          term_event, user_expr, trace_info, target_view);
-      }
-      else
-      {
-        FieldMaskSet<ExprView>::const_iterator first = to_traverse.begin();
-        target_view = first->first->add_covering_user(user, user_mask, 
-                            term_event, user_expr, trace_info, target_view);
-      }
-      return target_view;
+      // If we make it here and there are still fields then we need to 
+      // add it locally
+      if (!!subview_mask && subviews.insert(subview, subview_mask))
+        subview->add_reference();
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::find_covering_subviews(IndexSpaceExpression *user_expr,
-                                          const FieldMask &user_mask,
-                                          ExprView *key_view, 
-                                          FieldMask &perfect_mask,
-                                          FieldMaskSet<ExprView> &perfect_views,
+    void ExprView::find_tightest_subviews(IndexSpaceExpression *expr,
+                                          FieldMask &expr_mask,
                                           LegionMap<std::pair<size_t,ExprView*>,
                                             FieldMask>::aligned &bounding_views)
     //--------------------------------------------------------------------------
     {
-      // Handle the base case first
-      if ((user_expr == view_expr) || (user_expr->get_volume() == view_volume))
+      if (!subviews.empty() && !(expr_mask * subviews.get_valid_mask()))
       {
-        perfect_views.insert(this, user_mask);
-        perfect_mask |= user_mask;
-        return;
-      }
-      // No need for extra reference here because we know that additions
-      // don't race with cleans because of the owner materialized view
-      FieldMaskSet<ExprView> to_traverse;
-      FieldMask remainder_mask(user_mask);
-      {
-        ExprView *target_view = NULL;
-        // No need for a view lock anymore since we're protected
-        // by the expr_lock at the top of the tree
-        //AutoLock v_lock(view_lock);
+        FieldMask dominated_mask;
         for (FieldMaskSet<ExprView>::iterator it = subviews.begin();
               it != subviews.end(); it++)
         {
-          if (it->first->view_expr == user_expr)
-          {
-            target_view = it->first;
-            const FieldMask overlap = it->second & remainder_mask;
-            if (!overlap)
-            {
-              perfect_views.insert(target_view, overlap);
-              perfect_mask |= overlap;
-              remainder_mask -= overlap;
-              if (!remainder_mask)
-                return;
-            }
-            continue;
-          }
           // See if we intersect on fields
-          const FieldMask overlap_mask = it->second & remainder_mask;
+          FieldMask overlap_mask = it->second & expr_mask;
           if (!overlap_mask)
             continue;
           IndexSpaceExpression *overlap =
-            context->intersect_index_spaces(user_expr, it->first->view_expr);
+            context->intersect_index_spaces(expr, it->first->view_expr);
           const size_t overlap_volume = overlap->get_volume();
           if (overlap_volume == 0)
             continue;
           // See if we dominate or just intersect
-          if (overlap_volume == user_expr->get_volume())
+          if (overlap_volume == expr->get_volume())
           {
-            // We dominate so we can just continue traversing
-            to_traverse.insert(it->first, overlap_mask);
-          }     
+#ifdef DEBUG_LEGION
+            // Should strictly dominate otherwise we'd be congruent
+            assert(overlap_volume < it->first->view_volume);
+#endif
+            dominated_mask |= overlap_mask;
+            // Continute the traversal
+            it->first->find_tightest_subviews(expr,overlap_mask,bounding_views);
+          }
         }
+        // Remove any dominated fields from below
+        if (!!dominated_mask)
+          expr_mask -= dominated_mask;
       }
-      // Traverse below for the fields that we can
-      for (FieldMaskSet<ExprView>::const_iterator it = 
-            to_traverse.begin(); it != to_traverse.end(); it++)
-        it->first->find_covering_subviews(user_expr, it->second, key_view,
-            perfect_mask, perfect_views, bounding_views);
-      // We traversed these so no need to include them in the remainder
-      if (!to_traverse.empty())
-        remainder_mask -= to_traverse.get_valid_mask();
-      // Fields which weren't traversed and which we couldn't make perfect
-      // so this view is the closest enclosing bounding view for these fields
-      if (!!remainder_mask)
+      // If we still have fields then record ourself
+      if (!!expr_mask)
       {
-        std::pair<size_t,ExprView*> key(view_volume, key_view);
-        bounding_views[key] |= remainder_mask;
+        std::pair<size_t,ExprView*> key(view_volume, this);
+        bounding_views[key] |= expr_mask;
       }
     }
 
@@ -1292,7 +1193,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void ExprView::clean_views(FieldMask &valid_mask, 
-                               FieldMaskSet<ExprView> &clean_set) 
+                               FieldMaskSet<ExprView> &clean_set)
     //--------------------------------------------------------------------------
     {
       // Handle the base case if we already did it
@@ -1313,10 +1214,31 @@ namespace Legion {
         it->first->clean_views(new_mask, clean_set);
         // Save this as part of the valid mask without filtering
         valid_mask |= new_mask;
-        // have to make sure to filter this by the previous set of fields 
+        // Have to make sure to filter this by the previous set of fields 
         // since we could get more than we initially had
+        // We also need update the invalid fields if we remove a path
+        // to the subview
         if (!!new_mask)
+        {
           new_mask &= it->second;
+          const FieldMask new_invalid = it->second - new_mask;
+          if (!!new_invalid)
+          {
+#ifdef DEBUG_LEGION
+            // Should only have been one path here
+            assert(it->first->invalid_fields * new_invalid);
+#endif
+            it->first->invalid_fields |= new_invalid;
+          }
+        }
+        else
+        {
+#ifdef DEBUG_LEGION
+          // Should only have been one path here
+          assert(it->first->invalid_fields * it->second);
+#endif
+          it->first->invalid_fields |= it->second;
+        }
         if (!!new_mask)
           new_subviews.insert(it->first, new_mask);
         else
@@ -1346,62 +1268,8 @@ namespace Legion {
           valid_mask |= it->second.get_valid_mask();
       }
       // Save this for the future so we don't need to compute it again
-      clean_set.insert(this, valid_mask);
-    }
-
-    //--------------------------------------------------------------------------
-    void ExprView::add_dominated_subview(ExprView *subview, FieldMask view_mask)
-    //--------------------------------------------------------------------------
-    {
-      // See if we can add this view here or whether we need to keep 
-      // pushing it further down the tree
-      // No need for the lock anymore since we're protected by the 
-      // expr_lock at the top of the tree
-      //AutoLock v_lock(view_lock);
-      for (FieldMaskSet<ExprView>::iterator it =
-            subviews.begin(); it != subviews.end(); it++) 
-      {
-        const FieldMask overlap_mask = it->second & view_mask;
-        if (!overlap_mask)
-          continue;
-        if (subview->view_expr == it->first->view_expr)
-        {
-          it.merge(overlap_mask);
-          view_mask -= overlap_mask;
-          if (!view_mask)
-            break;
-        }
-        IndexSpaceExpression *overlap = context->intersect_index_spaces(
-                                subview->view_expr, it->first->view_expr);
-        const size_t overlap_volume = overlap->get_volume();
-        if (overlap_volume == 0)
-          continue;
-        if (overlap_volume == subview->view_volume)
-        {
-          if (overlap_volume < it->first->view_volume)
-          {
-            subview->add_reference();
-            it->first->add_dominated_subview(subview, overlap_mask);
-            view_mask -= overlap_mask;
-            if (!view_mask)
-              break;
-          }
-#ifdef DEBUG_LEGION
-          else
-            assert(false); // should have been the same view
-#endif
-        }
-      }
-      if (!!view_mask)
-      {
-        // if we already had a reference because it was already here
-        // then we need to remove our spurious reference
-        if (!subviews.insert(subview, view_mask) &&
-             subview->remove_reference())
-          delete subview;
-      }
-      else if (subview->remove_reference()) // remove extra reference
-        delete subview;
+      if (clean_set.insert(this, valid_mask))
+        add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -1526,8 +1394,9 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     void ExprView::unpack_replication(Deserializer &derez, ExprView *root,
-                                      const AddressSpaceID source,
-                                      std::vector<PhysicalUser*> &users)
+                              const AddressSpaceID source,
+                              std::map<IndexSpaceExprID,ExprView*> &expr_cache,
+                              std::vector<PhysicalUser*> &users)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
@@ -1604,38 +1473,42 @@ namespace Legion {
       derez.deserialize(num_subviews);
       if (num_subviews > 0)
       {
-        // Useful for looking up if we already have a view here
-        std::map<IndexSpaceExpression*,ExprView*> subview_exprs;
-        for (FieldMaskSet<ExprView>::const_iterator it = 
-                subviews.begin(); it != subviews.end(); it++)
-            subview_exprs[it->first->view_expr] = it->first;
         for (unsigned idx = 0; idx < num_subviews; idx++)
         {
           IndexSpaceExpression *subview_expr = 
             IndexSpaceExpression::unpack_expression(derez, context, source);
           FieldMask subview_mask;
           derez.deserialize(subview_mask);
-          // See if we already have it
-          std::map<IndexSpaceExpression*,ExprView*>::const_iterator finder = 
-            subview_exprs.find(subview_expr);
+          // See if we already have it in the cache
+          std::map<IndexSpaceExprID,ExprView*>::const_iterator finder = 
+            expr_cache.find(subview_expr->expr_id);
           ExprView *subview = NULL;
-          if (finder == subview_exprs.end())
+          if (finder == expr_cache.end())
           {
             // See if we can find this view in the tree before we make it
             subview = root->find_congruent_view(subview_expr);
             // If it's still NULL then we can make it
             if (subview == NULL)
               subview = new ExprView(context, manager, inst_view, subview_expr);
+            expr_cache[subview_expr->expr_id] = subview;
           }
           else
             subview = finder->second;
 #ifdef DEBUG_LEGION
           assert(subview != NULL);
 #endif
-          subview->unpack_replication(derez, root, source, users);
-          // Add a reference if this is the first time it's been added
-          if (subviews.insert(subview, subview_mask))
-            subview->add_reference();
+          // Check to see if it needs to be inserted
+          if (subview != root)
+          {
+            FieldMask insert_mask = subview->invalid_fields & subview_mask;
+            if (!!insert_mask)
+            {
+              subview->invalid_fields -= insert_mask;
+              root->insert_subview(subview, insert_mask);
+            }
+          }
+          // Continue the unpacking
+          subview->unpack_replication(derez, root, source, expr_cache, users);
         }
       }
       if (!to_collect.empty())
@@ -2415,37 +2288,48 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(is_logical_owner());
+      assert(current_users != NULL);
 #endif
       PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
                                             false/*copy user*/, true/*covers*/);
-      // No need to take the lock since we are just initializing
-      // See if we have it in the cache
-      LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
-        finder = expr_cache.find(user_expr->expr_id);
       const PhysicalTraceInfo trace_info(NULL);
-      if (finder == expr_cache.end() || 
-          !(finder->second.invalid_fields * user_mask))
+      // No need to take the lock since we are just initializing
+      // If it's the root this is easy
+      if (user_expr == current_users->view_expr)
       {
-        CacheEntry &entry = expr_cache[user_expr->expr_id];
-        // We're potentially mutation the view tree so need an exlcusive lock
-        AutoLock e_lock(expr_lock);
-        if (entry.target_view == NULL)
-        {
-          entry.target_view = current_users->find_congruent_view(user_expr);
-          entry.target_view = current_users->add_covering_user(user, user_mask,
-                          term_event, user_expr, trace_info, entry.target_view);
-        }
-        else
-          current_users->add_covering_user(user, user_mask, term_event, 
-                              user_expr, trace_info, entry.target_view);
-        entry.invalid_fields -= user_mask;
+        current_users->add_current_user(user, term_event, user_mask,trace_info);
+        return;
       }
-      else
-        // Found it in the cache, so we can just add it directly
-        finder->second.target_view->add_current_user(user, term_event,
-                                                     user_mask, trace_info);
-      // Don't need to actual launch a collection task, destructor
-      // will handle this case
+      // See if we have it in the cache
+      std::map<IndexSpaceExprID,ExprView*>::const_iterator finder = 
+        expr_cache.find(user_expr->expr_id);
+      if (finder == expr_cache.end() || 
+          !(finder->second->invalid_fields * user_mask))
+      {
+        // No need for expr_lock since this is initialization
+        if (finder == expr_cache.end())
+        {
+          ExprView *target_view = current_users->find_congruent_view(user_expr);
+          // Couldn't find a congruent view so we need to make one
+          if (target_view == NULL)
+            target_view = new ExprView(context, manager, this, user_expr);
+          expr_cache[user_expr->expr_id] = target_view;
+          finder = expr_cache.find(user_expr->expr_id);
+        }
+        if (finder->second != current_users)
+        {
+          // Now insert it for the invalid fields
+          FieldMask insert_mask = user_mask & finder->second->invalid_fields;
+          // Mark that we're removing these fields from the invalid fields
+          // first since we're later going to destroy the insert mask
+          finder->second->invalid_fields -= insert_mask;
+          // Then insert the subview into the tree
+          current_users->insert_subview(finder->second, insert_mask);
+        }
+      }
+      // Now that the view is valid we can add the user to it
+      finder->second->add_current_user(user, term_event, user_mask, trace_info);
+      // No need to launch a collection task as the destructor will handle it 
     }
 
     //--------------------------------------------------------------------------
@@ -3010,6 +2894,9 @@ namespace Legion {
         current_users->add_reference();
       }
       {
+        // Take the view lock so we can modify the cache as well
+        // as part of our unpacking
+        AutoLock v_lock(view_lock);
         // We need to hold the expr lock here since we might have to 
         // make ExprViews and we need this to be atomic with other
         // operations that might also try to mutate the tree 
@@ -3017,7 +2904,7 @@ namespace Legion {
         std::vector<PhysicalUser*> users;
         // The source is always from the logical owner space
         current_users->unpack_replication(derez, current_users, 
-                                          logical_owner, users);
+                                          logical_owner, expr_cache, users);
         // Remove references from all our users
         for (unsigned idx = 0; idx < users.size(); idx++)
           if (users[idx]->remove_reference())
@@ -3136,24 +3023,28 @@ namespace Legion {
       // with the analysis and its get pruned/deleted
       user->add_reference();
       ExprView *target_view = NULL;
-      bool use_target_view = false;
+      bool has_target_view = false;
       // Handle an easy case first, if the user_expr is the same as the 
       // view_expr for the root then this is easy
       bool update_count = true;
+      bool update_cache = false;
       if (user_expr != current_users->view_expr)
       {
         // Hard case where we will have subviews
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // See if we can find the entry in the cache and it's valid 
         // for all of our fields
-        LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
+        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
           finder = expr_cache.find(user_expr->expr_id);
         if (finder != expr_cache.end())
         {
-          target_view = finder->second.target_view;
-          if (finder->second.invalid_fields * user_mask)
-            use_target_view = true;
+          target_view = finder->second;
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          if (finder->second->invalid_fields * user_mask)
+            has_target_view = true;
         }
+        else
+          update_cache = true;
         // increment the number of outstanding additions
         __sync_fetch_and_add(&outstanding_additions,1);
       }
@@ -3161,10 +3052,9 @@ namespace Legion {
       {
         target_view = current_users;
         update_count = false;
-        use_target_view = true;
+        has_target_view = true;
       }
-      bool update_cache = false;
-      if (!use_target_view)
+      if (!has_target_view)
       {
         // This could change the shape of the view tree so we need
         // exclusive privilege son the expr lock to serialize it
@@ -3173,15 +3063,28 @@ namespace Legion {
         // If we don't have a target view see if there is a 
         // congruent one already in the tree
         if (target_view == NULL)
+        {
           target_view = current_users->find_congruent_view(user_expr);
-        // Do the add of our covering user which can change the tree
-        target_view = current_users->add_covering_user(user, user_mask, 
-                        term_event, user_expr, trace_info, target_view);
-        update_cache = true;
+          if (target_view == NULL)
+            target_view = new ExprView(context, manager, this, user_expr);
+        }
+        if (target_view != current_users)
+        {
+          // Now see if we need to insert it
+          FieldMask insert_mask = user_mask & target_view->invalid_fields;
+          if (!!insert_mask)
+          {
+            // Remove these fields from being invalid before we
+            // destroy the insert mask
+            target_view->invalid_fields -= insert_mask;
+            // Do the insertion into the tree
+            current_users->insert_subview(target_view, insert_mask);
+          }
+        }
       }
-      else
-        // Already know the view so just iterate them
-        target_view->add_current_user(user, term_event, user_mask, trace_info);
+      // Now we know the target view and it's valid for all fields
+      // so we can add it to the expr view
+      target_view->add_current_user(user, term_event, user_mask, trace_info);
       if (user->remove_reference())
         delete user;
       AutoLock v_lock(view_lock);
@@ -3223,11 +3126,7 @@ namespace Legion {
         }
       }
       else
-      {
-        CacheEntry &entry = expr_cache[user_expr->expr_id];
-        entry.target_view = target_view;
-        entry.invalid_fields -= user_mask;
-      }
+        expr_cache[user_expr->expr_id] = target_view;
     }
 
     //--------------------------------------------------------------------------
@@ -3244,23 +3143,25 @@ namespace Legion {
       // an existing ExprView with the same expresssion in which case
       // we'll be able to mark this user as being precise
       ExprView *target_view = NULL;
-      bool use_target_view = false;
+      bool has_target_view = false;
       // Handle an easy case first, if the user_expr is the same as the 
       // view_expr for the root then this is easy
       bool update_count = false;
+      bool update_cache = false;
       if (user_expr != current_users->view_expr)
       {
         // Hard case where we will have subviews
         AutoLock v_lock(view_lock,1,false/*exclusive*/);
         // See if we can find the entry in the cache and it's valid 
         // for all of our fields
-        LegionMap<IndexSpaceExprID,CacheEntry>::aligned::const_iterator
+        LegionMap<IndexSpaceExprID,ExprView*>::aligned::const_iterator
           finder = expr_cache.find(user_expr->expr_id);
         if (finder != expr_cache.end())
         {
-          target_view = finder->second.target_view;
-          if (finder->second.invalid_fields * user_mask)
-            use_target_view = true;
+          target_view = finder->second;
+          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
+          if (finder->second->invalid_fields * user_mask)
+            has_target_view = true;
         }
         // increment the number of outstanding additions
         __sync_fetch_and_add(&outstanding_additions,1);
@@ -3269,9 +3170,36 @@ namespace Legion {
       else // This is just going to add at the top so never needs to wait
       {
         target_view = current_users;
-        use_target_view = true;
+        has_target_view = true;
       }
-      if (use_target_view)
+      if (!has_target_view)
+      {
+        // Do a quick test to see if we can find a target view
+        AutoLock e_lock(expr_lock);
+        // If we haven't found it yet, see if we can find it
+        if (target_view == NULL)
+        {
+          target_view = current_users->find_congruent_view(user_expr);
+          if (target_view != NULL)
+            update_cache = true;
+        }
+        // Don't make it though if we don't already have it
+        if (target_view != NULL)
+        {
+          // No need to insert this if it's the root
+          if (target_view != current_users)
+          {
+            FieldMask insert_mask = target_view->invalid_fields & user_mask;
+            if (!!insert_mask)
+            {
+              target_view->invalid_fields -= insert_mask;
+              current_users->insert_subview(target_view, insert_mask);
+            }
+          }
+          has_target_view = true;
+        }
+      }
+      if (has_target_view)
       {
         // If we have a target view, then we know we cover it because
         // the expressions match directly
@@ -3285,9 +3213,11 @@ namespace Legion {
         target_view->add_current_user(user, term_event, user_mask, trace_info);
         if (user->remove_reference())
           delete user;
-        if (update_count)
+        if (update_count || update_cache)
         {
           AutoLock v_lock(view_lock);
+          if (update_cache)
+            expr_cache[user_expr->expr_id] = target_view;
           if (update_count)
           {
 #ifdef DEBUG_LEGION
@@ -3306,30 +3236,10 @@ namespace Legion {
       {
 #ifdef DEBUG_LEGION
         assert(update_count); // this should always be true
+        assert(!update_cache); // this should always be false
 #endif
         // This is a case where we don't know where to add the copy user
-        // so we need to traverse down and find one, if we know which
-        // target_view to use then we can add this as a covering user
-        // otherwise we need to add it as a partial user
-        if (target_view == NULL)
-        {
-          AutoLock e_lock(expr_lock,1,false/*exclusive*/);
-          target_view = current_users->find_congruent_view(user_expr);
-        }
-        if (target_view != NULL)
-        {
-          PhysicalUser *user = new PhysicalUser(usage, user_expr, op_id, index, 
-                                            true/*copy user*/, true/*covers*/);
-          // Hold a reference to this in case it finishes before we're done
-          // with the analysis and its get pruned/deleted
-          user->add_reference();
-          AutoLock e_lock(expr_lock);
-          target_view = current_users->add_covering_user(user, user_mask,
-                          term_event, user_expr, trace_info, target_view);
-          if (user->remove_reference())
-            delete user;
-        }
-        else
+        // so we need to traverse down and find one, 
         {
           // We're traversing the view tree but not modifying it so 
           // we need a read-only copy of the expr_lock
@@ -3339,13 +3249,6 @@ namespace Legion {
                                           user_expr->get_volume(), trace_info);
         }
         AutoLock v_lock(view_lock);
-        // Update the expression cache if the target view is not NULL
-        if (target_view != NULL)
-        {
-          CacheEntry &entry = expr_cache[user_expr->expr_id];
-          entry.target_view = target_view;
-          entry.invalid_fields -= user_mask;
-        }
 #ifdef DEBUG_LEGION
         assert(outstanding_additions > 0);
 #endif
@@ -3362,7 +3265,7 @@ namespace Legion {
     void MaterializedView::clean_cache(void)
     //--------------------------------------------------------------------------
     {
-      // Now we can clean the cache and the views
+      // Clear the cache
       expr_cache.clear();
       // Reset the cache use counter
       expr_cache_uses = 0;
@@ -3374,6 +3277,16 @@ namespace Legion {
       // Take the lock in exclusive mode since we might be modifying the tree
       AutoLock e_lock(expr_lock);
       current_users->clean_views(dummy_mask, clean_set);
+      // We can safely repopulate the cache with any view expressions which
+      // are still valid, remove all the references for views in the clean set 
+      for (FieldMaskSet<ExprView>::const_iterator it = 
+            clean_set.begin(); it != clean_set.end(); it++)
+      {
+        if (!!(~(it->first->invalid_fields)))
+          expr_cache[it->first->view_expr->expr_id] = it->first;
+        if (it->first->remove_reference())
+          delete it->first;
+      }
     }
 
     //--------------------------------------------------------------------------

@@ -290,19 +290,14 @@ namespace Legion {
                                    const PhysicalTraceInfo &trace_info);
       // Check to see if there is any view with the same shape already
       // in the ExprView tree, if so return it
-      ExprView* find_congruent_view(IndexSpaceExpression *user_expr);
-      ExprView* add_covering_user(PhysicalUser *user, 
-                                  const FieldMask &user_mask,
-                                  const ApEvent term_event,
-                                  IndexSpaceExpression *user_expr,
-                                  const PhysicalTraceInfo &trace_info,
-                                  ExprView *target_view/* can be NULL*/);
-      void find_covering_subviews(IndexSpaceExpression *user_expr,
-                                  const FieldMask &user_mask,
-                                  ExprView *key_view, FieldMask &perfect_mask,
-                                  FieldMaskSet<ExprView> &perfect_views,
-                                  LegionMap<std::pair<size_t,ExprView*>,
-                                    FieldMask>::aligned &bounding_views);
+      ExprView* find_congruent_view(IndexSpaceExpression *expr) const;
+      // Add a new subview with fields into the tree
+      void insert_subview(ExprView *subview, FieldMask &subview_mask);
+      void find_tightest_subviews(IndexSpaceExpression *expr,
+                                  FieldMask &expr_mask,
+                                  LegionMap<std::pair<size_t,
+                                    ExprView*>,FieldMask>::aligned 
+                                    &bounding_views);
       void add_partial_user(const RegionUsage &usage,
                             UniqueID op_id, unsigned index,
                             FieldMask user_mask,
@@ -317,8 +312,6 @@ namespace Legion {
       // this is that it will require stopping any precondition searches
       // which currently can still happen at the same time
       void clean_views(FieldMask &valid_mask,FieldMaskSet<ExprView> &clean_set);
-      // Assume a reference comes down with the subview
-      void add_dominated_subview(ExprView *subview, FieldMask view_mask);
     public:
       void pack_replication(Serializer &rez, 
                             std::map<PhysicalUser*,unsigned> &indexes,
@@ -326,6 +319,7 @@ namespace Legion {
                             const AddressSpaceID target) const;
       void unpack_replication(Deserializer &derez, ExprView *root,
                               const AddressSpaceID source,
+                              std::map<IndexSpaceExprID,ExprView*> &expr_cache,
                               std::vector<PhysicalUser*> &users);
       void deactivate_replication(const FieldMask &deactivate_mask);
     protected:
@@ -397,6 +391,9 @@ namespace Legion {
       InstanceView *const inst_view;
       IndexSpaceExpression *const view_expr;
       const size_t view_volume;
+      // This is publicly mutable and protected by expr_lock from
+      // the owner inst_view
+      FieldMask invalid_fields;
     protected:
       mutable LocalLock view_lock;
     protected:
@@ -436,17 +433,6 @@ namespace Legion {
     public:
       // Number of users to be added between cache invalidations
       static const unsigned user_cache_timeout = 1024;
-      struct CacheEntry {
-      public:
-        CacheEntry(void)
-          : invalid_fields(FieldMask(LEGION_FIELD_MASK_FIELD_ALL_ONES)),
-            target_view(NULL) { }
-      public:
-        // Track the invalid fields so we can do intersections
-        // and not differences
-        FieldMask invalid_fields;
-        ExprView *target_view;
-      };
     public:
       typedef LegionMap<VersionID,FieldMaskSet<IndexSpaceExpression>,
                       PHYSICAL_VERSION_ALLOC>::track_aligned VersionFieldExprs;  
@@ -575,7 +561,7 @@ namespace Legion {
       // Lock for serializing creation of ExprView objects
       mutable LocalLock expr_lock;
       // Mapping from user expressions to ExprViews to attach to
-      LegionMap<IndexSpaceExprID,CacheEntry>::aligned expr_cache;
+      std::map<IndexSpaceExprID,ExprView*> expr_cache;
       // A timeout counter for the cache so we don't permanently keep growing
       // in the case where the sets of expressions we use change over time
       unsigned expr_cache_uses;
