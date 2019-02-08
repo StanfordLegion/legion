@@ -452,9 +452,16 @@ namespace Legion {
     {
       // The runtime will add the gc reference to this view when necessary
       std::set<ApEvent> to_collect;
-      manager->defer_collect_user(this, term_event, mutator, to_collect);
+      bool add_ref = false;
+      bool remove_ref = false;
+      manager->defer_collect_user(this, term_event, to_collect, 
+                                  add_ref, remove_ref);
+      if (add_ref)
+        add_collectable_reference(mutator);
       if (!to_collect.empty())
         collect_users(to_collect); 
+      if (remove_ref && remove_collectable_reference(mutator))
+        delete this;
     }
 
     //--------------------------------------------------------------------------
