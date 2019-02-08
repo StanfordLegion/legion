@@ -324,6 +324,7 @@ namespace Legion {
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
+                                      const bool user_covers,
                                       std::set<ApEvent> &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       EventFieldUsers &filter_users,
@@ -336,6 +337,7 @@ namespace Legion {
                                       ApEvent term_event,
                                       const UniqueID op_id,
                                       const unsigned index,
+                                      const bool user_covers,
                                       std::set<ApEvent> &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const PhysicalTraceInfo &trace_info);
@@ -348,6 +350,7 @@ namespace Legion {
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
+                                      const bool user_covers,
                                       EventFieldExprs &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       EventFieldUsers &filter_events,
@@ -359,6 +362,7 @@ namespace Legion {
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
+                                      const bool user_covers,
                                       EventFieldExprs &preconditions,
                                       std::set<ApEvent> &dead_events,
                                       const PhysicalTraceInfo &trace_info); 
@@ -368,13 +372,15 @@ namespace Legion {
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
                                       const unsigned index,
+                                      const bool user_covers,
                                       bool &dominates);
       template<bool COPY_USER>
       inline bool has_local_precondition(PhysicalUser *prev_user,
                                       const RegionUsage &next_user,
                                       IndexSpaceExpression *user_expr,
                                       const UniqueID op_id,
-                                      const unsigned index);
+                                      const unsigned index,
+                                      const bool user_covers);
     protected:
       void filter_local_users(ApEvent term_event);
       void filter_current_users(const EventFieldUsers &to_filter);
@@ -1086,6 +1092,7 @@ namespace Legion {
                                                  IndexSpaceExpression *expr,
                                                  const UniqueID op_id,
                                                  const unsigned index,
+                                                 const bool next_covers,
                                                  bool &dominates)
     //--------------------------------------------------------------------------
     {
@@ -1111,16 +1118,22 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      // If the user doesn't cover the expression for this view then
-      // we need to do an extra intersection test, this should only
-      // happen with copy users at the moment
-      if (!user->covers)
+      if (!next_covers)
       {
-        IndexSpaceExpression *overlap = 
-          context->intersect_index_spaces(expr, user->expr);
-        if (overlap->is_empty())
-          return false;
-        if (overlap->get_volume() < user->expr->get_volume())
+        if (!user->covers)
+        {
+          // Neither one covers so we actually need to do the
+          // full intersection test and see if next covers
+          IndexSpaceExpression *overlap = 
+            context->intersect_index_spaces(expr, user->expr);
+          if (overlap->is_empty())
+            return false;
+          if (overlap->get_volume() < user->expr->get_volume())
+            dominates = false;
+        }
+        else
+          // Next doesn't cover so clearly doesn't dominate 
+          // a previous user that does cover
           dominates = false;
       }
       return true;
@@ -1132,7 +1145,8 @@ namespace Legion {
                                                  const RegionUsage &next_user,
                                                  IndexSpaceExpression *expr,
                                                  const UniqueID op_id,
-                                                 const unsigned index)
+                                                 const unsigned index,
+                                                 const bool next_covers)
     //--------------------------------------------------------------------------
     {
       // We order these tests in a entirely based on cost
@@ -1160,7 +1174,7 @@ namespace Legion {
       // If the user doesn't cover the expression for this view then
       // we need to do an extra intersection test, this should only
       // happen with copy users at the moment
-      if (!user->covers)
+      if (!user->covers && !next_covers)
       {
         IndexSpaceExpression *overlap = 
           context->intersect_index_spaces(expr, user->expr);
