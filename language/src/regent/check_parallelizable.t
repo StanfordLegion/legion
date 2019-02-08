@@ -518,7 +518,7 @@ local whitelist = {
 }
 
 local function is_admissible_function(cx, fn)
-  if cx.demand_cuda then
+  if cx.demand_cuda and cx.loop_var then
     return std.is_math_fn(fn) or fn == array or fn == arrayof
   else
     return std.is_math_fn(fn) or whitelist[fn]
@@ -1025,8 +1025,11 @@ local function check_demand_parallel(cx, node)
     local op = false
     for symbol, _ in cx.reductions:items() do
       local privilege, _ = unpack(cx:get_scalar(symbol))
+      if not std.is_reduce(privilege) then
+        report.error(cx.loop, prefixes["parallel"] ..
+            " failed: task must not read reduction variable")
+      end
       reduction = symbol
-      assert(std.is_reduce(privilege))
       op = privilege.op
     end
     node = node {
