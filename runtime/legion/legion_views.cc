@@ -571,9 +571,9 @@ namespace Legion {
           if (!current_epoch_users.empty())
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
-                                       preconditions, dead_events, 
-                                       current_to_filter, observed,
-                                       non_dominated, trace_info);
+                                       user_dominates, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated, trace_info);
           if (!previous_epoch_users.empty())
           {
             const FieldMask dominated = observed - non_dominated;
@@ -582,8 +582,9 @@ namespace Legion {
             const FieldMask previous_mask = user_mask - dominated;
             if (!!previous_mask)
               find_previous_preconditions(usage, previous_mask, user_expr,
-                                          term_event, op_id, index,
-                                          preconditions,dead_events,trace_info);
+                                          term_event, op_id, index, 
+                                          user_dominates, preconditions,
+                                          dead_events, trace_info);
           }
         }
         else
@@ -593,9 +594,9 @@ namespace Legion {
           {
             find_current_preconditions(usage, user_mask, user_expr,
                                        term_event, op_id, index, 
-                                       preconditions, dead_events, 
-                                       current_to_filter, observed,
-                                       non_dominated, trace_info);
+                                       user_dominates, preconditions, 
+                                       dead_events, current_to_filter, 
+                                       observed, non_dominated, trace_info);
             if (!current_to_filter.empty())
               current_to_filter.clear();
           }
@@ -606,7 +607,8 @@ namespace Legion {
             if (!!previous_mask)
               find_previous_preconditions(usage, previous_mask, user_expr,
                                           term_event, op_id, index,
-                                          preconditions,dead_events,trace_info);
+                                          user_dominates, preconditions,
+                                          dead_events, trace_info);
           }
         }
       } 
@@ -711,9 +713,10 @@ namespace Legion {
           FieldMask observed, non_dominated;
           if (!current_epoch_users.empty())
             find_current_preconditions(usage, copy_mask, copy_expr, 
-                                       op_id, index, preconditions, 
-                                       dead_events, current_to_filter, 
-                                       observed, non_dominated, trace_info);
+                                       op_id, index, copy_dominates,
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed, 
+                                       non_dominated, trace_info);
           if (!previous_epoch_users.empty())
           {
             const FieldMask dominated = observed - non_dominated;
@@ -722,8 +725,8 @@ namespace Legion {
             const FieldMask previous_mask = copy_mask - dominated;
             if (!!previous_mask)
               find_previous_preconditions(usage, previous_mask, copy_expr,
-                                          op_id, index, preconditions,
-                                          dead_events, trace_info);
+                                          op_id, index, copy_dominates,
+                                          preconditions,dead_events,trace_info);
           }
         }
         else
@@ -732,9 +735,10 @@ namespace Legion {
           if (!current_epoch_users.empty())
           {
             find_current_preconditions(usage, copy_mask, copy_expr, 
-                                       op_id, index, preconditions, 
-                                       dead_events, current_to_filter, 
-                                       observed, non_dominated, trace_info);
+                                       op_id, index, copy_dominates,
+                                       preconditions, dead_events, 
+                                       current_to_filter, observed, 
+                                       non_dominated, trace_info);
             current_to_filter.clear();
           }
           if (!previous_epoch_users.empty())
@@ -743,8 +747,8 @@ namespace Legion {
             const FieldMask previous_mask = copy_mask - dominated;
             if (!!previous_mask)
               find_previous_preconditions(usage, previous_mask, copy_expr,
-                                          op_id, index, preconditions,
-                                          dead_events, trace_info);
+                                          op_id, index, copy_dominates,
+                                          preconditions,dead_events,trace_info);
           }
         }
       }
@@ -1837,6 +1841,7 @@ namespace Legion {
                                               ApEvent term_event,
                                               const UniqueID op_id,
                                               const unsigned index,
+                                              const bool user_covers,
                                               std::set<ApEvent> &preconditions,
                                               std::set<ApEvent> &dead_events,
                                               EventFieldUsers &filter_users,
@@ -1882,7 +1887,7 @@ namespace Legion {
             continue;
           bool dominates = true;
           if (has_local_precondition<false>(it->first, usage, user_expr, 
-                                            op_id, index, dominates))
+                                  op_id, index, user_covers, dominates))
           {
             preconditions.insert(cit->first);
             if (dominates)
@@ -1918,6 +1923,7 @@ namespace Legion {
                                                ApEvent term_event,
                                                const UniqueID op_id,
                                                const unsigned index,
+                                               const bool user_covers,
                                                std::set<ApEvent> &preconditions,
                                                std::set<ApEvent> &dead_events,
                                             const PhysicalTraceInfo &trace_info)
@@ -1956,7 +1962,7 @@ namespace Legion {
           if (user_mask * it->second)
             continue;
           if (has_local_precondition<false>(it->first, usage, user_expr, 
-                                            op_id, index))
+                                            op_id, index, user_covers))
             preconditions.insert(pit->first);
         }
       }
@@ -1968,6 +1974,7 @@ namespace Legion {
                                               IndexSpaceExpression *user_expr,
                                               const UniqueID op_id,
                                               const unsigned index,
+                                              const bool user_covers,
                                               EventFieldExprs &preconditions,
                                               std::set<ApEvent> &dead_events,
                                               EventFieldUsers &filter_events,
@@ -2015,7 +2022,7 @@ namespace Legion {
             continue;
           bool dominated = true;
           if (has_local_precondition<true>(it->first, usage, user_expr,
-                                           op_id, index, dominated)) 
+                                 op_id, index, user_covers, dominated)) 
           {
             if (finder == preconditions.end())
             {
@@ -2051,6 +2058,7 @@ namespace Legion {
                                                IndexSpaceExpression *user_expr,
                                                const UniqueID op_id,
                                                const unsigned index,
+                                               const bool user_covers,
                                                EventFieldExprs &preconditions,
                                                std::set<ApEvent> &dead_events,
                                             const PhysicalTraceInfo &trace_info)
@@ -2094,7 +2102,7 @@ namespace Legion {
           if (!user_overlap)
             continue;
           if (has_local_precondition<true>(it->first, usage, user_expr, 
-                                           op_id, index))
+                                           op_id, index, user_covers))
           {
             if (finder == preconditions.end())
             {
