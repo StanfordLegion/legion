@@ -122,7 +122,13 @@ function normalize_access.expr_binary(stats, expr)
   }
 end
 
-normalize_access.expr_cast = normalize_expr_factory("arg", true)
+function normalize_access.expr_cast(stats, expr)
+  local read =
+    not (expr.fn.value:ispointer() and std.as_read(expr.arg.expr_type):isarray())
+  return expr {
+    arg = normalize_access.expr(stats, expr.arg, read),
+  }
+end
 
 local normalize_access_expr_table = {
   [ast.typed.expr.DynamicCast]                = normalize_access.expr_regent_cast,
