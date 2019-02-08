@@ -266,10 +266,9 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
     base = [
         # FIXME: Move this flag into a per-test parameter so we don't use it everywhere.
         # Don't include backtraces on those expected to fail
-        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fcuda", "1", "-fcuda-offline", "1"] + extra_flags, {})),
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1'] + extra_flags, {})),
          (os.path.join('tests', 'regent', 'compile_fail'),
           os.path.join('tests', 'bishop', 'compile_fail'),
-          os.path.join('tests', 'cuda', 'compile_fail'),
          )),
     ]
     pretty = [
@@ -330,6 +329,9 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
          )),
     ]
     cuda = [
+        ('compile_fail', (test_compile_fail, (['-fbounds-checks', '1', "-fcuda", "1", "-fcuda-offline", "1"] + extra_flags, {})),
+         (os.path.join('tests', 'cuda', 'compile_fail'),
+         )),
         ('run_pass', (test_run_pass, ([] + extra_flags, {})),
          (os.path.join('tests', 'cuda', 'run_pass'),
          )),

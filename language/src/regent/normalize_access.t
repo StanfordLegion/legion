@@ -122,7 +122,13 @@ function normalize_access.expr_binary(stats, expr)
   }
 end
 
-normalize_access.expr_cast = normalize_expr_factory("arg", true)
+function normalize_access.expr_cast(stats, expr)
+  local read =
+    not (expr.fn.value:ispointer() and std.as_read(expr.arg.expr_type):isarray())
+  return expr {
+    arg = normalize_access.expr(stats, expr.arg, read),
+  }
+end
 
 local normalize_access_expr_table = {
   [ast.typed.expr.DynamicCast]                = normalize_access.expr_regent_cast,
@@ -283,6 +289,11 @@ function normalize_access.stat_return(stats, stat)
   end
 end
 
+function normalize_access.stat_expr(stats, stat)
+  local expr = normalize_access.expr(stats, stat.expr, false)
+  stats:insert(stat { expr = expr })
+end
+
 function normalize_access.pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_access_stat_table = {
@@ -298,9 +309,9 @@ local normalize_access_stat_table = {
   [ast.typed.stat.Assignment]      = normalize_access.stat_assignment_or_reduce,
   [ast.typed.stat.Reduce]          = normalize_access.stat_assignment_or_reduce,
   [ast.typed.stat.Return]          = normalize_access.stat_return,
+  [ast.typed.stat.Expr]            = normalize_access.stat_expr,
 
   [ast.typed.stat.Break]           = normalize_access.pass_through_stat,
-  [ast.typed.stat.Expr]            = normalize_access.pass_through_stat,
   [ast.typed.stat.ParallelPrefix]  = normalize_access.pass_through_stat,
   [ast.typed.stat.RawDelete]       = normalize_access.pass_through_stat,
   [ast.typed.stat.Fence]           = normalize_access.pass_through_stat,

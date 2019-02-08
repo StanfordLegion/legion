@@ -13,36 +13,29 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fcuda", "1", "-ll:gpu", "1" ]]
+-- [["-fcuda", "1", "-foverride-demand-cuda", "1", "-ll:gpu", "1", "-fflow", "0" ]]
 
 import "regent"
 
-__demand(__parallel, __cuda)
-task gpu_task(r : region(ispace(int1d), float))
-where reads writes(r)
-do
-  var x : float = 0
+__demand(__cuda)
+task init(r : region(ispace(int1d), int))
+where writes(r) do
   for e in r do
-    x += @e
+    r[(e + 1) % r.bounds] = 123
   end
-  return x
+end
+
+task check(r : region(ispace(int1d), int))
+where reads(r) do
+  for e in r do
+    regentlib.assert(@e == 123, "test failed")
+  end
 end
 
 task main()
-  var r = region(ispace(int1d, 1000000), float)
-
-  var cs = ispace(int1d, 2)
-  var p_r = partition(equal, r, cs)
-  __fence(__execution, __block)
-  var ts_start = regentlib.c.legion_get_current_time_in_micros()
-  __parallelize_with cs, p_r do
-    for i = 0, 10 do
-      gpu_task(r)
-    end
-  end
-  __fence(__execution, __block)
-  var ts_end = regentlib.c.legion_get_current_time_in_micros()
-  regentlib.c.printf("wall-clock time: %lld us\n", ts_end - ts_start)
+  var r = region(ispace(int1d, 100), int)
+  init(r)
+  check(r)
 end
 
 regentlib.start(main)
