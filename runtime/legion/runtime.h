@@ -663,6 +663,7 @@ namespace Legion {
       // Scheduling state
       mutable LocalLock queue_lock;
       bool task_scheduler_enabled;
+      bool outstanding_task_scheduler;
       unsigned total_active_contexts;
       unsigned total_active_mappers;
       struct ContextState {
@@ -680,9 +681,13 @@ namespace Legion {
       // For each mapper something to track its state
       struct MapperState {
       public:
+        MapperState(void)
+          : queue_guard(false) { }
+      public:
         std::list<TaskOp*> ready_queue;
         RtEvent deferral_event;
-        bool added_tasks;
+        RtUserEvent queue_waiter;
+        bool queue_guard;
       };
       // State for each mapper for scheduling purposes
       std::map<MapperID,MapperState> mapper_states;
