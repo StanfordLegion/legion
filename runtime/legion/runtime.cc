@@ -2761,6 +2761,7 @@ namespace Legion {
       : runtime(rt), local_proc(proc), proc_kind(kind), 
         stealing_disabled(no_steal), replay_execution(replay), 
         next_local_index(0), task_scheduler_enabled(false), 
+        outstanding_task_scheduler(false),
         total_active_contexts(0), total_active_mappers(0)
     //--------------------------------------------------------------------------
     {
@@ -2777,8 +2778,7 @@ namespace Legion {
     ProcessorManager::ProcessorManager(const ProcessorManager &rhs)
       : runtime(NULL), local_proc(Processor::NO_PROC),
         proc_kind(Processor::LOC_PROC), stealing_disabled(false), 
-        replay_execution(false), next_local_index(0),
-        task_scheduler_enabled(false), total_active_contexts(0)
+        replay_execution(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -2915,19 +2915,27 @@ namespace Legion {
       // Now re-take the lock and re-check the condition to see 
       // if the next scheduling task should be launched
       AutoLock q_lock(queue_lock);
-      if ((total_active_contexts > 0) && (total_active_mappers > 0))
+#ifdef DEBUG_LEGION
+      assert(outstanding_task_scheduler);
+#endif
+      // If the task scheduler is enabled launch ourselves again
+      if (task_scheduler_enabled)
       {
-        task_scheduler_enabled = true;
-        launch_task_scheduler();
+        SchedulerArgs sched_args(local_proc);
+        runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
       }
       else
-        task_scheduler_enabled = false; 
+        outstanding_task_scheduler = false;
     } 
 
     //--------------------------------------------------------------------------
     void ProcessorManager::launch_task_scheduler(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!outstanding_task_scheduler);
+#endif
+      outstanding_task_scheduler = true;
       SchedulerArgs sched_args(local_proc);
       runtime->issue_runtime_meta_task(sched_args, LG_LATENCY_WORK_PRIORITY);
     } 
@@ -3009,7 +3017,8 @@ namespace Legion {
           (total_active_mappers > 0))
       {
         task_scheduler_enabled = true;
-        launch_task_scheduler();
+        if (!outstanding_task_scheduler)
+          launch_task_scheduler();
       }
       total_active_contexts++;
     }
@@ -3036,7 +3045,8 @@ namespace Legion {
           (total_active_contexts > 0))
       {
         task_scheduler_enabled = true;
-        launch_task_scheduler();
+        if (!outstanding_task_scheduler)
+          launch_task_scheduler();
       }
       total_active_mappers++;
     }
@@ -3076,64 +3086,113 @@ namespace Legion {
         MapperManager *mapper = find_mapper(stealer);
         if (mapper == NULL)
           continue;
-        
-        // Construct a vector of tasks eligible for stealing
+        // Wait until we can exclusive access to the ready queue
+        std::list<TaskOp*> queue_copy;
+        RtEvent queue_copy_ready;
+        // Pull out the current tasks for this mapping operation
+        // Need to iterate until we get access to the queue
+        do
+        {
+          if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
+          {
+            queue_copy_ready.wait();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
+          }
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[*steal_it];
+          if (!map_state.queue_guard)
+          {
+            // If we don't have a deferral event then grab our
+            // ready queue of tasks so we can try to map them
+            // this will also prevent them from being stolen
+            if (!map_state.ready_queue.empty())
+            {
+              map_state.ready_queue.swap(queue_copy);
+              // Set the queue guard so no one else tries to
+              // read the ready queue while we've checked it out
+              map_state.queue_guard = true;
+            }
+          }
+          else
+          {
+            // Make an event if necessary
+            if (!map_state.queue_waiter.exists())
+              map_state.queue_waiter = Runtime::create_rt_user_event();
+            // Record that we need to wait on it
+            queue_copy_ready = map_state.queue_waiter;
+          }
+        } while (queue_copy_ready.exists());
+        if (queue_copy.empty())
+          continue;
         Mapper::StealRequestInput input;
         input.thief_proc = thief;
-        std::vector<const Task*> &mapper_tasks = input.stealable_tasks;
+        for (std::list<TaskOp*>::const_iterator it = 
+              queue_copy.begin(); it != queue_copy.end(); it++)
         {
-          AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          std::list<TaskOp*> &target_list = mapper_states[stealer].ready_queue;
-          for (std::list<TaskOp*>::const_iterator it = 
-                target_list.begin(); it != target_list.end(); it++)
-          {
-            if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
-              mapper_tasks.push_back(*it);
-          }
+          if ((*it)->is_stealable() && !(*it)->is_origin_mapped())
+            input.stealable_tasks.push_back(*it);
         }
         Mapper::StealRequestOutput output;
         // Ask the mapper what it wants to allow be stolen
-        if (!mapper_tasks.empty())
+        if (!input.stealable_tasks.empty())
           mapper->invoke_permit_steal_request(&input, &output);
-        std::deque<TaskOp*> temp_stolen;
-        const std::set<const Task*> &to_steal = output.stolen_tasks;
-        if (!to_steal.empty())
+        // See which tasks we can succesfully steal
+        std::vector<TaskOp*> local_stolen;
+        if (!output.stolen_tasks.empty())
         {
-          // See if we can still get it out of the queue
-          AutoLock q_lock(queue_lock);
-          MapperState &map_state = mapper_states[stealer];
-          std::list<TaskOp*> &target_list = map_state.ready_queue;
-          for (std::set<const Task*>::const_iterator steal_it = 
-                to_steal.begin(); steal_it != to_steal.end(); steal_it++)
+          std::set<const Task*> to_steal(output.stolen_tasks.begin(), 
+                                         output.stolen_tasks.end());
+          // Remove any tasks that are going to be stolen
+          for (std::list<TaskOp*>::iterator it = 
+                queue_copy.begin(); it != queue_copy.end(); /*nothing*/)
           {
-            TaskOp *target = static_cast<TaskOp*>(
-                              const_cast<Task*>(*steal_it));
-            bool found = false;
-            for (std::list<TaskOp*>::iterator it = target_list.begin();
-                  it != target_list.end(); it++)
+            if ((to_steal.find(*it) != to_steal.end()) && 
+                (*it)->prepare_steal())
             {
-              if ((*it) == target)
-              {
-                target_list.erase(it);
-                if (target_list.empty())
-                {
-                  // If we already have a deferral event then we
-                  // are already not active so just clear it
-                  if (map_state.deferral_event.exists())
-                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
-                  else
-                    decrement_active_mappers();
-                }
-                found = true;
-                break;
-              }
+              // Mark this as stolen and update the target processor
+              (*it)->mark_stolen();
+              local_stolen.push_back(*it);
+              it = queue_copy.erase(it);
             }
-            if (found)
+            else
+              it++;
+          }
+        }
+        {
+          // Retake the lock, put any tasks still in the ready queue
+          // back into the queue and remove the queue guard
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[*steal_it];
+#ifdef DEBUG_LEGION
+          assert(map_state.queue_guard);
+#endif
+          std::list<TaskOp*> &rqueue = map_state.ready_queue;
+          if (!queue_copy.empty())
+          {
+            // Put any new items on the back of the queue
+            if (!rqueue.empty())
             {
-              temp_stolen.push_back(target);
+              for (std::list<TaskOp*>::const_iterator it = 
+                    rqueue.begin(); it != rqueue.end(); it++)
+                queue_copy.push_back(*it);
+            }
+            rqueue.swap(queue_copy);
+          }
+          else if (rqueue.empty())
+          {
+            if (map_state.deferral_event.exists())
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
+            else
+              decrement_active_mappers();
+          }
+          if (!local_stolen.empty())
+          {
+            for (std::vector<TaskOp*>::const_iterator it = 
+                  local_stolen.begin(); it != local_stolen.end(); it++)
+            {
               // Wait until we are no longer holding the lock
               // to mark that this is no longer an outstanding task
-              ContextID ctx_id = target->get_context()->get_context_id();
+              ContextID ctx_id = (*it)->get_context()->get_context_id();
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -3143,49 +3202,26 @@ namespace Legion {
                 decrement_active_contexts();
             }
           }
+          // Remove the queue guard
+          map_state.queue_guard = false;
+          if (map_state.queue_waiter.exists())
+          {
+            Runtime::trigger_event(map_state.queue_waiter);
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
-        // Now see if we can actually steal the task, if not
-        // then we have to put it back on the queue
-        bool successful_steal = false;
-        for (unsigned idx = 0; idx < temp_stolen.size(); idx++)
+        if (!local_stolen.empty())
         {
-          if (temp_stolen[idx]->prepare_steal())
+          successful_thiefs.push_back(stealer);
+          for (std::vector<TaskOp*>::const_iterator it = 
+                local_stolen.begin(); it != local_stolen.end(); it++)
           {
-            // Mark this as stolen and update the target processor
-            temp_stolen[idx]->mark_stolen();
-            stolen.insert(temp_stolen[idx]);
-            successful_steal = true;
-            temp_stolen[idx]->deactivate_outstanding_task();
-          }
-          else
-          {
-            // Always set this before putting anything on
-            // the ready queue
-            ContextID ctx_id = 
-              temp_stolen[idx]->get_context()->get_context_id();
-            AutoLock q_lock(queue_lock);
-            ContextState &state = context_states[ctx_id];
-            if (state.active && (state.owned_tasks == 0))
-              increment_active_contexts();
-            state.owned_tasks++;
-            MapperState &map_state = mapper_states[stealer];
-            if (map_state.ready_queue.empty())
-            {
-              // Clear any deferral event if we are changing state
-              map_state.deferral_event = RtEvent::NO_RT_EVENT;
-              increment_active_mappers();
-            }
-            // Otherwise the state hasn't actually changed so
-            // we can't actually clear any deferral events
-            map_state.ready_queue.push_back(temp_stolen[idx]);
-            map_state.added_tasks = true;
+            (*it)->deactivate_outstanding_task();
+            stolen.insert(*it);
           }
         }
-
-        if (!successful_steal) 
-          mapper->process_failed_steal(thief);
         else
-          successful_thiefs.push_back(stealer);
+          mapper->process_failed_steal(thief);
       }
       if (!stolen.empty())
       {
@@ -3253,7 +3289,6 @@ namespace Legion {
         increment_active_mappers();
       }
       map_state.ready_queue.push_back(task);
-      map_state.added_tasks = true;
     }
 
     //--------------------------------------------------------------------------
@@ -3292,39 +3327,57 @@ namespace Legion {
       {
         const MapperID map_id = it->first;
         MapperManager *const mapper = it->second;
-        Mapper::SelectMappingInput input;
-        std::list<const Task*> &visible_tasks = input.ready_tasks;
-        // We also need to capture the generations here
-        std::list<GenerationID> visible_generations;
+        std::list<TaskOp*> queue_copy;
+        RtEvent queue_copy_ready;
         // Pull out the current tasks for this mapping operation
+        // Need to iterate until we get access to the queue
+        do
         {
-          AutoLock q_lock(queue_lock,1,false/*exclusive*/);
-          MapperState &map_state = mapper_states[map_id];
-          // Only grap tasks if we don't have a deferral event
-          if (!map_state.deferral_event.exists())
+          if (queue_copy_ready.exists() && !queue_copy_ready.has_triggered())
           {
-            std::list<TaskOp*> &target_list = map_state.ready_queue;
-            for (std::list<TaskOp*>::const_iterator it = 
-                  target_list.begin(); it != target_list.end(); it++)
-            {
-              visible_tasks.push_back(*it);
-              visible_generations.push_back((*it)->get_generation());
-            }  
+            queue_copy_ready.wait();
+            queue_copy_ready = RtEvent::NO_RT_EVENT;
           }
-          // Set our flag to check for added tasks while we do the mapper call
-          map_state.added_tasks = false;
-        }
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[map_id];
+          if (!map_state.queue_guard)
+          {
+            // If we don't have a deferral event then grab our
+            // ready queue of tasks so we can try to map them
+            // this will also prevent them from being stolen
+            if (!map_state.deferral_event.exists() &&
+                !map_state.ready_queue.empty())
+            {
+              map_state.ready_queue.swap(queue_copy);
+              // Set the queue guard so no one else tries to
+              // read the ready queue while we've checked it out
+              map_state.queue_guard = true;
+            }
+          }
+          else
+          {
+            // Make an event if necessary
+            if (!map_state.queue_waiter.exists())
+              map_state.queue_waiter = Runtime::create_rt_user_event();
+            // Record that we need to wait on it
+            queue_copy_ready = map_state.queue_waiter;
+          }
+        } while (queue_copy_ready.exists());
         // Do this before anything else in case we don't have any tasks
         if (!stealing_disabled)
           mapper->perform_stealing(stealing_targets);
-        // Nothing to do if there are no visible tasks
-        if (visible_tasks.empty())
+        // Nothing to do if there are no tasks on the queue
+        if (queue_copy.empty())
           continue;
         // Ask the mapper which tasks it would like to schedule
+        Mapper::SelectMappingInput input;
         Mapper::SelectMappingOutput output;
-        if (!visible_tasks.empty())
-          mapper->invoke_select_tasks_to_map(&input, &output);
+        for (std::list<TaskOp*>::const_iterator it = 
+              queue_copy.begin(); it != queue_copy.end(); it++)
+          input.ready_tasks.push_back(*it);
+        mapper->invoke_select_tasks_to_map(&input, &output);
         // If we had no entry then we better have gotten a mapper event
+        std::vector<TaskOp*> to_trigger;
         if (output.map_tasks.empty() && output.relocate_tasks.empty())
         {
           const RtEvent wait_on = output.deferral_event.impl;
@@ -3336,15 +3389,35 @@ namespace Legion {
             // We have to check to see if any new tasks were added to 
             // the ready queue while we were doing our mapper call, if 
             // they were then we need to invoke select_tasks_to_map again
-            if (!map_state.added_tasks)
+            if (map_state.ready_queue.empty())
             {
 #ifdef DEBUG_LEGION
               assert(!map_state.deferral_event.exists());
+              assert(map_state.queue_guard);
 #endif
               map_state.deferral_event = wait_on;
               // Decrement the number of active mappers
               decrement_active_mappers();
+              // Put our tasks back on the queue
+              map_state.ready_queue.swap(queue_copy);
+              // Clear the queue guard
+              map_state.queue_guard = false;
+              if (map_state.queue_waiter.exists())
+              {
+                Runtime::trigger_event(map_state.queue_waiter);
+                map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+              }
+              // Launch a task to remove the deferred mapper 
+              // event when it triggers
+              DeferMapperSchedulerArgs args(this, map_id, wait_on);
+              runtime->issue_runtime_meta_task(args, 
+                  LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              // We can continue because there is nothing 
+              // left to do for this mapper
+              continue;
             }
+            // Otherwise we fall through to put our tasks back on the queue 
+            // which will lead to select_tasks_to_map being called again
           }
           else // Very bad, error message
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
@@ -3355,81 +3428,67 @@ namespace Legion {
                           "livelock conditions. Please return a "
                           "'deferral_event' in the 'output' struct.",
                           mapper->get_mapper_name())
-          // Launch a task to remove the deferred mapper event when it triggers
-          DeferMapperSchedulerArgs args(this, map_id, wait_on);
-          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                           wait_on);
-          // We can continue because there is nothing left to do for this mapper
-          continue;
         }
-        // Process the results first remove the operations that were
-        // selected to be mapped from the queue.  Note its possible
-        // that we can't actually find the task because it has been
-        // stolen from the queue while we were deciding what to
-        // map.  It's also possible the task is no longer in the same
-        // place if the queue was prepended to.
+        else
         {
-          // First things first: filter our visible list before we are holding
-          // the lock on the ready queues
-          std::list<GenerationID>::iterator gen_it = 
-            visible_generations.begin();
-          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
-                vis_it != visible_tasks.end(); /*nothing*/)
+          // Figure out which tasks are to be triggered
+          std::set<const Task*> selected;
+          if (!output.map_tasks.empty())
+            selected.insert(output.map_tasks.begin(), output.map_tasks.end());
+          if (!output.relocate_tasks.empty())
           {
-            // Check to see if this is a task that we care about
-            if ((output.map_tasks.find(*vis_it) != output.map_tasks.end()) ||
-                (output.relocate_tasks.find(*vis_it) != 
-                 output.relocate_tasks.end()))
-            {
-              vis_it++; // still care about it
-              gen_it++;
-            }
-            else // Otherwise we don't care so we can erase it
-            {
-              vis_it = visible_tasks.erase(vis_it);
-              gen_it = visible_generations.erase(gen_it);
-            }
+            for (std::map<const Task*,Processor>::const_iterator it = 
+                  output.relocate_tasks.begin(); it != 
+                  output.relocate_tasks.end(); it++)
+              selected.insert(it->first);
           }
-          // Reset the iterator to the start
-          gen_it = visible_generations.begin();
-          AutoLock q_lock(queue_lock);
-          MapperState &map_state = mapper_states[map_id];
-          std::list<TaskOp*> &rqueue = map_state.ready_queue;
-          for (std::list<const Task*>::iterator vis_it = visible_tasks.begin(); 
-                vis_it != visible_tasks.end(); gen_it++)
+          // Remove any tasks that are going to be triggered
+          for (std::list<TaskOp*>::iterator it = 
+                queue_copy.begin(); it != queue_copy.end(); /*nothing*/)
           {
-            bool found = false;
-            for (std::list<TaskOp*>::iterator it = rqueue.begin();
-                  it != rqueue.end(); it++)
+            if (selected.find(*it) != selected.end())
             {
-              // In order to be the same task, they need to have the
-              // same pointer and have the same generation
-              if (((*it) == (*vis_it)) &&
-                  ((*gen_it) == (*it)->get_generation()))
-              {
-                rqueue.erase(it);
-                if (rqueue.empty())
-                {
-                  if (map_state.deferral_event.exists())
-                    map_state.deferral_event = RtEvent::NO_RT_EVENT;
-                  else
-                    decrement_active_mappers();
-                }
-                found = true;
-                break;
-              }
-            }
-            if (!found) // stolen
-            {
-              // Remove it from our list
-              vis_it = visible_tasks.erase(vis_it);
+              to_trigger.push_back(*it);
+              it = queue_copy.erase(it);
             }
             else
+              it++;
+          }
+        }
+        {
+          // Retake the lock, put any tasks that the mapper didn't select
+          // back on the queue and update the context states for any
+          // that were selected 
+          AutoLock q_lock(queue_lock);
+          MapperState &map_state = mapper_states[map_id];
+#ifdef DEBUG_LEGION
+          assert(map_state.queue_guard);
+#endif
+          std::list<TaskOp*> &rqueue = map_state.ready_queue;
+          if (!queue_copy.empty())
+          {
+            // Put any new items on the back of the queue
+            if (!rqueue.empty())
             {
-              // Wait until we are not holding the queue lock
-              // to mark that this task is no longer outstanding
-              TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
-              ContextID ctx_id = task->get_context()->get_context_id(); 
+              for (std::list<TaskOp*>::const_iterator it = 
+                    rqueue.begin(); it != rqueue.end(); it++)
+                queue_copy.push_back(*it);
+            }
+            rqueue.swap(queue_copy);
+          }
+          else if (rqueue.empty())
+          {
+            if (map_state.deferral_event.exists())
+              map_state.deferral_event = RtEvent::NO_RT_EVENT;
+            else
+              decrement_active_mappers();
+          }
+          if (!to_trigger.empty())
+          {
+            for (std::vector<TaskOp*>::const_iterator it = 
+                  to_trigger.begin(); it != to_trigger.end(); it++)
+            {
+              ContextID ctx_id = (*it)->get_context()->get_context_id(); 
               ContextState &state = context_states[ctx_id];
 #ifdef DEBUG_LEGION
               assert(state.owned_tasks > 0);
@@ -3437,10 +3496,9 @@ namespace Legion {
               state.owned_tasks--;
               if (state.active && (state.owned_tasks == 0))
                 decrement_active_contexts();
-              vis_it++;
             }
           }
-          if (!stealing_disabled)
+          if (!stealing_disabled && !rqueue.empty())
           {
             for (std::list<TaskOp*>::const_iterator it =
                   rqueue.begin(); it != rqueue.end(); it++)
@@ -3452,22 +3510,27 @@ namespace Legion {
               }
             }
           }
+          // Remove the queue guard
+          map_state.queue_guard = false;
+          if (map_state.queue_waiter.exists())
+          {
+            Runtime::trigger_event(map_state.queue_waiter);
+            map_state.queue_waiter = RtUserEvent::NO_RT_USER_EVENT;
+          }
         }
-        // Now that we've removed them from the queue, issue the
-        // mapping analysis calls
-        for (std::list<const Task*>::iterator vis_it = visible_tasks.begin();
-              vis_it != visible_tasks.end(); vis_it++)
+        // Now we can trigger our tasks that the mapper selected
+        for (std::vector<TaskOp*>::const_iterator it = 
+              to_trigger.begin(); it != to_trigger.end(); it++)
         {
-          TaskOp *task = static_cast<TaskOp*>(const_cast<Task*>(*vis_it));
           // Update the target processor for this task if necessary
           std::map<const Task*,Processor>::const_iterator finder = 
-            output.relocate_tasks.find(*vis_it);
+            output.relocate_tasks.find(*it);
           const bool send_remotely = (finder != output.relocate_tasks.end());
           if (send_remotely)
-            task->set_target_proc(finder->second);
+            (*it)->set_target_proc(finder->second);
           // Mark that this task is no longer outstanding
-          task->deactivate_outstanding_task();
-          TaskOp::TriggerTaskArgs trigger_args(task);
+          (*it)->deactivate_outstanding_task();
+          TaskOp::TriggerTaskArgs trigger_args(*it);
           runtime->issue_runtime_meta_task(trigger_args,
                                            LG_THROUGHPUT_WORK_PRIORITY);
         }
