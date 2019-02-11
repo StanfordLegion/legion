@@ -84,9 +84,29 @@ end
 
 normalize_access.expr_deref = normalize_expr_factory("value", true)
 
+local function insert_temporary_variable(stats, expr)
+  local temp_var = std.newsymbol(std.as_read(expr.expr_type))
+  stats:insert(ast.typed.stat.Var {
+    symbol = temp_var,
+    type = std.as_read(temp_var:gettype()),
+    value = expr,
+    span = expr.span,
+    annotations = ast.default_annotations(),
+  })
+  return ast.typed.expr.ID {
+    value = temp_var,
+    expr_type = temp_var:gettype(),
+    span = expr.span,
+    annotations = ast.default_annotations(),
+  }
+end
+
 function normalize_access.expr_index_access(stats, expr)
   local index = normalize_access.expr(stats, expr.index, true)
   local value = normalize_access.expr(stats, expr.value, std.is_ref(expr.expr_type))
+  if std.is_ref(expr.expr_type) and not index:is(ast.typed.expr.ID) then
+    index = insert_temporary_variable(stats, index)
+  end
   return expr {
     index = index,
     value = value,
@@ -214,20 +234,7 @@ local normalize_access_expr = ast.make_single_dispatch(
 function normalize_access.expr(stats, expr, read)
   local expr = normalize_access_expr(stats)(expr, read)
   if read and not normalize_access.normalized(expr) then
-    local temp_var = std.newsymbol(std.as_read(expr.expr_type))
-    stats:insert(ast.typed.stat.Var {
-      symbol = temp_var,
-      type = std.as_read(temp_var:gettype()),
-      value = expr,
-      span = expr.span,
-      annotations = ast.default_annotations(),
-    })
-    return ast.typed.expr.ID {
-      value = temp_var,
-      expr_type = temp_var:gettype(),
-      span = expr.span,
-      annotations = ast.default_annotations(),
-    }
+    return insert_temporary_variable(stats, expr)
   else
     return expr
   end
@@ -267,23 +274,8 @@ end
 
 function normalize_access.stat_return(stats, stat)
   if stat.value and not stat.value:is(ast.typed.expr.ID) then
-    local value = stat.value
-    local temp_var = std.newsymbol(std.as_read(value.expr_type))
-    stats:insert(ast.typed.stat.Var {
-      symbol = temp_var,
-      type = std.as_read(temp_var:gettype()),
-      value = value,
-      span = stat.span,
-      annotations = ast.default_annotations(),
-    })
-    stats:insert(stat {
-      value = ast.typed.expr.ID {
-        value = temp_var,
-        expr_type = temp_var:gettype(),
-        span = value.span,
-        annotations = ast.default_annotations(),
-      }
-    })
+    local value = insert_temporary_variable(stats, stat.value)
+    stats:insert(stat { value = value })
   else
     stats:insert(stat)
   end
