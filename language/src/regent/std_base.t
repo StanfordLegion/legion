@@ -1439,15 +1439,25 @@ function base.task:get_cuda_variant()
   return self.cuda_variant
 end
 
-function base.task:set_parallel_task(task)
-  assert(not self.parallel_task)
-  self.parallel_task = task
+function base.task:set_parallel_task_generator(generator)
+  assert(not self.parallel_task_generator)
+  self.parallel_task_generator = generator
 end
 
-function base.task:get_parallel_task()
-  return self.parallel_task
+function base.task:get_parallel_task_generator()
+  assert(self.parallel_task_generator)
+  return self.parallel_task_generator
 end
 
+function base.task:set_partitioning_constraints(constraints)
+  assert(not self.partitioning_constraints)
+  self.partitioning_constraints = constraints
+end
+
+function base.task:get_partitioning_constraints()
+  assert(self.partitioning_constraints)
+  return self.partitioning_constraints
+end
 function base.task:is_shard_task()
   -- FIXME: This will break if we pick different names for shard tasks
   return string.sub(tostring(self:get_name()), 0, 6) == "<shard"
@@ -1541,7 +1551,10 @@ do
       -- Variants and alternative versions:
       primary_variant = false,
       cuda_variant = false,
-      parallel_task = false,
+
+      -- Metadata for partition driven auto-parallelization:
+      partitioning_constraints = false,
+      parallel_task_generator = false,
 
       -- Compilation continuations:
       compile_thunk = false,
