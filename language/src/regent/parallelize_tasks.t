@@ -1129,6 +1129,14 @@ function parallelize_task_calls.stat_parallelize_with(cx, stat)
   collect_constraints.block(collector_cx, stat.block)
 
   local all_tasks = collector_cx.all_tasks:map(function(task) return task end)
+  if #all_tasks == 0 then
+    return ast.typed.stat.Block {
+      block = stat.block,
+      span = stat.span,
+      annotations = stat.annotations,
+    }
+  end
+
   table.sort(all_tasks, cmp_tasks)
 
   local solver_cx = solver_context.new()
