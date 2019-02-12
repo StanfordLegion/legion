@@ -14586,7 +14586,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
-          INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14596,7 +14596,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
-          INDEX_SPACE_VIRTUAL_CHANNEL, true/*flush*/);
+          EXPRESSION_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15458,7 +15458,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_COMPUTE_EQUIVALENCE_SETS_REQUEST,
-          VERSION_MANAGER_VIRTUAL_CHANNEL, true/*flush*/);
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------

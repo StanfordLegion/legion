@@ -37,6 +37,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
     // Region Tree Forest 
     /////////////////////////////////////////////////////////////
+    
+    /*static*/ const unsigned RegionTreeForest::MAX_EXPRESSION_FANOUT;
 
     //--------------------------------------------------------------------------
     RegionTreeForest::RegionTreeForest(Runtime *rt)
@@ -5365,22 +5367,30 @@ namespace Legion {
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
       // this helps make sure we don't overflow our stack
-      while (expressions.size() > 32)
+      while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
         std::vector<IndexSpaceExpression*> next_expressions;
         while (!expressions.empty())
         {
-          std::vector<IndexSpaceExpression*> temp_expressions;
-          temp_expressions.reserve(32);
-          // Pop up to 32 expressions off the back
-          for (unsigned idx = 0; idx < 32; idx++)
+          if (expressions.size() > 1)
           {
-            temp_expressions.push_back(expressions.back());
-            expressions.pop_back();
-            if (expressions.empty())
-              break;
+            std::vector<IndexSpaceExpression*> temp_expressions;
+            temp_expressions.reserve(MAX_EXPRESSION_FANOUT);
+            // Pop up to 32 expressions off the back
+            for (unsigned idx = 0; idx < MAX_EXPRESSION_FANOUT; idx++)
+            {
+              temp_expressions.push_back(expressions.back());
+              expressions.pop_back();
+              if (expressions.empty())
+                break;
+            }
+            next_expressions.push_back(union_index_spaces(temp_expressions));
           }
-          next_expressions.push_back(union_index_spaces(temp_expressions));
+          else
+          {
+            next_expressions.push_back(expressions.back());
+            expressions.pop_back();
+          }
         }
         expressions.swap(next_expressions);
       }
@@ -5389,11 +5399,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::union_index_spaces(
-                          const std::vector<IndexSpaceExpression*> &expressions)
+                          const std::vector<IndexSpaceExpression*> &expressions,
+                          OperationCreator *creator /*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!expressions.empty());
+      assert(expressions.size() >= 2);
+      assert(expressions.size() <= MAX_EXPRESSION_FANOUT);
 #endif
       IndexSpaceExpression *first = expressions[0];
       const IndexSpaceExprID key = first->expr_id;
@@ -5408,29 +5420,57 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          UnionOpCreator creator(this, first->type_tag, expressions);
-          return next->find_or_create_operation(expressions, creator);
+          if (creator == NULL)
+          {
+            UnionOpCreator union_creator(this, first->type_tag, expressions);
+            return next->find_or_create_operation(expressions, union_creator);
+          }
+          else
+            return next->find_or_create_operation(expressions, *creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      UnionOpCreator creator(this, first->type_tag, expressions);
-      // Didn't find it, retake the lock, see if we lost the race
-      // and if no make the actual trie node
-      AutoLock l_lock(lookup_is_op_lock);
-      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
-        finder = union_ops.find(key);
-      if (finder == union_ops.end())
+      if (creator == NULL)
       {
-        // Didn't lose the race, so make the node
-        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
-        union_ops[key] = node;
+        UnionOpCreator union_creator(this, first->type_tag, expressions);
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if no make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = union_ops.find(key);
+        if (finder == union_ops.end())
+        {
+          // Didn't lose the race, so make the node
+          node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+          union_ops[key] = node;
+        }
+        else
+          node = finder->second;
+#ifdef DEBUG_LEGION
+        assert(node != NULL);
+#endif
+        return node->find_or_create_operation(expressions, union_creator);
       }
       else
-        node = finder->second;
+      {
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if no make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = union_ops.find(key);
+        if (finder == union_ops.end())
+        {
+          // Didn't lose the race, so make the node
+          node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+          union_ops[key] = node;
+        }
+        else
+          node = finder->second;
 #ifdef DEBUG_LEGION
-      assert(node != NULL);
+        assert(node != NULL);
 #endif
-      return node->find_or_create_operation(expressions, creator);
+        return node->find_or_create_operation(expressions, *creator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5461,22 +5501,31 @@ namespace Legion {
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
       // this helps make sure we don't overflow our stack
-      while (expressions.size() > 32)
+      while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
         std::vector<IndexSpaceExpression*> next_expressions;
         while (!expressions.empty())
         {
-          std::vector<IndexSpaceExpression*> temp_expressions;
-          temp_expressions.reserve(32);
-          // Pop up to 32 expressions off the back
-          for (unsigned idx = 0; idx < 32; idx++)
+          if (expressions.size() > 1)
           {
-            temp_expressions.push_back(expressions.back());
-            expressions.pop_back();
-            if (expressions.empty())
-              break;
+            std::vector<IndexSpaceExpression*> temp_expressions;
+            temp_expressions.reserve(MAX_EXPRESSION_FANOUT);
+            // Pop up to 32 expressions off the back
+            for (unsigned idx = 0; idx < MAX_EXPRESSION_FANOUT; idx++)
+            {
+              temp_expressions.push_back(expressions.back());
+              expressions.pop_back();
+              if (expressions.empty())
+                break;
+            }
+            next_expressions.push_back(
+                intersect_index_spaces(temp_expressions));
           }
-          next_expressions.push_back(intersect_index_spaces(temp_expressions));
+          else
+          {
+            next_expressions.push_back(expressions.back());
+            expressions.pop_back();
+          }
         }
         expressions.swap(next_expressions);
       }
@@ -5485,11 +5534,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::intersect_index_spaces(
-                          const std::vector<IndexSpaceExpression*> &expressions)
+                          const std::vector<IndexSpaceExpression*> &expressions,
+                          OperationCreator *creator /*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!expressions.empty());
+      assert(expressions.size() >= 2);
+      assert(expressions.size() <= MAX_EXPRESSION_FANOUT);
 #endif
       IndexSpaceExpression *first = expressions[0];
       const IndexSpaceExprID key = first->expr_id;
@@ -5504,35 +5555,66 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          IntersectionOpCreator creator(this, first->type_tag, expressions);
-          return next->find_or_create_operation(expressions, creator);
+          if (creator == NULL)
+          {
+            IntersectionOpCreator inter_creator(this, first->type_tag, 
+                                                expressions);
+            return next->find_or_create_operation(expressions, inter_creator);
+          }
+          else
+            return next->find_or_create_operation(expressions, *creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      IntersectionOpCreator creator(this, first->type_tag, expressions);
-      // Didn't find it, retake the lock, see if we lost the race
-      // and if not make the actual trie node
-      AutoLock l_lock(lookup_is_op_lock);
-      // See if we lost the race
-      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
-        finder = intersection_ops.find(key);
-      if (finder == intersection_ops.end())
+      if (creator == NULL)
       {
-        // Didn't lose the race so make the node
-        node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
-        intersection_ops[key] = node;
+        IntersectionOpCreator inter_creator(this, first->type_tag, expressions);
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if not make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        // See if we lost the race
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = intersection_ops.find(key);
+        if (finder == intersection_ops.end())
+        {
+          // Didn't lose the race so make the node
+          node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+          intersection_ops[key] = node;
+        }
+        else
+          node = finder->second;
+#ifdef DEBUG_LEGION
+        assert(node != NULL); 
+#endif
+        return node->find_or_create_operation(expressions, inter_creator);
       }
       else
-        node = finder->second;
+      {
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if not make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        // See if we lost the race
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = intersection_ops.find(key);
+        if (finder == intersection_ops.end())
+        {
+          // Didn't lose the race so make the node
+          node = new ExpressionTrieNode(0/*depth*/, first->expr_id);
+          intersection_ops[key] = node;
+        }
+        else
+          node = finder->second;
 #ifdef DEBUG_LEGION
-      assert(node != NULL); 
+        assert(node != NULL); 
 #endif
-      return node->find_or_create_operation(expressions, creator);
+        return node->find_or_create_operation(expressions, *creator);
+      }
     }
     
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::subtract_index_spaces(
-                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs)
+                           IndexSpaceExpression *lhs, IndexSpaceExpression *rhs,
+                           OperationCreator *creator/*=NULL*/)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -5553,30 +5635,59 @@ namespace Legion {
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
-          DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
-          return next->find_or_create_operation(expressions, creator);
+          if (creator == NULL)
+          {
+            DifferenceOpCreator diff_creator(this, lhs->type_tag, lhs, rhs);
+            return next->find_or_create_operation(expressions, diff_creator);
+          }
+          else
+            return next->find_or_create_operation(expressions, *creator);
         }
       }
       ExpressionTrieNode *node = NULL;
-      DifferenceOpCreator creator(this, lhs->type_tag, lhs, rhs);
-      // Didn't find it, retake the lock, see if we lost the race
-      // and if not make the actual trie node
-      AutoLock l_lock(lookup_is_op_lock);
-      // See if we lost the race
-      std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
-        finder = difference_ops.find(key);
-      if (finder == difference_ops.end())
+      if (creator == NULL)
       {
-        // Didn't lose the race so make the node
-        node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
-        difference_ops[key] = node;
+        DifferenceOpCreator diff_creator(this, lhs->type_tag, lhs, rhs);
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if not make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        // See if we lost the race
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = difference_ops.find(key);
+        if (finder == difference_ops.end())
+        {
+          // Didn't lose the race so make the node
+          node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+          difference_ops[key] = node;
+        }
+        else
+          node = finder->second;
+#ifdef DEBUG_LEGION
+        assert(node != NULL);
+#endif
+        return node->find_or_create_operation(expressions, diff_creator);
       }
       else
-        node = finder->second;
+      {
+        // Didn't find it, retake the lock, see if we lost the race
+        // and if not make the actual trie node
+        AutoLock l_lock(lookup_is_op_lock);
+        // See if we lost the race
+        std::map<IndexSpaceExprID,ExpressionTrieNode*>::const_iterator 
+          finder = difference_ops.find(key);
+        if (finder == difference_ops.end())
+        {
+          // Didn't lose the race so make the node
+          node = new ExpressionTrieNode(0/*depth*/, lhs->expr_id);
+          difference_ops[key] = node;
+        }
+        else
+          node = finder->second;
 #ifdef DEBUG_LEGION
-      assert(node != NULL);
+        assert(node != NULL);
 #endif
-      return node->find_or_create_operation(expressions, creator);
+        return node->find_or_create_operation(expressions, *creator);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5790,7 +5901,7 @@ namespace Legion {
       {
         RezCheck z2(rez);
         rez.serialize(remote_expr_id);
-        origin->pack_full(rez, source);
+        origin->pack_expression_structure(rez, source);
         rez.serialize(done_event);
       }
       runtime->send_index_space_remote_expression_response(source, rez);
@@ -5804,12 +5915,7 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id); 
-      // We get to make the object
-      TypeTag type_tag;
-      derez.deserialize(type_tag);
-      RemoteExpressionCreator creator(derez, this, remote_expr_id);
-      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-      IndexSpaceExpression *result = creator.result;
+      IndexSpaceExpression *result = unpack_expression_structure(derez);
       {
         AutoLock l_lock(lookup_is_op_lock);
 #ifdef DEBUG_LEGION
@@ -5824,6 +5930,73 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
       Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::unpack_expression_structure(
+                                                            Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      // First see if this is a base case of a known index space
+      bool is_index_space;
+      derez.deserialize<bool>(is_index_space);
+      if (is_index_space)
+      {
+        IndexSpace handle;
+        derez.deserialize(handle);
+        return get_node(handle);
+      }
+      bool is_local;
+      derez.deserialize(is_local);
+      if (is_local)
+      {
+        IndexSpaceExpression *local_expr;
+        derez.deserialize(local_expr);
+        return local_expr;
+      }
+      // Not an index space, so it is an operation, unpack all the arguments
+      // to the operation and see if we can find equivalence ones on this node
+      size_t num_sub_expressions;
+      derez.deserialize(num_sub_expressions);
+#ifdef DEBUG_LEGION
+      assert(num_sub_expressions >= 2);
+      assert(num_sub_expressions <= MAX_EXPRESSION_FANOUT);
+#endif
+      std::set<IndexSpaceExpression*> exprs;
+      for (unsigned idx = 0; idx < num_sub_expressions; idx++)
+        exprs.insert(unpack_expression_structure(derez));
+      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // Now figure out which kind of operation we're making here
+      IndexSpaceOperation::OperationKind op_kind;
+      derez.deserialize(op_kind);
+      switch (op_kind)
+      {
+        case IndexSpaceOperation::UNION_OP_KIND:
+          {
+            RemoteUnionOpCreator creator(this, derez, expressions);
+            return union_index_spaces(expressions, &creator);  
+          }
+        case IndexSpaceOperation::INTERSECT_OP_KIND:
+          {
+            RemoteIntersectionOpCreator creator(this, derez, expressions);
+            return intersect_index_spaces(expressions, &creator);
+          }
+        case IndexSpaceOperation::DIFFERENCE_OP_KIND:
+          {
+#ifdef DEBUG_LEGION
+            assert(num_sub_expressions == 2);
+#endif
+            RemoteDifferenceOpCreator creator(this, derez, 
+                expressions[0], expressions[1]);
+            return subtract_index_spaces(expressions[0],
+                                expressions[1], &creator);
+          }
+        default:
+          assert(false);
+      }
+      // Should never get here
+      assert(false);
+      return NULL;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5933,8 +6106,10 @@ namespace Legion {
            Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      // Handle the special case where we are the same node where we were packed
-      if (source == forest->runtime->address_space)
+      // Handle the special case where this is a local index space expression 
+      bool is_local;
+      derez.deserialize(is_local);
+      if (is_local)
       {
         IndexSpaceExpression *result;
         derez.deserialize(result);
@@ -6017,7 +6192,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
                                              RegionTreeForest *ctx)
-      : IntermediateExpression(tag, ctx), op_kind(kind), invalidated(0)
+      : IntermediateExpression(tag, ctx), op_kind(kind), origin_expr(this), 
+        origin_space(ctx->runtime->address_space), invalidated(0)
+    //--------------------------------------------------------------------------
+    {
+      // We always keep a reference on ourself until we get invalidated
+      add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceOperation::IndexSpaceOperation(TypeTag tag, OperationKind kind,
+                                     RegionTreeForest *ctx, Deserializer &derez)
+      : IntermediateExpression(tag, ctx, unpack_expr_id(derez)), 
+        op_kind(kind), origin_expr(unpack_origin_expr(derez)), 
+        origin_space(expr_id % ctx->runtime->total_address_spaces),
+        invalidated(0)
     //--------------------------------------------------------------------------
     {
       // We always keep a reference on ourself until we get invalidated
@@ -6028,28 +6217,6 @@ namespace Legion {
     IndexSpaceOperation::~IndexSpaceOperation(void)
     //--------------------------------------------------------------------------
     {
-      if (!remote_instances.empty())
-      {
-        Serializer rez;
-        rez.serialize(expr_id);
-        DestructionFunctor functor(context->runtime, rez);
-        remote_instances.map(functor);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::DestructionFunctor::apply(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      runtime->send_remote_expression_invalidation(target, rez);
-    }
-
-    //--------------------------------------------------------------------------
-    void IndexSpaceOperation::record_remote_instance(AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock i_lock(inter_lock);
-      remote_instances.add(target);
     }
 
     //--------------------------------------------------------------------------
@@ -6058,7 +6225,7 @@ namespace Legion {
     {
       return remove_reference();
     }
-    
+
     //--------------------------------------------------------------------------
     void IndexSpaceOperation::invalidate_operation(
                                     std::deque<IndexSpaceOperation*> &to_remove)
@@ -6138,6 +6305,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void OperationCreator::activate(IndexSpaceOperation *op)
+    //--------------------------------------------------------------------------
+    {
+      // Do nothing in the base case
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpaceOperation* OperationCreator::consume(void)
     //--------------------------------------------------------------------------
     {
@@ -6146,6 +6320,7 @@ namespace Legion {
 #endif
       IndexSpaceOperation *temp = result;
       result = NULL;
+      activate(temp);
       return temp;
     }
 
@@ -6273,8 +6448,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::pack_full(
-                                         Serializer &rez, AddressSpaceID target)
+    void PendingIndexSpaceExpression::pack_expression_structure(Serializer &rez,
+                                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
@@ -6282,7 +6457,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      result->pack_full(rez, target);
+      result->pack_expression_structure(rez, target);
     }
 
     //--------------------------------------------------------------------------
@@ -6802,7 +6977,10 @@ namespace Legion {
           assert(node_finder != nodes.end());
 #endif
           if (node_finder->second->remove_operation(expressions))
+          {
+            delete node_finder->second;
             nodes.erase(node_finder);
+          }
         }
         else
           operations.erase(op_finder);
@@ -6816,7 +6994,10 @@ namespace Legion {
         assert(finder != nodes.end());
 #endif
         if (finder->second->remove_operation(expressions))
+        {
+          delete finder->second;
           nodes.erase(finder);
+        }
       }
       if (local_operation != NULL)
         return false;
