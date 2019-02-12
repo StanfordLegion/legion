@@ -1353,6 +1353,11 @@ function base.task:get_partitioning_constraints()
   assert(self.partitioning_constraints)
   return self.partitioning_constraints
 end
+
+function base.task:has_partitioning_constraints()
+  return self.partitioning_constraints
+end
+
 function base.task:is_shard_task()
   -- FIXME: This will break if we pick different names for shard tasks
   return string.sub(tostring(self:get_name()), 0, 6) == "<shard"
