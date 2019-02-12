@@ -135,13 +135,10 @@ end
 
 -- Save off point variable values from previous cycle.
 __demand(__parallel, __cuda)
-task init_step_points(rp : region(point),
-                      enable : bool)
+task init_step_points(rp : region(point))
 where
   writes(rp.{pmaswt, pf})
 do
-  if not enable then return end
-
   -- Initialize fields used in reductions.
   for p in rp do
     var zero = 0.0
@@ -155,14 +152,11 @@ end
 -- 1. Advance mesh to center of time step.
 --
 __demand(__cuda, __parallel)
-task adv_pos_half(rp : region(point), dt : double,
-                  enable : bool)
+task adv_pos_half(rp : region(point), dt : double)
 where
   reads(rp.{px, pu}),
   writes(rp.{px0, pxp, pu0})
 do
-  if not enable then return end
-
   var dth = 0.5 * dt
 
   -- Copy state variables from previous time step and update position.
@@ -185,14 +179,12 @@ do
 end
 
 -- Save off zone variable value from previous cycle.
-__demand(__cuda)
-task init_step_zones(rz : region(zone), enable : bool)
+__demand(__cuda, __parallel)
+task init_step_zones(rz : region(zone))
 where
   reads(rz.zvol),
   writes(rz.zvol0)
 do
-  if not enable then return end
-
   -- Copy state variables from previous time step.
   for z in rz do
     var zvol = rz[z].zvol
@@ -207,15 +199,12 @@ end
 -- Compute centers of zones and edges.
 __demand(__cuda, __parallel)
 task calc_centers(rz : region(zone), rp : region(point),
-                  rs : region(side),
-                  enable : bool)
+                  rs : region(side))
 where
   reads(rz.znump, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rs.exp),
   reads writes(rz.zxp)
 do
-  if not enable then return end
-
   for z in rz do
     var init = vec2 {x = 0.0, y = 0.0}
     rz[z].zxp = init
@@ -235,7 +224,8 @@ do
     var znump = rz[z].znump
     var zxp = (1 / double(znump)) * p1_pxp
 
-    rz[z].zxp += zxp
+    rz[z].zxp.x += zxp.x
+    rz[z].zxp.y += zxp.y
   end
 end
 
@@ -243,22 +233,20 @@ end
 -- Compute edge lengths.
 __demand(__cuda, __parallel)
 task calc_volumes(rz : region(zone), rp : region(point),
-                  rs : region(side),
-                  enable : bool)
+                  rs : region(side))
 where
   reads(rz.{zxp, znump}, rp.pxp, rs.{mapsz, mapsp1, mapsp2}),
   writes(rs.{sareap, elen}),
   reads writes(rz.{zareap, zvolp})
 do
-  if not enable then return end
-
   for z in rz do
     var zero = 0.0
     rz[z].zareap = zero
     rz[z].zvolp = zero
   end
 
-  var num_negative_sv = 0
+  var num_negatives = 0
+
   for s in rs do
     var z  = rs[s].mapsz
     var p1 = rs[s].mapsp1
@@ -278,24 +266,20 @@ do
     var zvolp = (1.0 / 3.0) * sv
     rz[z].zvolp += zvolp
 
-    if sv <= 0.0 then
-      num_negative_sv += 1
-    end
+    num_negatives += [int](sv <= 0.0)
   end
-  regentlib.assert(num_negative_sv == 0, "sv negative")
+
+  return num_negatives
 end
 
 -- Compute zone characteristic lengths.
 __demand(__cuda, __parallel)
 task calc_char_len(rz : region(zone), rp : region(point),
-                   rs : region(side),
-                   enable : bool)
+                   rs : region(side))
 where
   reads(rz.znump, rs.{mapsz, sareap, elen}),
   reads writes(rz.zdl)
 do
-  if not enable then return end
-
   for z in rz do
     var init = [double](1.0e99)
     rz[z].zdl = init
@@ -325,13 +309,11 @@ end
 
 -- Compute zone densities.
 __demand(__cuda, __parallel)
-task calc_rho_half(rz : region(zone), enable : bool)
+task calc_rho_half(rz : region(zone))
 where
   reads(rz.{zvolp, zm}),
   writes(rz.zrp)
 do
-  if not enable then return end
-
   for z in rz do
     var zm = rz[z].zm
     var zvolp = rz[z].zvolp
@@ -343,14 +325,11 @@ end
 -- Reduce masses into points.
 __demand(__cuda, __parallel)
 task sum_point_mass(rz : region(zone), rp : region(point),
-                    rs : region(side),
-                    enable : bool)
+                    rs : region(side))
 where
   reads(rz.{zareap, zrp}, rs.{mapsz, mapsp1, mapss3, smf}),
   reduces+(rp.pmaswt)
 do
-  if not enable then return end
-
   for s in rs do
     var z  = rs[s].mapsz
     var p1 = rs[s].mapsp1
@@ -370,16 +349,13 @@ end
 -- 3. Compute material state (half-advanced).
 --
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_state_at_half(rz : region(zone),
-                        gamma : double, ssmin : double, dt : double,
-                        enable : bool)
+                        gamma : double, ssmin : double, dt : double)
 where
   reads(rz.{zvol0, zvolp, zm, zr, ze, zwrate}),
   writes(rz.{zp, zss})
 do
-  if not enable then return end
-
   var gm1 = gamma - 1.0
   var ss2 = max(ssmin * ssmin, 1e-99)
   var dth = 0.5 * dt
@@ -420,17 +396,14 @@ end
 --
 
 -- Compute PolyGas and TTS forces.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_force_pgas_tts(rz : region(zone), rp : region(point),
                          rs : region(side),
-                         alfa : double, ssmin : double,
-                         enable : bool)
+                         alfa : double, ssmin : double)
 where
   reads(rz.{zxp, zareap, zrp, zss, zp}, rs.{mapsz, sareap, smf, exp}),
   writes(rs.{sfp, sft})
 do
-  if not enable then return end
-
   for s in rs do
     var z = rs[s].mapsz
 
@@ -469,16 +442,13 @@ do
   end
 end
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task qcs_zone_center_velocity(rz : region(zone), rp : region(point),
-                              rs : region(side),
-                              enable : bool)
+                              rs : region(side))
 where
   reads(rz.znump, rp.pu, rs.{mapsz, mapsp1}),
   reads writes(rz.zuc)
 do
-  if not enable then return end
-
   for z in rz do
     var init = vec2 { x = 0.0, y = 0.0 }
     rz[z].zuc = init
@@ -493,21 +463,19 @@ do
 
     var zuc = (1.0 / [double](znump)) * pu
 
-    rz[z].zuc += zuc
+    rz[z].zuc.x += zuc.x
+    rz[z].zuc.y += zuc.y
   end
 end
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task qcs_corner_divergence(rz : region(zone), rp : region(point),
-                           rs : region(side),
-                           enable : bool)
+                           rs : region(side))
 where
   reads(rz.{zxp, zuc}, rp.{pxp, pu},
         rs.{mapsz, mapsp1, mapsp2, mapss3, exp, elen}),
   writes(rs.{carea, ccos, cdiv, cevol, cdu})
 do
-  if not enable then return end
-
   for s2 in rs do
     var s  = rs[s2].mapss3
     var z  = rs[s ].mapsz
@@ -595,18 +563,15 @@ do
   end
 end
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task qcs_qcn_force(rz : region(zone), rp : region(point),
                    rs : region(side),
-                   gamma : double, q1 : double, q2 : double,
-                   enable : bool)
+                   gamma : double, q1 : double, q2 : double)
 where
   reads(rz.{zrp, zss}, rp.pu,
         rs.{mapsz, mapsp1, mapsp2, mapss3, elen, cdiv, cdu, cevol}),
   writes(rs.{cqe1, cqe2})
 do
-  if not enable then return end
-
   var gammap1 = gamma + 1.0
 
   for s4 in rs do
@@ -651,16 +616,13 @@ do
   end
 end
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task qcs_force(rz : region(zone), rp : region(point),
-               rs : region(side),
-               enable : bool)
+               rs : region(side))
 where
   reads(rs.{mapss4, elen, carea, ccos, cqe1, cqe2}),
   writes(rs.sfq)
 do
-  if not enable then return end
-
   for s in rs do
     -- var c1 = s
     var c2 = rs[s].mapss4
@@ -697,18 +659,15 @@ do
   end
 end
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task qcs_vel_diff(rz : region(zone), rp : region(point),
                   rs : region(side),
-                  q1 : double, q2 : double,
-                  enable : bool)
+                  q1 : double, q2 : double)
 where
   reads(rz.{zss, z0tmp}, rp.{pxp, pu},
         rs.{mapsp1, mapsp2, mapsz, elen}),
   writes(rz.{zdu, z0tmp})
 do
-  if not enable then return end
-
   for z in rz do
     var zero = 0.0
     rz[z].z0tmp = zero
@@ -745,16 +704,13 @@ do
 end
 
 -- Reduce forces into points.
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task sum_point_force(rz : region(zone), rp : region(point),
-                     rs : region(side),
-                     enable : bool)
+                     rs : region(side))
 where
   reads(rz.znump, rs.{mapsz, mapsp1, mapss3, sfq, sft}),
   reduces+(rp.pf.{x, y})
 do
-  if not enable then return end
-
   for s in rs do
     var p1 = rs[s].mapsp1
     var s3 = rs[s].mapss3
@@ -777,15 +733,12 @@ end
 -- 4a. Apply boundary conditions.
 --
 
-__demand(__cuda)
-task apply_boundary_conditions(rp : region(point),
-                               enable : bool)
+__demand(__cuda, __parallel)
+task apply_boundary_conditions(rp : region(point))
 where
   reads(rp.{has_bcx, has_bcy}),
   reads writes(rp.{pu0, pf})
 do
-  if not enable then return end
-
   var vfixx = vec2 {x = 1.0, y = 0.0}
   var vfixy = vec2 {x = 0.0, y = 1.0}
   for p in rp do
@@ -818,15 +771,12 @@ end
 -- 6. Advance mesh to end of time step.
 --
 
-__demand(__cuda)
-task adv_pos_full(rp : region(point), dt : double,
-                  enable : bool)
+__demand(__cuda, __parallel)
+task adv_pos_full(rp : region(point), dt : double)
 where
   reads(rp.{px0, pu0, pf, pmaswt}),
   writes(rp.{px, pu})
 do
-  if not enable then return end
-
   var fuzz = 1e-99
   var dth = 0.5 * dt
   for p in rp do
@@ -865,15 +815,12 @@ end
 -- in both cases.
 __demand(__cuda, __parallel)
 task calc_centers_full(rz : region(zone), rp : region(point),
-                       rs : region(side),
-                       enable : bool)
+                       rs : region(side))
 where
   reads(rz.znump, rp.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rs.ex),
   reads writes(rz.zx)
 do
-  if not enable then return end
-
   for z in rz do
     var init = vec2 {x = 0.0, y = 0.0}
     rz[z].zx = init
@@ -892,7 +839,8 @@ do
 
     var znump = rz[z].znump
     var zx = (1 / double(znump)) * p1_px
-    rz[z].zx += zx
+    rz[z].zx.x += zx.x
+    rz[z].zx.y += zx.y
   end
 end
 
@@ -901,22 +849,20 @@ end
 -- in both cases.
 __demand(__cuda, __parallel)
 task calc_volumes_full(rz : region(zone), rp : region(point),
-                       rs : region(side),
-                       enable : bool)
+                       rs : region(side))
 where
   reads(rz.{zx, znump}, rp.px, rs.{mapsz, mapsp1, mapsp2}),
   writes(rs.{sarea}),
   reads writes(rz.{zarea, zvol})
 do
-  if not enable then return end
-
   for z in rz do
     var zero = 0.0
     rz[z].zarea = zero
     rz[z].zvol = zero
   end
 
-  var num_negative_sv = 0
+  var num_negatives = 0
+
   for s in rs do
     var z  = rs[s].mapsz
     var p1 = rs[s].mapsp1
@@ -935,29 +881,25 @@ do
     var zvol = (1.0 / 3.0) * sv
     rz[z].zvol += zvol
 
-    if sv <= 0.0 then
-      num_negative_sv += 1
-    end
+    num_negatives += [int](sv <= 0)
   end
-  regentlib.assert(num_negative_sv == 0, "sv negative")
+
+  return num_negatives
 end
 
 --
 -- 7. Compute work
 --
 
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_work(rz : region(zone), rp : region(point),
                rs : region(side),
-               dt : double,
-               enable : bool)
+               dt : double)
 where
   reads(rz.znump, rp.{pxp, pu0, pu},
         rs.{mapsz, mapsp1, mapsp2, sfp, sfq}),
   reads writes(rz.{zw, zetot})
 do
-  if not enable then return end
-
   for z in rz do
     var zero = 0.0
     rz[z].zw = zero
@@ -994,15 +936,12 @@ end
 -- 8. Update state variables.
 --
 
-__demand(__cuda)
-task calc_work_rate_energy_rho_full(rz : region(zone), dt : double,
-                                    enable : bool)
+__demand(__cuda, __parallel)
+task calc_work_rate_energy_rho_full(rz : region(zone), dt : double)
 where
   reads(rz.{zvol0, zvol, zm, zw, zp, zetot}),
   writes(rz.{zwrate, ze, zr})
 do
-  if not enable then return end
-
   var dtiny = 1.0 / dt
   var fuzz = 1e-99
 
@@ -1027,54 +966,14 @@ do
   end
 end
 
---
--- 9. Compute timstep for next cycle.
---
-
---[[
-task calc_dt_courant(rz : region(zone), dtmax : double, cfl : double) : double
-where
-  reads(rz.{zdl, zss, zdu})
-do
-  var fuzz = 1e-99
-  var dtnew = dtmax
-  for z in rz do
-    var cdu = max(z.zdu, max(z.zss, fuzz))
-    var zdthyd = z.zdl * cfl / cdu
-
-    dtnew min= zdthyd
-  end
-
-  return dtnew
-end
-
-task calc_dt_volume(rz : region(zone), dtlast : double, cflv : double) : double
-where
-  reads(rz.{zvol0, zvol})
-do
-  var dvovmax = 1e-99
-  for z in rz do
-    var zdvov = abs((z.zvol - z.zvol0) / z.zvol0)
-    dvovmax max= zdvov
-  end
-  return dtlast * cflv / dvovmax
-end
-]]
-
-__demand(__cuda)
+__demand(__cuda, __parallel)
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
-                   cfl : double, cflv : double, enable : bool) : double
+                   cfl : double, cflv : double) : double
 where
   reads(rz.{zdl, zvol0, zvol, zss, zdu})
 do
   var dthydro = dtmax
 
-  if not enable then return dthydro end
-
-  -- dthydro min= min(calc_dt_courant(rz, dtmax, cfl),
-  --                  calc_dt_volume(rz, dtlast, cflv))
-
-  -- Hack: manually inline calc_dt_courant
   do
     var fuzz = 1e-99
     for z in rz do
@@ -1088,7 +987,6 @@ do
     end
   end
 
-  -- Hack: manually inline calc_dt_volume
   do
     for z in rz do
       var zvol = rz[z].zvol
@@ -1102,7 +1000,6 @@ do
   return dthydro
 end
 
---__demand(__inline)
 task calc_global_dt(dt : double, dtfac : double, dtinit : double,
                     dtmax : double, dthydro : double,
                     time : double, tstop : double, cycle : int64) : double
@@ -1123,150 +1020,9 @@ task calc_global_dt(dt : double, dtfac : double, dtinit : double,
   return dt
 end
 
--- XXX: this triggers different behavior: __demand(__inline)
 task continue_simulation(cycle : int64, cstop : int64,
                          time : double, tstop : double)
   return (cycle < cstop and time < tstop)
-end
-
---[[
-task simulate(rz : region(zone),
-              rp : region(point),
-              rs : region(side),
-              conf : config)
-where
-  reads writes(rz, rp, rs)
-do
-  var alfa = conf.alfa
-  var cfl = conf.cfl
-  var cflv = conf.cflv
-  var cstop = conf.cstop
-  var dtfac = conf.dtfac
-  var dtinit = conf.dtinit
-  var dtmax = conf.dtmax
-  var gamma = conf.gamma
-  var q1 = conf.q1
-  var q2 = conf.q2
-  var qgamma = conf.qgamma
-  var ssmin = conf.ssmin
-  var tstop = conf.tstop
-  var uinitradial = conf.uinitradial
-  var vfix = vec2 {x = 0.0, y = 0.0}
-
-  var enable = conf.enable
-
-  var interval = 10
-  var start_time = c.legion_get_current_time_in_micros()/1.e6
-  var last_time = start_time
-
-  var time = 0.0
-  var cycle : int64 = 0
-  var dt = dtmax
-  var dthydro = dtmax
-  while continue_simulation(cycle, cstop, time, tstop) do
-    init_step_points(rp, enable)
-
-    init_step_zones(rz, enable)
-
-    dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
-
-    if cycle > 0 and cycle % interval == 0 then
-      var current_time = c.legion_get_current_time_in_micros()/1.e6
-      c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-               cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
-      last_time = current_time
-    end
-
-    adv_pos_half(rp, dt, enable)
-
-    calc_centers(rz, rp, rs, enable)
-
-    calc_volumes(rz, rp, rs, enable)
-
-    calc_char_len(rz, rp, rs, enable)
-
-    calc_rho_half(rz, enable)
-
-    sum_point_mass(rz, rp, rs, enable)
-
-    calc_state_at_half(rz, gamma, ssmin, dt, enable)
-
-    calc_force_pgas_tts(rz, rp, rs, alfa, ssmin, enable)
-
-    qcs_zone_center_velocity(rz, rp, rs, enable)
-
-    qcs_corner_divergence(rz, rp, rs, enable)
-
-    qcs_qcn_force(rz, rp, rs, gamma, q1, q2, enable)
-
-    qcs_force(rz, rp, rs, enable)
-
-    qcs_vel_diff(rz, rp, rs, q1, q2, enable)
-
-    sum_point_force(rz, rp, rs, enable)
-
-    apply_boundary_conditions(rp, enable)
-
-    adv_pos_full(rp, dt, enable)
-
-    calc_centers_full(rz, rp, rs, enable)
-
-    calc_volumes_full(rz, rp, rs, enable)
-
-    calc_work(rz, rp, rs, dt, enable)
-
-    calc_work_rate_energy_rho_full(rz, dt, enable)
-
-    dthydro = dtmax
-    dthydro min= calc_dt_hydro(rz, dt, dtmax, cfl, cflv, enable)
-
-    cycle += 1
-    time += dt
-  end
-end
-]]
-
---[[
-__demand(__inline)
-task initialize(rz : region(zone),
-                rp : region(point),
-                rs : region(side),
-                conf : config)
-where
-  reads writes(rz, rp, rs)
-do
-  var einit = conf.einit
-  var einitsub = conf.einitsub
-  var rinit = conf.rinit
-  var rinitsub = conf.rinitsub
-  var subregion = conf.subregion
-  var uinitradial = conf.uinitradial
-
-  var enable = true
-
-  init_mesh_zones(rz)
-
-  calc_centers_full(rz, rp, rs, enable)
-
-  calc_volumes_full(rz, rp, rs, enable)
-
-  init_side_fracs(rz, rp, rs)
-
-  init_hydro(rz,
-             rinit, einit, rinitsub, einitsub,
-             subregion[0], subregion[1], subregion[2], subregion[3])
-
-  init_radial_velocity(rp, uinitradial)
-end
-]]
-
-task dummy(rz : region(zone)) : int
-where reads(rz) do
-  return 1
-end
-
-terra wait_for(x : int)
-  return x
 end
 
 task read_input_sequential(rz : region(zone),
@@ -1293,6 +1049,14 @@ where reads(rz, rp, rs) do
     __physical(rp), __fields(rp),
     __physical(rs), __fields(rs),
     conf)
+end
+
+task verify_calc_volumes(value : int)
+  regentlib.assert(value == 0, "sv negative in calc_volumes")
+end
+
+task verify_calc_volumes_full(value : int)
+  regentlib.assert(value == 0, "sv negative in calc_volumes_full")
 end
 
 terra unwrap(x : mesh_colorings) return x end
@@ -1341,12 +1105,12 @@ task test()
   var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
 
   c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  __parallelize_with rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
-                     image(rp, rs_p, rs.mapsp1) <= rp_p_img,
-                     image(rp, rs_p, rs.mapsp2) <= rp_p_img
+
+  var start_time = c.legion_get_current_time_in_micros()/1.e6
+  __parallelize_with rz_c --rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
+                          --image(rp, rs_p, rs.mapsp1) <= rp_p_img,
+                          --image(rp, rs_p, rs.mapsp2) <= rp_p_img
   do
-    -- Hack: Manually inline this call to make parallelizer happy
-    -- initialize(rz, rp, rs, conf)
     var einit = conf.einit
     var einitsub = conf.einitsub
     var rinit = conf.rinit
@@ -1354,13 +1118,12 @@ task test()
     var subregion = conf.subregion
     var uinitradial = conf.uinitradial
 
-    var enable = true
-
     init_mesh_zones(rz)
 
-    calc_centers_full(rz, rp, rs, enable)
+    calc_centers_full(rz, rp, rs)
 
-    calc_volumes_full(rz, rp, rs, enable)
+    var sv = calc_volumes_full(rz, rp, rs)
+    verify_calc_volumes_full(sv)
 
     init_side_fracs(rz, rp, rs)
 
@@ -1369,18 +1132,11 @@ task test()
                subregion[0], subregion[1], subregion[2], subregion[3])
 
     init_radial_velocity(rp, uinitradial)
-  end
-  -- Hack: Force main task to wait for initialization to finish.
-  wait_for(dummy(rz))
 
-  c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
-  var start_time = c.legion_get_current_time_in_micros()/1.e6
-  __parallelize_with rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
-                     image(rp, rs_p, rs.mapsp1) <= rp_p_img,
-                     image(rp, rs_p, rs.mapsp2) <= rp_p_img
-  do
-    -- Hack: Manually inline this call to make parallelizer happy
-    -- simulate(rz, rp, rs, conf)
+    __fence(__execution, __block)
+
+    c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+
     var alfa = conf.alfa
     var cfl = conf.cfl
     var cflv = conf.cflv
@@ -1394,13 +1150,10 @@ task test()
     var qgamma = conf.qgamma
     var ssmin = conf.ssmin
     var tstop = conf.tstop
-    var uinitradial = conf.uinitradial
     var vfix = vec2 {x = 0.0, y = 0.0}
 
-    var enable = conf.enable
-
     var interval = 10
-    var start_time = c.legion_get_current_time_in_micros()/1.e6
+    start_time = c.legion_get_current_time_in_micros()/1.e6
     var last_time = start_time
 
     var time = 0.0
@@ -1408,9 +1161,9 @@ task test()
     var dt = dtmax
     var dthydro = dtmax
     while continue_simulation(cycle, cstop, time, tstop) do
-      init_step_points(rp, enable)
+      init_step_points(rp)
 
-      init_step_zones(rz, enable)
+      init_step_zones(rz)
 
       dt = calc_global_dt(dt, dtfac, dtinit, dtmax, dthydro, time, tstop, cycle)
 
@@ -1421,55 +1174,56 @@ task test()
         last_time = current_time
       end
 
-      adv_pos_half(rp, dt, enable)
+      adv_pos_half(rp, dt)
 
-      calc_centers(rz, rp, rs, enable)
+      calc_centers(rz, rp, rs)
 
-      calc_volumes(rz, rp, rs, enable)
+      var num_negatives = calc_volumes(rz, rp, rs)
+      verify_calc_volumes(num_negatives)
 
-      calc_char_len(rz, rp, rs, enable)
+      calc_char_len(rz, rp, rs)
 
-      calc_rho_half(rz, enable)
+      calc_rho_half(rz)
 
-      sum_point_mass(rz, rp, rs, enable)
+      sum_point_mass(rz, rp, rs)
 
-      calc_state_at_half(rz, gamma, ssmin, dt, enable)
+      calc_state_at_half(rz, gamma, ssmin, dt)
 
-      calc_force_pgas_tts(rz, rp, rs, alfa, ssmin, enable)
+      calc_force_pgas_tts(rz, rp, rs, alfa, ssmin)
 
-      qcs_zone_center_velocity(rz, rp, rs, enable)
+      qcs_zone_center_velocity(rz, rp, rs)
 
-      qcs_corner_divergence(rz, rp, rs, enable)
+      qcs_corner_divergence(rz, rp, rs)
 
-      qcs_qcn_force(rz, rp, rs, gamma, q1, q2, enable)
+      qcs_qcn_force(rz, rp, rs, gamma, q1, q2)
 
-      qcs_force(rz, rp, rs, enable)
+      qcs_force(rz, rp, rs)
 
-      qcs_vel_diff(rz, rp, rs, q1, q2, enable)
+      qcs_vel_diff(rz, rp, rs, q1, q2)
 
-      sum_point_force(rz, rp, rs, enable)
+      sum_point_force(rz, rp, rs)
 
-      apply_boundary_conditions(rp, enable)
+      apply_boundary_conditions(rp)
 
-      adv_pos_full(rp, dt, enable)
+      adv_pos_full(rp, dt)
 
-      calc_centers_full(rz, rp, rs, enable)
+      calc_centers_full(rz, rp, rs)
 
-      calc_volumes_full(rz, rp, rs, enable)
+      var num_negatives_full = calc_volumes_full(rz, rp, rs)
+      verify_calc_volumes_full(num_negatives_full)
 
-      calc_work(rz, rp, rs, dt, enable)
+      calc_work(rz, rp, rs, dt)
 
-      calc_work_rate_energy_rho_full(rz, dt, enable)
+      calc_work_rate_energy_rho_full(rz, dt)
 
       dthydro = dtmax
-      dthydro min= calc_dt_hydro(rz, dt, dtmax, cfl, cflv, enable)
+      dthydro min= calc_dt_hydro(rz, dt, dtmax, cfl, cflv)
 
       cycle += 1
       time += dt
     end
   end
-  -- Hack: Force main task to wait for simulation to finish.
-  wait_for(dummy(rz))
+  __fence(__execution, __block)
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
   c.printf("Elapsed time = %.6e\n", stop_time - start_time)
 
@@ -1478,13 +1232,12 @@ task test()
   else
     c.printf("Warning: Skipping sequential validation\n")
   end
-
-  -- write_output(conf, rz, rp, rs)
 end
 
 task toplevel()
   test()
 end
+
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local link_flags = {"-L" .. root_dir, "-lpennant"}

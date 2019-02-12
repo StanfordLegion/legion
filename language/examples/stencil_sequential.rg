@@ -131,7 +131,10 @@ __demand(__parallel)
 task check(points   : region(ispace(int2d), point),
            interior : region(ispace(int2d), point),
            tsteps : int64, init : int64)
-where reads(points.{input, output}) do
+where
+  reads(points.{input, output}),
+  interior <= points
+do
   var expect_in = init + tsteps
   var expect_out = init
   for i in interior do
@@ -140,60 +143,61 @@ where reads(points.{input, output}) do
   end
 end
 
---task make_interior_partition(points : region(ispace(int2d), point),
---                             n : int2d,
---                             radius : int64)
---  var r = region(ispace(int1d, 1), rect2d)
---  r[0] = rect2d { lo = {radius, radius}, hi = n + {radius - 1, radius - 1} }
---  var p = partition(equal, r, ispace(int1d, 1))
---  return image(points, p, r)
---end
---
---task main()
---  var conf = common.read_config()
---
---  var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
---  var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
---  var init : int64 = conf.init
---
---  var radius : int64 = RADIUS
---  var n = nbloated - { 2*radius, 2*radius } -- Grid size, minus the border.
---  regentlib.assert(n >= nt, "grid too small")
---
---  var grid = ispace(int2d, nbloated)
---  var tiles = ispace(int2d, nt)
---
---  var points = region(grid, point)
---  var p_interior = make_interior_partition(points, n, radius)
---  var interior = p_interior[0]
---
---  fill(points.{input, output}, init)
---
---  var tprune : int64 = conf.tprune
---  var tsteps : int64 = conf.tsteps + 2 * tprune
---
---  --__demand(__spmd)
---  do
---    __demand(__trace)
---    for t = 0, tsteps do
---      stencil(points, interior)
---      increment(points)
---    end
---    check(points, interior, tsteps, init)
---  end
---end
---
---if os.getenv('SAVEOBJ') == '1' then
---  local root_dir = arg[0]:match(".*/") or "./"
---  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
---  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
---
---  if os.getenv('STANDALONE') == '1' then
---    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
---  end
---
---  local exe = os.getenv('OBJNAME') or "stencil"
---  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
---else
---  regentlib.start(main, cmapper.register_mappers)
---end
+task make_interior_partition(points : region(ispace(int2d), point),
+                             n : int2d,
+                             radius : int64)
+  var r = region(ispace(int1d, 1), rect2d)
+  r[0] = rect2d { lo = {radius, radius}, hi = n + {radius - 1, radius - 1} }
+  var p = partition(equal, r, ispace(int1d, 1))
+  return image(points, p, r)
+end
+
+task main()
+  var conf = common.read_config()
+
+  var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
+  var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
+  var init : int64 = conf.init
+
+  var radius : int64 = RADIUS
+  var n = nbloated - { 2*radius, 2*radius } -- Grid size, minus the border.
+  regentlib.assert(n >= nt, "grid too small")
+
+  var grid = ispace(int2d, nbloated)
+  var tiles = ispace(int2d, nt)
+
+  var points = region(grid, point)
+  var p_interior = make_interior_partition(points, n, radius)
+  var interior = p_interior[0]
+
+  fill(points.{input, output}, init)
+
+  var tprune : int64 = conf.tprune
+  var tsteps : int64 = conf.tsteps + 2 * tprune
+
+  --__demand(__spmd)
+  __parallelize_with tiles
+  do
+    __demand(__trace)
+    for t = 0, tsteps do
+      stencil(points, interior)
+      increment(points)
+    end
+    check(points, interior, tsteps, init)
+  end
+end
+
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
+
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+  end
+
+  local exe = os.getenv('OBJNAME') or "stencil"
+  regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
+else
+  regentlib.start(main, cmapper.register_mappers)
+end
