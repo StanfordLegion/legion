@@ -7466,6 +7466,9 @@ function codegen.expr_import_region(cx, node)
       [eq_struct(c.legion_index_space_t, `([ispace.value].impl), `([lr].index_space))],
       [get_source_location(node) .. ": " .. pretty.entry_expr(node.ispace) ..
       " is not the index space of " .. pretty.entry_expr(node.value)])
+    std.assert_error(not
+      std.c.legion_logical_region_has_parent_logical_partition([cx.runtime], [lr]),
+      [get_source_location(node) .. ": cannot import a subregion"])
     std.assert_error(
       std.c.legion_field_space_has_fields([cx.runtime], [cx.context], [lr].field_space,
         [field_ids_symbol], [field_ids_type.N]),
