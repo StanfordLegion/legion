@@ -126,8 +126,8 @@ struct ghost_range {
 }
 
 fspace wire {
-  in_ptr : ptr,
-  out_ptr : ptr,
+  in_ptr : int1d,
+  out_ptr : int1d,
   inductance : float,
   resistance : float,
   wire_cap : float,
@@ -177,13 +177,7 @@ terra parse_input_args(conf : Config)
   return conf
 end
 
-terra random_element(arr : &c.legion_ptr_t,
-                     num_elmts : uint)
-  var index = [uint](drand48() * num_elmts)
-  return arr[index]
-end
-
-task init_nodes(rn : region(node))
+task init_nodes(rn : region(ispace(int1d), node))
 where
   reads writes(rn)
 do
@@ -197,7 +191,7 @@ end
 
 task init_wires(spiece_id  : int,
                 conf       : Config,
-                rw         : region(wire))
+                rw         : region(ispace(int1d), wire))
 where
   reads writes(rw)
 do
@@ -265,7 +259,7 @@ do
     end
 
     for wire_id = 0, conf.wires_per_piece do
-      var wire = unsafe_cast(ptr(wire, rw), [ptr](wire_id + offset))
+      var wire = unsafe_cast(int1d(wire, rw), [int1d](wire_id + offset))
       wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
       wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
       wire.resistance = drand48() * 10.0 + 1.0
@@ -281,7 +275,7 @@ do
         in_node += pn_ptr_offset - snpp
       end
 
-      wire.in_ptr = [ptr](in_node)
+      wire.in_ptr = [int1d](in_node)
 
       var out_node = 0
       if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
@@ -308,7 +302,7 @@ do
         max_shared_node_id = max(max_shared_node_id, out_node)
         min_shared_node_id = min(min_shared_node_id, out_node)
       end
-      wire.out_ptr = [ptr](out_node)
+      wire.out_ptr = [int1d](out_node)
     end
     offset += conf.wires_per_piece
   end
@@ -320,8 +314,8 @@ end
 
 task init_piece(spiece_id   : int,
                 conf        : Config,
-                rn          : region(node),
-                rw          : region(wire))
+                rn          : region(ispace(int1d), node),
+                rw          : region(ispace(int1d), wire))
 where
   reads writes(rn, rw)
 do
@@ -330,15 +324,14 @@ do
 end
 
 __demand(__parallel)
-task calculate_new_currents(print_ts : bool, steps : uint, rn : region(node), rw : region(wire))
+task calculate_new_currents(steps : uint,
+                            rn : region(ispace(int1d), node),
+                            rw : region(ispace(int1d), wire))
 where
   reads(rn.node_voltage,
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
   reads writes(rw.{current, voltage})
 do
-  if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
-  end
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
   --__demand(__vectorize)
@@ -451,7 +444,8 @@ do
 end
 
 __demand(__parallel)
-task distribute_charge(rn : region(node), rw : region(wire))
+task distribute_charge(rn : region(ispace(int1d), node),
+                       rw : region(ispace(int1d), wire))
 where
   reads(rw.{in_ptr, out_ptr, current._0, current._9}),
   reduces +(rn.charge)
@@ -470,7 +464,7 @@ do
 end
 
 __demand(__parallel)
-task update_voltages(print_ts : bool, rn : region(node))
+task update_voltages(rn : region(ispace(int1d), node))
 where
   reads(rn.{node_cap, leakage}),
   reads writes(rn.{node_voltage, charge})
@@ -484,9 +478,6 @@ do
     voltage = voltage * (1.0 - leakage)
     rn[node].node_voltage = voltage
     rn[node].charge = 0.0
-  end
-  if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
   end
 end
 
@@ -523,8 +514,8 @@ task toplevel()
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
-  var all_nodes = region(ispace(ptr, num_circuit_nodes), node)
-  var all_wires = region(ispace(ptr, num_circuit_wires), wire)
+  var all_nodes = region(ispace(int1d, num_circuit_nodes), node)
+  var all_wires = region(ispace(int1d, num_circuit_wires), wire)
 
   -- report mesh size in bytes
   do
@@ -537,7 +528,7 @@ task toplevel()
     c.printf("  Total                             %12lld bytes\n", total)
   end
 
-  var color_space = ispace(ptr, num_superpieces)
+  var color_space = ispace(int1d, num_superpieces)
 
   var p_nodes = partition(equal, all_nodes, color_space)
   var p_wires = partition(equal, all_wires, color_space)
@@ -548,21 +539,21 @@ task toplevel()
   end
 
   c.printf("Starting main simulation loop\n")
-  var ts_start = c.legion_get_current_time_in_micros()
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
-  __demand(__spmd)
-  do
-    __parallelize_with color_space do
-      for j = 0, num_loops do
-          calculate_new_currents(j == prune, steps, all_nodes, all_wires)
-          distribute_charge(all_nodes, all_wires)
-          update_voltages(j == num_loops - prune - 1, all_nodes)
-      end
+
+  __fence(__execution, __block)
+  var ts_start = c.legion_get_current_time_in_micros()
+  __parallelize_with color_space do
+    for j = 0, num_loops do
+      calculate_new_currents(steps, all_nodes, all_wires)
+      distribute_charge(all_nodes, all_wires)
+      update_voltages(all_nodes)
     end
   end
+  __fence(__execution, __block)
   var ts_end = c.legion_get_current_time_in_micros()
   if simulation_success then
     c.printf("SUCCESS!\n")
