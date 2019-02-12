@@ -24,6 +24,7 @@
 #include "realm/indexspace.h"
 #include "realm/processor.h"
 #include "realm/profiling.h"
+#include "realm/reservation.h"
 
 namespace Realm {
 
@@ -31,6 +32,7 @@ namespace Realm {
   struct SubgraphDefinition;
 
   class Subgraph {
+  public:
     typedef ::realm_id_t id_t;
 
     id_t id;
@@ -100,8 +102,7 @@ namespace Realm {
       CopyDesc();  // initializes all fields
 
       // interpolatable: none?
-      //IndexSpace space;  TODO: admit defeat and create a generic container
-      //                     for IndexSpace<N,T>?
+      IndexSpaceGeneric space; // type-erase here to avoid template explosion
       std::vector<CopySrcDstField> srcs;
       std::vector<CopySrcDstField> dsts;
       ProfilingRequestSet prs;
@@ -115,6 +116,7 @@ namespace Realm {
       
       // interpolatable: { barrier, reduce_value }
       Barrier barrier;
+      unsigned count /*= 1*/;
       ByteArray reduce_value;
     };
 
@@ -252,5 +254,7 @@ namespace Realm {
   };
 
 }; // namespace Realm
+
+#include "realm/subgraph.inl"
 
 #endif // ifndef REALM_SUBGRAPH_H

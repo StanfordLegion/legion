@@ -1227,6 +1227,14 @@ namespace Realm {
 	  nodes[i].sparsity_maps[Network::my_node_id] = m;
 	  local_sparsity_map_free_lists[i] = new SparsityMapTableAllocator::FreeList(*m, i /*owner_node*/);
 	}
+
+	local_subgraph_free_lists.resize(Network::max_node_id + 1);
+	for(NodeID i = 0; i <= Network::max_node_id; i++) {
+	  nodes[i].subgraphs.resize(Network::max_node_id + 1, 0);
+	  DynamicTable<SubgraphTableAllocator> *m = new DynamicTable<SubgraphTableAllocator>;
+	  nodes[i].subgraphs[Network::my_node_id] = m;
+	  local_subgraph_free_lists[i] = new SubgraphTableAllocator::FreeList(*m, i /*owner_node*/);
+	}
       }
 
       // form requests for network-registered memory
@@ -2181,6 +2189,11 @@ namespace Realm {
 	      it != n.sparsity_maps.end();
 	      ++it)
 	    delete it->load();
+
+	  for(std::vector<atomic<DynamicTable<SubgraphTableAllocator> *> >::iterator it = n.subgraphs.begin();
+	      it != n.subgraphs.end();
+	      ++it)
+	    delete it->load();
 	}
 	
 	delete[] nodes;
@@ -2190,6 +2203,7 @@ namespace Realm {
 	delete local_proc_group_free_list;
 	delete local_compqueue_free_list;
 	delete_container_contents(local_sparsity_map_free_lists);
+	delete_container_contents(local_subgraph_free_lists);
 
 	// same for code translators
 	delete_container_contents(code_translators);
@@ -2314,6 +2328,36 @@ namespace Realm {
       return wrap;
     }
 
+    SubgraphImpl *RuntimeImpl::get_subgraph_impl(ID id)
+    {
+      if(!id.is_subgraph()) {
+	log_runtime.fatal() << "invalid subgraph handle: id=" << id;
+	assert(0 && "invalid subgraph handle");
+      }
+
+      Node *n = &nodes[id.subgraph_owner_node()];
+      atomic<DynamicTable<SubgraphTableAllocator> *>& m = n->subgraphs[id.subgraph_creator_node()];
+      // might need to construct this (in a lock-free way)
+      DynamicTable<SubgraphTableAllocator> *mptr = m.load();
+      if(mptr == 0) {
+	// construct one and try to swap it in
+	DynamicTable<SubgraphTableAllocator> *newm = new DynamicTable<SubgraphTableAllocator>;
+	if(m.compare_exchange(mptr, newm))
+	  mptr = newm;  // we're using the one we made
+	else
+	  delete newm;  // somebody else made it faster (mptr has winner)
+      }
+      SubgraphImpl *impl = mptr->lookup_entry(id.subgraph_subgraph_idx(),
+					      id.subgraph_owner_node());
+      // creator node isn't always right, so try to fix it
+      if(impl->me != id) {
+	if(impl->me.subgraph_creator_node() == 0)
+	  impl->me.subgraph_creator_node() = NodeID(id.subgraph_creator_node());
+	assert(impl->me == id);
+      }
+      return impl;
+    }
+  
     ReservationImpl *RuntimeImpl::get_lock_impl(ID id)
     {
       if(id.is_reservation()) {

@@ -16,3 +16,4 @@ compqueue
 event_subscribe
 deferred_allocs
 test_nodeset
+subgraphs

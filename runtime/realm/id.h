@@ -225,7 +225,7 @@ namespace Realm {
       static ID make_procgroup(unsigned owner_node, unsigned creator_node, unsigned pgroup_idx);
       static ID make_sparsity(unsigned owner_node, unsigned creator_node, unsigned sparsity_idx);
       static ID make_compqueue(unsigned owner_node, unsigned cq_idx);
-      static ID make_subgraph(unsigned creator_node, unsigned subgraph_idx);
+      static ID make_subgraph(unsigned owner_node, unsigned creator_node, unsigned subgraph_idx);
 
       bool is_null(void) const;
       bool is_event(void) const;
@@ -253,7 +253,7 @@ namespace Realm {
 	ID_PROCGROUP,
 	ID_INDEXSPACE,
 	ID_SPARSITY,
-	ID_ALLOCATOR,
+	ID_SUBGRAPH,
 	ID_UNUSED_13,
 	ID_INSTANCE,
 	ID_UNUSED_15,
