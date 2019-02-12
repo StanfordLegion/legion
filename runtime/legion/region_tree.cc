@@ -5113,7 +5113,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!expressions.empty());
+      assert(expressions.size() >= 2);
+      assert(expressions.size() <= MAX_EXPRESSION_FANOUT);
 #endif
       IndexSpaceExpression *first = expressions[0];
       const IndexSpaceExprID key = first->expr_id;
@@ -5247,7 +5248,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!expressions.empty());
+      assert(expressions.size() >= 2);
+      assert(expressions.size() <= MAX_EXPRESSION_FANOUT);
 #endif
       IndexSpaceExpression *first = expressions[0];
       const IndexSpaceExprID key = first->expr_id;
@@ -5608,7 +5610,7 @@ namespace Legion {
       {
         RezCheck z2(rez);
         rez.serialize(remote_expr_id);
-        origin->pack_expression_structure(rez);
+        origin->pack_expression_structure(rez, source);
         rez.serialize(done_event);
       }
       runtime->send_index_space_remote_expression_response(source, rez);
@@ -5622,13 +5624,6 @@ namespace Legion {
       DerezCheck z(derez);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id); 
-#if 0
-      // We get to make the object
-      TypeTag type_tag;
-      derez.deserialize(type_tag);
-      RemoteExpressionCreator creator(derez, this, remote_expr_id);
-      NT_TemplateHelper::demux<RemoteExpressionCreator>(type_tag, &creator);
-#endif
       IndexSpaceExpression *result = unpack_expression_structure(derez);
       {
         AutoLock l_lock(lookup_is_op_lock);
@@ -5659,6 +5654,14 @@ namespace Legion {
         IndexSpace handle;
         derez.deserialize(handle);
         return get_node(handle);
+      }
+      bool is_local;
+      derez.deserialize(is_local);
+      if (is_local)
+      {
+        IndexSpaceExpression *local_expr;
+        derez.deserialize(local_expr);
+        return local_expr;
       }
       // Not an index space, so it is an operation, unpack all the arguments
       // to the operation and see if we can find equivalence ones on this node
@@ -6133,7 +6136,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::pack_expression_structure(Serializer &rez)
+    void PendingIndexSpaceExpression::pack_expression_structure(Serializer &rez,
+                                                          AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       if (!ready_event.has_triggered())
@@ -6141,7 +6145,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      result->pack_expression_structure(rez);
+      result->pack_expression_structure(rez, target);
     }
 
     //--------------------------------------------------------------------------
