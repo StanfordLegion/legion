@@ -20,7 +20,7 @@
 
 import "regent"
 
-local c = regentlib.c
+local fabs = regentlib.fabs(double)
 
 fspace fs1
 {
@@ -63,18 +63,16 @@ do
   end
 end
 
-local cmath = terralib.includec("math.h")
-
+__demand(__parallel)
 task check(r1 : region(ispace(int2d), fs1), r2 : region(fs2(r1)))
 where reads(r2.{g, h})
 do
   for e in r2 do
-    regentlib.assert(cmath.fabs(e.h - e.g) < 0.000001, "test failed")
+    regentlib.assert(fabs(e.h - e.g) < 0.000001, "test failed")
   end
 end
 
 task test(size : int, p : int)
-  c.srand48(12345)
   var r1 = region(ispace(int2d, {size, size}), fs1)
   var r2 = region(ispace(ptr, size * size), fs2(wild))
 
