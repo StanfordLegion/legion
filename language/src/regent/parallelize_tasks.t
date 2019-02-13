@@ -45,6 +45,14 @@ local function find_or_create(map, key, init)
   return value
 end
 
+local function intersect(set1, set2)
+  local result = data.newmap()
+  for k, _ in set1:items() do
+    if set2[k] then result[k] = true end
+  end
+  return result
+end
+
 local range_complex = std.newsymbol("__top__")
 
 local new_range
@@ -73,9 +81,9 @@ function graph:dump()
   print("digraph {")
   local next_id = 1
   local node_ids = {}
-  for v, _ in self.vertices:items() do
+  for v, l in self.vertices:items() do
     node_ids[v] = next_id
-    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(v) .. "\" ];")
+    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(v) .. " : " .. tostring(l) .. "\" ];")
     next_id = next_id + 1
   end
   for src, edges in self.edges:items() do
@@ -128,7 +136,7 @@ local function create_product_graph(g1, g2)
   local g = graph.new()
   for v1, l1 in g1.vertices:items() do
     for v2, l2 in g2.vertices:items() do
-      if l1 == l2 then
+      if l1:unifiable(l2) then
         local v = data.newtuple(v1, v2)
         g.vertices[v] = true
       end
@@ -139,17 +147,68 @@ local function create_product_graph(g1, g2)
       local va1, va2 = unpack(va)
       local vb1, vb2 = unpack(vb)
       if va1 ~= vb1 and va2 ~= vb2 then
-        local key1 = g1:connected(va1, vb1)
-        local key2 = g2:connected(va2, vb2)
-        if key1 and key2 and key1 == key2 then
+        local label1 = g1:connected(va1, vb1)
+        local label2 = g2:connected(va2, vb2)
+        local intersect = label1 and label2 and intersect(label1, label2)
+        if intersect and not intersect:is_empty() then
           local edges = find_or_create(g.edges, va)
-          edges[vb] = key1 or true
+          edges[vb] = intersect
         end
       end
     end
   end
   return g
 end
+
+local partition_info = {}
+
+partition_info.__index = partition_info
+
+function partition_info.new(region_symbol, disjoint, complete)
+  local tuple = {
+    region = region_symbol,
+    disjoint = disjoint or false,
+    complete = complete or false,
+  }
+  return setmetatable(tuple, partition_info)
+end
+
+function partition_info:clone(mapping)
+  local region = self.region
+  if mapping then region = mapping(region) end
+  assert(region ~= nil)
+  return partition_info.new(region, self.disjoint, self.complete)
+end
+
+function partition_info:meet_disjointness(disjoint)
+  self.disjoint = self.disjoint or disjoint
+end
+
+function partition_info:meet_completeness(complete)
+  self.complete = self.complete or complete
+end
+
+function partition_info:__tostring()
+  local disjoint = (self.disjoint and "D") or "A"
+  local complete = (self.complete and "C") or "I"
+  return "partition(" .. tostring(self.region) ..  "," ..
+    disjoint .. "," .. complete .. ")"
+end
+
+function partition_info:unifiable(other)
+  return self.region == other.region
+end
+
+function partition_info:__eq(other)
+  return self.region == other.region and
+         self.disjoint == other.disjoint and
+         self.complete == other.complete
+end
+
+local require_disjoint_partition = {
+  [std.writes]     = true,
+  ["reads_writes"] = true,
+}
 
 local partitioning_constraints = {}
 
@@ -169,52 +228,64 @@ function partitioning_constraints:is_empty()
   return self.ranges:is_empty()
 end
 
+local function render_subset_constraint(src, dst)
+  return tostring(src) .. " <= " .. tostring(dst)
+end
+
+local function render_image_constraint(src, key, dst)
+  local region_symbol, field_path = unpack(key)
+  return tostring(region_symbol) .. "[" .. tostring(src) .. "]." ..
+    field_path:mkstring("", ".", "") .. " <= " .. tostring(dst)
+end
+
+local function render_analytic_constraint(src, offset, dst)
+  if std.is_symbol(offset[#offset]) then
+    local symbol = offset[#offset]
+    local o = offset:slice(1, #offset - 1)
+    local divider =
+      (std.is_region(symbol:gettype()) and tostring(symbol) .. ".ispace.bounds") or
+      (std.is_ispace(symbol:gettype()) and tostring(symbol) .. ".bounds") or
+      assert(false)
+    return "(" ..tostring(src) .. " + {" ..
+      o:mkstring("",",","") .. "}) % " ..
+      divider .. " <= " .. tostring(dst)
+  else
+    return tostring(src) .. " + {" ..
+      offset:mkstring("",",","") .. "} <= " .. tostring(dst)
+  end
+end
+
 function partitioning_constraints:print_constraints()
-  print("* ranges:")
-  for range, region_symbol in self.ranges:items() do
-    print("    " .. tostring(range) .. " : partition(" .. tostring(region_symbol) .. ")")
+  print("* partitions:")
+  for range, partition in self.ranges:items() do
+    print("    " .. tostring(range) .. " : " .. tostring(partition))
   end
   print("* subset constraints:")
   for src, all_constraints in self.subset_constraints:items() do
     for region_symbol, dst in all_constraints:items() do
-      print("    " .. tostring(src) .. " <= " .. tostring(dst))
+      print("    " .. render_subset_constraint(src, dst))
     end
   end
   print("* image constraints:")
   for src, all_constraints in self.image_constraints:items() do
     for key, dst in all_constraints:items() do
-      local region_symbol, field_path = unpack(key)
-      print("    " .. tostring(region_symbol) .. "[" .. tostring(src) .. "]." ..
-        field_path:mkstring("", ".", "") .. " <= " .. tostring(dst))
+      print("    " .. render_image_constraint(src, key, dst))
     end
   end
   print("* analytic constraints:")
   for src, constraints in self.analytic_constraints:items() do
     for offset, dst in constraints:items() do
-      if std.is_symbol(offset[#offset]) then
-        local symbol = offset[#offset]
-        local o = offset:slice(1, #offset - 1)
-        local divider =
-          (std.is_region(symbol:gettype()) and tostring(symbol) .. ".ispace.bounds") or
-          (std.is_ispace(symbol:gettype()) and tostring(symbol) .. ".bounds") or
-          assert(false)
-        print("    (" ..tostring(src) .. " + {" ..
-          o:mkstring("",",","") .. "}) % " ..
-          divider .. " <= " .. tostring(dst))
-      else
-        print("    " ..tostring(src) .. " + {" ..
-          offset:mkstring("",",","") .. "} <= " .. tostring(dst))
-      end
+      print("    " .. render_analytic_constraint(src, offset, dst))
     end
   end
 end
 
-function partitioning_constraints:set_domain(range, region_symbol)
-  assert(self.ranges[range] == nil or self.ranges[range] == region_symbol)
-  self.ranges[range] = region_symbol
+function partitioning_constraints:set_partition(range, partition)
+  assert(self.ranges[range] == nil)
+  self.ranges[range] = partition
 end
 
-function partitioning_constraints:get_domain(range)
+function partitioning_constraints:get_partition(range)
   return self.ranges[range]
 end
 
@@ -242,8 +313,8 @@ function partitioning_constraints:clone(mapping)
     map_region = function(region_symbol) return region_symbol end
   end
   local result = partitioning_constraints.new()
-  for range, region_symbol in self.ranges:items() do
-    result:set_domain(range, map_region(region_symbol))
+  for range, partition in self.ranges:items() do
+    result:set_partition(range, partition:clone(map_region))
   end
   for src, constraints in self.subset_constraints:items() do
     local result_constraints = find_or_create(result.subset_constraints, src)
@@ -272,40 +343,133 @@ function partitioning_constraints:clone(mapping)
   return result
 end
 
+function partitioning_constraints:unify_ranges(range_mapping)
+  local result = partitioning_constraints.new()
+  for range, partition in self.ranges:items() do
+    local new_range = range_mapping[range] or range
+    local new_partition = result:get_partition(new_range)
+    if new_partition == nil then
+      result:set_partition(new_range, partition)
+    else
+      new_partition:meet_disjointness(partition.disjoint)
+      new_partition:meet_completeness(partition.complete)
+    end
+  end
+  for src, constraints in self.subset_constraints:items() do
+    local new_src = range_mapping[src] or src
+    local result_constraints = find_or_create(result.subset_constraints, new_src)
+    for region_symbol, dst in constraints:items() do
+      local new_dst = range_mapping[dst] or dst
+      if new_src == new_dst then
+        return false, render_subset_constraint(new_src, new_dst)
+      end
+      result_constraints[region_symbol] = new_dst
+    end
+  end
+  for src, constraints in self.image_constraints:items() do
+    local new_src = range_mapping[src] or src
+    local result_constraints = find_or_create(result.image_constraints, new_src)
+    for key, dst in constraints:items() do
+      local new_dst = range_mapping[dst] or dst
+      if new_src == new_dst then
+        return false, render_image_constraint(new_src, key, new_dst)
+      end
+      result_constraints[key] = new_dst
+    end
+  end
+  for src, constraints in self.analytic_constraints:items() do
+    local new_src = range_mapping[src] or src
+    local result_constraints = find_or_create(result.analytic_constraints, new_src)
+    for offset, dst in constraints:items() do
+      local new_dst = range_mapping[dst] or dst
+      if new_src == new_dst then
+        return false, render_analytic_constraint(new_src, offset, new_dst)
+      end
+      result_constraints[offset] = new_dst
+    end
+  end
+  return result
+end
+
+function partitioning_constraints:propagate_disjointness()
+  local function propagate(all_constraints, render)
+    for src, constraints in all_constraints:items() do
+      local src_partition = self.ranges[src]
+      local disjoint_images = data.newmap()
+      local num_disjoint_images = 0
+      for key, dst in constraints:items() do
+        local dst_partition = self.ranges[dst]
+        if dst_partition.disjoint then
+          disjoint_images[key] = dst
+          num_disjoint_images = num_disjoint_images + 1
+          src_partition:meet_disjointness(dst_partition.disjoint)
+        end
+      end
+      if num_disjoint_images > 1 then
+        local error_message =
+          tostring(src)  .. " : " .. tostring(src_partition) .. ". "
+        for _, dst in disjoint_images:items() do
+          local dst_partition = self.ranges[dst]
+          error_message = error_message ..
+            tostring(dst)  .. " : " .. tostring(dst_partition) .. ". "
+        end
+        for key, dst in disjoint_images:items() do
+          error_message = error_message .. render(src, key, dst) .. " /\\ "
+        end
+        return false, error_message
+      end
+    end
+    return true
+  end
+
+  local satisfiable, error_message =
+    propagate(self.image_constraints, render_image_constraint)
+  if not satisfiable then return satisfiable, error_message end
+  local satisfiable, error_message =
+    propagate(self.analytic_constraints, render_analytic_constraint)
+  if not satisfiable then return satisfiable, error_message end
+
+  return true
+end
+
 function partitioning_constraints:create_graph()
   local g = graph.new()
-  for range, region_symbol in self.ranges:items() do
-    g.vertices[range] = region_symbol
+  for range, partition in self.ranges:items() do
+    g.vertices[range] = partition
   end
   for src, constraints in self.subset_constraints:items() do
     local edges = find_or_create(g.edges, src)
     for region_symbol, dst in constraints:items() do
-      assert(edges[dst] == nil)
-      edges[dst] = true
+      local labels = find_or_create(edges, dst)
+      labels[true] = true
     end
   end
   for src, constraints in self.image_constraints:items() do
     local edges = find_or_create(g.edges, src)
     for key, dst in constraints:items() do
-      assert(edges[dst] == nil)
-      edges[dst] = key
+      local labels = find_or_create(edges, dst)
+      labels[key] = true
     end
   end
   for src, constraints in self.analytic_constraints:items() do
     local edges = find_or_create(g.edges, src)
     for key, dst in constraints:items() do
-      assert(edges[dst] == nil)
-      edges[dst] = key
+      local labels = find_or_create(edges, dst)
+      labels[key] = true
     end
   end
   return g
 end
 
 function partitioning_constraints:join(to_join, mapping)
-  for range, region_symbol in to_join.ranges:items() do
+  for range, partition in to_join.ranges:items() do
     local my_range = mapping[range]
     if my_range == nil then
-      self.ranges[range] = region_symbol
+      self.ranges[range] = partition
+    else
+      local my_partition = self.ranges[my_range]
+      my_partition:meet_disjointness(partition.disjoint)
+      my_partition:meet_completeness(partition.complete)
     end
   end
 
@@ -340,34 +504,29 @@ function partitioning_constraints:join(to_join, mapping)
   end
 end
 
+function partitioning_constraints:get_complexity()
+  local complexity = 0
+  for _, all_constraints in self.subset_constraints:items() do
+    for _, _ in all_constraints:items() do
+      complexity = complexity + 1
+    end
+  end
+  for _, all_constraints in self.image_constraints:items() do
+    for _, _ in all_constraints:items() do
+      complexity = complexity + 1
+    end
+  end
+  for _, constraints in self.analytic_constraints:items() do
+    for _, _ in constraints:items() do
+      complexity = complexity + 1
+    end
+  end
+  return complexity
+end
+
 local parallel_task_context = {}
 
 parallel_task_context.__index = parallel_task_context
-
-local function unify(a, b, map)
-  local seta = map[a]
-  local setb = map[b]
-  if seta == nil and setb == nil then
-    local u = data.newmap()
-    u[a] = true
-    u[b] = true
-    map[a] = u
-    map[b] = u
-  elseif seta == nil then
-    local u = map[b]
-    u[a] = true
-    map[a] = u
-  elseif setb == nil then
-    local u = map[a]
-    u[b] = true
-    map[b] = u
-  else
-    for k, _ in setb:items() do
-      seta[k] = true
-      map[k] = seta
-    end
-  end
-end
 
 local function map_tostring(map)
   local str = nil
@@ -381,25 +540,21 @@ local function map_tostring(map)
   return str or ""
 end
 
-function parallel_task_context.new()
+function parallel_task_context.new(task)
   local cx = {
+    task                     = task,
     env                      = data.newmap(),
     back_edges               = data.newmap(),
     sources                  = data.newmap(),
+    sources_by_regions       = data.newmap(),
 
     field_accesses           = data.newmap(),
     field_accesses_summary   = data.newmap(),
 
     constraints              = partitioning_constraints.new(),
-    completeness_constraints = data.newmap(),
-    disjointness_constraints = data.newmap(),
-    equality_constraints     = data.newmap(),
-    union_constraints        = data.newmap(),
 
-    -- Complexity of the system of constraints is a 4-tuple of
-    --  # of image/analytic constraints,
-    --  # of disjointness/completeness constraints,
-    --  # of equality constraints, and
+    -- Complexity of the system of constraints is a pair of
+    --  # of subset/image/analytic constraints,
     --  # of distinct field accesses
     complexity               = false,
   }
@@ -408,9 +563,11 @@ function parallel_task_context.new()
 end
 
 local function cmp_complexity(c1, c2)
-  for idx = 1, 4 do
-    if c1[idx] > c2[idx] then return true
-    elseif c1[idx] < c2[idx] then return false end
+  if c1[1] > c2[1] then return true
+  elseif c1[1] < c2[1] then return false
+  else
+    if c1[2] > c2[2] then return true
+    elseif c1[2] < c2[2] then return false end
   end
   return false
 end
@@ -429,136 +586,102 @@ function parallel_task_context:print_all_constraints()
   for range, _ in self.sources:items() do
     print("    " .. tostring(range))
   end
+  print("* sources by regions:")
+  for region, source in self.sources_by_regions:items() do
+    print("    " .. tostring(region) .. " => " .. tostring(source))
+  end
   self.constraints:print_constraints()
-  print("* completeness constraints:")
-  for range, _ in self.completeness_constraints:items() do
-    print("    " .. tostring(range) .. " : complete")
-  end
-  print("* disjointness constraints:")
-  for range, _ in self.disjointness_constraints:items() do
-    print("    " .. tostring(range) .. " : disjoint")
-  end
-  print("* equality constraints:")
-  do
-    local duplicate = {}
-    for range, equivalence_set in self.equality_constraints:items() do
-      if duplicate[equivalence_set] == nil then
-        print("    {" .. map_tostring(equivalence_set) .. "}")
-        duplicate[equivalence_set] = true
+  --print("* accesses:")
+  --for region_symbol, accesses_summary in self.field_accesses_summary:items() do
+  --  for field_path, summary in accesses_summary:items() do
+  --    local range, privilege = unpack(summary)
+  --    print("    " .. tostring(region_symbol) .. "[" .. tostring(range) .. "]." ..
+  --      field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
+  --  end
+  --end
+  print("* accesses:")
+  for region_symbol, all_accesses in self.field_accesses:items() do
+    for field_path, accesses in all_accesses:items() do
+      for range, privilege in accesses:items() do
+        print("    " .. tostring(region_symbol) .. "[" .. tostring(range) .. "]." ..
+          field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
       end
-    end
-  end
-  print("* union constraints:")
-  do
-    local duplicate = {}
-    for range, concurrent_set in self.union_constraints:items() do
-      if duplicate[concurrent_set] == nil then
-        print("    {" .. map_tostring(concurrent_set) .. "}")
-        duplicate[concurrent_set] = true
-      end
-    end
-  end
-  print("* access summary:")
-  for region_symbol, accesses_summary in self.field_accesses_summary:items() do
-    for field_path, summary in accesses_summary:items() do
-      local ranges, privilege = unpack(summary)
-      local range = tostring(ranges[1])
-      for idx = 2, #ranges do
-        range = range .. "," .. tostring(ranges[idx])
-      end
-      print("    " .. tostring(region_symbol) .. "[{ " .. range .. " }]." ..
-        field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
     end
   end
   print("================")
 end
 
 function parallel_task_context:add_field_access(region_symbol, range, field_path, privilege)
-  local domain = self.constraints:get_domain(range)
-  if not (domain == nil or domain == region_symbol) then
-    local new_range = self.constraints:find_or_create_subset_constraint(range, region_symbol)
+  local partition = self.constraints:get_partition(range)
+  if not (partition == nil or partition.region == region_symbol) then
+    local new_range =
+      self.constraints:find_or_create_subset_constraint(range, region_symbol)
     self.back_edges[new_range] = range
     range = new_range
+    partition = nil
   end
 
   local all_field_accesses = find_or_create(self.field_accesses, region_symbol)
   local field_accesses = find_or_create(all_field_accesses, field_path)
-  field_accesses[range] = std.meet_privilege(field_accesses[range], privilege)
-  self:set_domain(range, region_symbol)
+  local join = std.meet_privilege(field_accesses[range], privilege)
+  field_accesses[range] = join
+  if partition == nil then
+    local disjoint = require_disjoint_partition[join]
+    self:set_partition(range, partition_info.new(region_symbol, disjoint, false))
+  else
+    partition:meet_disjointness(require_disjoint_partition[join])
+  end
 end
 
 function parallel_task_context:summarize_accesses()
-  local complexity = data.newtuple(0, 0, 0, 0)
-
+  local range_mapping = {}
+  local needs_unification = false
+  local num_accesses = 0
   for region_symbol, all_field_accesses in self.field_accesses:items() do
-    local accesses_summary = find_or_create(self.field_accesses_summary, region_symbol)
+    local accesses_summary =
+      find_or_create(self.field_accesses_summary, region_symbol)
     for field_path, accesses in all_field_accesses:items() do
       local ranges = terralib.newlist()
-      local joined_privilege = nil
+      local join = nil
       for range, privilege in accesses:items() do
         ranges:insert(range)
-        joined_privilege = std.meet_privilege(joined_privilege, privilege)
+        join = std.meet_privilege(join, privilege)
       end
-      accesses_summary[field_path] = { ranges, joined_privilege }
-
-      complexity[4] = complexity[4] + 1
-
-      if (joined_privilege == std.writes or joined_privilege == "reads_writes") then
-        self:add_disjointness_constraint(ranges[1])
+      local disjoint = require_disjoint_partition[join]
+      if disjoint and #ranges > 1 then
+        local equivalence_class = ranges[1]
+        needs_unification = true
+        accesses_summary[field_path] = { equivalence_class, join }
+        ranges:map(function(range)
+          self.constraints:get_partition(range):meet_disjointness(disjoint)
+          range_mapping[range] = equivalence_class
+        end)
+      else
+        accesses_summary[field_path] = { ranges, join }
       end
-
-      if #ranges > 1 then
-        local constrain = nil
-        if (joined_privilege == std.writes or joined_privilege == "reads_writes") then
-          constrain = self.add_equality_constraint
-          local back_edge = nil
-          ranges:map(function(range) back_edge = back_edge or self.back_edges[range] end)
-          ranges:map(function(range) self.back_edges[range] = back_edge end)
-        else
-          constrain = self.add_union_constraint
-        end
-        for idx = 1, #ranges - 1 do
-          constrain(self, ranges[idx], ranges[idx + 1])
-        end
-      end
+      num_accesses = num_accesses + 1
     end
   end
 
-  for range, _ in self.constraints.ranges:items() do
-    if self.back_edges[range] == nil then
-      self.sources[range] = true
+  if needs_unification then
+    local unified, error_message = self.constraints:unify_ranges(range_mapping)
+    if not unified then
+      self.constraints:print_constraints()
+      report.error(self.task,
+        prefix .. " failed: found an unsatisfiable constraint during unification: " ..
+        error_message)
     end
+    self.constraints = unified
   end
 
-  for _, all_constraints in self.constraints.subset_constraints:items() do
-    for _, _ in all_constraints:items() do
-      complexity[1] = complexity[1] + 1
-    end
+  local satisfiable, error_message = self.constraints:propagate_disjointness()
+  if not satisfiable then
+    report.error(self.task,
+      prefix .. " failed: found an unsatisfiable constraint during unification: " ..
+      error_message)
   end
-  for _, all_constraints in self.constraints.image_constraints:items() do
-    for _, _ in all_constraints:items() do
-      complexity[1] = complexity[1] + 1
-    end
-  end
-  for _, constraints in self.constraints.analytic_constraints:items() do
-    for _, _ in constraints:items() do
-      complexity[1] = complexity[1] + 1
-    end
-  end
-  for range, _ in self.completeness_constraints:items() do
-    complexity[2] = complexity[2] + 1
-  end
-  for range, _ in self.disjointness_constraints:items() do
-    complexity[2] = complexity[2] + 1
-  end
-  local duplicate = {}
-  for range, equivalence_set in self.equality_constraints:items() do
-    if duplicate[equivalence_set] == nil then
-      complexity[3] = complexity[3] + 1
-      duplicate[equivalence_set] = true
-    end
-  end
-  self.complexity = complexity
+
+  self.complexity = data.newtuple(self.constraints:get_complexity(), num_accesses)
 end
 
 function parallel_task_context:find_or_create_image_constraint(src_range, region_symbol, field_path)
@@ -583,25 +706,26 @@ function parallel_task_context:get_range(symbol)
   return self.env[symbol]
 end
 
-function parallel_task_context:set_domain(range, region_symbol)
+function parallel_task_context:set_partition(range, partition)
   if range == range_complex then return end
-  self.constraints:set_domain(range, region_symbol)
+  self.constraints:set_partition(range, partition)
 end
 
-function parallel_task_context:add_completeness_constraint(range)
-  self.completeness_constraints[range] = true
+function parallel_task_context:update_partition(range, partition)
+  if range == range_complex then return end
+  local my_partition = self.constraints:get_partition(range)
+  if my_partition == nil then
+    self.constraints:set_partition(range, partition)
+  else
+    my_partition:meet_disjointness(partition.disjoint)
+    my_partition:meet_completeness(partition.complete)
+  end
 end
 
-function parallel_task_context:add_disjointness_constraint(range)
-  self.disjointness_constraints[range] = true
-end
-
-function parallel_task_context:add_equality_constraint(range1, range2)
-  unify(range1, range2, self.equality_constraints)
-end
-
-function parallel_task_context:add_union_constraint(range1, range2)
-  unify(range1, range2, self.union_constraints)
+function parallel_task_context:find_or_create_source_range(region)
+  local range = find_or_create(self.sources_by_regions, region, new_range)
+  self.sources[range] = true
+  return range
 end
 
 local infer_constraints = {}
@@ -770,14 +894,11 @@ end
 
 function infer_constraints.stat_for_list(cx, stat)
   if stat.metadata and stat.metadata.parallelizable then
-    local range = new_range()
     local region_symbol = stat.value.value
+    local range = cx:find_or_create_source_range(region_symbol)
     cx:set_range(stat.symbol, range)
-    cx:set_domain(range, region_symbol)
-    cx:add_completeness_constraint(range)
-    if stat.metadata.reductions and #stat.metadata.reductions > 0 then
-      cx:add_disjointness_constraint(range)
-    end
+    local disjoint = stat.metadata.reductions and #stat.metadata.reductions > 0
+    cx:update_partition(range, partition_info.new(region_symbol, disjoint, true))
   end
   infer_constraints.block(cx, stat.block)
 end
@@ -847,7 +968,7 @@ function infer_constraints.top_task(node)
   assert(proto)
 
   -- Analyze loops in the task
-  local cx = parallel_task_context.new()
+  local cx = parallel_task_context.new(node)
   infer_constraints.block(cx, node.body)
   cx:summarize_accesses()
   proto:set_partitioning_constraints(cx)
@@ -1070,36 +1191,76 @@ solver_context.__index = solver_context
 
 function solver_context.new()
   local cx = {
+    sources = data.newmap(),
+    sources_by_regions = data.newmap(),
     constraints = partitioning_constraints.new(),
   }
   return setmetatable(cx, solver_context)
+end
+
+local function find_unifiable_ranges(constraints1, constraints2, source1, source2)
+  -- TODO: Need to check if the resulting constraints are unsatisfiable
+  local mapping = data.newmap()
+  local worklist = terralib.newlist({data.newtuple(source1, source2)})
+  local idx = 1
+  while idx <= #worklist do
+    local range1, range2 = unpack(worklist[idx])
+    mapping[range1] = range2
+    idx = idx + 1
+    local all_constraints1 = constraints1.image_constraints[range1]
+    local all_constraints2 = constraints2.image_constraints[range2]
+    if all_constraints1 ~= nil and all_constraints2 ~= nil then
+      for key, dst_range1 in all_constraints1:items() do
+        local dst_range2 = all_constraints2[key]
+        if dst_range2 ~= nil then
+          worklist:insert(data.newtuple(dst_range1, dst_range2))
+        end
+      end
+    end
+  end
+  return true, mapping
 end
 
 function solver_context:unify(new_constraints, region_mapping)
   if new_constraints.constraints:is_empty() then
     return
   elseif self.constraints:is_empty() then
+    for source, _ in new_constraints.sources:items() do
+      self.sources[source] = true
+    end
+    for region, source in new_constraints.sources_by_regions:items() do
+      local my_region = region_mapping[region]
+      self.sources_by_regions[my_region] = source
+    end
     self.constraints = new_constraints.constraints:clone(region_mapping)
     return
   end
 
-  local g1 = self.constraints:create_graph()
-  local to_unify = new_constraints.constraints:clone(region_mapping)
-  new_constraints:print_all_constraints()
-  local g2 = to_unify:create_graph()
-  local g = create_product_graph(g1, g2)
-  local connected_components = g:get_connected_components()
-  assert(#connected_components > 0)
-  table.sort(connected_components, function(c1, c2) return #c1 > #c2 end)
-
   local range_mapping = data.newmap()
-  connected_components[1]:map(function(pair)
-    local dst, src = unpack(pair)
-    range_mapping[src] = dst
-  end)
+  local to_unify = new_constraints.constraints:clone(region_mapping)
+  for region, source in new_constraints.sources_by_regions:items() do
+    local my_region = region_mapping[region]
+    local my_source = self.sources_by_regions[my_region]
+    if my_source ~= nil then
+      local unifiable, mapping =
+        find_unifiable_ranges(to_unify, self.constraints, source, my_source)
+      if unifiable then
+        for src, tgt in mapping:items() do
+          range_mapping[src] = tgt
+        end
+      end
+    else
+      local partition = to_unify:get_partition(source)
+      for my_range, my_partition in self.constraints.ranges:items() do
+        if partition == my_partition then
+          range_mapping[source] = my_range
+          break
+        end
+      end
+    end
+  end
 
   self.constraints:join(to_unify, range_mapping)
-  self:print_all_constraints()
 end
 
 function solver_context:print_all_constraints()
