@@ -20420,6 +20420,11 @@ namespace Legion {
             CopyOp::handle_deferred_across(args);
             break;
           }
+        case LG_DEFER_REMOTE_OP_DELETION_TASK_ID:
+          {
+            RemoteOp::handle_deferred_deletion(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 

@@ -2482,7 +2482,7 @@ namespace Legion {
                 rez.serialize(did);
                 rez.serialize(usage);
                 rez.serialize(overlap);
-                user_expr->pack_expression(rez, it->first);
+                rez.serialize(user_expr->handle);
                 rez.serialize(op_id);
                 rez.serialize(index);
                 rez.serialize(term_event);

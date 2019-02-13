@@ -2388,11 +2388,16 @@ namespace Legion {
       }
       // We can also trigger our guard event once the effects are applied
       if (!effects.empty())
+      {
         Runtime::trigger_event(guard_postcondition,
             Runtime::merge_events(effects));
+        return guard_postcondition;
+      }
       else
+      {
         Runtime::trigger_event(guard_postcondition);
-      return RtEvent::NO_RT_EVENT;
+        return RtEvent::NO_RT_EVENT;
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -4143,8 +4148,11 @@ namespace Legion {
         Runtime::trigger_event(applied);
       if (effects_done.exists())
         Runtime::trigger_event(effects_done, result);
-      // We can clean up our remote operation
-      delete op;
+      // We can clean up our remote operation once updated triggers
+      if (!updated.has_triggered())
+        op->defer_deletion(updated);
+      else
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -4348,8 +4356,11 @@ namespace Legion {
             Runtime::merge_events(map_applied_events));
       else
         Runtime::trigger_event(applied);
-      // Clean up the remote operation we allocated
-      delete op;
+      // Clean up the remote operation we allocated once updated triggers
+      if (!updated.has_triggered())
+        op->defer_deletion(updated);
+      else
+        delete op;
     }
 
     //--------------------------------------------------------------------------
