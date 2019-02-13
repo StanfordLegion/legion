@@ -337,6 +337,7 @@ namespace Legion {
       LG_FINALIZE_EQ_SETS_TASK_ID,
       LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
+      LG_DEFER_REMOTE_OUTPUT_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -422,6 +423,7 @@ namespace Legion {
         "Finalize Equivalence Sets",                              \
         "Deferred Copy Across",                                   \
         "Defer Remote Op Deletion",                               \
+        "Defer Remote Output",                                    \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

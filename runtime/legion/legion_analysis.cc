@@ -4133,12 +4133,30 @@ namespace Legion {
       {
         // Wait until the user registration is done before issuing
         // any output copies so we get the effects right
-        if (user_registered.exists() && !user_registered.has_triggered())
-          user_registered.wait();
-        output_aggregator->issue_updates(trace_info, term_event);
-        result = output_aggregator->summarize(trace_info);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
+        if (effects_done.exists() ||
+            (user_registered.exists() && !user_registered.has_triggered()))
+        {
+          RtUserEvent deferred_applied = Runtime::create_rt_user_event();
+          ApUserEvent deferred_result;
+          if (effects_done.exists())
+            deferred_result = Runtime::create_ap_user_event();
+          DeferRemoteOutputArgs args(output_aggregator, op, 
+              op->get_unique_op_id(), term_event, 
+              deferred_applied, deferred_result);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, user_registered);
+          map_applied_events.insert(deferred_applied);
+          result = deferred_result;
+        }
+        else
+        {
+          // No need to summarize the results since we would have
+          // deferred this if we needed to track the effects because
+          // it could potentially block
+          output_aggregator->issue_updates(trace_info, term_event);
+          if (output_aggregator->release_guards(map_applied_events))
+            delete output_aggregator;
+        }
       }
       // Do the rest of the triggers
       if (!map_applied_events.empty())
@@ -4148,9 +4166,10 @@ namespace Legion {
         Runtime::trigger_event(applied);
       if (effects_done.exists())
         Runtime::trigger_event(effects_done, result);
-      // We can clean up our remote operation once updated triggers
-      if (!updated.has_triggered())
-        op->defer_deletion(updated);
+      // We can clean up our remote operation once we know there are no
+      // more outstanding copy operations still in flight
+      if (!updated.has_triggered() || !applied.has_triggered())
+        op->defer_deletion(Runtime::merge_events(updated, applied));
       else
         delete op;
     }
@@ -4706,17 +4725,32 @@ namespace Legion {
       {
         // If we have a guard event we need to wait for it before we
         // can issue the copy updates
-        if (guard_event.exists() && !guard_event.has_triggered())
-          guard_event.wait();
-        const RtEvent done = 
+        if (effects.exists() ||
+            (guard_event.exists() && !guard_event.has_triggered()))
+        {
+          RtUserEvent deferred_applied = Runtime::create_rt_user_event();
+          ApUserEvent deferred_result;
+          if (effects.exists())
+          {
+            deferred_result = Runtime::create_ap_user_event();
+            effects_events.insert(deferred_result);
+          }
+          DeferRemoteOutputArgs args(output_aggregator, op, 
+              op->get_unique_op_id(), precondition, 
+              deferred_applied, deferred_result);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, guard_event);
+          map_applied_events.insert(deferred_applied);
+        }
+        else
+        {
+          // No need to summarize the results since we would have
+          // deferred this if we needed to track effects because
+          // it could potentially block
           output_aggregator->issue_updates(trace_info, precondition);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
-        const ApEvent result = output_aggregator->summarize(trace_info); 
-        if (result.exists())
-          effects_events.insert(result);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
+          if (output_aggregator->release_guards(map_applied_events))
+            delete output_aggregator;
+        }
       }
       if (effects.exists())
       {
@@ -4735,7 +4769,10 @@ namespace Legion {
       if (local_view != NULL)
         local_view->send_remote_valid_decrement(previous, applied);
       registration_view->send_remote_valid_decrement(previous, applied);
-      delete op;
+      if (!applied.has_triggered())
+        op->defer_deletion(applied);
+      else
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -4832,6 +4869,38 @@ namespace Legion {
       derez.deserialize(done_event);
       target->process_remote_instances(derez, runtime);
       Runtime::trigger_event(done_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_deferred_output(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoteOutputArgs *dargs = (const DeferRemoteOutputArgs*)args;
+      const PhysicalTraceInfo trace_info(dargs->op);
+      std::set<RtEvent> map_applied;
+      if (dargs->summary.exists())
+      {
+        const RtEvent done = 
+          dargs->aggregator->issue_updates(trace_info, dargs->precondition);
+        // Need to wait before we can get the summary
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+        const ApEvent summary = dargs->aggregator->summarize(trace_info);
+        Runtime::trigger_event(dargs->summary, summary);
+        if (dargs->aggregator->release_guards(map_applied))
+          delete dargs->aggregator;
+      }
+      else
+      {
+        dargs->aggregator->issue_updates(trace_info, dargs->precondition);
+        if (dargs->aggregator->release_guards(map_applied))
+          delete dargs->aggregator;
+      }
+      if (!map_applied.empty())
+        Runtime::trigger_event(dargs->applied,
+            Runtime::merge_events(map_applied));
+      else
+        Runtime::trigger_event(dargs->applied);
     }
 
     /////////////////////////////////////////////////////////////

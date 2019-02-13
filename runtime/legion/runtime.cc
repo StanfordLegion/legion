@@ -20425,6 +20425,11 @@ namespace Legion {
             RemoteOp::handle_deferred_deletion(args);
             break;
           }
+        case LG_DEFER_REMOTE_OUTPUT_TASK_ID:
+          {
+            RemoteEqTracker::handle_deferred_output(args);
+            break;
+          }
         case LG_RETRY_SHUTDOWN_TASK_ID:
           {
             const ShutdownManager::RetryShutdownArgs *shutdown_args = 
