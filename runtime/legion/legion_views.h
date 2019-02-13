@@ -145,9 +145,10 @@ namespace Legion {
                                     IndexSpaceExpression *expr,
                                     const UniqueID op_id,
                                     const unsigned index) = 0;
+      // Always want users to be full index space expressions
       virtual ApEvent register_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
-                                    IndexSpaceExpression *expr,
+                                    IndexSpaceNode *expr,
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,
@@ -479,7 +480,7 @@ namespace Legion {
                                     const unsigned index);
       virtual ApEvent register_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
-                                    IndexSpaceExpression *expr,
+                                    IndexSpaceNode *expr,
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,
@@ -634,7 +635,7 @@ namespace Legion {
                                     const unsigned index);
       virtual ApEvent register_user(const RegionUsage &usage,
                                     const FieldMask &user_mask,
-                                    IndexSpaceExpression *user_expr,
+                                    IndexSpaceNode *expr,
                                     const UniqueID op_id,
                                     const unsigned index,
                                     ApEvent term_event,

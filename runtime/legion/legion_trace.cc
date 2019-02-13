@@ -1792,11 +1792,10 @@ namespace Legion {
         output_aggregators(requirements.size(), NULL);
       std::vector<std::vector<InstanceView*> > 
         target_views(requirements.size());
-      std::vector<std::set<ApEvent> > remote_ready(requirements.size());
       std::set<ApEvent> wait_events;
+      std::vector<RtUserEvent> users_registered(requirements.size(),
+                                                RtUserEvent::NO_RT_USER_EVENT);
       std::vector<ApEvent> effects(requirements.size(), ApEvent::NO_AP_EVENT);
-      LegionVector<FieldMaskSet<IndexSpaceExpression> >::aligned 
-        local_exprs(requirements.size());
       std::vector<RtEvent> reg_pre(requirements.size(), RtEvent::NO_RT_EVENT);
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
       {
@@ -1809,11 +1808,10 @@ namespace Legion {
                                                   instances[idx],
                                                   trace_info,
                                                   output_aggregators[idx],
+                                                  users_registered[idx],
                                                   map_applied_conditions,
-                                                  remote_ready[idx],
                                                   wait_events,
                                                   target_views[idx],
-                                                  local_exprs[idx],
 #ifdef DEBUG_LEGION
                                                   get_logging_name(),
                                                   unique_op_id,
@@ -1826,14 +1824,13 @@ namespace Legion {
         {
           const RtEvent postcondition = 
             runtime->forest->defer_physical_perform_registration(reg_pre[idx],
-                                                 local_exprs[idx],
                                                  requirements[idx],
                                                  this, idx,
                                                  completion_event,
                                                  instances[idx],
                                                  trace_info,
                                                  output_aggregators[idx],
-                                                 remote_ready[idx],
+                                                 users_registered[idx],
                                                  target_views[idx],
                                                  map_applied_conditions,
                                                  effects[idx]);
@@ -1842,14 +1839,13 @@ namespace Legion {
         else
           effects[idx] = 
             runtime->forest->physical_perform_registration(
-                                                 local_exprs[idx],
                                                  requirements[idx],
                                                  this, idx,
                                                  completion_event,
                                                  instances[idx],
                                                  trace_info,
                                                  output_aggregators[idx],
-                                                 remote_ready[idx],
+                                                 users_registered[idx],
                                                  target_views[idx],
                                                  map_applied_conditions);
       }

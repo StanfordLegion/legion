@@ -133,8 +133,9 @@ namespace Legion {
       derez.deserialize(usage);
       FieldMask user_mask;
       derez.deserialize(user_mask);
-      IndexSpaceExpression *user_expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      IndexSpace handle;
+      derez.deserialize(handle);
+      IndexSpaceNode *user_expr = runtime->forest->get_node(handle);
       UniqueID op_id;
       derez.deserialize(op_id);
       unsigned index;
@@ -2350,7 +2351,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent MaterializedView::register_user(const RegionUsage &usage,
                                             const FieldMask &user_mask,
-                                            IndexSpaceExpression *user_expr,
+                                            IndexSpaceNode *user_expr,
                                             const UniqueID op_id,
                                             const unsigned index,
                                             ApEvent term_event,
@@ -2382,7 +2383,7 @@ namespace Legion {
             rez.serialize(did);
             rez.serialize(usage);
             rez.serialize(user_mask);
-            user_expr->pack_expression(rez, logical_owner);
+            rez.serialize(user_expr->handle);
             rez.serialize(op_id);
             rez.serialize(index);
             rez.serialize(term_event);
@@ -2482,7 +2483,7 @@ namespace Legion {
                 rez.serialize(did);
                 rez.serialize(usage);
                 rez.serialize(overlap);
-                user_expr->pack_expression(rez, it->first);
+                rez.serialize(user_expr->handle);
                 rez.serialize(op_id);
                 rez.serialize(index);
                 rez.serialize(term_event);
@@ -4444,7 +4445,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent ReductionView::register_user(const RegionUsage &usage,
                                          const FieldMask &user_mask,
-                                         IndexSpaceExpression *user_expr,
+                                         IndexSpaceNode *user_expr,
                                          const UniqueID op_id,
                                          const unsigned index,
                                          ApEvent term_event,
@@ -4476,7 +4477,7 @@ namespace Legion {
           rez.serialize(did);
           rez.serialize(usage);
           rez.serialize(user_mask);
-          user_expr->pack_expression(rez, logical_owner);
+          rez.serialize(user_expr->handle);
           rez.serialize(op_id);
           rez.serialize(index);
           rez.serialize(term_event);

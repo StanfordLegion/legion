@@ -8415,12 +8415,12 @@ namespace Legion {
                                               this, 0/*idx*/, completion_event,
                                               restricted_instances,
                                               trace_info, 
-                                              map_applied_conditions,
+                                              map_applied_conditions
 #ifdef DEBUG_LEGION
-                                              get_logging_name(),
-                                              unique_op_id,
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                              runtime->legion_spy_enabled);
+                                              );
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -9188,12 +9188,12 @@ namespace Legion {
                                               this, 0/*idx*/, init_precondition,
                                               completion_event,
                                               restricted_instances, trace_info,
-                                              map_applied_conditions,
+                                              map_applied_conditions
 #ifdef DEBUG_LEGION
-                                              get_logging_name(),
-                                              unique_op_id,
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                              runtime->legion_spy_enabled);
+                                              );
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -15540,6 +15540,15 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
+    void RemoteOp::defer_deletion(RtEvent precondition)
+    //--------------------------------------------------------------------------
+    {
+      DeferRemoteOpDeletionArgs args(this);
+      runtime->issue_runtime_meta_task(args, 
+          LG_THROUGHPUT_WORK_PRIORITY, precondition);
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteOp::pack_remote_base(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
@@ -15687,6 +15696,15 @@ namespace Legion {
       int previous = __sync_fetch_and_add(&available_profiling_requests, -1);
       if (previous == 0)
         assert(false); // Very bad if we ever hit this
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteOp::handle_deferred_deletion(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoteOpDeletionArgs *dargs = 
+        (const DeferRemoteOpDeletionArgs*)args;
+      delete dargs->op;
     }
 
     //--------------------------------------------------------------------------

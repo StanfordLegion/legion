@@ -114,24 +114,21 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
         DeferPhysicalRegistrationArgs(
-                               const FieldMaskSet<IndexSpaceExpression> &exprs,
                                const RegionRequirement &r,
                                Operation *o, UniqueID uid, unsigned idx,
                                ApEvent term, InstanceSet &t,
                                const PhysicalTraceInfo &info,
                                CopyFillAggregator *&output,
-                               const std::set<ApEvent> &remote,
+                               const RtUserEvent user_reg,
                                std::vector<InstanceView*> &views, 
                                RtUserEvent map_applied,
                                ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
-            local_exprs(exprs), req(r), op(o), index(idx), 
-            term_event(term), targets(t), trace_info(info),
-            output_aggregator(output), remote_ready(remote), 
-            target_views(views), map_applied_done(map_applied),
-            result(res) { }
+            req(r), op(o), index(idx), term_event(term), targets(t), 
+            trace_info(info), output_aggregator(output), 
+            user_registered(user_reg), target_views(views), 
+            map_applied_done(map_applied), result(res) { }
       public:
-        const FieldMaskSet<IndexSpaceExpression> &local_exprs;
         const RegionRequirement &req;
         Operation *const op; 
         const unsigned index;
@@ -139,7 +136,7 @@ namespace Legion {
         InstanceSet &targets;
         const PhysicalTraceInfo &trace_info;
         CopyFillAggregator *const output_aggregator;
-        const std::set<ApEvent> &remote_ready;
+        const RtUserEvent user_registered;
         std::vector<InstanceView*> &target_views;
         RtUserEvent map_applied_done;
         ApEvent &result;
@@ -441,11 +438,10 @@ namespace Legion {
                                 const InstanceSet &targets,
                                 const PhysicalTraceInfo &trace_info,
                                 CopyFillAggregator *&output_aggregator,
+                                RtUserEvent &user_registered,
                                 std::set<RtEvent> &map_applied_events,
-                                std::set<ApEvent> &remote_events,
                                 std::set<ApEvent> &effects_events,
                                 std::vector<InstanceView*> &target_views,
-                                FieldMaskSet<IndexSpaceExpression> &local_exprs,
 #ifdef DEBUG_LEGION
                                 const char *log_name,
                                 UniqueID uid,
@@ -456,13 +452,12 @@ namespace Legion {
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(
-                         const FieldMaskSet<IndexSpaceExpression> &local_exprs,
                          const RegionRequirement &req,
                          Operation *op, unsigned index,
                          ApEvent term_event, InstanceSet &targets,
                          const PhysicalTraceInfo &trace_info,
                          CopyFillAggregator *output_aggregator,
-                         const std::set<ApEvent> &remote_events,
+                         const RtUserEvent user_registered,
                          std::vector<InstanceView*> &target_views,
                          std::set<RtEvent> &map_applied_events);
       // Same as the two above merged together
@@ -482,13 +477,12 @@ namespace Legion {
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
-                           const FieldMaskSet<IndexSpaceExpression> &local_expr,
                            const RegionRequirement &req,
                            Operation *op, unsigned index,
                            ApEvent term_event, InstanceSet &targets,
                            const PhysicalTraceInfo &trace_info,
                            CopyFillAggregator *output_aggregator,
-                           const std::set<ApEvent> &remote_ready,
+                           const RtUserEvent register_post,
                            std::vector<InstanceView*> &target_views,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result);
@@ -499,24 +493,24 @@ namespace Legion {
                                    ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
-                                   std::set<RtEvent> &map_applied_events,
+                                   std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
-                                   const char *log_name,
-                                   UniqueID uid,
+                                   , const char *log_name
+                                   , UniqueID uid
 #endif
-                                   const bool need_restricted_insts);
+                                   );
       ApEvent release_restrictions(const RegionRequirement &req,
                                    VersionInfo &version_info,
                                    ReleaseOp *op, unsigned index,
                                    ApEvent precondition, ApEvent term_event,
                                    InstanceSet &restricted_instances,
                                    const PhysicalTraceInfo &trace_info,
-                                   std::set<RtEvent> &map_applied_events,
+                                   std::set<RtEvent> &map_applied_events
 #ifdef DEBUG_LEGION
-                                   const char *log_name,
-                                   UniqueID uid,
+                                   , const char *log_name
+                                   , UniqueID uid
 #endif
-                                   const bool need_restricted_insts);
+                                   );
       ApEvent copy_across(const RegionRequirement &src_req,
                           const RegionRequirement &dst_req,
                           VersionInfo &src_version_info,

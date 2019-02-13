@@ -2187,7 +2187,6 @@ namespace Legion {
         local_space(f->runtime->address_space), op(o), src_index(idx), 
         dst_index(idx), guard_precondition(g), 
         guard_postcondition(Runtime::create_rt_user_event()),
-        applied_event(Runtime::create_rt_user_event()), 
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
@@ -2201,7 +2200,6 @@ namespace Legion {
         local_space(f->runtime->address_space), op(o), src_index(src_idx), 
         dst_index(dst_idx), guard_precondition(g),
         guard_postcondition(Runtime::create_rt_user_event()),
-        applied_event(Runtime::create_rt_user_event()), 
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
@@ -2214,8 +2212,7 @@ namespace Legion {
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
         guard_precondition(rhs.guard_precondition),
         guard_postcondition(rhs.guard_postcondition),
-        applied_event(rhs.applied_event), predicate_guard(rhs.predicate_guard),
-        track_events(rhs.track_events)
+        predicate_guard(rhs.predicate_guard), track_events(rhs.track_events)
     //--------------------------------------------------------------------------
     {
       // Should never be called
@@ -2731,15 +2728,18 @@ namespace Legion {
           perform_updates(*it, trace_info, precondition,
                           has_src_preconditions, has_dst_preconditions);
       }
-      // We can trigger our postcondition now that we've applied our updates
-      Runtime::trigger_event(guard_postcondition);
-      // We can also trigger our appplied event
+      // We can also trigger our guard event once the effects are applied
       if (!effects.empty())
-        Runtime::trigger_event(applied_event,
+      {
+        Runtime::trigger_event(guard_postcondition,
             Runtime::merge_events(effects));
+        return guard_postcondition;
+      }
       else
-        Runtime::trigger_event(applied_event);
-      return RtEvent::NO_RT_EVENT;
+      {
+        Runtime::trigger_event(guard_postcondition);
+        return RtEvent::NO_RT_EVENT;
+      }
     }
     
     //--------------------------------------------------------------------------
@@ -2753,13 +2753,13 @@ namespace Legion {
     bool CopyFillAggregator::release_guards(std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      if (!applied_event.has_triggered())
+      if (!guard_postcondition.has_triggered())
       {
         // Meta-task will take responsibility for deletion
         CopyFillDeletion args(this, op->get_unique_op_id(), 
                               !guarded_sets.empty());
         const RtEvent done = op->runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, applied_event);
+            LG_LATENCY_DEFERRED_PRIORITY, guard_postcondition);
         applied.insert(done);
         return false;
       }
@@ -3525,8 +3525,9 @@ namespace Legion {
                                   const InstanceSet &targets,
                                   const std::vector<InstanceView*> &views,
                                   ApEvent precondition, ApEvent term_event,
+                                  const RtEvent user_registered,
+                                  std::set<RtEvent> &guard_events,
                                   std::set<RtEvent> &map_applied_events,
-                                  std::set<ApEvent> &remote_events,
                                   std::set<ApEvent> &effects_events,
                                   const bool track_effects,
                                   const bool check_initialized) 
@@ -3544,8 +3545,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent ready = Runtime::create_ap_user_event();
         const ApUserEvent effects = track_effects ? 
           Runtime::create_ap_user_event() : ApUserEvent::NO_AP_USER_EVENT;
         Serializer rez;
@@ -3574,27 +3575,26 @@ namespace Legion {
           }
           rez.serialize(precondition);
           rez.serialize(term_event);
+          rez.serialize(updated);
+          rez.serialize(user_registered);
           rez.serialize(applied);
-          rez.serialize(ready);
           rez.serialize(effects);
           rez.serialize<bool>(check_initialized);
         }
         runtime->send_equivalence_set_remote_updates(rit->first, rez);
+        guard_events.insert(updated);
         map_applied_events.insert(applied);
-        remote_events.insert(ready);
         if (track_effects)
           effects_events.insert(effects);
       }
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_acquires(
-                                       Operation *op, const unsigned index,
-                                       const RegionUsage &usage,
-                                       const ApEvent term_event,
+    void RemoteEqTracker::perform_remote_acquires(Operation *op,
+                                       std::set<RtEvent> &instances_returned,
                                        std::set<RtEvent> &map_applied_events,
-                                       std::set<ApEvent> &acquired_events,
-                                       RemoteEqTracker *inst_target)
+                                       RemoteEqTracker *inst_target,
+                                       const AddressSpaceID inst_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3613,8 +3613,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const RtUserEvent returned = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent acquired = Runtime::create_ap_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -3628,33 +3628,31 @@ namespace Legion {
             rez.serialize(it->source);
           }
           op->pack_remote_operation(rez, rit->first);
-          rez.serialize(index);
-          rez.serialize(usage);
-          rez.serialize(term_event);
+          rez.serialize(returned);
           rez.serialize(applied);
-          rez.serialize(acquired);
           rez.serialize(inst_target);
+          rez.serialize(inst_owner);
         }
         runtime->send_equivalence_set_remote_acquires(rit->first, rez);
         map_applied_events.insert(applied);
-        acquired_events.insert(acquired);
         if (this == inst_target)
         {
           AutoLock r_lock(*remote_lock);
-          sync_events->insert(applied);
+          sync_events->insert(returned);
         }
+        else
+          instances_returned.insert(returned);
       }
     }
 
     //--------------------------------------------------------------------------
-    void RemoteEqTracker::perform_remote_releases(
-                                       Operation *op, const unsigned index,
-                                       const RegionUsage &usage,
+    void RemoteEqTracker::perform_remote_releases(Operation *op,
                                        const ApEvent precondition,
-                                       const ApEvent term_event,
+                                       std::set<RtEvent> &instances_returned,
                                        std::set<RtEvent> &map_applied_events,
-                                       std::set<ApEvent> &released_events,
-                                       RemoteEqTracker *inst_target)
+                                       std::set<RtEvent> &guard_events,
+                                       RemoteEqTracker *inst_target,
+                                       const AddressSpaceID inst_owner)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -3673,8 +3671,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(!rit->second.empty());
 #endif
+        const RtUserEvent returned = Runtime::create_rt_user_event();
+        const RtUserEvent updated = Runtime::create_rt_user_event();
         const RtUserEvent applied = Runtime::create_rt_user_event();
-        const ApUserEvent released = Runtime::create_ap_user_event();
         Serializer rez;
         {
           RezCheck z(rez);
@@ -3688,22 +3687,23 @@ namespace Legion {
             rez.serialize(it->source);
           }
           op->pack_remote_operation(rez, rit->first);
-          rez.serialize(index);
-          rez.serialize(usage);
           rez.serialize(precondition);
-          rez.serialize(term_event);
+          rez.serialize(returned);
+          rez.serialize(updated);
           rez.serialize(applied);
-          rez.serialize(released);
           rez.serialize(inst_target);
+          rez.serialize(inst_owner);
         }
         runtime->send_equivalence_set_remote_releases(rit->first, rez);
         map_applied_events.insert(applied);
-        released_events.insert(released);
+        guard_events.insert(updated);
         if (this == inst_target)
         {
           AutoLock r_lock(*remote_lock);
-          sync_events->insert(applied);
+          sync_events->insert(returned);
         }
+        else
+          instances_returned.insert(returned);
       }
     }
 
@@ -3793,12 +3793,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void RemoteEqTracker::perform_remote_overwrite(
                                   Operation *op, const unsigned index,
-                                  const RegionUsage &usage,
                                   InstanceView *local_view,
                                   LogicalView *registration_view,
                                   const PredEvent pred_guard,
                                   const ApEvent precondition,
-                                  const ApEvent term_event,
+                                  const RtEvent guard_event,
                                   const bool add_restriction,
                                   const bool track_effects,
                                   std::set<RtEvent> &map_applied_events,
@@ -3833,7 +3832,6 @@ namespace Legion {
           }
           op->pack_remote_operation(rez, rit->first);
           rez.serialize(index);
-          rez.serialize(usage);
           if (local_view != NULL)
           {
             local_view->add_base_valid_ref(REMOTE_DID_REF, &mutator);
@@ -3845,13 +3843,15 @@ namespace Legion {
           rez.serialize(registration_view->did);
           rez.serialize(pred_guard);
           rez.serialize(precondition);
-          rez.serialize(term_event);
+          rez.serialize(guard_event);
           rez.serialize<bool>(add_restriction);
           rez.serialize(applied);
           rez.serialize(effects);
         }
         runtime->send_equivalence_set_remote_overwrites(rit->first, rez);
         map_applied_events.insert(applied);
+        if (track_effects)
+          effects_events.insert(effects);
       }
     }
 
@@ -4078,6 +4078,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void RemoteEqTracker::process_local_instances(
+          const FieldMaskSet<ReductionView> &views, const bool local_restricted)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(remote_lock != NULL);
+      assert(sync_events != NULL);
+      assert(remote_insts != NULL);
+#endif
+      AutoLock r_lock(*remote_lock);
+      for (FieldMaskSet<ReductionView>::const_iterator it = 
+            views.begin(); it != views.end(); it++)
+        remote_insts->insert(it->first, it->second);
+      if (local_restricted)
+        restricted = true;
+    }
+
+    //--------------------------------------------------------------------------
     void RemoteEqTracker::filter_remote_expressions(
                                       FieldMaskSet<IndexSpaceExpression> &exprs)
     //--------------------------------------------------------------------------
@@ -4153,24 +4171,6 @@ namespace Legion {
               to_add.begin(); it != to_add.end(); it++)
           exprs.insert(it->first, it->second);
       }
-    }
-    
-    //--------------------------------------------------------------------------
-    void RemoteEqTracker::process_local_instances(
-          const FieldMaskSet<ReductionView> &views, const bool local_restricted)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(remote_lock != NULL);
-      assert(sync_events != NULL);
-      assert(remote_insts != NULL);
-#endif
-      AutoLock r_lock(*remote_lock);
-      for (FieldMaskSet<ReductionView>::const_iterator it = 
-            views.begin(); it != views.end(); it++)
-        remote_insts->insert(it->first, it->second);
-      if (local_restricted)
-        restricted = true;
     }
 
     //--------------------------------------------------------------------------
@@ -4386,10 +4386,12 @@ namespace Legion {
       derez.deserialize(precondition);
       ApEvent term_event;
       derez.deserialize(term_event);
+      RtUserEvent updated;
+      derez.deserialize(updated);
+      RtEvent user_registered;
+      derez.deserialize(user_registered);
       RtUserEvent applied;
       derez.deserialize(applied);
-      ApUserEvent remote_ready;
-      derez.deserialize(remote_ready);
       ApUserEvent effects_done;
       derez.deserialize(effects_done);
       const bool track_effects = effects_done.exists();
@@ -4402,10 +4404,8 @@ namespace Legion {
       CopyFillAggregator *output_aggregator = NULL;
       std::set<RtEvent> guard_events;
       std::set<RtEvent> map_applied_events;
-      std::set<ApEvent> remote_events;
       std::set<ApEvent> effects_events;
       PhysicalTraceInfo trace_info(op);
-      FieldMaskSet<IndexSpaceExpression> local_exprs;
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
@@ -4421,7 +4421,6 @@ namespace Legion {
               sources[idx], op, index, usage, eq_masks[idx], targets, 
               target_views, input_aggregators, output_aggregator, 
               map_applied_events, guard_events, &initialized);
-          local_exprs.insert(eq_sets[idx]->set_expr, eq_masks[idx]);
         }
         if (user_mask != initialized)
         {
@@ -4438,7 +4437,6 @@ namespace Legion {
               sources[idx], op, index, usage, eq_masks[idx], targets, 
               target_views, input_aggregators, output_aggregator, 
               map_applied_events, guard_events);
-          local_exprs.insert(eq_sets[idx]->set_expr, eq_masks[idx]);
         }
       }
       // If we have remote messages to send do that now
@@ -4446,9 +4444,8 @@ namespace Legion {
       {
         remote_tracker.perform_remote_updates(op, index, handle, usage, 
                targets, target_views, precondition, term_event, 
-               map_applied_events, remote_events, effects_events,
-               track_effects, check_initialized);
-        remote_tracker.filter_remote_expressions(local_exprs);
+               user_registered, guard_events, map_applied_events, 
+               effects_events, track_effects, check_initialized);
       }
       // If we have any input aggregators, perform those copies now too
       // so that we know they'll be done before we do our registration
@@ -4465,167 +4462,58 @@ namespace Legion {
             delete it->second;
         }
       }
-      // Wait for our guards to be done before continuing
+      // We can trigger our updated event done when all the guards are done 
       if (!guard_events.empty())
+        Runtime::trigger_event(updated,
+            Runtime::merge_events(guard_events));
+      else
+        Runtime::trigger_event(updated);
+      // If we have outputs we need for the user to be registered
+      // before we can apply the output copies
+      ApEvent result;
+      if (output_aggregator != NULL)
       {
-        const RtEvent wait_on = Runtime::merge_events(guard_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
+        // Wait until the user registration is done before issuing
+        // any output copies so we get the effects right
+        if (effects_done.exists() ||
+            (user_registered.exists() && !user_registered.has_triggered()))
         {
-          // Defer this so we don't end up waiting on it and blocking
-          // the virtual channel for the handler
-          InstanceSet *copy_targets = new InstanceSet();
-          copy_targets->swap(targets);
-          std::vector<InstanceView*> *copy_views = 
-            new std::vector<InstanceView*>();
-          copy_views->swap(target_views);
-          std::set<RtEvent> *copy_applied = new std::set<RtEvent>();
-          copy_applied->swap(map_applied_events);
-          std::set<ApEvent> *copy_remote = new std::set<ApEvent>();
-          copy_remote->swap(remote_events);
-          FieldMaskSet<IndexSpaceExpression> *exprs = 
-            new FieldMaskSet<IndexSpaceExpression>();
-          exprs->swap(local_exprs);
-          DeferRemoteUpdateArgs args(op, op->get_unique_op_id(), index,
-              usage, copy_targets, copy_views, exprs, term_event,
-              copy_applied, copy_remote, output_aggregator, applied,
-              remote_ready, effects_done);
-          runtime->issue_runtime_meta_task(args,
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
-          return;
+          RtUserEvent deferred_applied = Runtime::create_rt_user_event();
+          ApUserEvent deferred_result;
+          if (effects_done.exists())
+            deferred_result = Runtime::create_ap_user_event();
+          DeferRemoteOutputArgs args(output_aggregator, op, 
+              op->get_unique_op_id(), term_event, 
+              deferred_applied, deferred_result);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, user_registered);
+          map_applied_events.insert(deferred_applied);
+          result = deferred_result;
+        }
+        else
+        {
+          // No need to summarize the results since we would have
+          // deferred this if we needed to track the effects because
+          // it could potentially block
+          output_aggregator->issue_updates(trace_info, term_event);
+          if (output_aggregator->release_guards(map_applied_events))
+            delete output_aggregator;
         }
       }
-      // If we get here do the finish stage
-      const ApEvent result = finish_remote_updates(runtime, op, index, usage, 
-          targets, target_views, local_exprs, term_event, map_applied_events, 
-          remote_events, output_aggregator, trace_info);
-      // Now hook up all our output events
-      if (!remote_events.empty())
-        Runtime::trigger_event(remote_ready,
-            Runtime::merge_events(&trace_info, remote_events));
-      else
-        Runtime::trigger_event(remote_ready);
+      // Do the rest of the triggers
       if (!map_applied_events.empty())
-        Runtime::trigger_event(applied, 
+        Runtime::trigger_event(applied,
             Runtime::merge_events(map_applied_events));
       else
         Runtime::trigger_event(applied);
       if (effects_done.exists())
         Runtime::trigger_event(effects_done, result);
-      // We can clean up our remote operation
-      delete op;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ ApEvent RemoteEqTracker::finish_remote_updates(Runtime *runtime,
-                                Operation *op, const unsigned index,
-                                const RegionUsage &usage,
-                                const InstanceSet &targets,
-                                const std::vector<InstanceView*> &views,
-                                FieldMaskSet<IndexSpaceExpression> &local_exprs,
-                                ApEvent term_event,
-                                std::set<RtEvent> &map_applied_events,
-                                std::set<ApEvent> &remote_events,
-                                CopyFillAggregator *output_aggregator,
-                                const PhysicalTraceInfo &trace_info)
-    //--------------------------------------------------------------------------
-    {
-      if (term_event.exists() && !local_exprs.empty())
-      {
-        if (local_exprs.size() > 1)
-        {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned expr_sets;
-          local_exprs.compute_field_sets(FieldMask(), expr_sets);
-          const UniqueID op_id = op->get_unique_op_id();
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = expr_sets.begin(); 
-                it != expr_sets.end(); it++)
-          {
-            IndexSpaceExpression *expr = (it->elements.size() == 1) ? 
-              *(it->elements.begin()) :
-              runtime->forest->union_index_spaces(it->elements);
-            if (expr->is_empty())
-              continue;
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              const FieldMask &inst_mask = targets[idx].get_valid_fields();
-              const FieldMask overlap = inst_mask & it->set_mask;
-              if (!overlap)
-                continue;
-              ApEvent ready = views[idx]->register_user(usage, overlap, 
-                                expr, op_id, index, term_event, 
-                                map_applied_events, trace_info,
-                                runtime->address_space);
-              if (ready.exists())
-                remote_events.insert(ready);
-            }
-          }
-        }
-        else
-        {
-          FieldMaskSet<IndexSpaceExpression>::const_iterator first = 
-            local_exprs.begin();
-          if (!first->first->is_empty())
-          {
-            const UniqueID op_id = op->get_unique_op_id();
-            for (unsigned idx = 0; idx < targets.size(); idx++)
-            {
-              const FieldMask &inst_mask = targets[idx].get_valid_fields();
-              const FieldMask overlap = inst_mask & first->second;
-              if (!overlap)
-                continue;
-              ApEvent ready = views[idx]->register_user(usage, overlap, 
-                                first->first, op_id, index, term_event, 
-                                map_applied_events, trace_info,
-                                runtime->address_space);
-              if (ready.exists())
-                remote_events.insert(ready);
-            }
-          }
-        }
-      }
-      // Perform any output copies (e.g. for restriction) that need to be done
-      ApEvent result;
-      if (output_aggregator != NULL)
-      {
-        // Make sure we don't defer this
-        output_aggregator->issue_updates(trace_info, term_event);
-        result = output_aggregator->summarize(trace_info);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
-      }
-      return result;
-    }
-
-    //--------------------------------------------------------------------------
-    /*static*/ void RemoteEqTracker::handle_defer_remote_updates(
-                                             Runtime *runtime, const void *args)
-    //--------------------------------------------------------------------------
-    {
-      const DeferRemoteUpdateArgs *dargs = (const DeferRemoteUpdateArgs*)args;
-      const PhysicalTraceInfo trace_info(dargs->op);
-      const ApEvent result = finish_remote_updates(runtime, dargs->op, 
-          dargs->index, dargs->usage, *(dargs->targets), *(dargs->views), 
-          *(dargs->exprs), dargs->term_event, *(dargs->applied_events), 
-          *(dargs->remote_events), dargs->aggregator, trace_info);
-      // Now hook up all our output events
-      if (!dargs->remote_events->empty())
-        Runtime::trigger_event(dargs->remote_ready,
-            Runtime::merge_events(&trace_info, *(dargs->remote_events)));
+      // We can clean up our remote operation once we know there are no
+      // more outstanding copy operations still in flight
+      if (!updated.has_triggered() || !applied.has_triggered())
+        op->defer_deletion(Runtime::merge_events(updated, applied));
       else
-        Runtime::trigger_event(dargs->remote_ready);
-      if (!dargs->applied_events->empty())
-        Runtime::trigger_event(dargs->applied, 
-            Runtime::merge_events(*(dargs->applied_events)));
-      else
-        Runtime::trigger_event(dargs->applied);
-      if (dargs->effects_done.exists())
-        Runtime::trigger_event(dargs->effects_done, result);
-      delete dargs->op;
-      delete dargs->targets;
-      delete dargs->views;
-      delete dargs->applied_events;
-      delete dargs->remote_events;
-      delete dargs->exprs;
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -4655,28 +4543,21 @@ namespace Legion {
       }
       RemoteOp *op = 
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
-      unsigned index;
-      derez.deserialize(index);
-      RegionUsage usage;
-      derez.deserialize(usage);
-      ApEvent term_event;
-      derez.deserialize(term_event);
+      RtUserEvent returned;
+      derez.deserialize(returned);
       RtUserEvent applied;
       derez.deserialize(applied);
-      ApUserEvent acquired;
-      derez.deserialize(acquired);
       RemoteEqTracker *inst_target;
       derez.deserialize(inst_target);
+      AddressSpaceID inst_owner;
+      derez.deserialize(inst_owner);
 
       FieldMaskSet<InstanceView> instances;
-      LegionMap<InstanceView*,
-        FieldMaskSet<IndexSpaceExpression> >::aligned inst_exprs;
       FieldMaskSet<EquivalenceSet> dummy_alt_sets;
       RemoteEqTracker remote_tracker(previous, source, runtime);
+      std::set<RtEvent> instances_returned;
       std::set<RtEvent> map_applied_events;
-      std::set<ApEvent> acquired_events;
       PhysicalTraceInfo trace_info(op);
-      const UniqueID op_id = op->get_unique_op_id();
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
@@ -4686,49 +4567,10 @@ namespace Legion {
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->acquire_restrictions(remote_tracker, dummy_alt_sets, NULL,
                                    sources[idx], op, eq_masks[idx], instances,
-                                   inst_exprs, map_applied_events);
+                                   map_applied_events);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_acquires(op, index, usage, term_event, 
-                          map_applied_events, acquired_events, inst_target);
-      // Add users for all the local instances
-      for (LegionMap<InstanceView*,FieldMaskSet<IndexSpaceExpression> >::
-            aligned::const_iterator vit = inst_exprs.begin(); 
-            vit != inst_exprs.end(); vit++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!vit->second.empty());
-#endif
-        if (vit->second.size() > 1)
-        {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
-          vit->second.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = field_sets.begin(); 
-                it != field_sets.end(); it++)
-          {
-            IndexSpaceExpression *expr = (it->elements.size() == 1) ? 
-              *(it->elements.begin()) :
-              runtime->forest->union_index_spaces(it->elements);
-            ApEvent ready = vit->first->register_user(usage, it->set_mask,
-                                      expr, op_id, index, term_event,
-                                      map_applied_events, trace_info,
-                                      runtime->address_space);
-            if (ready.exists())
-              acquired_events.insert(ready);
-          }
-        }
-        else
-        {
-          FieldMaskSet<IndexSpaceExpression>::const_iterator first = 
-            vit->second.begin();
-          ApEvent ready = vit->first->register_user(usage, first->second,
-                                    first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info,
-                                    runtime->address_space);
-          if (ready.exists())
-            acquired_events.insert(ready);
-        }
-      }
+        remote_tracker.perform_remote_acquires(op, instances_returned, 
+                                map_applied_events, inst_target, inst_owner);
       // If we have response to send then we do that now
       if ((inst_target != NULL) && !instances.empty())
       {
@@ -4747,14 +4589,14 @@ namespace Legion {
           }
           rez.serialize<bool>(false); // dummy restricted value
         }
-        runtime->send_equivalence_set_remote_instances(source, rez);
-        map_applied_events.insert(response_event);
+        runtime->send_equivalence_set_remote_instances(inst_owner, rez);
+        instances_returned.insert(response_event);
       }
-      if (!acquired_events.empty())
-        Runtime::trigger_event(acquired,
-            Runtime::merge_events(&trace_info, acquired_events));
+      if (!instances_returned.empty())
+        Runtime::trigger_event(returned,
+            Runtime::merge_events(instances_returned));
       else
-        Runtime::trigger_event(acquired);
+        Runtime::trigger_event(returned);
       // Now we can trigger our applied event
       if (!map_applied_events.empty())
         Runtime::trigger_event(applied, 
@@ -4792,30 +4634,26 @@ namespace Legion {
       }
       RemoteOp *op = 
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
-      unsigned index;
-      derez.deserialize(index);
-      RegionUsage usage;
-      derez.deserialize(usage);
       ApEvent precondition;
       derez.deserialize(precondition);
-      ApEvent term_event;
-      derez.deserialize(term_event);
+      RtUserEvent returned;
+      derez.deserialize(returned);
+      RtUserEvent updated;
+      derez.deserialize(updated);
       RtUserEvent applied;
       derez.deserialize(applied);
-      ApUserEvent released;
-      derez.deserialize(released);
       RemoteEqTracker *inst_target;
       derez.deserialize(inst_target);
+      AddressSpaceID inst_owner;
+      derez.deserialize(inst_owner);
 
       FieldMaskSet<InstanceView> instances;
-      LegionMap<InstanceView*,
-        FieldMaskSet<IndexSpaceExpression> >::aligned inst_exprs;
       FieldMaskSet<EquivalenceSet> dummy_alt_sets;
       RemoteEqTracker remote_tracker(previous, source, runtime);
+      std::set<RtEvent> instances_returned;
+      std::set<RtEvent> guard_events;
       std::set<RtEvent> map_applied_events;
-      std::set<ApEvent> released_events;
       PhysicalTraceInfo trace_info(op);
-      const UniqueID op_id = op->get_unique_op_id();
       CopyFillAggregator *release_aggregator = NULL;
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
@@ -4827,10 +4665,13 @@ namespace Legion {
         eq_sets[idx]->release_restrictions(remote_tracker, dummy_alt_sets, NULL,
                                     sources[idx], op, eq_masks[idx], 
                                     release_aggregator, instances,
-                                    inst_exprs, map_applied_events);
+                                    map_applied_events);
       if (remote_tracker.has_remote_sets())
-        remote_tracker.perform_remote_releases(op, index, usage, precondition,
-            term_event, map_applied_events, released_events, inst_target);
+      {
+        remote_tracker.perform_remote_releases(op, precondition,
+            instances_returned, map_applied_events, 
+            guard_events, inst_target, inst_owner);
+      }
       // Issue any release copies/fills that need to be done
       if (release_aggregator != NULL)
       {
@@ -4839,46 +4680,7 @@ namespace Legion {
         if (release_aggregator->release_guards(map_applied_events))
           delete release_aggregator;
         if (done.exists() && !done.has_triggered())
-          done.wait();
-      }
-      // Now add users for all the instances
-      for (LegionMap<InstanceView*,FieldMaskSet<IndexSpaceExpression> >::
-            aligned::const_iterator vit = inst_exprs.begin(); 
-            vit != inst_exprs.end(); vit++)
-      {
-#ifdef DEBUG_LEGION
-        assert(!vit->second.empty());
-#endif
-        if (vit->second.size() > 1)
-        {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned field_sets;
-          vit->second.compute_field_sets(FieldMask(), field_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = field_sets.begin(); 
-                it != field_sets.end(); it++)
-          {
-            IndexSpaceExpression *expr = (it->elements.size() == 1) ? 
-              *(it->elements.begin()) :
-              runtime->forest->union_index_spaces(it->elements);
-            ApEvent ready = vit->first->register_user(usage, it->set_mask,
-                                      expr, op_id, index, term_event,
-                                      map_applied_events, trace_info,
-                                      runtime->address_space);
-            if (ready.exists())
-              released_events.insert(ready);
-          }
-        }
-        else
-        {
-          FieldMaskSet<IndexSpaceExpression>::const_iterator first = 
-            vit->second.begin();
-          ApEvent ready = vit->first->register_user(usage, first->second,
-                                    first->first, op_id, index, term_event,
-                                    map_applied_events, trace_info,
-                                    runtime->address_space);
-          if (ready.exists())
-            released_events.insert(ready);
-        }
+          guard_events.insert(done);
       }
       // If we have response to send then we do that now
       if ((inst_target != NULL) && !instances.empty())
@@ -4897,22 +4699,29 @@ namespace Legion {
             rez.serialize(it->second);
           }
         }
-        runtime->send_equivalence_set_remote_instances(source, rez);
-        map_applied_events.insert(response_event);
+        runtime->send_equivalence_set_remote_instances(inst_owner, rez);
+        instances_returned.insert(response_event);
       }
-      if (!released_events.empty())
-        Runtime::trigger_event(released,
-            Runtime::merge_events(&trace_info, released_events));
+      // Now trigger all our local events
+      if (!guard_events.empty())
+        Runtime::trigger_event(updated, Runtime::merge_events(guard_events));
       else
-        Runtime::trigger_event(released);
-      // Now we can trigger our applied event
+        Runtime::trigger_event(updated);
+      if (!instances_returned.empty())
+        Runtime::trigger_event(returned, 
+            Runtime::merge_events(instances_returned));
+      else
+        Runtime::trigger_event(returned);
       if (!map_applied_events.empty())
-        Runtime::trigger_event(applied, 
+        Runtime::trigger_event(applied,
             Runtime::merge_events(map_applied_events));
       else
         Runtime::trigger_event(applied);
-      // Clean up the remote operation we allocated
-      delete op;
+      // Clean up the remote operation we allocated once updated triggers
+      if (!updated.has_triggered())
+        op->defer_deletion(updated);
+      else
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -5199,8 +5008,6 @@ namespace Legion {
         RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
       unsigned index;
       derez.deserialize(index);
-      RegionUsage usage;
-      derez.deserialize(usage);
       DistributedID view_did;
       derez.deserialize(view_did);
       RtEvent view_ready;
@@ -5221,8 +5028,8 @@ namespace Legion {
       derez.deserialize(pred_guard);
       ApEvent precondition;
       derez.deserialize(precondition);
-      ApEvent term_event;
-      derez.deserialize(term_event);
+      RtEvent guard_event;
+      derez.deserialize(guard_event);
       bool add_restriction;
       derez.deserialize(add_restriction);
       RtUserEvent applied;
@@ -5236,8 +5043,6 @@ namespace Legion {
       std::set<RtEvent> map_applied_events;
       std::set<ApEvent> effects_events;
       PhysicalTraceInfo trace_info(op);
-      const UniqueID op_id = op->get_unique_op_id();
-      FieldMaskSet<IndexSpaceExpression> local_exprs;
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
@@ -5250,65 +5055,43 @@ namespace Legion {
         set->overwrite_set(remote_tracker, dummy_alt_sets, NULL,
             sources[idx], op, index, registration_view, eq_masks[idx],
             output_aggregator, map_applied_events, pred_guard, add_restriction);
-        local_exprs.insert(set->set_expr, eq_masks[idx]);
       }
       if (remote_tracker.has_remote_sets())
       {
-        remote_tracker.perform_remote_overwrite(op, index, usage, local_view, 
+        remote_tracker.perform_remote_overwrite(op, index, local_view, 
                 registration_view, pred_guard, precondition, 
-                term_event, add_restriction, effects.exists(), 
+                guard_event, add_restriction, effects.exists(), 
                 map_applied_events, effects_events);
-        remote_tracker.filter_remote_expressions(local_exprs);
       }
       if (output_aggregator != NULL)
       {
-        const RtEvent done = 
-          output_aggregator->issue_updates(trace_info, precondition);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
-        const ApEvent result = output_aggregator->summarize(trace_info); 
-        if (result.exists())
-          effects_events.insert(result);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
-      }
-      if (term_event.exists())
-      {
-        if (local_exprs.size() > 1)
+        // If we have a guard event we need to wait for it before we
+        // can issue the copy updates
+        if (effects.exists() ||
+            (guard_event.exists() && !guard_event.has_triggered()))
         {
-          LegionList<FieldSet<IndexSpaceExpression*> >::aligned expr_sets;
-          local_exprs.compute_field_sets(FieldMask(), expr_sets);
-          for (LegionList<FieldSet<IndexSpaceExpression*> >::aligned::
-                const_iterator it = expr_sets.begin(); 
-                it != expr_sets.end(); it++)
+          RtUserEvent deferred_applied = Runtime::create_rt_user_event();
+          ApUserEvent deferred_result;
+          if (effects.exists())
           {
-#ifdef DEBUG_LEGION
-            assert(!it->elements.empty());
-#endif
-            IndexSpaceExpression *user_expr = (it->elements.size() == 1) ? 
-              *(it->elements.begin()) : 
-              runtime->forest->union_index_spaces(it->elements);
-            if (user_expr->is_empty())
-              continue;
-            const ApEvent ready = local_view->register_user(usage, 
-                    it->set_mask, user_expr, op_id, index, term_event,
-                    map_applied_events, trace_info, runtime->address_space);
-            if (ready.exists())
-              effects_events.insert(ready);
+            deferred_result = Runtime::create_ap_user_event();
+            effects_events.insert(deferred_result);
           }
+          DeferRemoteOutputArgs args(output_aggregator, op, 
+              op->get_unique_op_id(), precondition, 
+              deferred_applied, deferred_result);
+          runtime->issue_runtime_meta_task(args, 
+              LG_LATENCY_DEFERRED_PRIORITY, guard_event);
+          map_applied_events.insert(deferred_applied);
         }
         else
         {
-          FieldMaskSet<IndexSpaceExpression>::const_iterator first = 
-            local_exprs.begin();
-          if (!first->first->is_empty())
-          {
-            const ApEvent ready = local_view->register_user(usage, 
-                    first->second, first->first, op_id, index, term_event,
-                    map_applied_events, trace_info, runtime->address_space);
-            if (ready.exists())
-              effects_events.insert(ready);
-          }
+          // No need to summarize the results since we would have
+          // deferred this if we needed to track effects because
+          // it could potentially block
+          output_aggregator->issue_updates(trace_info, precondition);
+          if (output_aggregator->release_guards(map_applied_events))
+            delete output_aggregator;
         }
       }
       if (effects.exists())
@@ -5328,7 +5111,10 @@ namespace Legion {
       if (local_view != NULL)
         local_view->send_remote_valid_decrement(previous, applied);
       registration_view->send_remote_valid_decrement(previous, applied);
-      delete op;
+      if (!applied.has_triggered())
+        op->defer_deletion(applied);
+      else
+        delete op;
     }
 
     //--------------------------------------------------------------------------
@@ -5425,6 +5211,38 @@ namespace Legion {
       derez.deserialize(done_event);
       target->process_remote_instances(derez, runtime);
       Runtime::trigger_event(done_event); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void RemoteEqTracker::handle_deferred_output(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferRemoteOutputArgs *dargs = (const DeferRemoteOutputArgs*)args;
+      const PhysicalTraceInfo trace_info(dargs->op);
+      std::set<RtEvent> map_applied;
+      if (dargs->summary.exists())
+      {
+        const RtEvent done = 
+          dargs->aggregator->issue_updates(trace_info, dargs->precondition);
+        // Need to wait before we can get the summary
+        if (done.exists() && !done.has_triggered())
+          done.wait();
+        const ApEvent summary = dargs->aggregator->summarize(trace_info);
+        Runtime::trigger_event(dargs->summary, summary);
+        if (dargs->aggregator->release_guards(map_applied))
+          delete dargs->aggregator;
+      }
+      else
+      {
+        dargs->aggregator->issue_updates(trace_info, dargs->precondition);
+        if (dargs->aggregator->release_guards(map_applied))
+          delete dargs->aggregator;
+      }
+      if (!map_applied.empty())
+        Runtime::trigger_event(dargs->applied,
+            Runtime::merge_events(map_applied));
+      else
+        Runtime::trigger_event(dargs->applied);
     }
 
     /////////////////////////////////////////////////////////////
@@ -6826,7 +6644,7 @@ namespace Legion {
       {
         for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
               update_guards.begin(); it != update_guards.end(); it++)
-          rez.serialize(it->first->applied_event);
+          rez.serialize(it->first->guard_postcondition);
         update_guards.clear();
       }
       // Pack subsets
@@ -7505,7 +7323,6 @@ namespace Legion {
           // No matter what record our dependences on the prior guards
           const RtEvent guard_event = it->first->guard_postcondition;
           guard_events.insert(guard_event);
-          applied_events.insert(it->first->applied_event);
           CopyFillAggregator *input_aggregator = NULL;
           // See if we have an input aggregator that we can use now
           std::map<RtEvent,CopyFillAggregator*>::const_iterator finder = 
@@ -7526,13 +7343,7 @@ namespace Legion {
                input_aggregator->has_update_fields()))
           {
             if (finder == input_aggregators.end())
-            {
               input_aggregators[guard_event] = input_aggregator;
-              // Chain applied events for dependent guard updates
-              // Only need to do this the first time we make an aggregator
-              input_aggregator->record_reference_mutation_effect(
-                                        it->first->applied_event);
-            }
             // Record this as a guard for later operations
             to_add.resize(to_add.size() + 1);
             std::pair<CopyFillAggregator*,FieldMask> &back = to_add.back();
@@ -7847,8 +7658,6 @@ namespace Legion {
                                 const AddressSpaceID source,
                                 Operation *op, FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
-                                LegionMap<InstanceView*,FieldMaskSet<
-                                  IndexSpaceExpression> >::aligned &inst_exprs,
                                 std::set<RtEvent> &applied_events,
                                 const bool original_set /*=true*/)
     //--------------------------------------------------------------------------
@@ -7928,7 +7737,7 @@ namespace Legion {
         for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->acquire_restrictions(remote_tracker, alt_sets, NULL, 
-              source, op, it->second, instances, inst_exprs, 
+              source, op, it->second, instances,
               applied_events, false/*original set*/);
         eq.reacquire();
         // Return if our acquire user mask is empty
@@ -7956,7 +7765,6 @@ namespace Legion {
           finder.merge(overlap);
         else
           instances.insert(view, overlap);
-        inst_exprs[view].insert(set_expr, overlap);
       }
       restricted_fields -= acquire_mask;
       check_for_migration(remote_tracker, source, applied_events);
@@ -7973,8 +7781,6 @@ namespace Legion {
                                 Operation *op, FieldMask release_mask,
                                 CopyFillAggregator *&release_aggregator,
                                 FieldMaskSet<InstanceView> &instances,
-                                LegionMap<InstanceView*,FieldMaskSet<
-                                  IndexSpaceExpression> >::aligned &inst_exprs,
                                 std::set<RtEvent> &ready_events,
                                 const bool original_set /*=true*/)
     //--------------------------------------------------------------------------
@@ -8055,7 +7861,7 @@ namespace Legion {
               to_traverse.begin(); it != to_traverse.end(); it++) 
           it->first->release_restrictions(remote_tracker, alt_sets, NULL,
               source, op, it->second, release_aggregator, instances, 
-              inst_exprs, ready_events, false/*original set*/);
+              ready_events, false/*original set*/);
         eq.reacquire();
         // Return if ourt release mask is empty
         if (!release_mask)
@@ -8083,7 +7889,6 @@ namespace Legion {
           finder.merge(overlap);
         else
           instances.insert(view, overlap);
-        inst_exprs[view].insert(set_expr, overlap);
       }
       if (release_aggregator != NULL)
         release_aggregator->clear_update_fields();

@@ -3073,6 +3073,18 @@ namespace Legion {
       // the count going back to zero too early
       static const int REMOTE_PROFILING_MAX_COUNT = 10000;
     public:
+      struct DeferRemoteOpDeletionArgs : 
+        public LgTaskArgs<DeferRemoteOpDeletionArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_OP_DELETION_TASK_ID;
+      public:
+        DeferRemoteOpDeletionArgs(Operation *o)
+          : LgTaskArgs<DeferRemoteOpDeletionArgs>(o->get_unique_op_id()), 
+            op(o) { }
+      public:
+        Operation *const op;
+      };
+    public:
       RemoteOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
       RemoteOp(const RemoteOp &rhs);
       virtual ~RemoteOp(void);
@@ -3102,10 +3114,12 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const = 0;
     public:
+      void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
       void unpack_remote_base(Deserializer &derez, Runtime *runtime);
       void pack_profiling_requests(Serializer &rez) const;
       void unpack_profiling_requests(Deserializer &derez);
+      static void handle_deferred_deletion(const void *args);
       // Caller takes ownership of this object and must delete it when done
       static RemoteOp* unpack_remote_operation(Deserializer &derez,
                          Runtime *runtime, std::set<RtEvent> &ready_events);
