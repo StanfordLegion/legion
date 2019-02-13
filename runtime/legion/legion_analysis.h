@@ -707,7 +707,6 @@ namespace Legion {
       const unsigned dst_index;
       const RtEvent guard_precondition;
       const RtUserEvent guard_postcondition;
-      const RtUserEvent applied_event; // for when our effects are done
       const PredEvent predicate_guard;
       const bool track_events;
     protected:
@@ -755,35 +754,6 @@ namespace Legion {
      */
     class RemoteEqTracker {
     public:
-      struct DeferRemoteUpdateArgs : public LgTaskArgs<DeferRemoteUpdateArgs> {
-      public:
-        static const LgTaskID TASK_ID = LG_DEFER_REMOTE_UPDATE_TASK_ID;
-      public:
-        DeferRemoteUpdateArgs(Operation *o, UniqueID uid, unsigned idx, 
-            const RegionUsage &u,InstanceSet *tar,std::vector<InstanceView*> *v,
-            FieldMaskSet<IndexSpaceExpression> *e, ApEvent term, 
-            std::set<RtEvent> *app_set, std::set<ApEvent> *rem_set, 
-            CopyFillAggregator *ag, RtUserEvent app, ApUserEvent rem, 
-            ApUserEvent effects)
-          : LgTaskArgs<DeferRemoteUpdateArgs>(uid), op(o), index(idx), usage(u),
-            targets(tar), views(v), exprs(e), term_event(term), 
-            applied_events(app_set), remote_events(rem_set), aggregator(ag),
-            applied(app), remote_ready(rem), effects_done(effects) { }
-      public:
-        Operation *const op;
-        const unsigned index;
-        const RegionUsage usage;
-        InstanceSet *const targets;
-        std::vector<InstanceView*> *views;
-        FieldMaskSet<IndexSpaceExpression> *const exprs;
-        const ApEvent term_event;
-        std::set<RtEvent> *const applied_events;
-        std::set<ApEvent> *const remote_events;
-        CopyFillAggregator *const aggregator;
-        const RtUserEvent applied;
-        const ApUserEvent remote_ready;
-        const ApUserEvent effects_done;
-      };
       struct RemoteSet {
       public:
         RemoteSet(void)
@@ -819,24 +789,23 @@ namespace Legion {
                                   const InstanceSet &targets,
                                   const std::vector<InstanceView*> &views,
                                   ApEvent precondition, ApEvent term_event,
+                                  const RtEvent user_registered,
+                                  std::set<RtEvent> &guard_events,
                                   std::set<RtEvent> &map_applied_events,
-                                  std::set<ApEvent> &remote_events,
                                   std::set<ApEvent> &effects_events,
                                   const bool track_effects,
                                   const bool check_initialized);
-      void perform_remote_acquires(Operation *op, const unsigned index,
-                                   const RegionUsage &usage,
-                                   const ApEvent term_event,
+      void perform_remote_acquires(Operation *op,
+                                   std::set<RtEvent> &instances_returned,
                                    std::set<RtEvent> &map_applied_events,
-                                   std::set<ApEvent> &acquired_events,
-                                   RemoteEqTracker *inst_target);
-      void perform_remote_releases(Operation *op, const unsigned index,
-                                   const RegionUsage &usage,
-                                   const ApEvent precondition,
-                                   const ApEvent term_event,
+                                   RemoteEqTracker *inst_target,
+                                   const AddressSpaceID inst_owner);
+      void perform_remote_releases(Operation *op, const ApEvent precondition,
+                                   std::set<RtEvent> &instances_returned,
                                    std::set<RtEvent> &map_applied_events,
-                                   std::set<ApEvent> &released_events,
-                                   RemoteEqTracker *inst_target);
+                                   std::set<RtEvent> &guard_events,
+                                   RemoteEqTracker *inst_target,
+                                   const AddressSpaceID inst_owner);
       void perform_remote_copies_across(Operation *op, 
                                 const unsigned src_index,
                                 const unsigned dst_index,
@@ -856,12 +825,11 @@ namespace Legion {
                                 std::set<RtEvent> &map_applied_events,
                                 std::set<ApEvent> &copy_events);
       void perform_remote_overwrite(Operation *op, const unsigned index,
-                                    const RegionUsage &usage,
                                     InstanceView *local_view,
                                     LogicalView *registration_view,
                                     const PredEvent pred_guard,
                                     const ApEvent precondition,
-                                    const ApEvent term_event,
+                                    const RtEvent guard_event,
                                     const bool add_restriction,
                                     const bool track_effects,
                                     std::set<RtEvent> &map_applied_events,
@@ -897,20 +865,6 @@ namespace Legion {
       static void handle_remote_filters(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
-      static void handle_defer_remote_updates(Runtime *runtime, 
-                                              const void *args);
-    protected:
-      static ApEvent finish_remote_updates(Runtime *runtime, Operation *op, 
-                                const unsigned index,
-                                const RegionUsage &usage,
-                                const InstanceSet &targets,
-                                const std::vector<InstanceView*> &views,
-                                FieldMaskSet<IndexSpaceExpression> &local_exprs,
-                                ApEvent term_event,
-                                std::set<RtEvent> &map_applied_events,
-                                std::set<ApEvent> &remote_events,
-                                CopyFillAggregator *output_aggregator,
-                                const PhysicalTraceInfo &trace_info);
     public:
       const AddressSpaceID previous;
       const AddressSpaceID original_source;
@@ -1164,8 +1118,6 @@ namespace Legion {
                                 const AddressSpaceID eq_source,
                                 Operation *op, FieldMask acquire_mask,
                                 FieldMaskSet<InstanceView> &instances,
-                                LegionMap<InstanceView*,FieldMaskSet<
-                                  IndexSpaceExpression> >::aligned &inst_exprs,
                                 std::set<RtEvent> &applied_events,
                                 const bool original_set = true);
       bool release_restrictions(RemoteEqTracker &remote_tracker,
@@ -1175,8 +1127,6 @@ namespace Legion {
                                 Operation *op, FieldMask release_mask,
                                 CopyFillAggregator *&release_aggregator,
                                 FieldMaskSet<InstanceView> &instances,
-                                LegionMap<InstanceView*,FieldMaskSet<
-                                  IndexSpaceExpression> >::aligned &inst_exprs,
                                 std::set<RtEvent> &ready_events,
                                 const bool original_set = true);
       bool issue_across_copies(RemoteEqTracker &remote_tracker,

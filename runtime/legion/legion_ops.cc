@@ -8361,12 +8361,12 @@ namespace Legion {
                                               this, 0/*idx*/, completion_event,
                                               restricted_instances,
                                               trace_info, 
-                                              map_applied_conditions,
+                                              map_applied_conditions
 #ifdef DEBUG_LEGION
-                                              get_logging_name(),
-                                              unique_op_id,
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                              runtime->legion_spy_enabled);
+                                              );
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif
@@ -9134,12 +9134,12 @@ namespace Legion {
                                               this, 0/*idx*/, init_precondition,
                                               completion_event,
                                               restricted_instances, trace_info,
-                                              map_applied_conditions,
+                                              map_applied_conditions
 #ifdef DEBUG_LEGION
-                                              get_logging_name(),
-                                              unique_op_id,
+                                              , get_logging_name()
+                                              , unique_op_id
 #endif
-                                              runtime->legion_spy_enabled);
+                                              );
 #ifdef DEBUG_LEGION
       dump_physical_state(&requirement, 0);
 #endif

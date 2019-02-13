@@ -3436,10 +3436,8 @@ namespace Legion {
           std::vector<CopyFillAggregator*> 
             output_aggregators(regions.size(), NULL);
           std::vector<std::vector<InstanceView*> > target_views(regions.size());
-          std::vector<std::set<ApEvent> > remote_ready(regions.size());
+          std::vector<RtUserEvent> users_registered(regions.size());
           std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
-          LegionVector<FieldMaskSet<IndexSpaceExpression> >::aligned
-            local_exprs(regions.size());
           std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
           for (unsigned idx = 0; idx < regions.size(); idx++)
           {
@@ -3467,11 +3465,10 @@ namespace Legion {
                                         physical_instances[idx],
                                         trace_info,
                                         output_aggregators[idx],
+                                        users_registered[idx],
                                         map_applied_conditions,
-                                        remote_ready[idx],
                                         effects_postconditions,
                                         target_views[idx],
-                                        local_exprs[idx],
 #ifdef DEBUG_LEGION
                                         get_logging_name(),
                                         unique_op_id,
@@ -3488,23 +3485,22 @@ namespace Legion {
             {
               const RtEvent registration_post = 
                 runtime->forest->defer_physical_perform_registration(
-                                          reg_pre[*it], local_exprs[*it],
-                                          regions[*it],
+                                          reg_pre[*it], regions[*it],
                                           this, *it, local_termination_event,
                                           physical_instances[*it], trace_info,
                                           output_aggregators[*it],
-                                          remote_ready[*it],
+                                          users_registered[*it],
                                           target_views[*it], 
                                           map_applied_conditions, effects[*it]);
               registration_postconditions.insert(registration_post);
             }
             else
               effects[*it] = runtime->forest->physical_perform_registration(
-                                          local_exprs[*it], regions[*it], 
-                                          this, *it, local_termination_event,
-                                          physical_instances[*it], trace_info,
-                                          output_aggregators[*it],
-                                          remote_ready[*it],
+                                          regions[*it], this, *it, 
+                                          local_termination_event,
+                                          physical_instances[*it], 
+                                          trace_info, output_aggregators[*it],
+                                          users_registered[*it],
                                           target_views[*it], 
                                           map_applied_conditions);
           }
