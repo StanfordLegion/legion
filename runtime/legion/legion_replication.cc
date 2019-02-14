@@ -3723,18 +3723,13 @@ namespace Legion {
         // Everyone else just needs to do their registration
         if (!is_owner_shard)
         {
-          RegionNode *node = runtime->forest->get_node(requirement.region);
-          FieldMaskSet<IndexSpaceExpression> local_exprs;
-          local_exprs.insert(node->row_source,
-             node->column_source->get_field_mask(requirement.privilege_fields));
           InnerContext *context = find_physical_context(0/*index*/);
           context->convert_target_views(mapped_instances, mapped_views); 
-          std::set<ApEvent> dummy_remote_events;
           effects_done = 
-            runtime->forest->physical_perform_registration(local_exprs,
-                requirement, this, 0/*index*/, termination_event,
-                mapped_instances, trace_info, NULL/*aggregator*/,
-                dummy_remote_events, mapped_views, map_applied_conditions);
+            runtime->forest->physical_perform_registration(requirement, 
+                this, 0/*index*/, termination_event, mapped_instances, 
+                trace_info, NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
+                mapped_views, map_applied_conditions);
         }
         else
           effects_done = 
@@ -3757,16 +3752,11 @@ namespace Legion {
         assert(exchange != NULL);
 #endif
         // All the users just need to do their registration
-        RegionNode *node = runtime->forest->get_node(requirement.region);
-        FieldMaskSet<IndexSpaceExpression> local_exprs;
-        local_exprs.insert(node->row_source,
-           node->column_source->get_field_mask(requirement.privilege_fields));
-        std::set<ApEvent> dummy_remote_events;
         effects_done = 
-          runtime->forest->physical_perform_registration(local_exprs,
-              requirement, this, 0/*index*/, termination_event,
-              mapped_instances, trace_info, NULL/*aggregator*/,
-              dummy_remote_events, mapped_views, map_applied_conditions);
+          runtime->forest->physical_perform_registration(requirement, 
+              this, 0/*index*/, termination_event, mapped_instances, 
+              trace_info, NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
+              mapped_views, map_applied_conditions);
         // We need to fill in the sharded view before we do the next
         // call in case there are output effects due to restriction
         exchange->complete_exchange(this, sharded_view, 
@@ -3801,16 +3791,14 @@ namespace Legion {
           requirement.privilege = READ_ONLY; // pretend read-only for now
         // Perform the updates first as if we're read-only
         CopyFillAggregator *output_aggregator = NULL;
-        std::set<ApEvent> remote_ready;
+        RtUserEvent user_registered;
         std::set<ApEvent> effects_events;
         std::vector<InstanceView*> target_views;
-        FieldMaskSet<IndexSpaceExpression> local_exprs;
         const RtEvent registration_precondition = 
           runtime->forest->physical_perform_updates(requirement, version_info,
               this, 0/*index*/, init_precondition, termination_event, 
-              mapped_instances, trace_info, output_aggregator, 
-              map_applied_conditions, remote_ready, effects_events, 
-              target_views, local_exprs,
+              mapped_instances, trace_info, output_aggregator, user_registered,
+              map_applied_conditions, effects_events, target_views,
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
@@ -3849,9 +3837,10 @@ namespace Legion {
         // Then do the registration, no need to track output effects since we
         // know that this instance can't be restricted in a control 
         // replicated context
-        runtime->forest->physical_perform_registration(local_exprs, requirement,
+        runtime->forest->physical_perform_registration(requirement,
             this, 0/*index*/, termination_event, mapped_instances, trace_info,
-            output_aggregator,remote_ready,target_views,map_applied_conditions);
+            output_aggregator, user_registered, target_views,
+            map_applied_conditions);
         // If we have a write then we make a sharded view and 
         // then shard 0 will do the overwrite
         if (is_write)
@@ -4231,16 +4220,11 @@ namespace Legion {
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
         const PhysicalTraceInfo trace_info(this);
-        RegionNode *node = runtime->forest->get_node(requirement.region);
-        FieldMaskSet<IndexSpaceExpression> local_exprs;
-        local_exprs.insert(node->row_source,
-           node->column_source->get_field_mask(requirement.privilege_fields));
-        std::set<ApEvent> dummy_remote_events;
         // Have each operation do its own registration
-        runtime->forest->physical_perform_registration(local_exprs,
-            requirement, this, 0/*idx*/, completion_event,
-            attach_instances, trace_info, NULL/*aggregator*/,
-            dummy_remote_events, attach_views, map_applied_conditions);
+        runtime->forest->physical_perform_registration(requirement, 
+            this, 0/*idx*/, completion_event, attach_instances, trace_info, 
+            NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
+            attach_views, map_applied_conditions);
         exchange->complete_exchange(this, sharded_view, 
                                     attach_instances, map_applied_conditions);
         // Make sure all these are done before we do the overwrite

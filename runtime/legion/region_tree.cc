@@ -3129,7 +3129,6 @@ namespace Legion {
       }
       if (remote_tracker.has_remote_sets())
       {
-        const RegionUsage usage(req);
         remote_tracker.perform_remote_overwrite(op, index, NULL, 
             fill_view, true_guard, precondition, RtEvent::NO_RT_EVENT, 
             false/*restricted*/, true/*track effects*/,
@@ -3193,10 +3192,9 @@ namespace Legion {
       }
       if (remote_tracker.has_remote_sets())
       {
-        const RegionUsage usage(req);
-        remote_tracker.perform_remote_overwrite(op, index, usage, NULL, 
+        remote_tracker.perform_remote_overwrite(op, index, NULL, 
             view, PredEvent::NO_PRED_EVENT, precondition,
-            ApEvent::NO_AP_EVENT, add_restriction, true/*track effects*/, 
+            RtEvent::NO_RT_EVENT, add_restriction, true/*track effects*/, 
             map_applied_events, effects_events);
       }
       if (!alt_sets.empty())
