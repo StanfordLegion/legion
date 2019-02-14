@@ -53,6 +53,36 @@ local function intersect(set1, set2)
   return result
 end
 
+local function set_union_destructive(set1, set2)
+  for k, _ in set2:items() do
+    set1[k] = true
+  end
+end
+
+local function set_union(set1, set2)
+  local result = set1:copy()
+  set_union_destructive(result, set2)
+  return result
+end
+
+local function list_to_set(l)
+  local result = data.newmap()
+  l:map(function(v) result[v] = true end)
+  return result
+end
+
+local function set_map(set, fn)
+  local result = data.newmap()
+  for k, _ in set:items() do
+    result[fn(k)] = true
+  end
+  return result
+end
+
+local function set_map_table(set, tbl)
+  return set_map(set, function(k) return tbl[k] end)
+end
+
 local range_complex = std.newsymbol("__top__")
 
 local new_range
@@ -91,7 +121,7 @@ function graph:dump()
       local src_id = node_ids[src]
       local dst_id = node_ids[dst]
       print("    " .. tostring(src_id) .. " -> " .. tostring(dst_id) ..
-        " [ label = \"" .. tostring(key) .. "\" ];")
+        " [ label = \"" .. set_to_string(key) .. "\" ];")
     end
   end
   print("}")
@@ -464,7 +494,7 @@ end
 function partitioning_constraints:join(to_join, mapping)
   for range, partition in to_join.ranges:items() do
     local my_range = mapping[range]
-    if my_range == nil then
+    if my_range == range then
       self.ranges[range] = partition
     else
       local my_partition = self.ranges[my_range]
@@ -528,7 +558,7 @@ local parallel_task_context = {}
 
 parallel_task_context.__index = parallel_task_context
 
-local function map_tostring(map)
+local function set_to_string(map)
   local str = nil
   for k, _ in map:items() do
     if str == nil then
@@ -591,21 +621,12 @@ function parallel_task_context:print_all_constraints()
     print("    " .. tostring(region) .. " => " .. tostring(source))
   end
   self.constraints:print_constraints()
-  --print("* accesses:")
-  --for region_symbol, accesses_summary in self.field_accesses_summary:items() do
-  --  for field_path, summary in accesses_summary:items() do
-  --    local range, privilege = unpack(summary)
-  --    print("    " .. tostring(region_symbol) .. "[" .. tostring(range) .. "]." ..
-  --      field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
-  --  end
-  --end
   print("* accesses:")
-  for region_symbol, all_accesses in self.field_accesses:items() do
-    for field_path, accesses in all_accesses:items() do
-      for range, privilege in accesses:items() do
-        print("    " .. tostring(region_symbol) .. "[" .. tostring(range) .. "]." ..
-          field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
-      end
+  for region_symbol, accesses_summary in self.field_accesses_summary:items() do
+    for field_path, summary in accesses_summary:items() do
+      local ranges_set, privilege = unpack(summary)
+      print("    " .. tostring(region_symbol) .. "[" .. set_to_string(ranges_set) .. "]." ..
+        field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
     end
   end
   print("================")
@@ -618,7 +639,7 @@ function parallel_task_context:add_field_access(region_symbol, range, field_path
       self.constraints:find_or_create_subset_constraint(range, region_symbol)
     self.back_edges[new_range] = range
     range = new_range
-    partition = nil
+    partition = self.constraints:get_partition(range)
   end
 
   local all_field_accesses = find_or_create(self.field_accesses, region_symbol)
@@ -638,8 +659,6 @@ function parallel_task_context:summarize_accesses()
   local needs_unification = false
   local num_accesses = 0
   for region_symbol, all_field_accesses in self.field_accesses:items() do
-    local accesses_summary =
-      find_or_create(self.field_accesses_summary, region_symbol)
     for field_path, accesses in all_field_accesses:items() do
       local ranges = terralib.newlist()
       local join = nil
@@ -651,13 +670,7 @@ function parallel_task_context:summarize_accesses()
       if disjoint and #ranges > 1 then
         local equivalence_class = ranges[1]
         needs_unification = true
-        accesses_summary[field_path] = { equivalence_class, join }
-        ranges:map(function(range)
-          self.constraints:get_partition(range):meet_disjointness(disjoint)
-          range_mapping[range] = equivalence_class
-        end)
-      else
-        accesses_summary[field_path] = { ranges, join }
+        ranges:map(function(range) range_mapping[range] = equivalence_class end)
       end
       num_accesses = num_accesses + 1
     end
@@ -672,6 +685,19 @@ function parallel_task_context:summarize_accesses()
         error_message)
     end
     self.constraints = unified
+  end
+  for region_symbol, all_field_accesses in self.field_accesses:items() do
+    local accesses_summary = find_or_create(self.field_accesses_summary, region_symbol)
+    for field_path, accesses in all_field_accesses:items() do
+      local ranges_set = data.newmap()
+      local join = nil
+      for range, privilege in accesses:items() do
+        local new_range = range_mapping[range] or range
+        ranges_set[new_range] = true
+        join = std.meet_privilege(join, privilege)
+      end
+      accesses_summary[field_path] = { ranges_set, join }
+    end
   end
 
   local satisfiable, error_message = self.constraints:propagate_disjointness()
@@ -1194,6 +1220,7 @@ function solver_context.new()
     sources = data.newmap(),
     sources_by_regions = data.newmap(),
     constraints = partitioning_constraints.new(),
+    field_accesses = data.newmap(),
   }
   return setmetatable(cx, solver_context)
 end
@@ -1222,6 +1249,7 @@ local function find_unifiable_ranges(constraints1, constraints2, source1, source
 end
 
 function solver_context:unify(new_constraints, region_mapping)
+  new_constraints:print_all_constraints()
   if new_constraints.constraints:is_empty() then
     return
   elseif self.constraints:is_empty() then
@@ -1233,6 +1261,17 @@ function solver_context:unify(new_constraints, region_mapping)
       self.sources_by_regions[my_region] = source
     end
     self.constraints = new_constraints.constraints:clone(region_mapping)
+    for region, accesses_summary in new_constraints.field_accesses_summary:items() do
+      local my_region = region_mapping[region]
+      local all_accesses = find_or_create(self.field_accesses, my_region)
+      for field_path, summary in accesses_summary:items() do
+        local accesses = find_or_create(all_accesses, field_path)
+        local ranges_set, privilege = unpack(summary)
+        if privilege == "reads_writes" then privilege = std.writes end
+        local my_ranges_set = find_or_create(accesses, privilege)
+        set_union_destructive(my_ranges_set, ranges_set)
+      end
+    end
     return
   end
 
@@ -1259,13 +1298,51 @@ function solver_context:unify(new_constraints, region_mapping)
       end
     end
   end
+  for range, partition in to_unify.ranges:items() do
+    if range_mapping[range] == nil then
+      range_mapping[range] = range
+      if new_constraints.sources[range] then
+        self.sources[range] = true
+        assert(self.sources_by_regions[partition.region] == nil)
+        self.sources_by_regions[partition.region] = range
+      end
+    end
+  end
+
+  print("* Mapping for " .. tostring(new_constraints.task.name))
+  for from, to in range_mapping:items() do
+    print("    " .. tostring(from) .. " => " .. tostring(to))
+  end
 
   self.constraints:join(to_unify, range_mapping)
+
+  for region, accesses_summary in new_constraints.field_accesses_summary:items() do
+    local my_region = region_mapping[region]
+    local all_accesses = find_or_create(self.field_accesses, my_region)
+    for field_path, summary in accesses_summary:items() do
+      local accesses = find_or_create(all_accesses, field_path)
+      local ranges_set, privilege = unpack(summary)
+      if privilege == "reads_writes" then privilege = std.writes end
+      local my_ranges_set = find_or_create(accesses, privilege)
+      set_union_destructive(my_ranges_set, set_map_table(ranges_set, range_mapping))
+    end
+  end
 end
 
 function solver_context:print_all_constraints()
   print("################")
   self.constraints:print_constraints()
+  print("* accesses:")
+  for region_symbol, accesses in self.field_accesses:items() do
+    for field_path, summary in accesses:items() do
+      print("    " .. tostring(region_symbol) .. "." .. field_path:mkstring("", ".", ""))
+      for privilege, ranges_set in summary:items() do
+        print("        " .. tostring(region_symbol) .. "[" ..
+          set_to_string(ranges_set) .. "]." ..  field_path:mkstring("", ".", "") ..
+          " @ " .. tostring(privilege))
+      end
+    end
+  end
   print("################")
 end
 
@@ -1306,6 +1383,7 @@ function parallelize_task_calls.stat_parallelize_with(cx, stat)
     local mapping = collector_cx:get_mapping(task)
     solver_cx:unify(constraints, mapping)
   end)
+  solver_cx:print_all_constraints()
 
   return ast.typed.stat.Block {
     block = stat.block,
