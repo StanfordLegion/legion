@@ -2770,6 +2770,8 @@ namespace Legion {
       {
         const ShardID shard = 
           sharding_function->find_owner((*it)->index_point, shard_domain);
+        if (runtime->legion_spy_enabled)
+          LegionSpy::log_owner_shard((*it)->get_unique_id(), shard);
         // If it is not our shard then we don't own it
         if (shard != repl_ctx->owner_shard->shard_id)
           continue;
