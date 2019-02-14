@@ -6102,7 +6102,7 @@ class Operation(object):
             for idx in range(depth):
                 prefix += '  '
         # If we are an index space task, only do our points
-        if self.kind == INDEX_TASK_KIND:
+        if self.kind == INDEX_TASK_KIND and self.points:
             for point in sorted(self.points.itervalues(), key=lambda x: x.op.uid):
                 if not point.op.perform_op_physical_verification(perform_checks):
                     return False
@@ -6954,6 +6954,31 @@ class Task(object):
         if not self.operations:
             # Check to see if we were replicated
             if self.replicants:
+                # If we're control replicated we need to alias all the single
+                # operations across shards so they have the same operation name
+                num_ops = -1
+                for shard in self.replicants.shards.itervalues():
+                    if num_ops == -1:
+                        num_ops = len(shard.operations)
+                    else:
+                        assert num_ops == len(shard.operations)
+                for idx in range(num_ops):
+                    owner_op = None
+                    # See if we have an owner op
+                    for shard in self.replicants.shards.itervalues():
+                        op = shard.operations[idx]
+                        if op.owner_shard is not None and \
+                                op.owner_shard == op.context.shard:
+                            owner_op = op
+                            break
+                    # We should only have owner ops for single operations
+                    if owner_op is not None:
+                        # Alias all the node names to the owner node name
+                        for shard in self.replicants.shards.itervalues():
+                            op = shard.operations[idx]
+                            if op is not owner_op:
+                                op.node_name = owner_op.node_name
+                # Now we can do the normal event graph print routine
                 for shard in self.replicants.shards.itervalues():
                     shard.print_event_graph_context(printer, elevate, all_nodes, top)
             return
