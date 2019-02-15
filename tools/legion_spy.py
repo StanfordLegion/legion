@@ -4106,7 +4106,6 @@ class DataflowTraverser(object):
         self.observed_reductions = dict()
         self.reductions_to_perform = dict()
         self.failed_analysis = False
-        self.generation = None
 
     def visit_node(self, node): 
         if isinstance(node, Operation):
@@ -4121,12 +4120,6 @@ class DataflowTraverser(object):
             pass
         else:
             assert False # should never get here
-        # Mark that we visited this node
-        if node.generation == self.generation:
-            return False
-        else:
-            assert node.generation < self.generation
-            node.generation = self.generation
         return True
 
     def post_visit_node(self, node):
@@ -4134,9 +4127,7 @@ class DataflowTraverser(object):
             self.post_visit_copy(node)
 
     def traverse_node(self, node, eq_key, first = True):
-        if self.generation is None:
-            self.generation = node.state.get_next_traversal_generation()
-        elif node.version_numbers and eq_key in node.version_numbers and \
+        if node.version_numbers and eq_key in node.version_numbers and \
                 node.version_numbers[eq_key] != self.state.version_number:
             # We can't traverse this node if it's from a previous version number
             # because that is not the same value of the equivalence class
