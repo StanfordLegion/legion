@@ -425,12 +425,13 @@ namespace Realm {
 
       if(NodeID(ID(i).instance_creator_node()) == my_node_id) {
 	// local notification of result
-	get_instance(i)->notify_allocation(ok, offset);
+	get_instance(i)->notify_allocation(ok, offset, bytes);
       } else {
 	// remote notification
 	MemStorageAllocResponse::send_request(ID(i).instance_creator_node(),
 					      i,
 					      offset,
+                                              bytes,
 					      ok);
       }
 
@@ -902,18 +903,20 @@ namespace Realm {
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
-    impl->notify_allocation(args.success, args.offset);
+    impl->notify_allocation(args.success, args.offset, args.footprint);
   }
 
   /*static*/ void MemStorageAllocResponse::send_request(NodeID target,
 							RegionInstance inst,
 							size_t offset,
+                                                        size_t footprint,
 							bool success)
   {
     RequestArgs args;
 
     args.inst = inst;
     args.offset = offset;
+    args.footprint = footprint;
     args.success = success;
 
     Message::request(target, args);
