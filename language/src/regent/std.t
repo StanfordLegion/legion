@@ -2663,12 +2663,47 @@ end
 end
 
 do
-  local st = terralib.types.newstruct("complex")
+  local st = terralib.types.newstruct("complex32")
+  st.entries = terralib.newlist({
+      { "real", float },
+      { "imag", float },
+  })
+  std.complex = st
+  std.complex32 = st
+
+  terra st.metamethods.__add(a : st, b : st)
+    return st { real = a.real + b.real, imag = a.imag + b.imag }
+  end
+  terra st.metamethods.__sub(a : st, b : st)
+    return st { real = a.real - b.real, imag = a.imag - b.imag }
+  end
+  terra st.metamethods.__mul(a : st, b : st)
+    return st { real = a.real*b.real - a.imag*b.imag, imag = a.real*b.imag + a.imag*b.real }
+  end
+  terra st.metamethods.__div(a : st, b : st)
+    var denom = b.real * b.real + b.imag * b.imag
+    return st {
+      real = (a.real * b.real + a.imag * b.imag) / denom,
+      imag = (a.imag * b.real - a.real * b.imag) / denom
+    }
+  end
+
+  st.metamethods.__cast = function(from, to, expr)
+    if to == st and std.validate_implicit_cast(from, float) then
+      return `(st { real = [float](expr), imag = [float](0.0) })
+    end
+    assert(false)
+  end
+end
+
+do
+  local st = terralib.types.newstruct("complex64")
   st.entries = terralib.newlist({
       { "real", double },
       { "imag", double },
   })
   std.complex = st
+  std.complex64 = st
 
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }
@@ -2689,7 +2724,7 @@ do
 
   st.metamethods.__cast = function(from, to, expr)
     if to == st and std.validate_implicit_cast(from, double) then
-      return `(complex { real = [double](expr), imag = 0.0 })
+      return `(st { real = [double](expr), imag = 0.0 })
     end
     assert(false)
   end
