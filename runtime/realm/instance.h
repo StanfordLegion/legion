@@ -66,6 +66,7 @@ namespace Realm {
 
     static const RegionInstance NO_INST;
 
+    __CUDA_HD__
     bool exists(void) const;
 
     Memory get_location(void) const;

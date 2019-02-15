@@ -5085,6 +5085,7 @@ namespace Legion {
     template<typename FT, int N, typename T> 
     class DeferredBuffer<FT,N,T,false> {
     public:
+      inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
                             const FT *initial_value = NULL);
@@ -5117,6 +5118,7 @@ namespace Legion {
     template<typename FT, int N, typename T> 
     class DeferredBuffer<FT,N,T,true> {
     public:
+      inline DeferredBuffer(void);
       inline DeferredBuffer(Memory::Kind kind, 
                             const Domain &bounds,
                             const FT *initial_value = NULL);
@@ -5146,6 +5148,24 @@ namespace Legion {
       DomainT<N,T> bounds;
     };
 #endif
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifndef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+           false
+#else
+            CB
+#endif
+           >::DeferredBuffer(void)
+      : instance(Realm::RegionInstance::NO_INST)
+    //--------------------------------------------------------------------------
+    {
+    }
 
     //--------------------------------------------------------------------------
     template<typename FT, int N, typename T
@@ -5486,6 +5506,24 @@ namespace Legion {
 #else
             true
 #endif
+           >::DeferredBuffer(void)
+      : instance(Realm::RegionInstance::NO_INST)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    template<typename FT, int N, typename T
+#ifdef BOUNDS_CHECKS
+              , bool CB
+#endif
+              >
+    inline DeferredBuffer<FT,N,T,
+#ifdef BOUNDS_CHECKS
+            CB 
+#else
+            true
+#endif
            >::DeferredBuffer(Memory::Kind kind, const Domain &space,
                              const FT *initial_value/* = NULL*/)
     //--------------------------------------------------------------------------
@@ -5707,6 +5745,7 @@ namespace Legion {
               >::read(const Point<N,T> &p) const
     //--------------------------------------------------------------------------
     {
+      assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(p));
 #else
@@ -5731,6 +5770,7 @@ namespace Legion {
                                                     FT value) const
     //--------------------------------------------------------------------------
     {
+      assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(p));
 #else
@@ -5754,6 +5794,7 @@ namespace Legion {
               >::ptr(const Point<N,T> &p) const
     //--------------------------------------------------------------------------
     {
+      assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(p));
 #else
@@ -5777,6 +5818,7 @@ namespace Legion {
               >::ptr(const Rect<N,T> &r) const
     //--------------------------------------------------------------------------
     {
+      assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(r));
 #else
@@ -5815,6 +5857,7 @@ namespace Legion {
             >::ptr(const Rect<N,T> &r, size_t strides[N]) const
     //--------------------------------------------------------------------------
     {
+      assert(instance.exists());
 #ifdef __CUDA_ARCH__
       assert(bounds.bounds.contains(r));
 #else
