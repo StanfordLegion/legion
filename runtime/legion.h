@@ -2373,6 +2373,7 @@ namespace Legion {
 #endif
     class DeferredBuffer {
     public:
+      DeferredBuffer(void);
       DeferredBuffer(Memory::Kind kind, 
                      const Domain &bounds,
                      const T *initial_value = NULL);
