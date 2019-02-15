@@ -4059,6 +4059,8 @@ namespace Legion {
           new ValueBroadcast<DistributedID>(ctx, 0/*owner*/, COLLECTIVE_LOC_77);
       if ((resource == EXTERNAL_INSTANCE) || local_files)
       {
+        // In this case we need a second generation of the resource_bar
+        Runtime::advance_barrier(resource_bar);
         exchange = new ShardedMappingExchange(COLLECTIVE_LOC_78, ctx,
                            ctx->owner_shard->shard_id, false/*perform checks*/);
         
