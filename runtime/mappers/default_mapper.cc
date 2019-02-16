@@ -1099,13 +1099,14 @@ namespace Legion {
             const TaskLayoutConstraintSet &layout_constraints =
               runtime->find_task_layout_constraints(ctx,
                                         task.task_id, info.variant);
+            size_t footprint;
             if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[it->first], it->first,
                   needed_fields, layout_constraints, true/*needs check*/,
-                  output.premapped_instances[it->first]))
+                  output.premapped_instances[it->first], &footprint))
             {
               default_report_failed_instance_creation(task, it->first, 
-                                              task.target_proc, target_memory);
+                          task.target_proc, target_memory, footprint);
             }
             continue;
           }
@@ -1167,13 +1168,14 @@ namespace Legion {
         const TaskLayoutConstraintSet &layout_constraints =
           runtime->find_task_layout_constraints(ctx,
                                     task.task_id, info.variant);
+        size_t footprint;
         if (!default_create_custom_instances(ctx, task.target_proc,
               target_memory, task.regions[it->first], it->first,
               needed_fields, layout_constraints, true/*needs check*/,
-              output.premapped_instances[it->first]))
+              output.premapped_instances[it->first], &footprint))
         {
           default_report_failed_instance_creation(task, it->first, 
-                                          task.target_proc, target_memory);
+                      task.target_proc, target_memory, footprint);
         }
       }
       // If we have any restricted regions, put the task 
@@ -1471,13 +1473,14 @@ namespace Legion {
                                                          task.target_proc,
                                                          task.regions[*it]);
               std::set<FieldID> copy = task.regions[*it].privilege_fields;
+              size_t footprint;
               if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[*it], *it, copy, 
                   layout_constraints, false/*needs constraint check*/, 
-                  output.chosen_instances[*it]))
+                  output.chosen_instances[*it], &footprint))
               {
                 default_report_failed_instance_creation(task, *it, 
-                                            task.target_proc, target_memory);
+                      task.target_proc, target_memory, footprint);
               }
             }
           }
@@ -1534,13 +1537,14 @@ namespace Legion {
                                                          task.target_proc,
                                                          task.regions[idx]);
                 std::set<FieldID> copy = task.regions[idx].privilege_fields;
+                size_t footprint;
                 if (!default_create_custom_instances(ctx, task.target_proc,
                     target_memory, task.regions[idx], idx, copy, 
                     layout_constraints, needs_field_constraint_check, 
-                    output.chosen_instances[idx]))
+                    output.chosen_instances[idx], &footprint))
                 {
                   default_report_failed_instance_creation(task, idx, 
-                                              task.target_proc, target_memory);
+                        task.target_proc, target_memory, footprint);
                 }
               }
             }
@@ -1596,13 +1600,14 @@ namespace Legion {
         if (task.regions[idx].privilege == REDUCE)
         {
           has_reductions = true;
+          size_t footprint;
           if (!default_create_custom_instances(ctx, task.target_proc,
                   target_memory, task.regions[idx], idx, missing_fields[idx],
                   layout_constraints, needs_field_constraint_check,
-                  output.chosen_instances[idx]))
+                  output.chosen_instances[idx], &footprint))
           {
             default_report_failed_instance_creation(task, idx, 
-                                        task.target_proc, target_memory);
+                  task.target_proc, target_memory, footprint);
           }
           continue;
         }
@@ -1642,13 +1647,14 @@ namespace Legion {
             continue;
         }
         // Otherwise make normal instances for the given region
+        size_t footprint;
         if (!default_create_custom_instances(ctx, task.target_proc,
                 target_memory, task.regions[idx], idx, missing_fields[idx],
                 layout_constraints, needs_field_constraint_check,
-                output.chosen_instances[idx]))
+                output.chosen_instances[idx], &footprint))
         {
           default_report_failed_instance_creation(task, idx,
-                                      task.target_proc, target_memory);
+                  task.target_proc, target_memory, footprint);
         }
       }
       if (cache_policy == DEFAULT_CACHE_POLICY_ENABLE) {
@@ -1890,7 +1896,8 @@ namespace Legion {
                           std::set<FieldID> &needed_fields,
                           const TaskLayoutConstraintSet &layout_constraints,
                           bool needs_field_constraint_check,
-                          std::vector<PhysicalInstance> &instances)
+                          std::vector<PhysicalInstance> &instances,
+                          size_t *footprint /*= NULL*/)
     //--------------------------------------------------------------------------
     {
       // Special case for reduction instances, no point in checking
@@ -1916,7 +1923,7 @@ namespace Legion {
           our_constraints.field_constraint.field_set.push_back(*it);
           if (!default_make_instance(ctx, target_memory, our_constraints,
                        instances[idx], TASK_MAPPING, force_new_instances,
-                       true/*meets*/, req))
+                       true/*meets*/, req, footprint))
             return false;
         }
         return true; 
@@ -1965,7 +1972,7 @@ namespace Legion {
           // using these constraints
           if (!default_make_instance(ctx, target_memory, index_constraints,
                      instances.back(), TASK_MAPPING, force_new_instances, 
-                     false/*meets*/, req))
+                     false/*meets*/, req, footprint))
             return false;
         }
         else if (runtime->do_constraints_entail(ctx, 
@@ -1975,7 +1982,7 @@ namespace Legion {
           // so we can just use them directly
           if (!default_make_instance(ctx, target_memory, index_constraints,
                       instances.back(), TASK_MAPPING, force_new_instances, 
-                      true/*meets*/, req))
+                      true/*meets*/, req, footprint))
             return false;
         }
         else
@@ -1990,7 +1997,7 @@ namespace Legion {
                 false/*contig*/, false/*inorder*/));
           if (!default_make_instance(ctx, target_memory, creation_constraints,
                          instances.back(), TASK_MAPPING, force_new_instances, 
-                         true/*meets*/, req))
+                         true/*meets*/, req, footprint))
             return false;
         }
       }
@@ -2007,7 +2014,7 @@ namespace Legion {
           FieldConstraint(creation_fields, false/*contig*/, false/*inorder*/));
       if (!default_make_instance(ctx, target_memory, creation_constraints, 
                 instances.back(), TASK_MAPPING, force_new_instances, 
-                true/*meets*/,  req))
+                true/*meets*/,  req, footprint))
         return false;
       return true;
     }
@@ -2218,7 +2225,7 @@ namespace Legion {
     bool DefaultMapper::default_make_instance(MapperContext ctx, 
         Memory target_memory, const LayoutConstraintSet &constraints,
         PhysicalInstance &result, MappingKind kind, bool force_new, bool meets, 
-        const RegionRequirement &req)
+        const RegionRequirement &req, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       bool created = true;
@@ -2237,7 +2244,7 @@ namespace Legion {
       } else {
         if (!runtime->find_or_create_physical_instance(ctx, 
               target_memory, constraints, target_regions, result, created,
-              true/*acquire*/, 0/*priority*/, tight_region_bounds))
+              true/*acquire*/, 0/*priority*/, tight_region_bounds, footprint))
           return false;
       }
       if (created)
@@ -2374,19 +2381,21 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void DefaultMapper::default_report_failed_instance_creation(
                                  const Task &task, unsigned index, 
-                                 Processor target_proc, Memory target_mem) const
+                                 Processor target_proc, Memory target_mem,
+                                 size_t footprint) const
     //--------------------------------------------------------------------------
     {
-      log_mapper.error("Default mapper failed allocation for region "
-                       "requirement %d of task %s (UID %lld) in memory " IDFMT
-                       " for processor " IDFMT ". This means the working set "
-                       "of your application is too big for the allotted "
+      log_mapper.error("Default mapper failed allocation of size %zd bytes for "
+                       "region  requirement %d of task %s (UID %lld) in memory " 
+                       IDFMT " for processor " IDFMT ". This means the working "
+                       "set of your application is too big for the allotted "
                        "capacity of the given memory under the default "
                        "mapper's mapping scheme. You have three choices: "
                        "ask Realm to allocate more memory, write a custom "
                        "mapper to better manage working sets, or find a bigger "
-                       "machine. Good luck!", index, task.get_task_name(),
-                       task.get_unique_id(), target_mem.id, target_proc.id);
+                       "machine.", footprint, index, 
+                       task.get_task_name(), task.get_unique_id(), 
+                       target_mem.id, target_proc.id);
       assert(false);
     }
 
@@ -2641,20 +2650,22 @@ namespace Legion {
             FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
       }
       output.chosen_instances.resize(output.chosen_instances.size()+1);
+      size_t footprint;
       if (!default_make_instance(ctx, target_memory, creation_constraints,
             output.chosen_instances.back(), INLINE_MAPPING, 
-            force_new_instances, true/*meets*/, inline_op.requirement))
+            force_new_instances, true/*meets*/, 
+            inline_op.requirement, &footprint))
       {
         // If we failed to make it that is bad
-        log_mapper.error("Default mapper failed allocation for region "
-                         "requirement of inline mapping in task %s (UID %lld) "
-                         "in memory " IDFMT "for processor " IDFMT ". This "
-                         "means the working set of your application is too big "
-                         "for the allotted capacity of the given memory under "
-                         "the default mapper's mapping scheme. You have three "
-                         "choices: ask Realm to allocate more memory, write a "
-                         "custom mapper to better manage working sets, or find "
-                         "a bigger machine. Good luck!", 
+        log_mapper.error("Default mapper failed allocation of size %zd bytes "
+                         "for region requirement of inline mapping in task %s "
+                         "(UID %lld) in memory " IDFMT "for processor " IDFMT 
+                         ". This means the working set of your application is "
+                         "too big for the allotted capacity of the given memory"
+                         " under the default mapper's mapping scheme. You have "
+                         "three choices: ask Realm to allocate more memory, "
+                         "write a custom mapper to better manage working sets, "
+                         "or find a bigger machine.", footprint,
                          inline_op.parent_task->get_task_name(),
                          inline_op.parent_task->get_unique_id(),
                          target_memory.id,
@@ -2839,20 +2850,21 @@ namespace Legion {
                                           close.requirement);
 
         output.chosen_instances.resize(output.chosen_instances.size()+1);
+        size_t footprint;
         if (!default_make_instance(ctx, target_memory, constraints,
               output.chosen_instances.back(), CLOSE_MAPPING,
-              false/*force*/, true/*meets*/, close.requirement))
+              false/*force*/, true/*meets*/, close.requirement, &footprint))
         {
           // If we failed to make it that is bad
-          log_mapper.error("Default mapper failed allocation for region "
-                         "requirement of close in task %s (UID %lld) "
-                         "in memory " IDFMT "for processor " IDFMT ". This "
+          log_mapper.error("Default mapper failed allocation of size %zd bytes "
+                         "for region requirement of close in task %s (UID %lld)"
+                         " in memory " IDFMT "for processor " IDFMT ". This "
                          "means the working set of your application is too big "
                          "for the allotted capacity of the given memory under "
                          "the default mapper's mapping scheme. You have three "
                          "choices: ask Realm to allocate more memory, write a "
                          "custom mapper to better manage working sets, or find "
-                         "a bigger machine. Good luck!",
+                         "a bigger machine.", footprint,
                          close.parent_task->get_task_name(),
                          close.parent_task->get_unique_id(),
                          close.parent_task->current_proc.id,
@@ -3063,20 +3075,22 @@ namespace Legion {
       creation_constraints.add_constraint(
           FieldConstraint(missing_fields, false/*contig*/, false/*inorder*/));
       output.chosen_instances.resize(output.chosen_instances.size()+1);
+      size_t footprint;
       if (!default_make_instance(ctx, target_memory, creation_constraints,
             output.chosen_instances.back(), PARTITION_MAPPING, 
-            force_new_instances, true/*meets*/, partition.requirement))
+            force_new_instances, true/*meets*/, 
+            partition.requirement, &footprint))
       {
         // If we failed to make it that is bad
-        log_mapper.error("Default mapper failed allocation for region "
-                         "requirement of partition in task %s (UID %lld) "
-                         "in memory " IDFMT "for processor " IDFMT ". This "
-                         "means the working set of your application is too big "
-                         "for the allotted capacity of the given memory under "
-                         "the default mapper's mapping scheme. You have three "
-                         "choices: ask Realm to allocate more memory, write a "
-                         "custom mapper to better manage working sets, or find "
-                         "a bigger machine. Good luck!", 
+        log_mapper.error("Default mapper failed allocation of size %zd bytes "
+                         "for region requirement of partition in task %s (UID "
+                         "%lld) in memory " IDFMT "for processor " IDFMT ". "
+                         "This means the working set of your application is too"
+                         " big for the allotted capacity of the given memory "
+                         "under the default mapper's mapping scheme. You have "
+                         "three choices: ask Realm to allocate more memory, "
+                         "write a custom mapper to better manage working sets, "
+                         "or find a bigger machine.", footprint, 
                          partition.parent_task->get_task_name(),
                          partition.parent_task->get_unique_id(),
                          target_memory.id,
