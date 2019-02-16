@@ -2879,7 +2879,8 @@ namespace Legion {
                                        const std::vector<FieldID> &field_set,
                                        const std::vector<size_t> &field_sizes,
                                              LayoutConstraintSet &cons,
-                                             ApEvent &ready_event);
+                                             ApEvent &ready_event,
+                                             size_t &instance_footprint);
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
@@ -2898,6 +2899,7 @@ namespace Legion {
       std::set<RtEvent> map_applied_conditions;
       InstanceManager *external_instance;
       LayoutConstraintSet layout_constraint_set;
+      size_t footprint;
     };
 
     /**

@@ -2012,8 +2012,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AttachLauncher::AttachLauncher(ExternalResource r, 
                                    LogicalRegion h, LogicalRegion p)
-      : resource(r), handle(h), parent(p), 
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), static_dependences(NULL)
+      : resource(r), handle(h), parent(p), file_name(NULL), 
+        mode(LEGION_FILE_READ_ONLY), footprint(0), static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }

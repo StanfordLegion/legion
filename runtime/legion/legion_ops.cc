@@ -14784,6 +14784,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/, 1/*regions*/, 
                            launcher.static_dependences);
       resource = launcher.resource;
+      footprint = launcher.footprint;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:
@@ -14877,6 +14878,7 @@ namespace Legion {
       activate_operation();
       file_name = NULL;
       external_instance = NULL;
+      footprint = 0;
     }
 
     //--------------------------------------------------------------------------
@@ -15073,10 +15075,12 @@ namespace Legion {
                                          const std::vector<FieldID> &field_set,
                                          const std::vector<size_t> &sizes, 
                                                LayoutConstraintSet &constraints,
-                                               ApEvent &ready_event)
+                                               ApEvent &ready_event,
+                                               size_t &instance_footprint)
     //--------------------------------------------------------------------------
     {
       PhysicalInstance result = PhysicalInstance::NO_INST;
+      instance_footprint = footprint;
       switch (resource)
       {
         case EXTERNAL_POSIX_FILE:

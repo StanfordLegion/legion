@@ -8712,10 +8712,11 @@ namespace Legion {
                            mask_index_map, serdez, file_mask);
       // Now make the instance, this should always succeed
       ApEvent ready_event;
+      size_t instance_footprint;
       LayoutConstraintSet constraints;
       PhysicalInstance inst = 
         attach_op->create_instance(node->row_source, field_set, field_sizes, 
-                                   constraints, ready_event);
+                                   constraints, ready_event,instance_footprint);
       // Pull out the pointer constraint so that we can use it separately
       // and not have it included in the layout constraints
       PointerConstraint pointer_constraint = constraints.pointer_constraint;
@@ -8745,7 +8746,9 @@ namespace Legion {
                                          memory, inst, node->row_source, 
                                          false/*own*/, node, layout, 
                                          pointer_constraint,
-                                         true/*register now*/, ready_event,
+                                         true/*register now*/, 
+                                         instance_footprint,
+                                         ready_event,
                                          true/*external instance*/,
                                          Reservation::create_reservation());
 #ifdef DEBUG_LEGION

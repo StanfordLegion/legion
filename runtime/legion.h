@@ -1891,6 +1891,9 @@ namespace Legion {
       LayoutConstraintSet                           constraints;
       std::set<FieldID>                             privilege_fields;
     public:
+      // Optional footprint of the instance in memory in bytes
+      size_t                                        footprint;
+    public:
       // Inform the runtime about any static dependences
       // These will be ignored outside of static traces
       const std::vector<StaticDependence>           *static_dependences;
