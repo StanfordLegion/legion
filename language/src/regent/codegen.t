@@ -4349,8 +4349,10 @@ function codegen.expr_partition_equal(cx, node)
                end
              end
 
-             [extent].lo.x[ [i] ] = region_rect.lo.x[ [i] ]
-             [extent].hi.x[ [i] ] = region_rect.lo.x[ [i] ] + block_size - 1
+             [extent].lo.x[ [i] ] =
+               region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size
+             [extent].hi.x[ [i] ] =
+               region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size + block_size - 1
            end
          end)]
       var dtransform = [create_domain_transform]([transform])
