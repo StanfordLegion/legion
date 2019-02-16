@@ -171,10 +171,11 @@ namespace Realm {
     };
 
     // Simple boolean indicating whether or not allocation is expected to
-    //  succeed
+    //  succeed and footprint size of the allocation required in bytes
     struct InstanceAllocResult {
       static const ProfilingMeasurementID ID = PMID_INST_ALLOCRESULT;
-      
+     
+      size_t footprint;
       bool success;
     };
 

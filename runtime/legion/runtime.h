@@ -763,13 +763,15 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id,
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id,
                                     bool remote = false);
       bool create_physical_instance(LayoutConstraints *constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id,
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id,
                                     bool remote = false);
       bool find_or_create_physical_instance(
                                     const LayoutConstraintSet &constraints,
@@ -777,7 +779,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool tight_region_bounds,
+                                    bool tight_region_bounds, size_t *footprint,
                                     UniqueID creator_id, bool remote = false);
       bool find_or_create_physical_instance(
                                     LayoutConstraints *constraints,
@@ -785,7 +787,7 @@ namespace Legion {
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority, 
-                                    bool tight_region_bounds,
+                                    bool tight_region_bounds, size_t *footprint,
                                     UniqueID creator_id, bool remote = false);
       bool find_physical_instance(  const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
@@ -835,7 +837,8 @@ namespace Legion {
       // ensure find_and_create calls will remain atomic
       RtEvent acquire_allocation_privilege(void);
       void release_allocation_privilege(void);
-      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder);
+      PhysicalManager* allocate_physical_instance(InstanceBuilder &builder,
+                                                  size_t *footprint);
     public:
       bool delete_by_size_and_state(const size_t needed_size, 
                                     InstanceState state, bool larger_only); 
@@ -2534,27 +2537,31 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id);
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id);
       bool create_physical_instance(Memory target_memory, 
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, MapperID mapper_id,
                                     Processor processor, bool acquire, 
-                                    GCPriority priority, UniqueID creator_id);
+                                    GCPriority priority, bool tight_bounds,
+                                    size_t *footprint, UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    bool tight_bounds, UniqueID creator_id);
+                                    bool tight_bounds, size_t *footprint,
+                                    UniqueID creator_id);
       bool find_or_create_physical_instance(Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     MapperID mapper_id, Processor processor,
                                     bool acquire, GCPriority priority,
-                                    bool tight_bounds, UniqueID creator_id);
+                                    bool tight_bounds, size_t *footprint,
+                                    UniqueID creator_id);
       bool find_physical_instance(Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,

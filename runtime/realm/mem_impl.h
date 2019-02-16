@@ -327,6 +327,7 @@ namespace Realm {
       struct RequestArgs {
 	RegionInstance inst;
 	size_t offset;
+        size_t footprint;
 	bool success;
       };
 
@@ -337,8 +338,8 @@ namespace Realm {
 					handle_request> Message;
 
       static void send_request(NodeID target,
-			       RegionInstance inst,
-			       size_t offset, bool success);
+			       RegionInstance inst, size_t offset, 
+                               size_t footprint, bool success);
     };
 
     struct MemStorageReleaseRequest {

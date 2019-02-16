@@ -40,7 +40,7 @@ namespace Realm {
       // the life cycle of an instance is defined in part by when the
       //  allocation and deallocation of storage occurs, but that is managed
       //  by the memory, which uses these callbacks to notify us
-      void notify_allocation(bool success, size_t offset);
+      void notify_allocation(bool success, size_t offset, size_t footprint);
       void notify_deallocation(void);
 
 #ifdef POINTER_CHECKS

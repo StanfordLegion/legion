@@ -321,26 +321,28 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds,size_t *footprint);
       bool create_physical_instance(MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
-                                    bool acquire, GCPriority priority);
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_or_create_physical_instance(
                                     MappingCallInfo *ctx, Memory target_memory,
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds);
+                                    bool tight_region_bounds,size_t *footprint);
       bool find_physical_instance(  MappingCallInfo *ctx, Memory target_memory,
                                     const LayoutConstraintSet &constraints,
                                     const std::vector<LogicalRegion> &regions,

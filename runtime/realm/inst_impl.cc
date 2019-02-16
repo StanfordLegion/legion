@@ -440,7 +440,7 @@ namespace Realm {
 	delete metadata.layout;
     }
 
-    void RegionInstanceImpl::notify_allocation(bool success, size_t offset)
+    void RegionInstanceImpl::notify_allocation(bool success, size_t offset, size_t footprint)
     {
       if(!success) {
 	// if somebody is listening to profiling measurements, we report
@@ -468,6 +468,7 @@ namespace Realm {
 
 	  if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
 	    ProfilingMeasurements::InstanceAllocResult result;
+            result.footprint = footprint;
 	    result.success = false;
 	    measurements.add_measurement(result);
 	  }
@@ -518,6 +519,7 @@ namespace Realm {
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
 	ProfilingMeasurements::InstanceAllocResult result;
+        result.footprint = footprint;
 	result.success = true;
 	measurements.add_measurement(result);
       }
