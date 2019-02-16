@@ -443,15 +443,17 @@ namespace Legion {
                               std::set<FieldID> &needed_fields, // will destroy
                               const TaskLayoutConstraintSet &layout_constraints,
                               bool needs_field_constraint_check,
-                              std::vector<PhysicalInstance> &instances);
+                              std::vector<PhysicalInstance> &instances,
+                              size_t *footprint = NULL);
       bool default_make_instance(MapperContext ctx, Memory target_memory,
                               const LayoutConstraintSet &constraints, 
                               PhysicalInstance &result, MappingKind kind,
                               bool force_new, bool meets,
-                              const RegionRequirement &req);
+                              const RegionRequirement &req,
+                              size_t *footprint = NULL);
       void default_report_failed_instance_creation(const Task &task, 
                               unsigned index, Processor target_proc, 
-                              Memory target_memory) const;
+                              Memory target_memory, size_t footprint = 0) const;
       void default_remove_cached_task(MapperContext ctx, VariantID variant,
                               unsigned long long task_hash,
                               const std::pair<TaskID,Processor> &cache_key,

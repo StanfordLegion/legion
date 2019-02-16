@@ -1957,7 +1957,8 @@ namespace Legion {
                                     const LayoutConstraintSet &constraints, 
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, 
-                                    bool acquire, GCPriority priority)
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -1977,7 +1978,8 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, 
         constraints, regions, result, mapper_id, processor, acquire, priority,
-        (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
+        tight_region_bounds, footprint, (ctx->operation == NULL) ? 
+          0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -1990,7 +1992,8 @@ namespace Legion {
                                     LayoutConstraintID layout_id,
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result,
-                                    bool acquire, GCPriority priority)
+                                    bool acquire, GCPriority priority,
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -2010,7 +2013,8 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->create_physical_instance(target_memory, layout_id,
                       regions, result, mapper_id, processor, acquire, priority,
-             (ctx->operation == NULL) ? 0 : ctx->operation->get_unique_op_id());
+                      tight_region_bounds, footprint, (ctx->operation == NULL) ? 
+                        0 : ctx->operation->get_unique_op_id());
       if (success && acquire)
         record_acquired_instance(ctx, result.impl, true/*created*/);
       resume_mapper_call(ctx);
@@ -2024,7 +2028,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds)
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -2045,7 +2049,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                   constraints, regions, result, created, mapper_id, processor, 
-                  acquire, priority, tight_region_bounds,
+                  acquire, priority, tight_region_bounds, footprint,
                   (ctx->operation == NULL) ? 0 :
                    ctx->operation->get_unique_op_id());
       if (success && acquire)
@@ -2061,7 +2065,7 @@ namespace Legion {
                                     const std::vector<LogicalRegion> &regions,
                                     MappingInstance &result, bool &created, 
                                     bool acquire, GCPriority priority,
-                                    bool tight_region_bounds)
+                                    bool tight_region_bounds, size_t *footprint)
     //--------------------------------------------------------------------------
     {
       if (!target_memory.exists())
@@ -2082,7 +2086,7 @@ namespace Legion {
       pause_mapper_call(ctx);
       bool success = runtime->find_or_create_physical_instance(target_memory,
                    layout_id, regions, result, created, mapper_id, processor, 
-                   acquire, priority, tight_region_bounds,
+                   acquire, priority, tight_region_bounds, footprint,
                    (ctx->operation == NULL) ? 0 : 
                     ctx->operation->get_unique_op_id());
       if (success && acquire)

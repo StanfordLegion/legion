@@ -2038,7 +2038,8 @@ namespace Legion {
                                    LogicalRegion h, LogicalRegion p,
                                    const bool restr/*= true*/)
       : resource(r), handle(h), parent(p), restricted(restr),
-        file_name(NULL), mode(LEGION_FILE_READ_ONLY), static_dependences(NULL)
+        file_name(NULL), mode(LEGION_FILE_READ_ONLY), footprint(0),
+        static_dependences(NULL)
     //--------------------------------------------------------------------------
     {
     }
