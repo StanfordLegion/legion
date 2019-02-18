@@ -5373,10 +5373,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
-      return runtime->execute_index_space(ctx, launcher, redop);
+      return runtime->execute_index_space(ctx, launcher, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------
@@ -5441,7 +5441,7 @@ namespace Legion {
                                  predicate, must_parallelism, id, tag);
       launcher.index_requirements = indexes;
       launcher.region_requirements = regions;
-      return runtime->execute_index_space(ctx, launcher, reduction);
+      return runtime->execute_index_space(ctx, launcher, reduction, false);
     }
 
     //--------------------------------------------------------------------------

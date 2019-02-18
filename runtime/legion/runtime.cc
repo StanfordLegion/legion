@@ -11433,12 +11433,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context execute index space!");
-      return ctx->execute_index_space(launcher, redop); 
+      return ctx->execute_index_space(launcher, redop, deterministic); 
     }
 
     //--------------------------------------------------------------------------

@@ -2768,6 +2768,22 @@ legion_index_launcher_execute_reduction(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(new Future(f));
 }
 
+legion_future_t
+legion_index_launcher_execute_deterministic_reduction(
+                                        legion_runtime_t runtime_,
+                                        legion_context_t ctx_,
+                                        legion_index_launcher_t launcher_,
+                                        legion_reduction_op_id_t redop,
+                                        bool deterministic)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+
+  Future f = runtime->execute_index_space(ctx, *launcher, redop, deterministic);
+  return CObjectWrapper::wrap(new Future(f));
+}
+
 unsigned
 legion_index_launcher_add_region_requirement_logical_region(
   legion_index_launcher_t launcher_,
