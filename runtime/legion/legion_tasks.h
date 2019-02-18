@@ -649,12 +649,15 @@ namespace Legion {
       IndexSpace launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       ReductionOpID redop;
+      bool deterministic_redop;
       const ReductionOp *reduction_op;
       FutureMap point_arguments;
       // For handling reductions of types with serdez methods
       const SerdezRedopFns *serdez_redop_fns;
       size_t reduction_state_size;
       void *reduction_state; 
+      // Temporary storage for future results
+      std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
     protected:
       bool children_complete_invoked;
       bool children_commit_invoked;
@@ -906,6 +909,7 @@ namespace Legion {
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
                              ReductionOpID redop,
+                             bool deterministic,
                              bool check_privileges,
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
@@ -1145,9 +1149,7 @@ namespace Legion {
       bool origin_mapped;
       bool need_versioning_analysis;
       UniqueID remote_owner_uid;
-    protected:
-      // Temporary storage for future results
-      std::map<DomainPoint,std::pair<void*,size_t> > temporary_futures;
+    protected: 
       std::map<PhysicalManager*,std::pair<unsigned,bool> > acquired_instances;
       std::set<RtEvent> map_applied_conditions;
       std::set<ApEvent> restrict_postconditions;

@@ -4232,6 +4232,7 @@ namespace Legion {
       internal_space = IndexSpace::NO_SPACE;
       sliced = false;
       redop = 0;
+      deterministic_redop = false;
       reduction_op = NULL;
       serdez_redop_fns = NULL;
       reduction_state_size = 0;
@@ -4255,6 +4256,15 @@ namespace Legion {
         legion_free(REDUCTION_ALLOC, reduction_state, reduction_state_size);
         reduction_state = NULL;
         reduction_state_size = 0;
+      }
+      if (!temporary_futures.empty())
+      {
+        for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
+              temporary_futures.begin(); it != temporary_futures.end(); it++)
+        {
+          legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
+        }
+        temporary_futures.clear();
       }
       // Remove our reference to the point arguments 
       point_arguments = FutureMap();
@@ -4456,13 +4466,19 @@ namespace Legion {
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
       this->redop = rhs->redop;
-      this->point_arguments = rhs->point_arguments;
       if (this->redop != 0)
       {
-        this->reduction_op = rhs->reduction_op;
-        this->serdez_redop_fns = rhs->serdez_redop_fns;
-        initialize_reduction_state();
+        this->deterministic_redop = rhs->deterministic_redop;
+        if (!this->deterministic_redop)
+        {
+          // Only need to initialize this if we're not doing a 
+          // deterministic reduction operation
+          this->reduction_op = rhs->reduction_op;
+          this->serdez_redop_fns = rhs->serdez_redop_fns;
+          initialize_reduction_state();
+        }
       }
+      this->point_arguments = rhs->point_arguments;
       this->restrict_infos = rhs->restrict_infos;
       this->projection_infos = rhs->projection_infos;
       this->predicate_false_future = rhs->predicate_false_future;
@@ -4592,6 +4608,8 @@ namespace Legion {
       rez.serialize(launch_space);
       rez.serialize(sliced);
       rez.serialize(redop);
+      if (redop > 0)
+        rez.serialize<bool>(deterministic_redop);
     }
 
     //--------------------------------------------------------------------------
@@ -4607,9 +4625,15 @@ namespace Legion {
       derez.deserialize(redop);
       if (redop > 0)
       {
-        reduction_op = Runtime::get_reduction_op(redop);
-        serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
-        initialize_reduction_state();
+        derez.deserialize(deterministic_redop);
+        // Only need to fill these in if we're not doing a 
+        // deterministic reduction operation
+        if (!deterministic_redop)
+        {
+          reduction_op = Runtime::get_reduction_op(redop);
+          serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
+          initialize_reduction_state();
+        }
       }
     }
 
@@ -6768,7 +6792,6 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDEX_ACTIVATE_CALL);
       activate_multi();
       launch_space = IndexSpace::NO_SPACE;
-      reduction_op = NULL;
       serdez_redop_fns = NULL;
       slice_fraction = Fraction<long long>(0,1); // empty fraction
       total_points = 0;
@@ -6888,6 +6911,7 @@ namespace Legion {
                                       const IndexTaskLauncher &launcher,
                                       IndexSpace launch_sp,
                                       ReductionOpID redop_id, 
+                                      bool deterministic,
                                       bool check_privileges,
                                       bool track /*= true*/)
     //--------------------------------------------------------------------------
@@ -6929,6 +6953,7 @@ namespace Legion {
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
       reduction_op = Runtime::get_reduction_op(redop);
+      deterministic_redop = deterministic;
       serdez_redop_fns = Runtime::get_serdez_redop_fns(redop);
       if (!reduction_op->is_foldable)
         REPORT_LEGION_ERROR(ERROR_REDUCTION_OPERATION_INDEX,
@@ -7393,9 +7418,22 @@ namespace Legion {
       {
         // Set the future if we actually ran the task or we speculated
         if ((speculation_state != RESOLVE_FALSE_STATE) || false_guard.exists())
+        {
+          // If we're doing a deterministic reduction this is the point
+          // at which we can collapse all the futures down to a single
+          // value since we know we have them all in the temporary futures
+          if (deterministic_redop)
+          {
+            for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator
+                  it = temporary_futures.begin();
+                  it != temporary_futures.end(); it++)
+              fold_reduction_future(it->second.first, it->second.second,
+                                    false/*owner*/, true/*exclusive*/);
+          }
           reduction_future.impl->set_result(reduction_state,
                                             reduction_state_size, 
                                             false/*owner*/);
+        }
         reduction_future.impl->complete_future();
       }
       else
@@ -7593,7 +7631,39 @@ namespace Legion {
       // Need to hold the lock when doing this since it could
       // be going in parallel with other users
       if (reduction_op != NULL)
-        fold_reduction_future(result, result_size, owner, false/*exclusive*/);
+      {
+        // If we're doing a deterministic reduction then we need to 
+        // buffer up these future values until we get all of them so
+        // that we can fold them in a deterministic way
+        if (deterministic_redop)
+        {
+          // Store it in our temporary futures
+          if (owner)
+          {
+            // Hold the lock to protect the data structure
+            AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+            assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
+            temporary_futures[point] = 
+              std::pair<void*,size_t>(const_cast<void*>(result),result_size);
+          }
+          else
+          {
+            void *copy = legion_malloc(FUTURE_RESULT_ALLOC, result_size);
+            memcpy(copy,result,result_size);
+            // Hold the lock to protect the data structure
+            AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+            assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
+            temporary_futures[point] = 
+              std::pair<void*,size_t>(copy,result_size);
+          }
+        }
+        else
+          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
+      }
       else
       {
         if (must_epoch == NULL)
@@ -7801,20 +7871,9 @@ namespace Legion {
       ApEvent slice_postcondition;
       derez.deserialize(slice_postcondition);
       ResourceTracker::unpack_privilege_state(derez, parent_ctx);
-      if (redop != 0)
+      if (redop == 0)
       {
-#ifdef DEBUG_LEGION
-        assert(reduction_op != NULL);
-        assert(reduction_state_size == reduction_op->sizeof_rhs);
-#endif
-        const void *reduc_ptr = derez.get_current_pointer();
-        fold_reduction_future(reduc_ptr, reduction_state_size,
-                              false /*owner*/, false/*exclusive*/);
-        // Advance the pointer on the deserializer
-        derez.advance_pointer(reduction_state_size);
-      }
-      else
-      {
+        // No reduction so we can unpack these futures directly
         for (unsigned idx = 0; idx < points; idx++)
         {
           DomainPoint p;
@@ -7827,6 +7886,37 @@ namespace Legion {
           else
             must_epoch->unpack_future(p, derez);
         }
+      }
+      else if (deterministic_redop)
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_op != NULL);
+        assert(reduction_state_size == reduction_op->sizeof_rhs);
+#endif
+        // Unpack these futures and save them so we can do a
+        // deterministic reduction fold operation later
+        for (unsigned idx = 0; idx < points; idx++)
+        {
+          DomainPoint p;
+          derez.deserialize(p);
+          size_t size;
+          derez.deserialize(size);
+          const void *ptr = derez.get_current_pointer();
+          handle_future(p, ptr, size, false/*owner*/);
+          derez.advance_pointer(size);
+        }
+      }
+      else
+      {
+#ifdef DEBUG_LEGION
+        assert(reduction_op != NULL);
+        assert(reduction_state_size == reduction_op->sizeof_rhs);
+#endif
+        const void *reduc_ptr = derez.get_current_pointer();
+        fold_reduction_future(reduc_ptr, reduction_state_size,
+                              false /*owner*/, false/*exclusive*/);
+        // Advance the pointer on the deserializer
+        derez.advance_pointer(reduction_state_size);
       }
       return_slice_complete(points, slice_postcondition);
     }
@@ -8062,13 +8152,7 @@ namespace Legion {
         else
           (*it)->commit_operation(true/*deactivate*/);
       }
-      points.clear();
-      for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it = 
-            temporary_futures.begin(); it != temporary_futures.end(); it++)
-      {
-        legion_free(FUTURE_RESULT_ALLOC, it->second.first, it->second.second);
-      }
-      temporary_futures.clear();
+      points.clear(); 
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
       acquired_instances.clear();
@@ -8576,18 +8660,19 @@ namespace Legion {
       // it back to the enclosing index owner
       if (is_remote())
       {
-        if (redop != 0)
-          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
-        else
+        // Store the future result in our temporary futures unless we're 
+        // doing a non-deterministic reduction in which case we can eagerly
+        // fold this now into our reduction buffer
+        if ((redop == 0) || deterministic_redop)
         {
           // Store it in our temporary futures
-#ifdef DEBUG_LEGION
-          assert(temporary_futures.find(point) == temporary_futures.end());
-#endif
           if (owner)
           {
             // Hold the lock to protect the data structure
             AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+            assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
             temporary_futures[point] = 
               std::pair<void*,size_t>(const_cast<void*>(result),result_size);
           }
@@ -8597,10 +8682,15 @@ namespace Legion {
             memcpy(copy,result,result_size);
             // Hold the lock to protect the data structure
             AutoLock o_lock(op_lock);
+#ifdef DEBUG_LEGION
+            assert(temporary_futures.find(point) == temporary_futures.end());
+#endif
             temporary_futures[point] = 
               std::pair<void*,size_t>(copy,result_size);
           }
         }
+        else
+          fold_reduction_future(result, result_size, owner, false/*exclusive*/);
       }
       else
         index_owner->handle_future(point, result, result_size, owner);
@@ -9002,13 +9092,7 @@ namespace Legion {
       // Serialize the privilege state
       pack_privilege_state(rez, target, true/*returning*/); 
       // Now pack up the future results
-      if (redop != 0)
-      {
-        // Don't need to pack the size since they already 
-        // know it on the other side
-        rez.serialize(reduction_state,reduction_state_size);
-      }
-      else
+      if (redop == 0)
       {
         // Already know how many futures we are packing 
 #ifdef DEBUG_LEGION
@@ -9022,6 +9106,26 @@ namespace Legion {
           rez.serialize(it->second.second);
           rez.serialize(it->second.first,it->second.second);
         }
+      }
+      else if (deterministic_redop)
+      {
+        // Same as above but without the extra rez check
+#ifdef DEBUG_LEGION
+        assert(temporary_futures.size() == points.size());
+#endif
+        for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator it =
+              temporary_futures.begin(); it != temporary_futures.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second.second);
+          rez.serialize(it->second.first,it->second.second);
+        }
+      }
+      else
+      {
+        // Don't need to pack the size since they already 
+        // know it on the other side
+        rez.serialize(reduction_state,reduction_state_size);
       }
     }
 

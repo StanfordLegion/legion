@@ -2402,6 +2402,18 @@ extern "C" {
                                           legion_reduction_op_id_t redop);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::execute_index_space(Context, const IndexTaskLauncher &, ReductionOpID)
+   */
+  legion_future_t
+  legion_index_launcher_execute_deterministic_reduction(legion_runtime_t runtime,
+                                                        legion_context_t ctx,
+                                                        legion_index_launcher_t launcher,
+                                                        legion_reduction_op_id_t redop,
+                                                        bool deterministic);
+
+  /**
    * @see Legion::IndexTaskLauncher::add_region_requirement()
    */
   unsigned

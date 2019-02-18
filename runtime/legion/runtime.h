@@ -1966,8 +1966,8 @@ namespace Legion {
       Future execute_task(Context ctx, const TaskLauncher &launcher);
       FutureMap execute_index_space(Context ctx, 
                                     const IndexTaskLauncher &launcher);
-      Future execute_index_space(Context ctx, 
-                    const IndexTaskLauncher &launcher, ReductionOpID redop);
+      Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
+                                 ReductionOpID redop, bool deterministic);
     public:
       PhysicalRegion map_region(Context ctx, 
                                 const InlineLauncher &launcher);
