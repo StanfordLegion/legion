@@ -5107,11 +5107,13 @@ namespace Legion {
        * @param ctx enclosing task context
        * @param launcher the task launcher configuration
        * @param redop ID for the reduction op to use for reducing return values
+       * @param deterministic request that the reduced future value be computed 
+       *        in a deterministic way (more expensive than non-deterministic)
        * @return a future result representing the reduction of
        *    all the return values from the index space of tasks
        */
       Future execute_index_space(Context ctx, const IndexTaskLauncher &launcher,
-                                 ReductionOpID redop);
+                               ReductionOpID redop, bool deterministic = false);
 
       /**
        * @deprecated

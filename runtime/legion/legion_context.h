@@ -260,7 +260,7 @@ namespace Legion {
       virtual FutureMap execute_index_space(
                                          const IndexTaskLauncher &launcher) = 0;
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                         ReductionOpID redop) = 0; 
+                                   ReductionOpID redop, bool deterministic) = 0; 
       virtual PhysicalRegion map_region(const InlineLauncher &launcher) = 0;
       virtual ApEvent remap_region(PhysicalRegion region) = 0;
       virtual void unmap_region(PhysicalRegion region) = 0;
@@ -928,7 +928,7 @@ namespace Legion {
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                         ReductionOpID redop);
+                                      ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -1509,7 +1509,7 @@ namespace Legion {
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                         ReductionOpID redop);
+                                      ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       // Unmapping region is the same as for an inner context
@@ -1977,7 +1977,7 @@ namespace Legion {
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                         ReductionOpID redop);
+                                      ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);
@@ -2304,7 +2304,7 @@ namespace Legion {
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
-                                         ReductionOpID redop);
+                                      ReductionOpID redop, bool deterministic);
       virtual PhysicalRegion map_region(const InlineLauncher &launcher);
       virtual ApEvent remap_region(PhysicalRegion region);
       virtual void unmap_region(PhysicalRegion region);

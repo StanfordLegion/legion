@@ -3831,7 +3831,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InnerContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                             ReductionOpID redop)
+                                        ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -3885,7 +3885,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       Future result = 
         task->initialize_task(this, launcher, launch_space, redop, 
-                              runtime->check_privileges);
+                              deterministic, runtime->check_privileges);
       log_task.debug("Registering new index space task with unique id "
                      "%lld and task %s (ID %lld) with high level runtime in "
                      "address space %d",
@@ -3893,7 +3893,7 @@ namespace Legion {
                      task->get_unique_id(), runtime->address_space);
 #else
       Future result = task->initialize_task(this, launcher, launch_space, redop,
-                                            false/*check privileges*/);
+                                      deterministic, false/*check privileges*/);
 #endif
       execute_task_launch(task, true/*index*/, current_trace, 
                           launcher.silence_warnings, launcher.enable_inlining);
@@ -9994,7 +9994,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future ReplicateContext::execute_index_space(
-                         const IndexTaskLauncher &launcher, ReductionOpID redop)
+     const IndexTaskLauncher &launcher, ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
       if (launcher.must_parallelism)
@@ -10050,7 +10050,7 @@ namespace Legion {
       ReplIndexTask *task = runtime->get_available_repl_index_task();
 #ifdef DEBUG_LEGION
       Future result = task->initialize_task(this, launcher, launch_space, redop,
-                                            runtime->check_privileges);
+                                      deterministic, runtime->check_privileges);
       if (owner_shard->shard_id == 0)
         log_task.debug("Registering new index space task with unique id "
                        "%lld and task %s (ID %lld) with high level runtime in "
@@ -10061,7 +10061,7 @@ namespace Legion {
                                     0/*owner shard*/, COLLECTIVE_LOC_45));
 #else
       Future result = task->initialize_task(this, launcher, launch_space, redop,
-                                            false/*check privileges*/);
+                                      deterministic, false/*check privileges*/);
 #endif
       task->initialize_replication(this);
       execute_task_launch(task, true/*index*/, current_trace, 
@@ -12394,7 +12394,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future LeafContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                            ReductionOpID redop)
+                                        ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_EXECUTE_INDEX_SPACE,
@@ -13685,10 +13685,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future InlineContext::execute_index_space(const IndexTaskLauncher &launcher,
-                                              ReductionOpID redop)
+                                        ReductionOpID redop, bool deterministic)
     //--------------------------------------------------------------------------
     {
-      return enclosing->execute_index_space(launcher, redop);
+      return enclosing->execute_index_space(launcher, redop, deterministic);
     }
 
     //--------------------------------------------------------------------------
