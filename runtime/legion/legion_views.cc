@@ -458,21 +458,24 @@ namespace Legion {
       manager->defer_collect_user(this, term_event, to_collect, 
                                   add_ref, remove_ref);
       if (add_ref)
-        add_collectable_reference(mutator);
+        add_collectable_reference(mutator, manager->is_owner());
       if (!to_collect.empty())
         collect_users(to_collect); 
-      if (remove_ref && remove_collectable_reference(mutator))
+      if (remove_ref && 
+          remove_collectable_reference(mutator, manager->is_owner()))
         delete this;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void CollectableView::handle_deferred_collect(
-                     CollectableView *view, const std::set<ApEvent> &to_collect)
+                                            CollectableView *view, 
+                                            const std::set<ApEvent> &to_collect,
+                                            const bool owner_ref)
     //--------------------------------------------------------------------------
     {
       view->collect_users(to_collect);
       // Then remove the gc reference on the object
-      if (view->remove_collectable_reference(NULL))
+      if (view->remove_collectable_reference(NULL, owner_ref))
         delete view;
     }
 
@@ -1662,19 +1665,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::add_collectable_reference(ReferenceMutator *mutator)
+    void ExprView::add_collectable_reference(ReferenceMutator *mutator,
+                                             const bool owner_ref)
     //--------------------------------------------------------------------------
     {
       add_reference();
-      inst_view->add_base_gc_ref(PENDING_GC_REF, mutator);
+      if (owner_ref)
+        inst_view->add_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        inst_view->add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator)
+    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator,
+                                                const bool owner_ref)
     //--------------------------------------------------------------------------
     {
-      if (inst_view->remove_base_gc_ref(PENDING_GC_REF, mutator))
-        delete inst_view;
+      if (owner_ref)
+      {
+        if (inst_view->remove_base_gc_ref(PENDING_GC_REF, mutator))
+          delete inst_view;
+      }
+      else
+      {
+        if (inst_view->remove_base_resource_ref(PENDING_GC_REF))
+          delete inst_view;
+      }
       return remove_reference();
     }
 
@@ -2990,10 +3006,7 @@ namespace Legion {
     void MaterializedView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        manager->add_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_increment(owner_space, mutator);
+      manager->add_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -3001,10 +3014,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // we have a resource reference on the manager so no need to check
-      if (is_owner())
-        manager->remove_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+      manager->remove_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4657,20 +4667,14 @@ namespace Legion {
     void ReductionView::notify_active(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        manager->add_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_increment(owner_space, mutator);
+      manager->add_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_inactive(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (is_owner())
-        manager->remove_nested_gc_ref(did, mutator);
-      else
-        send_remote_gc_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+      manager->remove_nested_gc_ref(did, mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4690,20 +4694,28 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::add_collectable_reference(ReferenceMutator *mutator)
+    void ReductionView::add_collectable_reference(ReferenceMutator *mutator,
+                                                  const bool owner_ref)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mutator != NULL);
 #endif
-      add_base_gc_ref(PENDING_GC_REF, mutator);
+      if (owner_ref)
+        add_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator)
+    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator,
+                                                     const bool owner_ref)
     //--------------------------------------------------------------------------
     {
-      return remove_base_gc_ref(PENDING_GC_REF, mutator);
+      if (owner_ref)
+        return remove_base_gc_ref(PENDING_GC_REF, mutator);
+      else
+        return remove_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
