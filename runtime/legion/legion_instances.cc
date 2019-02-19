@@ -568,6 +568,24 @@ namespace Legion {
       // Add a reference to the layout
       if (layout != NULL)
         layout->add_reference();
+      if (!gc_events.empty())
+      {
+        // On remote nodes we can get users added even when we don't know
+        // were valid since the owner doesn't tell us every time it becomes
+        // valid, hence we need to clean up any event users that we still
+        // have around to remove their references
+#ifdef DEBUG_LEGION
+        assert(!is_owner());
+#endif
+        // There's no need to launch a task to do this, if we're being
+        // deleted it's because the instance was deleted and therefore
+        // all the users are done using it
+        for (std::map<CollectableView*,CollectableInfo>::iterator it = 
+              gc_events.begin(); it != gc_events.end(); it++)
+          CollectableView::handle_deferred_collect(it->first,
+              it->second.view_events, false/*owner ref*/);
+        gc_events.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -671,8 +689,10 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
+      {
         assert(instance.exists());
-      assert(gc_events.empty());
+        assert(gc_events.empty());
+      }
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
@@ -716,12 +736,14 @@ namespace Legion {
       {
         // We do need the lock if we're going to be modifying this
         AutoLock inst(inst_lock);
-        for (std::map<CollectableView*,std::set<ApEvent> >::iterator it =
+        for (std::map<CollectableView*,CollectableInfo>::iterator it =
               gc_events.begin(); it != gc_events.end(); it++)
         {
-          GarbageCollectionArgs args(it->first, new std::set<ApEvent>());
-          RtEvent precondition = Runtime::protect_merge_events(it->second);
-          args.to_collect->swap(it->second);
+          GarbageCollectionArgs args(it->first, 
+              new std::set<ApEvent>(), is_owner());
+          const RtEvent precondition = 
+            Runtime::protect_merge_events(it->second.view_events);
+          args.to_collect->swap(it->second.view_events);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_WORK_PRIORITY, precondition);
         }
@@ -1010,26 +1032,26 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock);
-      std::set<ApEvent> &view_events = gc_events[view]; 
-      if (view_events.empty())
+      CollectableInfo &info = gc_events[view]; 
+      if (info.view_events.empty())
         add_ref = true;
-      view_events.insert(term_event);
-      // If the number of events is too big then prune them out
-      if (view_events.size() >= runtime->gc_epoch_size)
+      info.view_events.insert(term_event);
+      // Only do the pruning for every so many adds
+      if ((++info.events_added) == runtime->gc_epoch_size)
       {
-        for (std::set<ApEvent>::iterator it = view_events.begin();
-              it != view_events.end(); /*nothing*/)
+        for (std::set<ApEvent>::iterator it = info.view_events.begin();
+              it != info.view_events.end(); /*nothing*/)
         {
           if (it->has_triggered())
           {
             to_collect.insert(*it);
             std::set<ApEvent>::iterator to_delete = it++;
-            view_events.erase(to_delete);
+            info.view_events.erase(to_delete);
           }
           else
             it++;
         }
-        if (view_events.empty())
+        if (info.view_events.empty())
         {
           gc_events.erase(view);
           if (add_ref)
@@ -1037,6 +1059,8 @@ namespace Legion {
           else
             remove_ref = true;
         }
+        else // Reset the counter for the next time
+          info.events_added = 0;
       }
     }
 
@@ -1046,12 +1070,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock inst(inst_lock,1,false/*exclusive*/);
-      for (std::map<CollectableView*,std::set<ApEvent> >::const_iterator git =
+      for (std::map<CollectableView*,CollectableInfo>::const_iterator git =
             gc_events.begin(); git != gc_events.end(); git++)
       {
         // Make sure to test these for having triggered or risk a shutdown hang
-        for (std::set<ApEvent>::const_iterator it = git->second.begin();
-              it != git->second.end(); it++)
+        for (std::set<ApEvent>::const_iterator it = 
+              git->second.view_events.begin(); it != 
+              git->second.view_events.end(); it++)
           if (!it->has_triggered())
             preconditions.insert(*it);
       }

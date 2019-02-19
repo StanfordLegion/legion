@@ -112,12 +112,23 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
       public:
-        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
+        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect, 
+                              const bool owner)
           : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
-            view(v), to_collect(collect) { }
+            view(v), to_collect(collect), owner_ref(owner) { }
       public:
         CollectableView *const view;
         std::set<ApEvent> *const to_collect;
+        const bool owner_ref;
+      };
+    public:
+      struct CollectableInfo {
+      public:
+        CollectableInfo(void) : events_added(0) { }
+      public:
+        std::set<ApEvent> view_events;
+        // Events added since the last collection of view events
+        unsigned events_added;
       };
     public:
       PhysicalManager(RegionTreeForest *ctx, MemoryManager *memory_manager,
@@ -239,7 +250,7 @@ namespace Legion {
       std::set<InnerContext*> active_contexts;
     private:
       // Events that have to trigger before we can remove our GC reference
-      std::map<CollectableView*,std::set<ApEvent> > gc_events;
+      std::map<CollectableView*,CollectableInfo> gc_events;
     };
 
     /**
