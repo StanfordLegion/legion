@@ -4326,42 +4326,50 @@ function codegen.expr_partition_equal(cx, node)
 
     actions = quote
       [actions]
+      var [ip]
       var region_domain = c.legion_index_space_get_domain(
         [cx.runtime], [region.value].impl.index_space)
-      var region_rect = [domain_get_rect](region_domain)
       var color_domain = c.legion_index_space_get_domain(
         [cx.runtime], [colors.value].impl)
-      var color_rect = [domain_get_rect](color_domain)
+      if c.legion_domain_is_dense(region_domain) and c.legion_domain_is_dense(color_domain) then
+        var region_rect = [domain_get_rect](region_domain)
+        var color_rect = [domain_get_rect](color_domain)
 
-      var [transform]
-      var [extent]
-      [data.range(dim):map(
-         function(i)
-           local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
-           local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
-           return quote
-             var block_size = ([block] + [colors] - 1) / [colors]
-             for j = 0, dim do
-               if i == j then
-                 [transform].trans[i][j] = block_size
-               else
-                 [transform].trans[i][j] = 0
+        var [transform]
+        var [extent]
+        [data.range(dim):map(
+           function(i)
+             local block = `(region_rect.hi.x[ [i] ] - region_rect.lo.x[ [i] ] + 1)
+             local colors = `(color_rect.hi.x[ [i] ] - color_rect.lo.x[ [i] ] + 1)
+             return quote
+               var block_size = ([block] + [colors] - 1) / [colors]
+               for j = 0, dim do
+                 if i == j then
+                   [transform].trans[i][j] = block_size
+                 else
+                   [transform].trans[i][j] = 0
+                 end
                end
-             end
 
-             [extent].lo.x[ [i] ] =
-               region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size
-             [extent].hi.x[ [i] ] =
-               region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size + block_size - 1
-           end
-         end)]
-      var dtransform = [create_domain_transform]([transform])
-      var dextent = [create_domain]([extent])
-      var [ip] = c.legion_index_partition_create_by_restriction(
-        [cx.runtime], [cx.context], [region.value].impl.index_space,
-        [colors.value].impl,
-        dtransform, dextent, c.DISJOINT_KIND,
-        -1 --[[ AUTO_GENERATE_ID ]])
+               [extent].lo.x[ [i] ] =
+                 region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size
+               [extent].hi.x[ [i] ] =
+                 region_rect.lo.x[ [i] ] - color_rect.lo.x[ [i] ] * block_size + block_size - 1
+             end
+           end)]
+        var dtransform = [create_domain_transform]([transform])
+        var dextent = [create_domain]([extent])
+        [ip] = c.legion_index_partition_create_by_restriction(
+          [cx.runtime], [cx.context], [region.value].impl.index_space,
+          [colors.value].impl,
+          dtransform, dextent, c.DISJOINT_KIND,
+          -1 --[[ AUTO_GENERATE_ID ]])
+      else
+        [ip] = c.legion_index_partition_create_equal(
+          [cx.runtime], [cx.context], [region.value].impl.index_space,
+          [colors.value].impl, 1,
+          -1 --[[ AUTO_GENERATE_ID ]])
+      end
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
       [tag_imported(cx, lp)]
