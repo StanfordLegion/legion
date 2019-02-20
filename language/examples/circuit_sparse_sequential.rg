@@ -126,8 +126,8 @@ struct ghost_range {
 }
 
 fspace wire {
-  in_ptr : int1d,
-  out_ptr : int1d,
+  inN : int1d,
+  outN : int1d,
   inductance : float,
   resistance : float,
   wire_cap : float,
@@ -275,7 +275,7 @@ do
         in_node += pn_ptr_offset - snpp
       end
 
-      wire.in_ptr = [int1d](in_node)
+      wire.inN = [int1d](in_node)
 
       var out_node = 0
       if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
@@ -302,7 +302,7 @@ do
         max_shared_node_id = max(max_shared_node_id, out_node)
         min_shared_node_id = min(min_shared_node_id, out_node)
       end
-      wire.out_ptr = [int1d](out_node)
+      wire.outN = [int1d](out_node)
     end
     offset += conf.wires_per_piece
   end
@@ -329,7 +329,7 @@ task calculate_new_currents(steps : uint,
                             rw : region(ispace(int1d), wire))
 where
   reads(rn.node_voltage,
-        rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
+        rw.{inN, outN, inductance, resistance, wire_cap}),
   reads writes(rw.{current, voltage})
 do
   var dt : float = DELTAT
@@ -392,11 +392,11 @@ do
     end
 
     -- Pin the outer voltages to the node voltages
-    var in_ptr = rw[w].in_ptr
-    var in_voltage = rn[in_ptr].node_voltage
+    var inN = rw[w].inN
+    var in_voltage = rn[inN].node_voltage
     temp_v[0] = in_voltage
-    var out_ptr = rw[w].out_ptr
-    var out_voltage = rn[out_ptr].node_voltage
+    var outN = rw[w].outN
+    var out_voltage = rn[outN].node_voltage
     temp_v[WIRE_SEGMENTS] = out_voltage
 
     -- Solve the RLC model iteratively
@@ -447,7 +447,7 @@ __demand(__parallel)
 task distribute_charge(rn : region(ispace(int1d), node),
                        rw : region(ispace(int1d), wire))
 where
-  reads(rw.{in_ptr, out_ptr, current._0, current._9}),
+  reads(rw.{inN, outN, current._0, current._9}),
   reduces +(rn.charge)
 do
   var dt = DELTAT
@@ -456,10 +456,10 @@ do
     var out_current : float = rw[w].current._9
     var in_current_dt = -dt * in_current
     var out_current_dt = dt * out_current
-    var in_ptr = rw[w].in_ptr
-    var out_ptr = rw[w].out_ptr
-    rn[in_ptr].charge += in_current_dt
-    rn[out_ptr].charge += out_current_dt
+    var inN = rw[w].inN
+    var outN = rw[w].outN
+    rn[inN].charge += in_current_dt
+    rn[outN].charge += out_current_dt
   end
 end
 
@@ -514,8 +514,8 @@ task toplevel()
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
-  var all_nodes = region(ispace(int1d, num_circuit_nodes), node)
-  var all_wires = region(ispace(int1d, num_circuit_wires), wire)
+  var rn = region(ispace(int1d, num_circuit_nodes), node)
+  var rw = region(ispace(int1d, num_circuit_wires), wire)
 
   -- report mesh size in bytes
   do
@@ -530,8 +530,8 @@ task toplevel()
 
   var color_space = ispace(int1d, num_superpieces)
 
-  var p_nodes = partition(equal, all_nodes, color_space)
-  var p_wires = partition(equal, all_wires, color_space)
+  var p_nodes = partition(equal, rn, color_space)
+  var p_wires = partition(equal, rw, color_space)
   do
     for color in color_space do
       init_piece([int](color), conf, p_nodes[color], p_wires[color])
@@ -547,10 +547,11 @@ task toplevel()
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
   __parallelize_with color_space do
+    __demand(__spmd)
     for j = 0, num_loops do
-      calculate_new_currents(steps, all_nodes, all_wires)
-      distribute_charge(all_nodes, all_wires)
-      update_voltages(all_nodes)
+      calculate_new_currents(steps, rn, rw)
+      distribute_charge(rn, rw)
+      update_voltages(rn)
     end
   end
   __fence(__execution, __block)
