@@ -112,14 +112,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_COLLECT_ID;
       public:
-        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect, 
-                              const bool owner)
+        GarbageCollectionArgs(CollectableView *v, std::set<ApEvent> *collect)
           : LgTaskArgs<GarbageCollectionArgs>(implicit_provenance), 
-            view(v), to_collect(collect), owner_ref(owner) { }
+            view(v), to_collect(collect) { }
       public:
         CollectableView *const view;
         std::set<ApEvent> *const to_collect;
-        const bool owner_ref;
       };
     public:
       struct CollectableInfo {

@@ -570,20 +570,13 @@ namespace Legion {
         layout->add_reference();
       if (!gc_events.empty())
       {
-        // On remote nodes we can get users added even when we don't know
-        // were valid since the owner doesn't tell us every time it becomes
-        // valid, hence we need to clean up any event users that we still
-        // have around to remove their references
-#ifdef DEBUG_LEGION
-        assert(!is_owner());
-#endif
         // There's no need to launch a task to do this, if we're being
         // deleted it's because the instance was deleted and therefore
         // all the users are done using it
         for (std::map<CollectableView*,CollectableInfo>::iterator it = 
               gc_events.begin(); it != gc_events.end(); it++)
           CollectableView::handle_deferred_collect(it->first,
-              it->second.view_events, false/*owner ref*/);
+                                                   it->second.view_events);
         gc_events.clear();
       }
     }
@@ -689,10 +682,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       if (is_owner())
-      {
         assert(instance.exists());
-        assert(gc_events.empty());
-      }
 #endif
       // Will be null for virtual managers
       if (memory_manager != NULL)
@@ -739,8 +729,7 @@ namespace Legion {
         for (std::map<CollectableView*,CollectableInfo>::iterator it =
               gc_events.begin(); it != gc_events.end(); it++)
         {
-          GarbageCollectionArgs args(it->first, 
-              new std::set<ApEvent>(), is_owner());
+          GarbageCollectionArgs args(it->first, new std::set<ApEvent>());
           const RtEvent precondition = 
             Runtime::protect_merge_events(it->second.view_events);
           args.to_collect->swap(it->second.view_events);
