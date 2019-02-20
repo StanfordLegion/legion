@@ -20048,7 +20048,7 @@ namespace Legion {
             const PhysicalManager::GarbageCollectionArgs *collect_args =
               (const PhysicalManager::GarbageCollectionArgs*)args;
             CollectableView::handle_deferred_collect(collect_args->view,
-                    *collect_args->to_collect, collect_args->owner_ref);
+                                                    *collect_args->to_collect);
             delete collect_args->to_collect;
             break;
           }

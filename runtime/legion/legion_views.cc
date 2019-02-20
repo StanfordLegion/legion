@@ -458,24 +458,22 @@ namespace Legion {
       manager->defer_collect_user(this, term_event, to_collect, 
                                   add_ref, remove_ref);
       if (add_ref)
-        add_collectable_reference(mutator, manager->is_owner());
+        add_collectable_reference(mutator);
       if (!to_collect.empty())
         collect_users(to_collect); 
-      if (remove_ref && 
-          remove_collectable_reference(mutator, manager->is_owner()))
+      if (remove_ref && remove_collectable_reference(mutator))
         delete this;
     }
 
     //--------------------------------------------------------------------------
     /*static*/ void CollectableView::handle_deferred_collect(
                                             CollectableView *view, 
-                                            const std::set<ApEvent> &to_collect,
-                                            const bool owner_ref)
+                                            const std::set<ApEvent> &to_collect)
     //--------------------------------------------------------------------------
     {
       view->collect_users(to_collect);
       // Then remove the gc reference on the object
-      if (view->remove_collectable_reference(NULL, owner_ref))
+      if (view->remove_collectable_reference(NULL))
         delete view;
     }
 
@@ -1665,23 +1663,24 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ExprView::add_collectable_reference(ReferenceMutator *mutator,
-                                             const bool owner_ref)
+    void ExprView::add_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       add_reference();
-      if (owner_ref)
+      // Only the logical owner adds the full GC reference as this is where
+      // the actual garbage collection algorithm will take place and we know
+      // that we have all the valid gc event users
+      if (inst_view->is_logical_owner())
         inst_view->add_base_gc_ref(PENDING_GC_REF, mutator);
       else
         inst_view->add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator,
-                                                const bool owner_ref)
+    bool ExprView::remove_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (owner_ref)
+      if (inst_view->is_logical_owner())
       {
         if (inst_view->remove_base_gc_ref(PENDING_GC_REF, mutator))
           delete inst_view;
@@ -3021,15 +3020,25 @@ namespace Legion {
     void MaterializedView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_valid_ref(did, mutator);
+      // The logical owner is where complete set of users is and is therefore
+      // where garbage collection will take place so we need to send our 
+      // valid update there if we're not the owner, otherwise we send it 
+      // down to the manager
+      if (is_logical_owner())
+        manager->add_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_increment(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
     void MaterializedView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // we have a resource reference on the manager so no need to check
-      manager->remove_nested_valid_ref(did, mutator);
+      if (is_logical_owner())
+        // we have a resource reference on the manager so no need to check
+        manager->remove_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -4681,38 +4690,48 @@ namespace Legion {
     void ReductionView::notify_valid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      manager->add_nested_valid_ref(did, mutator);
+      // The logical owner is where complete set of users is and is therefore
+      // where garbage collection will take place so we need to send our 
+      // valid update there if we're not the owner, otherwise we send it 
+      // down to the manager
+      if (is_logical_owner())
+        manager->add_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_increment(logical_owner, mutator);
     }
 
     //--------------------------------------------------------------------------
     void ReductionView::notify_invalid(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      // No need to check for deletion of the manager since
-      // we know that we also hold a resource reference
-      manager->remove_nested_valid_ref(did, mutator);
+      if (is_logical_owner())
+        // we have a resource reference on the manager so no need to check
+        manager->remove_nested_valid_ref(did, mutator);
+      else
+        send_remote_valid_decrement(logical_owner,RtEvent::NO_RT_EVENT,mutator);
     }
 
     //--------------------------------------------------------------------------
-    void ReductionView::add_collectable_reference(ReferenceMutator *mutator,
-                                                  const bool owner_ref)
+    void ReductionView::add_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(mutator != NULL);
 #endif
-      if (owner_ref)
+      // Only the logical owner adds the full GC reference as this is where
+      // the actual garbage collection algorithm will take place and we know
+      // that we have all the valid gc event users
+      if (is_logical_owner())
         add_base_gc_ref(PENDING_GC_REF, mutator);
       else
         add_base_resource_ref(PENDING_GC_REF);
     }
 
     //--------------------------------------------------------------------------
-    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator,
-                                                     const bool owner_ref)
+    bool ReductionView::remove_collectable_reference(ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
-      if (owner_ref)
+      if (is_logical_owner())
         return remove_base_gc_ref(PENDING_GC_REF, mutator);
       else
         return remove_base_resource_ref(PENDING_GC_REF);

@@ -227,18 +227,15 @@ namespace Legion {
     public:
       virtual ~CollectableView(void) { }
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator,
-                                             const bool owner_ref) = 0;
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator,
-                                                const bool owner_ref) = 0;
+      virtual void add_collectable_reference(ReferenceMutator *mutator) = 0;
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator) = 0;
       virtual void update_gc_events(const std::set<ApEvent> &term_events) = 0;
       virtual void collect_users(const std::set<ApEvent> &to_collect) = 0;
     public:
       void defer_collect_user(PhysicalManager *manager, ApEvent term_event,
                               ReferenceMutator *mutator = NULL);
       static void handle_deferred_collect(CollectableView *view,
-                                          const std::set<ApEvent> &to_collect,
-                                          const bool owner_ref);
+                                          const std::set<ApEvent> &to_collect);
     };
 
     /**
@@ -267,10 +264,8 @@ namespace Legion {
     public:
       ExprView& operator=(const ExprView &rhs);
     public:
-      virtual void add_collectable_reference(ReferenceMutator *mutator,
-                                             const bool owner_ref);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator,
-                                                const bool owner_ref);
+      virtual void add_collectable_reference(ReferenceMutator *mutator);
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
       virtual void collect_users(const std::set<ApEvent> &to_collect);
     public:
@@ -697,10 +692,8 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
       virtual void notify_valid(ReferenceMutator *mutator);
       virtual void notify_invalid(ReferenceMutator *mutator);
-      virtual void add_collectable_reference(ReferenceMutator *mutator,
-                                             const bool owner_ref);
-      virtual bool remove_collectable_reference(ReferenceMutator *mutator,
-                                                const bool owner_ref);
+      virtual void add_collectable_reference(ReferenceMutator *mutator);
+      virtual bool remove_collectable_reference(ReferenceMutator *mutator);
       virtual void collect_users(const std::set<ApEvent> &term_events);
       virtual void update_gc_events(const std::set<ApEvent> &term_events);
     public:
