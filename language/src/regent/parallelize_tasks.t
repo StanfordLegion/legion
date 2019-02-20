@@ -45,6 +45,161 @@ local function find_or_create(map, key, init)
   return value
 end
 
+local hash_set = {}
+
+hash_set.__index = hash_set
+
+function hash_set.new()
+  local s = {
+    __set = data.newmap(),
+    __len = false,
+    __hash = false,
+  }
+  return setmetatable(s, hash_set)
+end
+
+function hash_set.from_list(l)
+  local m = data.newmap()
+  l:map(function(v) m[v] = true end)
+  local s = {
+    __set = m,
+    __len = #l,
+    __hash = false,
+  }
+  return setmetatable(s, hash_set)
+end
+
+function hash_set:copy()
+  local s = {
+    __set = self.__set:copy(),
+    __len = self.__len,
+    __hash = self.__hash,
+  }
+  return setmetatable(s, hash_set)
+end
+
+function hash_set:insert(v)
+  self.__set[v] = true
+  self.__len = false
+  self.__hash = false
+end
+
+function hash_set:insert_all(other)
+  for v, _ in other.__set:items() do
+    self.__set[v] = true
+  end
+  self.len = false
+  self.__hash = false
+end
+
+function hash_set:remove(v)
+  self.__set[v] = nil
+  self.__len = false
+  self.__hash = false
+end
+
+function hash_set:remove_all(other)
+  for v, _ in other.__set:items() do
+    self.__set[v] = nil
+  end
+  self.len = false
+  self.__hash = false
+end
+
+function hash_set:has(v)
+  return self.__set[v]
+end
+
+function hash_set:__le(other)
+  for v, _ in self.__set:items() do
+    if not other:has(v) then return false end
+  end
+  return true
+end
+
+function hash_set:__mul(other)
+  local result = hash_set.new()
+  for v, _ in other.__set:items() do
+    if self:has(v) then
+      result.__set[v] = true
+    end
+  end
+  return result
+end
+
+function hash_set:__add(other)
+  local copy = self:copy()
+  copy:insert_all(other)
+  return copy
+end
+
+function hash_set:__sub(other)
+  local copy = self:copy()
+  copy:remove_all(other)
+  return copy
+end
+
+function hash_set:map(fn)
+  local result = hash_set.new()
+  for v, _ in self.__set:items() do
+    result.__set[fn(v)] = true
+  end
+  return result
+end
+
+function hash_set:map_table(tbl)
+  return self:map(function(k) return tbl[k] end)
+end
+
+function hash_set:foreach(fn)
+  for v, _ in self.__set:items() do
+    fn(v)
+  end
+end
+
+function hash_set:to_list()
+  local l = terralib.newlist()
+  for v, _ in self.__set:items() do l:insert(v) end
+  return l
+end
+
+function hash_set:__tostring()
+  local str = nil
+  for v, _ in self.__set:items() do
+    if str == nil then
+      str = tostring(v)
+    else
+      str = str .. "," .. tostring(v)
+    end
+  end
+  return str or ""
+end
+
+function hash_set:hash()
+  if not self.__hash then
+    self:canonicalize()
+    self.__hash = tostring(self)
+  end
+  return self.__hash
+end
+
+function hash_set:canonicalize(fn)
+  local l = self:to_list()
+  local fn = fn or function(v1, v2) return v1:hash() < v2:hash() end
+  table.sort(l, fn)
+  local s = hash_set.from_list(l)
+  self.__set = s.__set
+end
+
+function hash_set:size()
+  if not self.__len then
+    local len = 0
+    for v, _ in self.__set:items() do len = len + 1 end
+    self.__len = len
+  end
+  return self.__len
+end
+
 local function intersect(set1, set2)
   local result = data.newmap()
   for k, _ in set1:items() do
@@ -83,6 +238,18 @@ local function set_map_table(set, tbl)
   return set_map(set, function(k) return tbl[k] end)
 end
 
+local function set_to_string(map)
+  local str = nil
+  for k, _ in map:items() do
+    if str == nil then
+      str = tostring(k)
+    else
+      str = str .. "," .. tostring(k)
+    end
+  end
+  return str or ""
+end
+
 local range_complex = std.newsymbol("__top__")
 
 local new_range
@@ -113,7 +280,8 @@ function graph:dump()
   local node_ids = {}
   for v, l in self.vertices:items() do
     node_ids[v] = next_id
-    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(v) .. " : " .. tostring(l) .. "\" ];")
+    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(v) ..
+        " : " .. tostring(l) .. "\" ];")
     next_id = next_id + 1
   end
   for src, edges in self.edges:items() do
@@ -554,27 +722,55 @@ function partitioning_constraints:get_complexity()
   return complexity
 end
 
+function partitioning_constraints:find_path_to_disjoint_child(range)
+  local found_any = false
+  local found_path = nil
+  local function visit_children(edges)
+    if edges == nil then return end
+    for key, child in edges:items() do
+      local found, path = self:find_path_to_disjoint_child(child)
+      assert(not (found_any and found))
+      if found then
+        found_any = found
+        found_path = path
+        found_path:insert({key, range})
+      end
+    end
+  end
+  visit_children(self.subset_constraints[range])
+  visit_children(self.image_constraints[range])
+  visit_children(self.analytic_constraints[range])
+  if found_any then
+    assert(found_path ~= nil)
+    return found_any, found_path
+  else
+    local partition = self:get_partition(range)
+    return partition.disjoint, terralib.newlist({{nil, range}})
+  end
+end
+
+function partitioning_constraints:find_paths_to_disjoint_children(sources)
+  local paths = terralib.newlist()
+  for source, _ in sources:items() do
+    local found, path = self:find_path_to_disjoint_child(source)
+    if found then
+      assert(path ~= nil)
+      paths:insert(path)
+    else
+      paths:insert(terralib.newlist({source}))
+    end
+  end
+  return paths
+end
+
 local parallel_task_context = {}
 
 parallel_task_context.__index = parallel_task_context
-
-local function set_to_string(map)
-  local str = nil
-  for k, _ in map:items() do
-    if str == nil then
-      str = tostring(k)
-    else
-      str = str .. "," .. tostring(k)
-    end
-  end
-  return str or ""
-end
 
 function parallel_task_context.new(task)
   local cx = {
     task                     = task,
     env                      = data.newmap(),
-    back_edges               = data.newmap(),
     sources                  = data.newmap(),
     sources_by_regions       = data.newmap(),
 
@@ -625,7 +821,7 @@ function parallel_task_context:print_all_constraints()
   for region_symbol, accesses_summary in self.field_accesses_summary:items() do
     for field_path, summary in accesses_summary:items() do
       local ranges_set, privilege = unpack(summary)
-      print("    " .. tostring(region_symbol) .. "[" .. set_to_string(ranges_set) .. "]." ..
+      print("    " .. tostring(region_symbol) .. "[" .. tostring(ranges_set) .. "]." ..
         field_path:mkstring("", ".", "") .. " @ " .. tostring(privilege))
     end
   end
@@ -637,7 +833,6 @@ function parallel_task_context:add_field_access(region_symbol, range, field_path
   if not (partition == nil or partition.region == region_symbol) then
     local new_range =
       self.constraints:find_or_create_subset_constraint(range, region_symbol)
-    self.back_edges[new_range] = range
     range = new_range
     partition = self.constraints:get_partition(range)
   end
@@ -689,11 +884,11 @@ function parallel_task_context:summarize_accesses()
   for region_symbol, all_field_accesses in self.field_accesses:items() do
     local accesses_summary = find_or_create(self.field_accesses_summary, region_symbol)
     for field_path, accesses in all_field_accesses:items() do
-      local ranges_set = data.newmap()
+      local ranges_set = hash_set.new()
       local join = nil
       for range, privilege in accesses:items() do
         local new_range = range_mapping[range] or range
-        ranges_set[new_range] = true
+        ranges_set:insert(new_range)
         join = std.meet_privilege(join, privilege)
       end
       accesses_summary[field_path] = { ranges_set, join }
@@ -711,17 +906,11 @@ function parallel_task_context:summarize_accesses()
 end
 
 function parallel_task_context:find_or_create_image_constraint(src_range, region_symbol, field_path)
-  local dst_range =
-    self.constraints:find_or_create_image_constraint(src_range, region_symbol, field_path)
-  self.back_edges[dst_range] = src_range
-  return dst_range
+  return self.constraints:find_or_create_image_constraint(src_range, region_symbol, field_path)
 end
 
 function parallel_task_context:find_or_create_analytic_constraint(src_range, offset)
-  local dst_range =
-    self.constraints:find_or_create_analytic_constraint(src_range, offset)
-  self.back_edges[dst_range] = src_range
-  return dst_range
+  return self.constraints:find_or_create_analytic_constraint(src_range, offset)
 end
 
 function parallel_task_context:set_range(symbol, range)
@@ -1221,6 +1410,7 @@ function solver_context.new()
     sources_by_regions = data.newmap(),
     constraints = partitioning_constraints.new(),
     field_accesses = data.newmap(),
+    mappings_by_access_paths = data.newmap()
   }
   return setmetatable(cx, solver_context)
 end
@@ -1248,8 +1438,7 @@ local function find_unifiable_ranges(constraints1, constraints2, source1, source
   return true, mapping
 end
 
-function solver_context:unify(new_constraints, region_mapping)
-  new_constraints:print_all_constraints()
+function solver_context:unify(name, new_constraints, region_mapping)
   if new_constraints.constraints:is_empty() then
     return
   elseif self.constraints:is_empty() then
@@ -1268,8 +1457,8 @@ function solver_context:unify(new_constraints, region_mapping)
         local accesses = find_or_create(all_accesses, field_path)
         local ranges_set, privilege = unpack(summary)
         if privilege == "reads_writes" then privilege = std.writes end
-        local my_ranges_set = find_or_create(accesses, privilege)
-        set_union_destructive(my_ranges_set, ranges_set)
+        local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
+        my_ranges_set:insert_all(ranges_set)
       end
     end
     return
@@ -1309,11 +1498,6 @@ function solver_context:unify(new_constraints, region_mapping)
     end
   end
 
-  print("* Mapping for " .. tostring(new_constraints.task.name))
-  for from, to in range_mapping:items() do
-    print("    " .. tostring(from) .. " => " .. tostring(to))
-  end
-
   self.constraints:join(to_unify, range_mapping)
 
   for region, accesses_summary in new_constraints.field_accesses_summary:items() do
@@ -1323,14 +1507,355 @@ function solver_context:unify(new_constraints, region_mapping)
       local accesses = find_or_create(all_accesses, field_path)
       local ranges_set, privilege = unpack(summary)
       if privilege == "reads_writes" then privilege = std.writes end
-      local my_ranges_set = find_or_create(accesses, privilege)
-      set_union_destructive(my_ranges_set, set_map_table(ranges_set, range_mapping))
+      local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
+      my_ranges_set:insert_all(ranges_set:map_table(range_mapping))
     end
   end
+
+  return range_mapping
+end
+
+local function create_equal_partition(variable, region_symbol, color_space_symbol)
+  local partition_type = std.partition(std.disjoint, region_symbol, color_space_symbol)
+  variable:settype(partition_type)
+  return ast.typed.stat.Var {
+    symbol = variable,
+    type = partition_type,
+    value = ast.typed.expr.PartitionEqual {
+      region = ast.typed.expr.ID {
+        value = region_symbol,
+        expr_type = std.rawref(&region_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      colors = ast.typed.expr.ID {
+        value = color_space_symbol,
+        expr_type = std.rawref(&color_space_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      expr_type = partition_type,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function create_preimage_partition(variable, region_symbol, src_partition, key)
+  local src_partition_type = src_partition:gettype()
+  local partition_type = std.partition(src_partition_type.disjointness, region_symbol,
+      src_partition_type.color_space_symbol)
+  variable:settype(partition_type)
+  local mapping_region_symbol, field_path = unpack(key)
+  return ast.typed.stat.Var {
+    symbol = variable,
+    type = partition_type,
+    value = ast.typed.expr.Preimage {
+      expr_type = partition_type,
+      parent = ast.typed.expr.ID {
+        value = region_symbol,
+        expr_type = std.rawref(&region_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      partition = ast.typed.expr.ID {
+        value = src_partition,
+        expr_type = std.rawref(&src_partition:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      region = ast.typed.expr.RegionRoot {
+        expr_type = mapping_region_symbol:gettype(),
+        region = ast.typed.expr.ID {
+          value = mapping_region_symbol,
+          expr_type = std.rawref(&mapping_region_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        fields = terralib.newlist {field_path},
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function create_image_partition(variable, region_symbol, src_partition, key)
+  local partition_type = std.partition(std.aliased, region_symbol,
+      src_partition:gettype().color_space_symbol)
+  variable:settype(partition_type)
+  local mapping_region_symbol, field_path = unpack(key)
+  return ast.typed.stat.Var {
+    symbol = variable,
+    type = partition_type,
+    value = ast.typed.expr.Image {
+      expr_type = partition_type,
+      parent = ast.typed.expr.ID {
+        value = region_symbol,
+        expr_type = std.rawref(&region_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      partition = ast.typed.expr.ID {
+        value = src_partition,
+        expr_type = std.rawref(&src_partition:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      region = ast.typed.expr.RegionRoot {
+        expr_type = mapping_region_symbol:gettype(),
+        region = ast.typed.expr.ID {
+          value = mapping_region_symbol,
+          expr_type = std.rawref(&mapping_region_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        fields = terralib.newlist {field_path},
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local op_name = {
+  ["|"] = "or",
+  ["-"] = "minus",
+}
+
+local function create_partition_by_binary_op(lhs, rhs, op)
+  if rhs == nil then return lhs, nil end
+  local lhs_type = lhs:gettype()
+  local partition_type = std.partition(std.aliased,
+      lhs_type.parent_region_symbol, lhs_type.colors_symbol)
+  local variable = std.newsymbol(partition_type,
+      lhs:getname() .. "_" .. op_name[op] .. "_" .. rhs:getname())
+  return variable, ast.typed.stat.Var {
+    symbol = variable,
+    type = partition_type,
+    value = ast.typed.expr.Binary {
+      op = op,
+      expr_type = partition_type,
+      lhs = ast.typed.expr.ID {
+        value = lhs,
+        expr_type = std.rawref(&lhs_type),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      rhs = ast.typed.expr.ID {
+        value = rhs,
+        expr_type = std.rawref(&rhs:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function create_union_partition(lhs, rhs)
+  return create_partition_by_binary_op(lhs, rhs, "|")
+end
+
+local function create_difference_partition(lhs, rhs)
+  return create_partition_by_binary_op(lhs, rhs, "-")
+end
+
+local function create_union_partitions(partitions, cached_unions)
+  local stats = terralib.newlist()
+  if #partitions == 1 then return partitions[1], stats end
+
+  -- Find the existing partitions that cover the current set of ranges
+  local remaining = hash_set.from_list(partitions)
+  local subsets = terralib.newlist()
+  for ranges, partition in cached_unions:items() do
+    if ranges <= remaining then
+      subsets:insert({ranges, partition})
+    end
+  end
+  table.sort(subsets, function(p1, p2) return p1[1]:size() > p2[1]:size() end)
+
+  local to_join = terralib.newlist()
+  for idx = 1, #subsets do
+    local subset, partition = unpack(subsets[idx])
+    if subset <= remaining then
+      remaining:remove_all(subset)
+      to_join:insert({subset, partition})
+    end
+    if remaining:size() <= 1 then break end
+  end
+  to_join:insertall(remaining:to_list():map(function(range)
+    local singleton = hash_set.new()
+    singleton:insert(range)
+    return {singleton, range}
+  end))
+
+  while #to_join > 1 do
+    local results = terralib.newlist()
+    for idx = 1, #to_join, 2 do
+      local lhs_ranges, lhs = unpack(to_join[idx])
+      local rhs_ranges, rhs = unpack(to_join[idx + 1] or {hash_set.new(), nil})
+      local result, stat = create_union_partition(lhs, rhs)
+      local all_ranges = lhs_ranges + rhs_ranges
+      if stat ~= nil then
+        stats:insert(stat)
+        cached_unions[all_ranges] = result
+      end
+      results:insert({all_ranges, result})
+    end
+    to_join = results
+  end
+
+  return to_join[1][2], stats
+end
+
+function solver_context:synthesize_partitions(color_space_symbol)
+  local stats = terralib.newlist()
+
+  local created = data.newmap()
+
+  -- First, we find paths to disjoint child ranges. For each of the paths,
+  -- we create a series of preimage partitions in the reverse order.
+  local paths = self.constraints:find_paths_to_disjoint_children(self.sources)
+  paths:map(function(path)
+    local parent = nil
+    for idx = 1, #path do
+      local key, range = unpack(path[idx])
+      local partition = self.constraints:get_partition(range)
+      assert(created[range] == nil)
+      created[range] = true
+      if key == nil then
+        assert(parent == nil)
+        stats:insert(create_equal_partition(range, partition.region, color_space_symbol))
+      else
+        assert(parent ~= nil)
+        stats:insert(
+          create_preimage_partition(range, partition.region, parent, key))
+      end
+      parent = range
+    end
+  end)
+
+  -- Once we create all disjoint partitions, we derive all dependent partitions
+  local worklist = paths:map(function(path)
+    local key, range = unpack(path[#path])
+    return range
+  end)
+  local idx = 1
+  while idx <= #worklist do
+    local src_range = worklist[idx]
+    idx = idx + 1
+    -- TODO: We need to create partitions other than image partitions
+    local image_constraints = self.constraints.image_constraints[src_range]
+    if image_constraints ~= nil then
+      for key, dst_range in image_constraints:items() do
+        if created[dst_range] == nil then
+          local dst_partition = self.constraints:get_partition(dst_range)
+          stats:insert(
+            create_image_partition(dst_range, dst_partition.region, src_range, key))
+          created[dst_range] = true
+        end
+        worklist:insert(dst_range)
+      end
+    end
+  end
+
+  -- Finally, we create union partitions for accesses with multiple ranges
+  local union_partitions = data.newmap()
+  local diff_partitions = data.newmap()
+  local mappings_by_range_sets = data.newmap()
+
+  for region_symbol, accesses_summary in self.field_accesses:items() do
+    for field_path, summary in accesses_summary:items() do
+      local all_ranges = hash_set.new()
+      local has_read = false
+      local has_write = false
+      local has_reduce = false
+
+      for privilege, range_set in summary:items() do
+        all_ranges:insert_all(range_set)
+        has_read = has_read or privilege == std.reads
+        has_write = has_write or privilege == std.writes
+        has_reduce = has_reduce or std.is_reduce(privilege)
+      end
+
+      local mapping = nil
+
+      if all_ranges:size() == 1 then
+        local range = all_ranges:to_list()[1]
+        mapping = data.newmap()
+        mapping[range] = range
+
+      else
+        local primary_range = nil
+        local secondary_ranges = terralib.newlist()
+        all_ranges:foreach(function(range)
+          local partition_type = range:gettype()
+          if partition_type:is_disjoint() then
+            assert(primary_range == nil)
+            primary_range = range
+          else
+            secondary_ranges:insert(range)
+          end
+        end)
+        assert(primary_range ~= nil)
+
+        mapping = mappings_by_range_sets[all_ranges]
+        if mapping == nil then
+          mapping = data.newmap()
+          -- TODO: Need to create private-vs-shared partitions for reductions
+          mapping[primary_range] = primary_range
+
+          local union_range, union_partition_stats =
+            create_union_partitions(secondary_ranges, union_partitions)
+          stats:insertall(union_partition_stats)
+          local ghost_range =
+            diff_partitions[data.newtuple(union_range, primary_range)]
+          if ghost_range == nil then
+            local diff_range, diff_partition_stat =
+              create_difference_partition(union_range, primary_range)
+            stats:insert(diff_partition_stat)
+            ghost_range = diff_range
+            diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
+          end
+
+          secondary_ranges:map(function(range) mapping[range] = ghost_range end)
+          mappings_by_range_sets[all_ranges] = mapping
+        end
+      end
+
+      assert(mapping ~= nil)
+      local key = data.newtuple(region_symbol, field_path)
+      self.mappings_by_access_paths[key] = mapping
+    end
+  end
+
+  return stats
 end
 
 function solver_context:print_all_constraints()
   print("################")
+  print("* sources:")
+  for source, _ in self.sources:items() do
+    print("    " .. tostring(source))
+  end
+  print("* sources by regions:")
+  for region, source in self.sources_by_regions:items() do
+    print("    " .. tostring(region) .. " -> " .. tostring(source))
+  end
   self.constraints:print_constraints()
   print("* accesses:")
   for region_symbol, accesses in self.field_accesses:items() do
@@ -1338,7 +1863,7 @@ function solver_context:print_all_constraints()
       print("    " .. tostring(region_symbol) .. "." .. field_path:mkstring("", ".", ""))
       for privilege, ranges_set in summary:items() do
         print("        " .. tostring(region_symbol) .. "[" ..
-          set_to_string(ranges_set) .. "]." ..  field_path:mkstring("", ".", "") ..
+          tostring(ranges_set) .. "]." ..  field_path:mkstring("", ".", "") ..
           " @ " .. tostring(privilege))
       end
     end
@@ -1352,9 +1877,9 @@ local parallelization_context = {}
 
 parallelization_context.__index = parallelization_context
 
-function parallelization_context.new()
+function parallelization_context.new(mapping)
   local cx = {
-    mapping = data.newmap(),
+    mapping = mapping,
   }
 
   return setmetatable(cx, parallelization_context)
@@ -1378,15 +1903,46 @@ function parallelize_task_calls.stat_parallelize_with(cx, stat)
   table.sort(all_tasks, cmp_tasks)
 
   local solver_cx = solver_context.new()
-  all_tasks:map(function(task)
+  local range_mappings = all_tasks:map(function(task)
     local constraints = task:get_partitioning_constraints()
-    local mapping = collector_cx:get_mapping(task)
-    solver_cx:unify(constraints, mapping)
+    local region_mapping = collector_cx:get_mapping(task)
+    return solver_cx:unify(task.name, constraints, region_mapping)
   end)
   solver_cx:print_all_constraints()
 
+  -- TODO: 1) We need to enforce that either a color space or a partition
+  --          must be provided
+  --       2) We need to handle hints other than color space
+  local color_space = nil
+  for idx = 1, #stat.hints do
+    local hint = stat.hints[idx]
+    if hint:is(ast.typed.expr.ID) and
+       std.is_ispace(std.as_read(hint.expr_type))
+    then
+      color_space = hint.value
+    end
+  end
+  assert(color_space ~= nil)
+  local stats = solver_cx:synthesize_partitions(color_space)
+
+  -- TODO: Need to transform single task launches to index task launches
+  --local mapping = {}
+  --for idx = 1, #all_tasks do mapping[all_tasks[idx]] = range_mappings[idx] end
+  --local cx = parallelization_context.new(mapping)
+  local block = stat.block
+
+  -- TODO: Need a dataflow analysis to find the right place to put partitioning calls
+  stats:insert(ast.typed.stat.Block {
+    block = block,
+    span = stat.block.span,
+    annotations = stat.annotations,
+  })
+
   return ast.typed.stat.Block {
-    block = stat.block,
+    block = ast.typed.Block {
+      stats = stats,
+      span = stat.span,
+    },
     span = stat.span,
     annotations = stat.annotations,
   }
