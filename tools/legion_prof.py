@@ -267,6 +267,8 @@ class TimeRange(object):
         self.ready = ready
         self.start = start
         self.stop = stop
+        self.trimmed = False
+        self.was_removed = False
 
     def __cmp__(self, other):
         # The order chosen here is critical for sort_range. Ranges are
@@ -288,7 +290,6 @@ class TimeRange(object):
         return "Start: %d us  Stop: %d us  Total: %d us" % (
                 self.start, self.end, self.total_time())
 
-
     def total_time(self):
         return self.stop - self.start
 
@@ -304,6 +305,130 @@ class TimeRange(object):
 
     def meta_time(self):
         pass
+
+    def is_trimmed(self):
+        return self.was_removed
+
+    def trim_time_range(self, start, stop):
+        if self.trimmed:
+            return not self.was_removed
+        self.trimmed = True
+        if start is not None and stop is not None:
+            if self.stop < start:
+                self.was_removed = True
+                return False
+            if self.start > stop:
+                self.was_removed = True
+                return False
+            # Either we span or we're contained inside
+            # Clip our boundaries down to the border
+            if self.start < start:
+                self.start = 0
+            else:
+                self.start -= start
+            if self.stop > stop:
+                self.stop = stop - start
+            else:
+                self.stop -= start
+            if self.create is not None:
+                if self.create < start:
+                    self.create = 0
+                elif self.create > stop:
+                    self.create = stop - start
+                else:
+                    self.create -= start
+            if self.ready is not None:
+                if self.ready < start:
+                    self.ready = 0
+                elif self.ready > stop:
+                    self.ready = stop - start
+                else:
+                    self.ready -= start
+            # See if we need to filter the waits
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.end < start:
+                        continue
+                    if wait_interval.start > stop:
+                        continue
+                    # Adjust the start location
+                    if wait_interval.start < start:
+                        wait_interval.start = 0
+                    else:
+                        wait_interval.start -= start
+                    # Adjust the ready location
+                    if wait_interval.ready < start:
+                        wait_interval.ready = 0
+                    elif wait_interval.ready > stop:
+                        wait_interval.ready = stop - start
+                    else:
+                        wait_interval.ready -= start
+                    # Adjust the end location
+                    if wait_interval.end > stop:
+                        wait_interval.end = stop - start
+                    else:
+                        wait_interval.end -= start
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        elif start is not None:
+            if self.stop < start:
+                self.was_removed = True
+                return False
+            if self.start < start:
+                self.start = 0
+            else:
+                self.start -= start
+            self.stop -= start
+            if self.create is not None:
+                if self.create < start:
+                    self.create = 0
+                else:
+                    self.create -= start
+            if self.ready is not None:
+                if self.ready < start:
+                    self.ready = 0
+                else:
+                    self.ready -= start
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.end < start:
+                        continue
+                    if wait_interval.start < start:
+                        wait_interval.start = 0
+                    else:
+                        wait_interval.start -= start
+                    if wait_interval.ready < start:
+                        wait_interval.ready = 0
+                    else:
+                        wait_interval.ready -= start
+                    wait_interval.end -= start
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        else:
+            assert stop is not None
+            if self.start > stop:
+                self.was_removed = True
+                return False
+            if self.stop > stop:
+                self.stop = stop
+            if self.create is not None and self.create > stop:
+                self.create = stop
+            if self.ready is not None and self.ready > stop:
+                self.ready = stop
+            if isinstance(self, HasWaiters):
+                trimmed_intervals = list()
+                for wait_interval in self.wait_intervals:
+                    if wait_interval.start > stop:
+                        continue
+                    if wait_interval.ready > stop:
+                        wait_interval.ready = stop
+                    if wait_interval.end > stop:
+                        wait_interval.end = stop
+                    trimmed_intervals.append(wait_interval)
+                self.wait_intervals = trimmed_intervals
+        return True
 
 class Processor(object):
     def __init__(self, proc_id, kind):
@@ -342,6 +467,13 @@ class Processor(object):
         # treating runtime calls like any other task
         call.proc = self
         self.tasks.append(call)
+
+    def trim_time_range(self, start, stop):
+        trimmed_tasks = list()
+        for task in self.tasks:
+            if task.trim_time_range(start, stop):
+                trimmed_tasks.append(task)
+        self.tasks = trimmed_tasks 
 
     def sort_time_range(self):
         for task in self.tasks:
@@ -494,6 +626,13 @@ class Memory(object):
                 inst.stop = last_time
         self.last_time = last_time 
 
+    def trim_time_range(self, start, stop):
+        trimmed_instances = set()
+        for inst in self.instances:
+            if inst.trim_time_range(start, stop):
+                trimmed_instances.add(inst)
+        self.instances = trimmed_instances
+
     def sort_time_range(self):
         self.max_live_instances = 0
         for inst in self.instances:
@@ -600,6 +739,13 @@ class Channel(object):
 
     def init_time_range(self, last_time):
         self.last_time = last_time
+
+    def trim_time_range(self, start, stop):
+        trimmed_copies = set()
+        for copy in self.copies:
+            if copy.trim_time_range(start, stop):
+                trimmed_copies.add(copy)
+        self.copies = trimmed_copies 
 
     def sort_time_range(self):
         self.max_live_copies = 0 
@@ -874,6 +1020,11 @@ class Operation(Base):
     def get_info(self):
         info = '<'+str(self.op_id)+">"
         return info
+
+    def is_trimmed(self):
+        if isinstance(self, TimeRange):
+            return TimeRange.is_trimmed(self)
+        return False
 
     def __repr__(self):
         if self.is_task:
@@ -2046,6 +2197,27 @@ class State(object):
         self.prof_uid_map[user.prof_uid] = user
         return user
 
+    def trim_time_ranges(self, start, stop):
+        assert self.last_time is not None
+        if start < 0:
+            start = None
+        if stop > self.last_time:
+            stop = None
+        if start is None and stop is None:
+            return
+        for proc in self.processors.itervalues():
+            proc.trim_time_range(start, stop)
+        for mem in self.memories.itervalues():
+            mem.trim_time_range(start, stop)
+        for channel in self.channels.itervalues():
+            channel.trim_time_range(start, stop)
+        if start is not None and stop is not None:
+            self.last_time = stop - start
+        elif stop is not None:
+            self.last_time = stop
+        else:
+            self.last_time -= start
+
     def sort_time_ranges(self):
         assert self.last_time is not None 
         # Processors first
@@ -2723,6 +2895,8 @@ class State(object):
         ops_file = open(ops_file_name, "w")
         ops_file.write("op_id\tdesc\tproc\tlevel\n")
         for op_id, operation in self.operations.iteritems():
+            if operation.is_trimmed():
+                continue
             proc = ""
             level = ""
             if (operation.proc is not None):
@@ -2868,6 +3042,14 @@ def main():
         '-f', '--force', dest='force', action='store_true',
         help='overwrite output directory if it exists')
     parser.add_argument(
+        '--start-trim', dest='start_trim', action='store',
+        type=int, default=-1,
+        help='start time in micro-seconds to trim the profile')
+    parser.add_argument(
+        '--stop-trim', dest='stop_trim', action='store',
+        type=int, default=-1,
+        help='stop time in micro-seconds to trim the profile')
+    parser.add_argument(
         dest='filenames', nargs='+',
         help='input Legion Prof log filenames')
     args = parser.parse_args()
@@ -2883,6 +3065,8 @@ def main():
     copy_output_prefix = output_dirname + "_copy"
     print_stats = args.print_stats
     verbose = args.verbose
+    start_trim = args.start_trim
+    stop_trim = args.stop_trim
 
     state = State()
     has_matches = False
@@ -2921,6 +3105,17 @@ def main():
     if not has_matches:
         print('No matches found! Exiting...')
         return
+
+    # See if we need to trim out any boxes before we build the profile
+    if not print_stats and ((start_trim > 0) or (stop_trim > 0)):
+        if start_trim > 0 and stop_trim > 0:
+            if stop_trim > start_trim:
+                state.trim_time_ranges(start_trim, stop_trim)
+            else:
+                print('WARNING: Ignoring invalid trim ranges because stop trim time ('+
+                    str(stop_trim)+') comes before start trim time ('+str(start_trim)+')')
+        else:
+            state.trim_time_ranges(start_trim, stop_trim)
 
     # Once we are done loading everything, do the sorting
     state.sort_time_ranges()
