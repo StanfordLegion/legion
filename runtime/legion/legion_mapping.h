@@ -616,17 +616,13 @@ namespace Legion {
        * each of the different region requirements for the task in 
        * 'mapped_regions', as well of any currently valid physical instances
        * for those regions in the set of 'valid_instances' for each region
-       * requirement. The mapper then specifies the desired number of copies
-       * of each region requirement that it wants to generate in the 
-       * 'copy_count' vector. Setting this count to 0 will prevent any copies 
-       * from being made. The runtime will first walk through the list of 
-       * physical instances in 'chosen_ranking' and issue copies to the target 
-       * physical instances for each region requirement. The runtime will
-       * continue issuing copies until the copy count has been met. If the
-       * copy count has still not been satisfied, the runtime will progress
-       * through the layout constraints until either it has met the copy
-       * count or the requested number of physical instances in the target
-       * memories have been created.
+       * requirement. The mapper can then specify one or more new instances
+       * to update with the output from the task for each region requirement.
+       * Unlike map_task where the chosen_instances are filtered so that only
+       * the first instance which has space for a given field is updated, each
+       * instances specified in 'chosen_instances' will be updated for any 
+       * fields of the original region requirement for which they have 
+       * sufficient space. 
        */
       struct PostMapInput {
         std::vector<std::vector<PhysicalInstance> >     mapped_regions;
