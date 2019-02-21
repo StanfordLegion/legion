@@ -2186,6 +2186,9 @@ namespace Legion {
       : WrapperReferenceMutator(effects), forest(f), 
         local_space(f->runtime->address_space), op(o), src_index(idx), 
         dst_index(idx), guard_precondition(g), 
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+        performed_postcondition(Runtime::create_rt_user_event()),
+#endif
         guard_postcondition(Runtime::create_rt_user_event()),
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
@@ -2199,6 +2202,9 @@ namespace Legion {
       : WrapperReferenceMutator(effects), forest(f), 
         local_space(f->runtime->address_space), op(o), src_index(src_idx), 
         dst_index(dst_idx), guard_precondition(g),
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+        performed_postcondition(Runtime::create_rt_user_event()),
+#endif
         guard_postcondition(Runtime::create_rt_user_event()),
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
@@ -2211,6 +2217,9 @@ namespace Legion {
         local_space(rhs.local_space), op(rhs.op),
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
         guard_precondition(rhs.guard_precondition),
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+        performed_postcondition(rhs.performed_postcondition),
+#endif
         guard_postcondition(rhs.guard_postcondition),
         predicate_guard(rhs.predicate_guard), track_events(rhs.track_events)
     //--------------------------------------------------------------------------
@@ -2224,6 +2233,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      assert(performed_postcondition.has_triggered());
+#endif
       assert(guard_postcondition.has_triggered());
       assert(guarded_sets.empty());
 #endif
@@ -2728,6 +2740,9 @@ namespace Legion {
           perform_updates(*it, trace_info, precondition,
                           has_src_preconditions, has_dst_preconditions);
       }
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      Runtime::trigger_event(performed_postcondition);
+#endif
       // We can also trigger our guard event once the effects are applied
       if (!effects.empty())
       {
@@ -7321,7 +7336,11 @@ namespace Legion {
           if (!guard_mask)
             continue;
           // No matter what record our dependences on the prior guards
+#ifdef NON_AGGRESSIVE_AGGREGATORS
           const RtEvent guard_event = it->first->guard_postcondition;
+#else
+          const RtEvent guard_event = it->first->performed_postcondition;
+#endif
           guard_events.insert(guard_event);
           CopyFillAggregator *input_aggregator = NULL;
           // See if we have an input aggregator that we can use now

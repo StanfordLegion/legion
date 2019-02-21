@@ -203,6 +203,7 @@ namespace Legion {
       RtUserEvent done_event;
       derez.deserialize(done_event);
 
+#ifdef NON_AGGRESSIVE_AGGREGATORS
       // There are often many parallel copy requests coming from remote nodes
       // which could be handled in parallel, so if we always launch a meta task 
       // to handle these since they are often expensive and we don't want to
@@ -213,6 +214,49 @@ namespace Legion {
       // One-up the message priority here to keep us ahead of any other
       // messages which might have been enqueued.
       runtime->issue_runtime_meta_task(args,LG_LATENCY_RESPONSE_PRIORITY,ready);
+#else
+      // This blocks the virtual channel, but keeps queries in-order 
+      // with respect to updates from the same node which is necessary
+      // for preventing cycles in the realm event graph
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      InstanceView *inst_view = view->as_instance_view();
+      const PhysicalTraceInfo trace_info(NULL);
+      EventFieldExprs preconditions;
+      inst_view->find_copy_preconditions_remote(reading, copy_mask, copy_expr,
+          op_id, index, preconditions, trace_info, source);
+      // Send back the response unless the preconditions are empty in
+      // which case we can just trigger the done event
+      if (!preconditions.empty())
+      {
+        // Pack up the response and send it back
+        Serializer rez;
+        {
+          RezCheck z2(rez);
+          rez.serialize(inst_view->did);
+          rez.serialize<size_t>(preconditions.size());
+          for (EventFieldExprs::const_iterator eit = preconditions.begin();
+                eit != preconditions.end(); eit++)
+          {
+            rez.serialize(eit->first);
+            const FieldMaskSet<IndexSpaceExpression> &exprs = eit->second;
+            rez.serialize<size_t>(exprs.size());
+            for (FieldMaskSet<IndexSpaceExpression>::const_iterator it = 
+                  exprs.begin(); it != exprs.end(); it++)
+            {
+              it->first->pack_expression(rez, source);
+              rez.serialize(it->second);
+            }
+          }
+          rez.serialize(remote_aggregator);
+          rez.serialize<bool>(reading);
+          rez.serialize(done_event);
+        }
+        runtime->send_view_find_copy_preconditions_response(source, rez);
+      }
+      else
+        Runtime::trigger_event(done_event);
+#endif
     }
 
     //--------------------------------------------------------------------------

@@ -737,6 +737,9 @@ namespace Legion {
       const unsigned src_index;
       const unsigned dst_index;
       const RtEvent guard_precondition;
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+      const RtUserEvent performed_postcondition;
+#endif
       const RtUserEvent guard_postcondition;
       const PredEvent predicate_guard;
       const bool track_events;
