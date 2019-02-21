@@ -362,7 +362,7 @@ function context:pop_loop_context(node)
   local to_propagate = cx:filter_shared_variables(cx.reductions)
   self:forall_context(function(cx_outer)
     cx_outer:union_reduction_variables(to_propagate)
-    to_propagate = cx_outer:filter_shared_variables(cx.reductions)
+    to_propagate = cx_outer:filter_shared_variables(to_propagate)
     return to_propagate:is_empty()
   end)
 
@@ -672,22 +672,16 @@ function analyze_access.stat_block(cx, node)
 end
 
 function analyze_access.stat_var(cx, node)
-  local center = false
+  local symbol = node.symbol
   if node.value then
-    local first = true
     cx:forall_context(function(cx)
       local value_private, value_center =
         analyze_access.expr(cx, node.value, std.reads)
-      if first then
-        center = value_center
-        first = false
-      end
+      cx:update_center(symbol, value_center)
       return value_private
     end)
   end
   local cx = cx:current_context()
-  local symbol = node.symbol
-  cx:update_center(symbol, center)
   cx:add_local_variable(symbol)
   return node
 end
