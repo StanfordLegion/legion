@@ -362,7 +362,7 @@ function context:pop_loop_context(node)
   local to_propagate = cx:filter_shared_variables(cx.reductions)
   self:forall_context(function(cx_outer)
     cx_outer:union_reduction_variables(to_propagate)
-    to_propagate = cx_outer:filter_shared_variables(cx.reductions)
+    to_propagate = cx_outer:filter_shared_variables(to_propagate)
     return to_propagate:is_empty()
   end)
 
