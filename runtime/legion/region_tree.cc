@@ -4952,6 +4952,10 @@ namespace Legion {
 #endif
       if (lhs == rhs)
         return lhs;
+      if (lhs->is_empty())
+        return rhs;
+      if (rhs->is_empty())
+        return lhs;
       std::vector<IndexSpaceExpression*> exprs(2);
       exprs[0] = lhs;
       exprs[1] = rhs;
@@ -4968,7 +4972,19 @@ namespace Legion {
 #endif
       if (exprs.size() == 1)
         return *(exprs.begin());
-      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      std::vector<IndexSpaceExpression*> expressions;
+      expressions.reserve(exprs.size());
+      for (std::set<IndexSpaceExpression*>::const_iterator it = 
+            exprs.begin(); it != exprs.end(); it++)
+      {
+        // Remove any empty expressions on the way in
+        if (!(*it)->is_empty())
+          expressions.push_back(*it);
+      }
+      if (expressions.empty())
+        return *(exprs.begin());
+      if (expressions.size() == 1)
+        return expressions[0];
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5019,7 +5035,7 @@ namespace Legion {
           finder = union_ops.find(key);
         if (finder != union_ops.end())
         {
-          IndexSpaceOperation *result = NULL;
+          IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
@@ -5086,6 +5102,10 @@ namespace Legion {
 #endif
       if (lhs == rhs)
         return lhs;
+      if (lhs->is_empty())
+        return lhs;
+      if (rhs->is_empty())
+        return rhs;
       std::vector<IndexSpaceExpression*> exprs(2);
       exprs[0] = lhs;
       exprs[1] = rhs;
@@ -5103,6 +5123,12 @@ namespace Legion {
       if (exprs.size() == 1)
         return *(exprs.begin());
       std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+      // Do a quick pass to see if any of them are empty in which case we 
+      // know that the result of the whole intersection is empty
+      for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+            expressions.begin(); it != expressions.end(); it++)
+        if ((*it)->is_empty())
+          return (*it);
       // this helps make sure we don't overflow our stack
       while (expressions.size() > MAX_EXPRESSION_FANOUT)
       {
@@ -5154,7 +5180,7 @@ namespace Legion {
           finder = intersection_ops.find(key);
         if (finder != intersection_ops.end())
         {
-          IndexSpaceOperation *result = NULL;
+          IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
@@ -5224,6 +5250,14 @@ namespace Legion {
       assert(lhs->type_tag == rhs->type_tag);
 #endif
       const IndexSpaceExprID key = lhs->expr_id;
+      // Handle a few easy cases
+      if (creator == NULL)
+      {
+        if (lhs->is_empty())
+          return lhs;
+        if (rhs->is_empty())
+          return lhs;
+      }
       std::vector<IndexSpaceExpression*> expressions(2);
       expressions[0] = lhs;
       expressions[1] = rhs;
@@ -5234,7 +5268,7 @@ namespace Legion {
           finder = difference_ops.find(key);
         if (finder != difference_ops.end())
         {
-          IndexSpaceOperation *result = NULL;
+          IndexSpaceExpression *result = NULL;
           ExpressionTrieNode *next = NULL;
           if (finder->second->find_operation(expressions, result, next))
             return result;
@@ -5562,7 +5596,7 @@ namespace Legion {
       size_t num_sub_expressions;
       derez.deserialize(num_sub_expressions);
 #ifdef DEBUG_LEGION
-      assert(num_sub_expressions >= 2);
+      assert(num_sub_expressions != 1); // should be 0 or >= 2
       assert(num_sub_expressions <= MAX_EXPRESSION_FANOUT);
 #endif
       std::set<IndexSpaceExpression*> exprs;
@@ -5887,304 +5921,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OperationCreator::activate(IndexSpaceOperation *op)
+    IndexSpaceExpression* OperationCreator::consume(void)
     //--------------------------------------------------------------------------
     {
-      // Do nothing in the base case
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceOperation* OperationCreator::consume(void)
-    //--------------------------------------------------------------------------
-    {
+      if (result == NULL)
+        create_operation();
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      IndexSpaceOperation *temp = result;
-      result = NULL;
-      activate(temp);
-      return temp;
-    }
-
-    /////////////////////////////////////////////////////////////
-    // Pending Index Space Expression
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    PendingIndexSpaceExpression::PendingIndexSpaceExpression(
-                             IndexSpaceExpression *upper, RegionTreeForest *ctx)
-      : IntermediateExpression(upper->type_tag, ctx), upper_bound(upper),
-        ready_event(Runtime::create_rt_user_event()), result(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-    
-    //--------------------------------------------------------------------------
-    PendingIndexSpaceExpression::PendingIndexSpaceExpression(
-                                         const PendingIndexSpaceExpression &rhs)
-      : IntermediateExpression(rhs), upper_bound(NULL)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-    }
-
-    //--------------------------------------------------------------------------
-    PendingIndexSpaceExpression::~PendingIndexSpaceExpression(void)
-    //--------------------------------------------------------------------------
-    {
+      IndexSpaceExpression *temp = find_congruence();
+      if (temp == NULL)
+      {
+        // No congruence found
+        temp = result;
+        result = NULL;
+        return temp;
+      }
+      else
+      {
 #ifdef DEBUG_LEGION
-      assert(result != NULL);
+        assert(temp != result);
 #endif
-      if (result->remove_expression_reference())
-        delete result;
-    }
-
-    //--------------------------------------------------------------------------
-    PendingIndexSpaceExpression& PendingIndexSpaceExpression::operator=(
-                                         const PendingIndexSpaceExpression &rhs)
-    //--------------------------------------------------------------------------
-    {
-      // should never be called
-      assert(false);
-      return *this;
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PendingIndexSpaceExpression::get_expr_index_space(
-                                 void *res, TypeTag tag, bool need_tight_result)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->get_expr_index_space(res, tag, need_tight_result);
-    }
-
-    //--------------------------------------------------------------------------
-    Domain PendingIndexSpaceExpression::get_domain(ApEvent &ready, bool tight)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->get_domain(ready, tight);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::tighten_index_space(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      result->tighten_index_space();
-    }
-
-    //--------------------------------------------------------------------------
-    bool PendingIndexSpaceExpression::check_empty(void)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->check_empty();
-    }
-
-    //--------------------------------------------------------------------------
-    size_t PendingIndexSpaceExpression::get_volume(void)
-    //--------------------------------------------------------------------------
-    {
-      if (has_volume)
-        return volume;
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      volume = result->get_volume();
-      __sync_synchronize();
-      has_volume = true;
-      return volume;
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::pack_expression(
-                                         Serializer &rez, AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      result->pack_expression(rez, target);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      result->pack_expression_structure(rez, target);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpaceNode* PendingIndexSpaceExpression::find_or_create_node(
-                                                              InnerContext *ctx)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->find_or_create_node(ctx);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PendingIndexSpaceExpression::issue_fill(
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                                 UniqueID fill_uid,
-                                 FieldSpace handle,
-                                 RegionTreeID tree_id,
-#endif
-                                 ApEvent precondition, PredEvent pred_guard)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->issue_fill(trace_info, dst_fields, fill_value, fill_size,
-#ifdef LEGION_SPY
-                                fill_uid, handle, tree_id,
-#endif
-                                precondition, pred_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PendingIndexSpaceExpression::issue_copy(
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                                 FieldSpace handle,
-                                 RegionTreeID src_tree_id,
-                                 RegionTreeID dst_tree_id,
-#endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->issue_copy(trace_info, dst_fields, src_fields, 
-#ifdef LEGION_SPY
-                                handle, src_tree_id, dst_tree_id,
-#endif
-                                precondition, pred_guard, redop,reduction_fold);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::construct_indirections(
-                                     const std::vector<unsigned> &field_indexes,
-                                     const FieldID indirect_field,
-                                     const TypeTag indirect_type,
-                                     const PhysicalInstance indirect_instance,
-                                     const LegionVector<
-                                            IndirectRecord>::aligned &records,
-                                     std::vector<void*> &indirections,
-                                     std::vector<unsigned> &indirect_indexes)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      result->construct_indirections(field_indexes, indirect_field, 
-                                     indirect_type, indirect_instance, records,
-                                     indirections, indirect_indexes);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::destroy_indirections(
-                                               std::vector<void*> &indirections)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      result->destroy_indirections(indirections);
-    }
-
-    //--------------------------------------------------------------------------
-    ApEvent PendingIndexSpaceExpression::issue_indirect(
-                                 const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<void*> &indirects,
-                                 ApEvent precondition, PredEvent pred_guard)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->issue_indirect(trace_info, dst_fields, src_fields,
-                                    indirects, precondition, pred_guard);
-    }
-
-    //--------------------------------------------------------------------------
-    Realm::InstanceLayoutGeneric* PendingIndexSpaceExpression::create_layout(
-                                    const Realm::InstanceLayoutConstraints &ilc,
-                                    const OrderingConstraint &constraint)
-    //--------------------------------------------------------------------------
-    {
-      if (!ready_event.has_triggered())
-        ready_event.wait();
-#ifdef DEBUG_LEGION
-      assert(result != NULL);
-#endif
-      return result->create_layout(ilc, constraint);
-    }
-
-    //--------------------------------------------------------------------------
-    void PendingIndexSpaceExpression::set_result(IndexSpaceExpression *res)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(result == NULL);
-      assert(!ready_event.has_triggered());
-#endif
-      result = res;
-      // Keep a reference on it until we're deleted
-      result->add_expression_reference();
-      Runtime::trigger_event(ready_event);
+        // Add an extra expression reference to this result
+        temp->add_expression_reference();
+        return temp;
+      }
     }
 
     /////////////////////////////////////////////////////////////
@@ -6193,7 +5954,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ExpressionTrieNode::ExpressionTrieNode(unsigned d, IndexSpaceExprID id,
-                                           IndexSpaceOperation *op)
+                                           IndexSpaceExpression *op)
       : depth(d), expr(id), local_operation(op)
     //--------------------------------------------------------------------------
     {
@@ -6226,8 +5987,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool ExpressionTrieNode::find_operation(
-                        const std::vector<IndexSpaceExpression*> &expressions,
-                        IndexSpaceOperation *&result, ExpressionTrieNode *&last)
+                       const std::vector<IndexSpaceExpression*> &expressions,
+                       IndexSpaceExpression *&result, ExpressionTrieNode *&last)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -6256,7 +6017,7 @@ namespace Legion {
         const IndexSpaceExprID target_expr = expressions.back()->expr_id;
         {
           AutoLock t_lock(trie_lock,1,false/*exclusive*/);
-          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if (op_finder != operations.end())
           {
@@ -6273,7 +6034,7 @@ namespace Legion {
         if (next == NULL)
         {
           AutoLock t_lock(trie_lock);
-          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if (op_finder != operations.end())
           {
@@ -6320,7 +6081,7 @@ namespace Legion {
           {
             // We have to make the next node, also check to see if we
             // already made an operation expression for it or not
-            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+            std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator
               op_finder = operations.find(target_expr);
             if (op_finder != operations.end())
             {
@@ -6343,7 +6104,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceOperation* ExpressionTrieNode::find_or_create_operation(
+    IndexSpaceExpression* ExpressionTrieNode::find_or_create_operation(
                           const std::vector<IndexSpaceExpression*> &expressions,
                           OperationCreator &creator)
     //--------------------------------------------------------------------------
@@ -6375,7 +6136,7 @@ namespace Legion {
         const IndexSpaceExprID target_expr = expressions.back()->expr_id;
         {
           AutoLock t_lock(trie_lock,1,false/*exclusive*/);
-          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if (op_finder != operations.end())
             return op_finder->second;
@@ -6389,7 +6150,7 @@ namespace Legion {
         if (next == NULL)
         {
           AutoLock t_lock(trie_lock);
-          std::map<IndexSpaceExprID,IndexSpaceOperation*>::const_iterator
+          std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator
             op_finder = operations.find(target_expr);
           if (op_finder != operations.end())
             return op_finder->second;
@@ -6399,7 +6160,7 @@ namespace Legion {
           if (node_finder == nodes.end())
           {
             // Didn't find the sub-node, so make the operation here
-            IndexSpaceOperation *result = creator.consume();
+            IndexSpaceExpression *result = creator.consume();
             operations[target_expr] = result;
             return result;
           }
@@ -6435,13 +6196,13 @@ namespace Legion {
           {
             // We have to make the next node, also check to see if we
             // already made an operation expression for it or not
-            std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator
+            std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator
               op_finder = operations.find(target_expr);
             if (op_finder != operations.end())
             {
               next = new ExpressionTrieNode(depth+1, target_expr, 
                                             op_finder->second);
-              operations.erase(op_finder);    
+              operations.erase(op_finder);
             }
             else
               next = new ExpressionTrieNode(depth+1, target_expr);
@@ -6477,7 +6238,7 @@ namespace Legion {
       {
         // See if we should continue traversing or if we have the operation
         const IndexSpaceExprID target_expr = expressions.back()->expr_id;
-        std::map<IndexSpaceExprID,IndexSpaceOperation*>::iterator op_finder =
+        std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator op_finder =
           operations.find(target_expr);
         if (op_finder == operations.end())
         {
@@ -7652,6 +7413,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return remove_base_resource_ref(IS_EXPR_REF);
+    }
+
+    //--------------------------------------------------------------------------
+    bool IndexSpaceNode::remove_operation(RegionTreeForest *forest)
+    //--------------------------------------------------------------------------
+    {
+      return remove_expression_reference();
     }
 
     //--------------------------------------------------------------------------

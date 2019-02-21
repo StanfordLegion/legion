@@ -901,19 +901,35 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        rez.serialize<size_t>(sub_expressions.size());
-        for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-              sub_expressions.begin(); it != sub_expressions.end(); it++)
-          (*it)->pack_expression_structure(rez, target);
+        const bool local_empty = this->is_empty();
+        if (!local_empty)
+        {
+          rez.serialize<size_t>(sub_expressions.size());
+          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+                sub_expressions.begin(); it != sub_expressions.end(); it++)
+            (*it)->pack_expression_structure(rez, target);
+        }
+        else
+          rez.serialize<size_t>(0);
         rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        Realm::IndexSpace<DIM,T> temp;
-        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-        rez.serialize(temp);
-        rez.serialize(ready);
+        if (!local_empty)
+        {
+          Realm::IndexSpace<DIM,T> temp;
+          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+          rez.serialize(temp);
+          rez.serialize(ready);
+        }
+        else
+        {
+          const Realm::IndexSpace<DIM,T> temp = 
+            Realm::IndexSpace<DIM,T>::make_empty();
+          rez.serialize(temp);
+          rez.serialize(ApEvent::NO_AP_EVENT);
+        }
       }
     }
 
@@ -931,6 +947,21 @@ namespace Legion {
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceUnion<DIM,T>::find_congruence(void) 
+    //--------------------------------------------------------------------------
+    {
+      const size_t local_volume = this->get_volume();
+      if (local_volume == 0)
+        return NULL;
+      for (typename std::vector<IndexSpaceExpression*>::const_iterator it = 
+            sub_expressions.begin(); it != sub_expressions.end(); it++)
+        if ((*it)->get_volume() == local_volume)
+          return (*it);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1071,19 +1102,35 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        rez.serialize<size_t>(sub_expressions.size());
-        for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-              sub_expressions.begin(); it != sub_expressions.end(); it++)
-          (*it)->pack_expression_structure(rez, target);
+        const bool local_empty = this->is_empty();
+        if (!local_empty)
+        {
+          rez.serialize<size_t>(sub_expressions.size());
+          for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+                sub_expressions.begin(); it != sub_expressions.end(); it++)
+            (*it)->pack_expression_structure(rez, target);
+        }
+        else
+          rez.serialize<size_t>(0);
         rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        Realm::IndexSpace<DIM,T> temp;
-        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-        rez.serialize(temp);
-        rez.serialize(ready);
+        if (!local_empty)
+        {
+          Realm::IndexSpace<DIM,T> temp;
+          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+          rez.serialize(temp);
+          rez.serialize(ready);
+        }
+        else
+        {
+          const Realm::IndexSpace<DIM,T> temp = 
+            Realm::IndexSpace<DIM,T>::make_empty();
+          rez.serialize(temp);
+          rez.serialize(ApEvent::NO_AP_EVENT);
+        }
       }
     }
 
@@ -1102,6 +1149,21 @@ namespace Legion {
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceIntersection<DIM,T>::find_congruence(void)
+    //--------------------------------------------------------------------------
+    {
+      const size_t local_volume = this->get_volume();
+      if (local_volume == 0)
+        return NULL;
+      for (typename std::vector<IndexSpaceExpression*>::const_iterator it = 
+            sub_expressions.begin(); it != sub_expressions.end(); it++)
+        if ((*it)->get_volume() == local_volume)
+          return (*it);
+      return NULL;
     }
 
     //--------------------------------------------------------------------------
@@ -1185,10 +1247,16 @@ namespace Legion {
                                     ctx, derez), lhs(l), rhs(r)
     //--------------------------------------------------------------------------
     {
-      lhs->add_parent_operation(this);
-      rhs->add_parent_operation(this);
-      lhs->add_expression_reference();
-      rhs->add_expression_reference();
+      if (lhs != NULL)
+      {
+        lhs->add_parent_operation(this);
+        lhs->add_expression_reference();
+      }
+      if (rhs != NULL)
+      {
+        rhs->add_parent_operation(this);
+        rhs->add_expression_reference();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1207,10 +1275,10 @@ namespace Legion {
     IndexSpaceDifference<DIM,T>::~IndexSpaceDifference(void)
     //--------------------------------------------------------------------------
     {
-      if (lhs->remove_expression_reference())
-        delete lhs;
-      if ((lhs != rhs) && rhs->remove_expression_reference())
+      if ((rhs != NULL) && (lhs != rhs) && rhs->remove_expression_reference())
         delete rhs;
+      if ((lhs != NULL) && lhs->remove_expression_reference())
+        delete lhs;
     }
 
     //--------------------------------------------------------------------------
@@ -1242,18 +1310,34 @@ namespace Legion {
       else
       {
         rez.serialize<bool>(false); // not local
-        rez.serialize<size_t>(2);
-        lhs->pack_expression_structure(rez, target);
-        rhs->pack_expression_structure(rez, target);
+        const bool local_empty = this->is_empty();
+        if (!local_empty)
+        {
+          rez.serialize<size_t>(2);
+          lhs->pack_expression_structure(rez, target);
+          rhs->pack_expression_structure(rez, target);
+        }
+        else
+          rez.serialize<size_t>(0);
         rez.serialize(this->op_kind); 
         rez.serialize(this->type_tag); // unpacked by creator
         rez.serialize(this->expr_id); // unpacked by IndexSpaceOperation
         rez.serialize(this->origin_expr); // unpacked by IndexSpaceOperation
         // unpacked by IndexSpaceOperationT
-        Realm::IndexSpace<DIM,T> temp;
-        ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
-        rez.serialize(temp);
-        rez.serialize(ready);
+        if (!local_empty)
+        {
+          Realm::IndexSpace<DIM,T> temp;
+          ApEvent ready = this->get_realm_index_space(temp, true/*tight*/);
+          rez.serialize(temp);
+          rez.serialize(ready);
+        }
+        else
+        {
+          const Realm::IndexSpace<DIM,T> temp = 
+            Realm::IndexSpace<DIM,T>::make_empty();
+          rez.serialize(temp);
+          rez.serialize(ApEvent::NO_AP_EVENT);
+        }
       }
     }
 
@@ -1263,15 +1347,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Remove the parent operation from all the sub expressions
-      lhs->remove_parent_operation(this);
-      if (lhs != rhs)
+      if (lhs != NULL)
+        lhs->remove_parent_operation(this);
+      if ((rhs != NULL) && (lhs != rhs))
         rhs->remove_parent_operation(this);
       // Then remove ourselves from the tree
-      if (forest != NULL)
+      if ((forest != NULL) && (lhs != NULL) && (rhs != NULL))
         forest->remove_subtraction_operation(this, lhs, rhs);
       // Remove our expression reference added by invalidate_operation
       // and return true if we should be deleted
       return this->remove_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexSpaceExpression* IndexSpaceDifference<DIM,T>::find_congruence(void)
+    //--------------------------------------------------------------------------
+    {
+      const size_t local_volume = this->get_volume();
+      if (local_volume == 0)
+        return NULL;
+      if (local_volume == lhs->get_volume())
+        return lhs;
+      return NULL;
     }
 
     /////////////////////////////////////////////////////////////

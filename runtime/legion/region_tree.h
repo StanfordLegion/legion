@@ -65,11 +65,13 @@ namespace Legion {
     public:
       OperationCreator(void);
       virtual ~OperationCreator(void); 
-    public:
+    public: 
       void produce(IndexSpaceOperation *op);
-      virtual void activate(IndexSpaceOperation *op);
-      IndexSpaceOperation* consume(void);
-    private:
+      IndexSpaceExpression* consume(void);
+    public:
+      virtual void create_operation(void) = 0;
+      virtual IndexSpaceExpression* find_congruence(void) = 0;
+    protected:
       IndexSpaceOperation *result;
     };
     
@@ -877,6 +879,7 @@ namespace Legion {
                                              AddressSpaceID target) = 0;
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
+      virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1023,6 +1026,7 @@ namespace Legion {
                                              AddressSpaceID target) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
+      virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0; 
     public:
       static void handle_expression_invalidation(Deserializer &derez,
@@ -1064,6 +1068,7 @@ namespace Legion {
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) = 0;
+      virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
     public:
       void invalidate_operation(std::deque<IndexSpaceOperation*> &to_remove);
@@ -1108,6 +1113,7 @@ namespace Legion {
                                              AddressSpaceID target) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
+      virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
                                  const std::vector<CopySrcDstField> &dst_fields,
@@ -1171,6 +1177,7 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
+      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     }; 
@@ -1179,8 +1186,7 @@ namespace Legion {
     public:
       UnionOpCreator(RegionTreeForest *f, TypeTag t,
                      const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) 
-        { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
+        : forest(f), type_tag(t), exprs(e) { }
     public:
       template<typename N, typename T>
       static inline void demux(UnionOpCreator *creator)
@@ -1188,6 +1194,11 @@ namespace Legion {
         creator->produce(new IndexSpaceUnion<N::N,T>(creator->exprs,
                                                      creator->forest));
       }
+    public:
+      virtual void create_operation(void)
+        { NT_TemplateHelper::demux<UnionOpCreator>(type_tag, this); }
+      virtual IndexSpaceExpression* find_congruence(void)
+        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1201,17 +1212,18 @@ namespace Legion {
         : forest(f), type_tag(unpack_type_tag(d)), exprs(e), derez(d) 
       { NT_TemplateHelper::demux<RemoteUnionOpCreator>(type_tag, this); }
     public:
-      virtual void activate(IndexSpaceOperation *op)
-      {
-        op->activate_remote();
-      }
-    public:
       template<typename N, typename T>
       static inline void demux(RemoteUnionOpCreator *creator)
       {
         creator->produce(new IndexSpaceUnion<N::N,T>(creator->exprs, 
                                   creator->forest, creator->derez));
       }
+    public:
+      // Nothing to do for this
+      virtual void create_operation(void) { }
+      // We know there is no congruence or it would have been found on the owner
+      virtual IndexSpaceExpression* find_congruence(void)
+        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1241,6 +1253,7 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
+      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       const std::vector<IndexSpaceExpression*> sub_expressions;
     };
@@ -1249,8 +1262,7 @@ namespace Legion {
     public:
       IntersectionOpCreator(RegionTreeForest *f, TypeTag t,
                             const std::vector<IndexSpaceExpression*> &e)
-        : forest(f), type_tag(t), exprs(e) 
-        { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
+        : forest(f), type_tag(t), exprs(e) { }
     public:
       template<typename N, typename T>
       static inline void demux(IntersectionOpCreator *creator)
@@ -1258,6 +1270,11 @@ namespace Legion {
         creator->produce(new IndexSpaceIntersection<N::N,T>(creator->exprs,
                                                             creator->forest));
       }
+    public:
+      virtual void create_operation(void)
+        { NT_TemplateHelper::demux<IntersectionOpCreator>(type_tag, this); }
+      virtual IndexSpaceExpression* find_congruence(void)
+        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1271,17 +1288,18 @@ namespace Legion {
         : forest(f), type_tag(unpack_type_tag(d)), exprs(e), derez(d) 
       { NT_TemplateHelper::demux<RemoteIntersectionOpCreator>(type_tag, this); }
     public:
-      virtual void activate(IndexSpaceOperation *op)
-      {
-        op->activate_remote();
-      }
-    public:
       template<typename N, typename T>
       static inline void demux(RemoteIntersectionOpCreator *creator)
       {
         creator->produce(new IndexSpaceIntersection<N::N,T>(creator->exprs,
                                           creator->forest, creator->derez));
       } 
+    public:
+      // Nothing to do for this
+      virtual void create_operation(void) { }
+      // We know there is no congruence or it would have been found on the owner
+      virtual IndexSpaceExpression* find_congruence(void)
+        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1311,6 +1329,7 @@ namespace Legion {
       virtual void pack_expression_structure(Serializer &rez,
                                              AddressSpaceID target);
       virtual bool remove_operation(RegionTreeForest *forest);
+      virtual IndexSpaceExpression* find_congruence(void);
     protected:
       IndexSpaceExpression *const lhs;
       IndexSpaceExpression *const rhs;
@@ -1320,8 +1339,7 @@ namespace Legion {
     public:
       DifferenceOpCreator(RegionTreeForest *f, TypeTag t,
                           IndexSpaceExpression *l, IndexSpaceExpression *r)
-        : forest(f), type_tag(t), lhs(l), rhs(r) 
-        { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
+        : forest(f), type_tag(t), lhs(l), rhs(r) { }
     public:
       template<typename N, typename T>
       static inline void demux(DifferenceOpCreator *creator)
@@ -1329,6 +1347,11 @@ namespace Legion {
         creator->produce(new IndexSpaceDifference<N::N,T>(creator->lhs,
                                           creator->rhs, creator->forest));
       }
+    public:
+      virtual void create_operation(void)
+        { NT_TemplateHelper::demux<DifferenceOpCreator>(type_tag, this); }
+      virtual IndexSpaceExpression* find_congruence(void)
+        { return result->find_congruence(); }
     public:
       RegionTreeForest *const forest;
       const TypeTag type_tag;
@@ -1343,17 +1366,18 @@ namespace Legion {
         : forest(f), type_tag(unpack_type_tag(d)), lhs(l), rhs(r), derez(d) 
       { NT_TemplateHelper::demux<RemoteDifferenceOpCreator>(type_tag, this); }
     public:
-      virtual void activate(IndexSpaceOperation *op)
-      {
-        op->activate_remote();
-      }
-    public:
       template<typename N, typename T>
       static inline void demux(RemoteDifferenceOpCreator *creator)
       {
         creator->produce(new IndexSpaceDifference<N::N,T>(creator->lhs,
                               creator->rhs, creator->forest, creator->derez));
       }
+    public:
+      // Nothing to do for this
+      virtual void create_operation(void) { }
+      // We know there is no congruence or it would have been found on the owner
+      virtual IndexSpaceExpression* find_congruence(void)
+        { result->activate_remote(); return NULL; }
     public:
       static inline TypeTag unpack_type_tag(Deserializer &derez)
       {
@@ -1370,80 +1394,6 @@ namespace Legion {
     };
 
     /**
-     * \class PendingIndexSpaceExpression
-     * This class is a thunk that is used to represent index space
-     * expressions that haven't been computed yet. It allows for 
-     * partial specification of an upper bound expression that
-     * allows us to do partial intersection testing.
-     */
-    class PendingIndexSpaceExpression : public IntermediateExpression {
-    public:
-      PendingIndexSpaceExpression(IndexSpaceExpression *upper_bound, 
-                                  RegionTreeForest *ctx); 
-      PendingIndexSpaceExpression(const PendingIndexSpaceExpression &rhs);
-      virtual ~PendingIndexSpaceExpression(void);
-    public:
-      PendingIndexSpaceExpression& operator=(
-                                  const PendingIndexSpaceExpression &rhs);
-    public:
-      virtual ApEvent get_expr_index_space(void *result, TypeTag tag, 
-                                           bool need_tight_result);
-      virtual Domain get_domain(ApEvent &ready, bool need_tight);
-      virtual void tighten_index_space(void);
-      virtual bool check_empty(void);
-      virtual size_t get_volume(void);
-      virtual void pack_expression(Serializer &rez, AddressSpaceID target);
-      virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target);
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx);
-    public:
-      virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const void *fill_value, size_t fill_size,
-#ifdef LEGION_SPY
-                                 UniqueID fill_uid,
-                                 FieldSpace handle,
-                                 RegionTreeID tree_id,
-#endif
-                                 ApEvent precondition, PredEvent pred_guard);
-      virtual ApEvent issue_copy(const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-#ifdef LEGION_SPY
-                                 FieldSpace handle,
-                                 RegionTreeID src_tree_id,
-                                 RegionTreeID dst_tree_id,
-#endif
-                                 ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold);
-      virtual void construct_indirections(
-                                 const std::vector<unsigned> &field_indexes,
-                                 const FieldID indirect_field,
-                                 const TypeTag indirect_type,
-                                 const PhysicalInstance indirect_instance,
-                                 const LegionVector<
-                                        IndirectRecord>::aligned &records,
-                                 std::vector<void*> &indirections,
-                                 std::vector<unsigned> &indirect_indexes);
-      virtual void destroy_indirections(std::vector<void*> &indirections);
-      virtual ApEvent issue_indirect(const PhysicalTraceInfo &trace_info,
-                                 const std::vector<CopySrcDstField> &dst_fields,
-                                 const std::vector<CopySrcDstField> &src_fields,
-                                 const std::vector<void*> &indirects,
-                                 ApEvent precondition, PredEvent pred_guard);
-      virtual Realm::InstanceLayoutGeneric*
-                   create_layout(const Realm::InstanceLayoutConstraints &ilc,
-                                 const OrderingConstraint &constraint);
-    public:
-      void set_result(IndexSpaceExpression *result);
-    public:
-      IndexSpaceExpression *const upper_bound;
-    protected:
-      RtUserEvent ready_event;
-      IndexSpaceExpression *result;
-    };
-
-    /**
      * \class ExpressionTrieNode
      * This is a class for constructing a trie for index space
      * expressions so we can quickly detect commmon subexpression
@@ -1453,7 +1403,7 @@ namespace Legion {
     class ExpressionTrieNode {
     public:
       ExpressionTrieNode(unsigned depth, IndexSpaceExprID expr_id, 
-                         IndexSpaceOperation *op = NULL);
+                         IndexSpaceExpression *op = NULL);
       ExpressionTrieNode(const ExpressionTrieNode &rhs);
       ~ExpressionTrieNode(void);
     public:
@@ -1461,8 +1411,8 @@ namespace Legion {
     public:
       bool find_operation(
           const std::vector<IndexSpaceExpression*> &expressions,
-          IndexSpaceOperation *&result, ExpressionTrieNode *&last);
-      IndexSpaceOperation* find_or_create_operation( 
+          IndexSpaceExpression *&result, ExpressionTrieNode *&last);
+      IndexSpaceExpression* find_or_create_operation( 
           const std::vector<IndexSpaceExpression*> &expressions,
           OperationCreator &creator);
       bool remove_operation(const std::vector<IndexSpaceExpression*> &exprs);
@@ -1470,8 +1420,8 @@ namespace Legion {
       const unsigned depth;
       const IndexSpaceExprID expr;
     protected:
-      IndexSpaceOperation *local_operation;
-      std::map<IndexSpaceExprID,IndexSpaceOperation*> operations;
+      IndexSpaceExpression *local_operation;
+      std::map<IndexSpaceExprID,IndexSpaceExpression*> operations;
       std::map<IndexSpaceExprID,ExpressionTrieNode*> nodes;
     protected:
       mutable LocalLock trie_lock;
@@ -1703,6 +1653,7 @@ namespace Legion {
                                              AddressSpaceID target) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
+      virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx) 
         { return this; }
     public:
