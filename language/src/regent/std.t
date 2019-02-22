@@ -2222,20 +2222,18 @@ if max_dim >= 1 then
   std.int1d = std.index_type(int64, "int1d")
   std.rect1d = std.rect_type(std.int1d)
 end
-if max_dim >= 2 then
-  struct std.__int2d { x : int64, y : int64 }
-  std.int2d = std.index_type(std.__int2d, "int2d")
-  std.rect2d = std.rect_type(std.int2d)
-end
-if max_dim >= 3 then
-  struct std.__int3d { x : int64, y : int64, z : int64 }
-  std.int3d = std.index_type(std.__int3d, "int3d")
-  std.rect3d = std.rect_type(std.int3d)
-end
-if max_dim >= 4 then
-  struct std.__int4d { x : int64, y : int64, z : int64, w : int64 }
-  std.int4d = std.index_type(std.__int4d, "int4d")
-  std.rect4d = std.rect_type(std.int4d)
+do
+  local dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
+  for dim = 2, max_dim do
+    local st = terralib.types.newstruct("__int" .. dim .. "d")
+    st.entries = data.take(dim, dim_names):map(
+      function(name)
+        return { name, int64 }
+      end)
+    std["__int" .. dim .. "d"] = st
+    std["int" .. dim .. "d"] = std.index_type(st, "int" .. dim .. "d")
+    std["rect" .. dim .. "d"] = std.rect_type(std["int" .. dim .. "d"])
+  end
 end
 
 do
