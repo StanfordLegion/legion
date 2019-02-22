@@ -3475,6 +3475,7 @@ local function make_ordering_constraint(layout, dim)
   result:insert(quote dims[0] = c.DIM_X end)
   if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
   if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
+  if dim >= 4 then result:insert(quote dims[3] = c.DIM_W end) end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
   result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
 
