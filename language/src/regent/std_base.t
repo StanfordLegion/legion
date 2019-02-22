@@ -81,40 +81,21 @@ terra base.assert(x : bool, message : rawstring)
   end
 end
 
-terra base.domain_from_bounds_1d(start : c.legion_point_1d_t,
-                                 extent : c.legion_point_1d_t)
-  var rect = c.legion_rect_1d_t {
-    lo = start,
-    hi = c.legion_point_1d_t {
-      x = array(start.x[0] + extent.x[0] - 1),
-    },
-  }
-  return c.legion_domain_from_rect_1d(rect)
-end
+for dim = 1, max_dim do
+  local point_type = c["legion_point_" .. tostring(dim) .. "d_t"]
+  local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local domain_from_rect = c["legion_domain_from_rect_" .. tostring(dim) .. "d"]
+  local domain_from_bounds = "domain_from_bounds_" .. tostring(dim) .. "d"
 
-terra base.domain_from_bounds_2d(start : c.legion_point_2d_t,
-                                 extent : c.legion_point_2d_t)
-  var rect = c.legion_rect_2d_t {
-    lo = start,
-    hi = c.legion_point_2d_t {
-      x = array(start.x[0] + extent.x[0] - 1,
-                start.x[1] + extent.x[1] - 1),
-    },
-  }
-  return c.legion_domain_from_rect_2d(rect)
-end
-
-terra base.domain_from_bounds_3d(start : c.legion_point_3d_t,
-                                 extent : c.legion_point_3d_t)
-  var rect = c.legion_rect_3d_t {
-    lo = start,
-    hi = c.legion_point_3d_t {
-      x = array(start.x[0] + extent.x[0] - 1,
-                start.x[1] + extent.x[1] - 1,
-                start.x[2] + extent.x[2] - 1),
-    },
-  }
-  return c.legion_domain_from_rect_3d(rect)
+  base[domain_from_bounds] = terra(start : point_type, extent : point_type)
+    var rect = rect_type {
+      lo = start,
+      hi = point_type {
+        x = array([data.range(0, max_dim):map(function(dim) return `(start.x[dim] + extent.x[dim] - 1) end)]),
+      },
+    }
+    return domain_from_rect(rect)
+  end
 end
 
 -- A whitelist of functions that are known to be ok. We're importing a
