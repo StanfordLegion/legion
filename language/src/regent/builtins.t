@@ -33,9 +33,15 @@ builtins.index_type = std.index_type
 builtins.int1d = std.int1d
 builtins.int2d = std.int2d
 builtins.int3d = std.int3d
+if std.int4d then
+  builtins.int4d = std.int4d
+end
 builtins.rect1d = std.rect1d
 builtins.rect2d = std.rect2d
 builtins.rect3d = std.rect3d
+if std.rect4d then
+  builtins.rect4d = std.rect4d
+end
 builtins.ispace = std.ispace
 builtins.partition = std.partition
 builtins.phase_barrier = std.phase_barrier
