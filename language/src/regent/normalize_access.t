@@ -241,11 +241,42 @@ function normalize_access.expr(stats, expr, read)
 end
 
 function normalize_access.stat_if(stats, stat)
+  local cond = normalize_access.expr(stats, stat.cond, true)
   local then_block = normalize_access.block(stat.then_block)
   local else_block = normalize_access.block(stat.else_block)
   stats:insert(stat {
+    cond = cond,
     then_block = then_block,
     else_block = else_block,
+  })
+end
+
+function normalize_access.stat_while(stats, stat)
+  local cond = normalize_access.expr(stats, stat.cond, true)
+  local block = normalize_access.block(stat.block)
+  stats:insert(stat {
+    cond = cond,
+    block = block,
+  })
+end
+
+function normalize_access.stat_for_num(stats, stat)
+  local values = stat.values:map(function(value)
+    return normalize_access.expr(stats, value, true)
+  end)
+  local block = normalize_access.block(stat.block)
+  stats:insert(stat {
+    values = values,
+    block = block,
+  })
+end
+
+function normalize_access.stat_repeat(stats, stat)
+  local until_cond = normalize_access.expr(stats, stat.until_cond, true)
+  local block = normalize_access.block(stat.block)
+  stats:insert(stat {
+    until_cond = until_cond,
+    block = block,
   })
 end
 
@@ -290,10 +321,11 @@ function normalize_access.pass_through_stat(stats, stat) stats:insert(stat) end
 
 local normalize_access_stat_table = {
   [ast.typed.stat.If]              = normalize_access.stat_if,
-  [ast.typed.stat.While]           = normalize_access.stat_block,
-  [ast.typed.stat.ForNum]          = normalize_access.stat_block,
+  [ast.typed.stat.While]           = normalize_access.stat_while,
+  [ast.typed.stat.ForNum]          = normalize_access.stat_for_num,
+  [ast.typed.stat.Repeat]          = normalize_access.stat_repeat,
+
   [ast.typed.stat.ForList]         = normalize_access.stat_block,
-  [ast.typed.stat.Repeat]          = normalize_access.stat_block,
   [ast.typed.stat.Block]           = normalize_access.stat_block,
 
   [ast.typed.stat.Var]             = normalize_access.stat_var,
