@@ -3476,6 +3476,7 @@ local function make_ordering_constraint(layout, dim)
   if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
   if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
   if dim >= 4 then result:insert(quote dims[3] = c.DIM_W end) end
+  if dim >= 5 then result:insert(quote dims[4] = c.DIM_V end) end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
   result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
 
@@ -4462,6 +4463,7 @@ std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
 std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
 std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
 std.layout.dimw = ast.layout.Dim { index = c.DIM_W }
+std.layout.dimv = ast.layout.Dim { index = c.DIM_V }
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
 
 function std.layout.field_path(...)
@@ -4491,6 +4493,8 @@ function std.layout.make_index_ordering_from_constraint(constraint)
         ordering:insert(3)
       elseif dimension == std.layout.dimw then
         ordering:insert(4)
+      elseif dimension == std.layout.dimv then
+        ordering:insert(5)
       end
     end)
   assert(#ordering == #constraint.dimensions - 1)
@@ -4507,6 +4511,9 @@ std.layout.default_layout = terralib.memoize(function(index_type)
   end
   if index_type.dim > 3 then
     dimensions:insert(std.layout.dimw)
+  end
+  if index_type.dim > 4 then
+    dimensions:insert(std.layout.dimv)
   end
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
