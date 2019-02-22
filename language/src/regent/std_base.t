@@ -91,7 +91,7 @@ for dim = 1, max_dim do
     var rect = rect_type {
       lo = start,
       hi = point_type {
-        x = array([data.range(0, max_dim):map(function(dim) return `(start.x[dim] + extent.x[dim] - 1) end)]),
+        x = array([data.range(0, dim):map(function(i) return `(start.x[i] + extent.x[i] - 1) end)]),
       },
     }
     return domain_from_rect(rect)
