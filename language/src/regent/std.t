@@ -4460,6 +4460,7 @@ std.layout = {}
 std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
 std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
 std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
+std.layout.dimw = ast.layout.Dim { index = c.DIM_W }
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
 
 function std.layout.field_path(...)
@@ -4487,6 +4488,8 @@ function std.layout.make_index_ordering_from_constraint(constraint)
         ordering:insert(2)
       elseif dimension == std.layout.dimz then
         ordering:insert(3)
+      elseif dimension == std.layout.dimw then
+        ordering:insert(4)
       end
     end)
   assert(#ordering == #constraint.dimensions - 1)
@@ -4500,6 +4503,9 @@ std.layout.default_layout = terralib.memoize(function(index_type)
   end
   if index_type.dim > 2 then
     dimensions:insert(std.layout.dimz)
+  end
+  if index_type.dim > 3 then
+    dimensions:insert(std.layout.dimw)
   end
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
