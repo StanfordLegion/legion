@@ -10126,9 +10126,15 @@ namespace Legion {
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
       if (ready.exists() && !ready.has_triggered())
-        ready.wait();
-      target->record_equivalence_set(set, eq_mask);
-      Runtime::trigger_event(done_event);
+      {
+        target->record_pending_equivalence_set(set, eq_mask);
+        Runtime::trigger_event(done_event, ready);
+      }
+      else
+      {
+        target->record_equivalence_set(set, eq_mask);
+        Runtime::trigger_event(done_event);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -10388,6 +10394,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void VersionManager::record_pending_equivalence_set(EquivalenceSet *set,
+                                                        const FieldMask &mask)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock m_lock(manager_lock);
+      pending_equivalence_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
     void VersionManager::finalize_equivalence_sets(RtUserEvent done_event)
     //--------------------------------------------------------------------------
     {
@@ -10397,6 +10412,36 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(finder != equivalence_sets_ready.end());
 #endif
+      // If there are any pending equivalence sets, move them into 
+      // the actual equivalence sets
+      if (!pending_equivalence_sets.empty() && 
+          !(finder->second * pending_equivalence_sets.get_valid_mask()))
+      {
+        std::vector<EquivalenceSet*> to_delete;
+        for (FieldMaskSet<EquivalenceSet>::iterator it = 
+              pending_equivalence_sets.begin(); it !=
+              pending_equivalence_sets.end(); it++)
+        {
+          // Once it's valid for any field then it's valid for all of them
+          if (it->second * finder->second)
+            continue;
+          if (equivalence_sets.insert(it->first, it->second))
+            it->first->add_base_resource_ref(VERSION_MANAGER_REF);
+          to_delete.push_back(it->first);
+        }
+        if (!to_delete.empty())
+        {
+          if (to_delete.size() < pending_equivalence_sets.size())
+          {
+            for (std::vector<EquivalenceSet*>::const_iterator it =
+                  to_delete.begin(); it != to_delete.end(); it++)
+              pending_equivalence_sets.erase(*it);
+            pending_equivalence_sets.tighten_valid_mask();
+          }
+          else
+            pending_equivalence_sets.clear();
+        }
+      }
       if (!waiting_infos.empty() &&
           !(waiting_infos.get_valid_mask() * finder->second))
       {
