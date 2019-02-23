@@ -560,16 +560,17 @@ namespace Legion {
     };
 
     enum VirtualChannelKind {
-      // The default virtual channel is unordered
-      DEFAULT_VIRTUAL_CHANNEL = 0, 
-      // All the rest of these are ordered channels
+      // The default and work virtual channels are unordered
+      DEFAULT_VIRTUAL_CHANNEL = 0, // latency priority
+      THROUGHPUT_VIRTUAL_CHANNEL = 1, // throughput priority
+      // All the rest of these are ordered (latency-priority) channels
       MAPPER_VIRTUAL_CHANNEL = 1, 
       TASK_VIRTUAL_CHANNEL = 2,
       INDEX_SPACE_VIRTUAL_CHANNEL = 3,
       FIELD_SPACE_VIRTUAL_CHANNEL = 4,
       LOGICAL_TREE_VIRTUAL_CHANNEL = 5,
       REFERENCE_VIRTUAL_CHANNEL = 6,
-      UPDATE_VIRTUAL_CHANNEL = 7,
+      UPDATE_VIRTUAL_CHANNEL = 7, // deferred-priority
       CONTEXT_VIRTUAL_CHANNEL = 8,
       LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 9,
       EXPRESSION_VIRTUAL_CHANNEL = 10,
