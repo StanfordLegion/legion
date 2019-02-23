@@ -2189,23 +2189,33 @@ namespace Legion {
       }
       else
       {
-        // Normal instance creation
-        std::vector<FieldID> fields;
-        default_policy_select_constraint_fields(ctx, req, fields);
-        std::vector<DimensionKind> dimension_ordering(4);
-        dimension_ordering[0] = DIM_X;
-        dimension_ordering[1] = DIM_Y;
-        dimension_ordering[2] = DIM_Z;
-        dimension_ordering[3] = DIM_F;
         // Our base default mapper will try to make instances of containing
         // all fields (in any order) laid out in SOA format to encourage 
         // maximum re-use by any tasks which use subsets of the fields
         constraints.add_constraint(SpecializedConstraint())
-          .add_constraint(MemoryConstraint(target_memory.kind()))
-          .add_constraint(FieldConstraint(fields, false/*contiguous*/,
-                                          false/*inorder*/))
-          .add_constraint(OrderingConstraint(dimension_ordering, 
-                                             false/*contigous*/));
+          .add_constraint(MemoryConstraint(target_memory.kind()));
+
+        if (constraints.field_constraint.field_set.size() == 0)
+        {
+          // Normal instance creation
+          std::vector<FieldID> fields;
+          default_policy_select_constraint_fields(ctx, req, fields);
+          constraints.add_constraint(FieldConstraint(fields,false/*contiguous*/,
+                                                     false/*inorder*/));
+        }
+        if (constraints.ordering_constraint.ordering.size() == 0)
+        {
+          IndexSpace is = req.region.get_index_space();
+          Domain domain = runtime->get_index_space_domain(ctx, is);
+          int dim = domain.get_dim();
+          std::vector<DimensionKind> dimension_ordering(dim + 1);
+          for (int i = 0; i < dim; ++i)
+            dimension_ordering[i] =
+              static_cast<DimensionKind>(static_cast<int>(DIM_X) + i);
+          dimension_ordering[dim] = DIM_F;
+          constraints.add_constraint(OrderingConstraint(dimension_ordering,
+                                                        false/*contigous*/));
+        }
       }
     }
 
