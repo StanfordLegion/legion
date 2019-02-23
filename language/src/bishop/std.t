@@ -18,17 +18,20 @@
 local config = require("bishop/config")
 local log = require("bishop/log")
 
-local c = terralib.includecstring [[
+local std = {}
+
+std.config, std.args = config.args()
+
+local max_dim = std.config["legion-dim"]
+
+local c = terralib.includecstring ([[
 #include "legion.h"
 #include "bishop_c.h"
 #include <stdio.h>
 #include <stdlib.h>
-]]
+]], {"-DREALM_MAX_DIM=" .. tostring(max_dim), "-DLEGION_MAX_DIM=" .. tostring(max_dim)})
 
-local std = {}
 std.c = c
-
-std.config, std.args = config.args()
 
 function std.curry(f, a)
   return function(...) return f(a, ...) end
