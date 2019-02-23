@@ -205,6 +205,17 @@ function data.flatten(list)
   return result
 end
 
+function data.take(n, list)
+  local result = terralib.newlist()
+  for i, elt in ipairs(list) do
+    result:insert(elt)
+    if i >= n then
+      break
+    end
+  end
+  return result
+end
+
 function data.dict(list)
   local result = {}
   for _, pair in ipairs(list) do

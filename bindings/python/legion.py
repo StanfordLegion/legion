@@ -91,10 +91,14 @@ header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTAL
 ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
+
+# Note: don't use __file__ here, it may return either .py or .pyc and cause
+# non-deterministic failures.
+library_name = "legion.py"
 max_legion_python_tasks = 1000000
 next_legion_task_id = c.legion_runtime_generate_library_task_ids(
                         c.legion_runtime_get_runtime(),
-                        os.path.basename(__file__).encode('utf-8'),
+                        library_name.encode('utf-8'),
                         max_legion_python_tasks)
 max_legion_task_id = next_legion_task_id + max_legion_python_tasks
 
