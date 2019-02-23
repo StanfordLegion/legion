@@ -1372,6 +1372,8 @@ namespace Legion {
                                           const FieldMask &version_mask,
                                           Operation *op);
       void record_equivalence_set(EquivalenceSet *set, const FieldMask &mask);
+      void record_pending_equivalence_set(EquivalenceSet *set, 
+                                          const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void update_equivalence_sets(const unsigned previous_number,
                              const FieldMaskSet<EquivalenceSet> &to_add,
@@ -1390,6 +1392,7 @@ namespace Legion {
       mutable LocalLock manager_lock;
     protected: 
       FieldMaskSet<EquivalenceSet> equivalence_sets;
+      FieldMaskSet<EquivalenceSet> pending_equivalence_sets;
       FieldMaskSet<VersionInfo> waiting_infos;
       LegionMap<RtUserEvent,FieldMask>::aligned equivalence_sets_ready;
       unsigned version_number;
