@@ -5805,7 +5805,15 @@ namespace Legion {
         size_t max_message_size, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
         sending_buffer_size(max_message_size), 
-        ordered_channel(kind != 0), observed_recent(true), profiler(prof)
+        ordered_channel((kind != DEFAULT_VIRTUAL_CHANNEL) &&
+                        (kind != THROUGHPUT_VIRTUAL_CHANNEL)), 
+        request_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
+            LG_THROUGHPUT_MESSAGE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
+            LG_LATENCY_DEFERRED_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY),
+        response_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
+            LG_THROUGHPUT_RESPONSE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
+            LG_LATENCY_MESSAGE_PRIORITY : LG_LATENCY_RESPONSE_PRIORITY),
+        observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
     {
@@ -5847,7 +5855,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     VirtualChannel::VirtualChannel(const VirtualChannel &rhs)
       : sending_buffer(NULL), sending_buffer_size(0), 
-        ordered_channel(false), profiler(NULL)
+        ordered_channel(false), request_priority(rhs.request_priority),
+        response_priority(rhs.response_priority), profiler(NULL)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -5963,10 +5972,10 @@ namespace Legion {
       {
         Realm::ProfilingRequestSet requests;
         LegionProfiler::add_message_request(requests, target);
-        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer, 
-            sending_index, requests, ordered_channel ? 
-              last_message_event : RtEvent::NO_RT_EVENT, response ? 
-              LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, 
+              sending_buffer, sending_index, requests, 
+              ordered_channel ? last_message_event : RtEvent::NO_RT_EVENT, 
+              response ? response_priority : request_priority));
         if (!ordered_channel)
         {
           unordered_events.insert(last_message_event);
@@ -5976,10 +5985,10 @@ namespace Legion {
       }
       else
       {
-        last_message_event = RtEvent(target.spawn(LG_TASK_ID, sending_buffer,
-              sending_index, ordered_channel ? 
-                last_message_event : RtEvent::NO_RT_EVENT, response ? 
-                LG_LATENCY_RESPONSE_PRIORITY : LG_LATENCY_MESSAGE_PRIORITY));
+        last_message_event = RtEvent(target.spawn(LG_TASK_ID, 
+                sending_buffer, sending_index, 
+                ordered_channel ? last_message_event : RtEvent::NO_RT_EVENT, 
+                response ? response_priority : request_priority));
         if (!ordered_channel)
         {
           unordered_events.insert(last_message_event);
@@ -14544,10 +14553,8 @@ namespace Legion {
           rez.serialize(task->get_task_kind());
           deactivate_task = task->pack_task(rez, target);
         }
-        // Send tasks on the physical state virtual channel in case
-        // they moved any state when they were sent
         manager->send_message(rez, TASK_MESSAGE, 
-                              DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                              TASK_VIRTUAL_CHANNEL, true/*flush*/);
         if (deactivate_task)
           task->deactivate();
       }
@@ -14592,7 +14599,7 @@ namespace Legion {
           }
           // Put it in the queue, flush the last task
           manager->send_message(rez, TASK_MESSAGE,
-                                DEFAULT_VIRTUAL_CHANNEL, (idx == tasks.size()));
+                                TASK_VIRTUAL_CHANNEL, (idx == tasks.size()));
           // Deactivate the task if it is remote
           if (deactivate_task)
             (*it)->deactivate();
@@ -15674,7 +15681,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_EQUIVALENCE_SET_RAY_TRACE_REQUEST, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15743,7 +15750,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_UPDATES, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15753,7 +15760,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15763,7 +15770,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_RELEASES, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15773,7 +15780,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_COPIES_ACROSS, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15783,7 +15790,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_OVERWRITES, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15793,7 +15800,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez,
           SEND_EQUIVALENCE_SET_REMOTE_FILTERS, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+          THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -16082,7 +16089,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_NOTIFICATION,
-                                    DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, 
+                                    THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/, 
                                     false/*response*/, true/*shutdown*/);
     }
 
@@ -16091,7 +16098,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       find_messenger(target)->send_message(rez, SEND_SHUTDOWN_RESPONSE,
-                                DEFAULT_VIRTUAL_CHANNEL, true/*flush*/,
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/,
                                 false/*response*/, true/*shutdown*/);
     }
 
@@ -18375,7 +18382,7 @@ namespace Legion {
         Serializer rez;
         rez.serialize(grant_event);
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_REQUEST,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
         grant_event.wait();
       }
       else
@@ -18395,7 +18402,7 @@ namespace Legion {
         // executing a top-level task
         Serializer rez;
         find_messenger(0)->send_message(rez, SEND_TOP_LEVEL_TASK_COMPLETE,
-                                        DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+                                THROUGHPUT_VIRTUAL_CHANNEL, true/*flush*/);
       }
       else
       {

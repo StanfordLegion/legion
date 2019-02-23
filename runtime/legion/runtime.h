@@ -971,6 +971,8 @@ namespace Legion {
       bool partial;
     private:
       const bool ordered_channel;
+      const LgPriority request_priority;
+      const LgPriority response_priority;
       static const unsigned MAX_UNORDERED_EVENTS = 32;
       std::set<RtEvent> unordered_events;
     private:
