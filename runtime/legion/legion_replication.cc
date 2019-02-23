@@ -659,6 +659,23 @@ namespace Legion {
         if (!deferred)
         {
           // First time through so start the exchange
+          if (deterministic_redop)
+          {
+            // We have to do the fold of our values here now before
+            // we can send them all remotely to the other nodes
+            for (std::map<DomainPoint,std::pair<void*,size_t> >::const_iterator
+                  it = temporary_futures.begin();
+                  it != temporary_futures.end(); it++)
+            {
+              fold_reduction_future(it->second.first, it->second.second,
+                                    false/*owner*/, true/*exclusive*/);
+              legion_free(FUTURE_RESULT_ALLOC, 
+                          it->second.first, it->second.second);
+            }
+            // Clear these out so we don't apply them twice when 
+            // we call the base-class version of this method
+            temporary_futures.clear();
+          }
           // The collective takes ownership of the buffer here
           const RtEvent futures_ready = 
             reduction_collective->exchange_futures(reduction_state);
