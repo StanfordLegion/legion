@@ -560,24 +560,20 @@ namespace Legion {
     };
 
     enum VirtualChannelKind {
-      DEFAULT_VIRTUAL_CHANNEL = 0,
-      INDEX_SPACE_VIRTUAL_CHANNEL = 1,
-      FIELD_SPACE_VIRTUAL_CHANNEL = 2,
-      LOGICAL_TREE_VIRTUAL_CHANNEL = 3,
-      MAPPER_VIRTUAL_CHANNEL = 4,
-      SEMANTIC_INFO_VIRTUAL_CHANNEL = 5,
-      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 6,
-      CONTEXT_VIRTUAL_CHANNEL = 7,
-      MANAGER_VIRTUAL_CHANNEL = 8,
-      VIEW_VIRTUAL_CHANNEL = 9,
-      UPDATE_VIRTUAL_CHANNEL = 10,
-      VARIANT_VIRTUAL_CHANNEL = 11,
-      VERSION_VIRTUAL_CHANNEL = 12,
-      ANALYSIS_VIRTUAL_CHANNEL = 13,
-      FUTURE_VIRTUAL_CHANNEL = 14,
-      REFERENCE_VIRTUAL_CHANNEL = 15,
-      EXPRESSION_VIRTUAL_CHANNEL = 16,
-      MAX_NUM_VIRTUAL_CHANNELS = 17, // this one must be last
+      // The default virtual channel is unordered
+      DEFAULT_VIRTUAL_CHANNEL = 0, 
+      // All the rest of these are ordered channels
+      MAPPER_VIRTUAL_CHANNEL = 1, 
+      TASK_VIRTUAL_CHANNEL = 2,
+      INDEX_SPACE_VIRTUAL_CHANNEL = 3,
+      FIELD_SPACE_VIRTUAL_CHANNEL = 4,
+      LOGICAL_TREE_VIRTUAL_CHANNEL = 5,
+      REFERENCE_VIRTUAL_CHANNEL = 6,
+      UPDATE_VIRTUAL_CHANNEL = 7,
+      CONTEXT_VIRTUAL_CHANNEL = 8,
+      LAYOUT_CONSTRAINT_VIRTUAL_CHANNEL = 9,
+      EXPRESSION_VIRTUAL_CHANNEL = 10,
+      MAX_NUM_VIRTUAL_CHANNELS = 11, // this one must be last
     };
 
     enum MessageKind {
@@ -594,7 +590,7 @@ namespace Legion {
       SEND_INDEX_SPACE_COLORS_RESPONSE,
       SEND_INDEX_SPACE_REMOTE_EXPRESSION_REQUEST,
       SEND_INDEX_SPACE_REMOTE_EXPRESSION_RESPONSE,
-      SEND_REMOTE_EXPRESSION_INVALIDATION,
+      SEND_INDEX_SPACE_REMOTE_EXPRESSION_INVALIDATION,
       SEND_INDEX_PARTITION_NOTIFICATION,
       SEND_INDEX_PARTITION_NODE,
       SEND_INDEX_PARTITION_REQUEST,
@@ -742,7 +738,7 @@ namespace Legion {
         "Send Index Space Colors Response",                           \
         "Send Index Space Remote Expression Request",                 \
         "Send Index Space Remote Expression Response",                \
-        "Send Remote Expression Invalidation",                        \
+        "Send Index Space Remote Expression Invalidation",            \
         "Send Index Partition Notification",                          \
         "Send Index Partition Node",                                  \
         "Send Index Partition Request",                               \

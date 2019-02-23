@@ -1847,11 +1847,15 @@ namespace Legion {
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
-          const RtEvent done = 
-            it->second->issue_updates(trace_info, precondition,
-                false/*has src*/, false/*has dst*/, needs_deferral);
-          if (done.exists())
-            guard_events.insert(done);
+          it->second->issue_updates(trace_info, precondition,
+              false/*has src*/, false/*has dst*/, needs_deferral);
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+          if (!it->second->effects_applied.has_triggered())
+            guard_events.insert(it->second->effects_applied);
+#else
+          if (!it->second->guard_postcondition.has_triggered())
+            guard_events.insert(it->second->guard_postcondition);
+#endif
           if (it->second->release_guards(map_applied_events))
             delete it->second;
         }
@@ -2170,12 +2174,16 @@ namespace Legion {
       // Issue any release copies/fills that need to be done
       if (release_aggregator != NULL)
       {
-        const RtEvent done = 
-          release_aggregator->issue_updates(trace_info, precondition);
+        release_aggregator->issue_updates(trace_info, precondition);
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (release_aggregator->effects_applied.has_triggered())
+          guard_events.insert(release_aggregator->effects_applied);
+#else
+        if (!release_aggregator->guard_postcondition.has_triggered())
+          guard_events.insert(release_aggregator->guard_postcondition);
+#endif
         if (release_aggregator->release_guards(map_applied_events))
           delete release_aggregator;
-        if (done.exists() && !done.has_triggered())
-          guard_events.insert(done);
       }
       if (!alt_sets.empty())
         version_info.update_equivalence_sets(alt_sets, to_delete);
@@ -2497,11 +2505,16 @@ namespace Legion {
             }
           }
         }
-        const RtEvent done = 
-          across_aggregator->issue_updates(trace_info, precondition,
-              false/*has src preconditions*/, true/*has dst preconditions*/);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+        across_aggregator->issue_updates(trace_info, precondition,
+            false/*has src preconditions*/, true/*has dst preconditions*/);
+        // Need to wait before we can get the summary
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (!across_aggregator->effects_applied.has_triggered())
+          across_aggregator->effects_applied.wait();
+#else
+        if (!across_aggregator->guard_postcondition.has_triggered())
+          across_aggregator->guard_postcondition.wait();
+#endif
         const ApEvent result = across_aggregator->summarize(trace_info);
         if (result.exists())
           copy_events.insert(result);
@@ -2932,10 +2945,15 @@ namespace Legion {
         version_info.update_equivalence_sets(alt_sets, to_delete);
       if (output_aggregator != NULL)
       {
-        const RtEvent done = 
-          output_aggregator->issue_updates(trace_info, precondition);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+        output_aggregator->issue_updates(trace_info, precondition);
+        // Need to wait before we can get the summary
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (!output_aggregator->effects_applied.has_triggered())
+          output_aggregator->effects_applied.wait();
+#else
+        if (!output_aggregator->guard_postcondition.has_triggered())
+          output_aggregator->guard_postcondition.wait();
+#endif
         const ApEvent result = output_aggregator->summarize(trace_info); 
         if (result.exists())
           effects_events.insert(result);
@@ -5513,13 +5531,19 @@ namespace Legion {
                                                 IndexSpaceExprID remote_expr_id)
     //--------------------------------------------------------------------------
     {
-      AutoLock l_lock(lookup_is_op_lock);
-      std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
-        finder = remote_expressions.find(remote_expr_id);
+      IndexSpaceExpression *expr;
+      {
+        AutoLock l_lock(lookup_is_op_lock);
+        std::map<IndexSpaceExprID,IndexSpaceExpression*>::iterator 
+          finder = remote_expressions.find(remote_expr_id);
 #ifdef DEBUG_LEGION
-      assert(finder != remote_expressions.end());
+        assert(finder != remote_expressions.end());
 #endif
-      remote_expressions.erase(finder);
+        expr = finder->second;
+        remote_expressions.erase(finder);
+      }
+      if (expr->remove_expression_reference())
+        delete expr;
     }
 
     //--------------------------------------------------------------------------
@@ -5538,7 +5562,7 @@ namespace Legion {
       {
         RezCheck z2(rez);
         rez.serialize(remote_expr_id);
-        origin->pack_expression_structure(rez, source);
+        origin->pack_expression_structure(rez, source, true/*top*/);
         rez.serialize(done_event);
       }
       runtime->send_index_space_remote_expression_response(source, rez);
@@ -5546,13 +5570,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::handle_remote_expression_response(
-                                                            Deserializer &derez)
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DerezCheck z(derez);
       IndexSpaceExprID remote_expr_id;
       derez.deserialize(remote_expr_id); 
-      IndexSpaceExpression *result = unpack_expression_structure(derez);
+      IndexSpaceExpression *result = unpack_expression_structure(derez, source);
+      result->add_expression_reference();
       {
         AutoLock l_lock(lookup_is_op_lock);
 #ifdef DEBUG_LEGION
@@ -5570,8 +5595,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceExpression* RegionTreeForest::unpack_expression_structure(
+    void RegionTreeForest::handle_remote_expression_invalidation(
                                                             Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      IndexSpaceExprID remote_expr_id;
+      derez.deserialize(remote_expr_id);
+      unregister_remote_expression(remote_expr_id);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexSpaceExpression* RegionTreeForest::unpack_expression_structure(
+                                     Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // First see if this is a base case of a known index space
@@ -5581,7 +5617,10 @@ namespace Legion {
       {
         IndexSpace handle;
         derez.deserialize(handle);
-        return get_node(handle);
+        IndexSpaceNode *result = get_node(handle);
+        // Remove the reference that we have from when this was packed
+        result->send_remote_gc_decrement(source, RtEvent::NO_RT_EVENT);
+        return result;
       }
       bool is_local;
       derez.deserialize(is_local);
@@ -5599,10 +5638,9 @@ namespace Legion {
       assert(num_sub_expressions != 1); // should be 0 or >= 2
       assert(num_sub_expressions <= MAX_EXPRESSION_FANOUT);
 #endif
-      std::set<IndexSpaceExpression*> exprs;
+      std::vector<IndexSpaceExpression*> expressions(num_sub_expressions);
       for (unsigned idx = 0; idx < num_sub_expressions; idx++)
-        exprs.insert(unpack_expression_structure(derez));
-      std::vector<IndexSpaceExpression*> expressions(exprs.begin(),exprs.end());
+        expressions[idx] = unpack_expression_structure(derez, source);
       // Now figure out which kind of operation we're making here
       IndexSpaceOperation::OperationKind op_kind;
       derez.deserialize(op_kind);
@@ -5610,11 +5648,21 @@ namespace Legion {
       {
         case IndexSpaceOperation::UNION_OP_KIND:
           {
+            // Sort the expressions so they're in the same order
+            // as if they had come from the local node
+            if (num_sub_expressions > 0)
+              std::sort(expressions.begin(), expressions.end(), 
+                        std::less<IndexSpaceExpression*>());
             RemoteUnionOpCreator creator(this, derez, expressions);
             return union_index_spaces(expressions, &creator);  
           }
         case IndexSpaceOperation::INTERSECT_OP_KIND:
           {
+            // Sort the expressions so they're in the same order
+            // as if they had come from the local node
+            if (num_sub_expressions > 0)
+              std::sort(expressions.begin(), expressions.end(), 
+                        std::less<IndexSpaceExpression*>());
             RemoteIntersectionOpCreator creator(this, derez, expressions);
             return intersect_index_spaces(expressions, &creator);
           }
@@ -5755,7 +5803,7 @@ namespace Legion {
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                                    RegionTreeForest *ctx)
       : IndexSpaceExpression(tag, ctx->runtime, inter_lock), 
-        context(ctx), node(NULL)
+        context(ctx), node(NULL), remote_exprs(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5763,7 +5811,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     IntermediateExpression::IntermediateExpression(TypeTag tag,
                                      RegionTreeForest *ctx, IndexSpaceExprID id)
-      : IndexSpaceExpression(tag, id, inter_lock), context(ctx), node(NULL)
+      : IndexSpaceExpression(tag, id, inter_lock), context(ctx), node(NULL),
+        remote_exprs(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -5772,6 +5821,20 @@ namespace Legion {
     IntermediateExpression::~IntermediateExpression(void)
     //--------------------------------------------------------------------------
     {
+      // Send messages to remove any remote expressions
+      if (remote_exprs != NULL)
+      {
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(expr_id);
+        }
+        Runtime *runtime = context->runtime;
+        for (std::set<AddressSpaceID>::const_iterator it =
+              remote_exprs->begin(); it != remote_exprs->end(); it++)
+          runtime->send_index_space_remote_expression_invalidation(*it, rez);
+        delete remote_exprs;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5789,16 +5852,16 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    /*static*/ void IntermediateExpression::handle_expression_invalidation(
-                                  Deserializer &derez, RegionTreeForest *forest)
+    void IntermediateExpression::record_remote_expression(AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
-      IndexSpaceExprID remote_expr_id;
-      derez.deserialize(remote_expr_id);
-      IndexSpaceExpression *remote_expr = 
-        forest->find_remote_expression(remote_expr_id);
-      if (remote_expr->remove_expression_reference())
-        delete remote_expr;
+      AutoLock i_lock(inter_lock);
+      if (remote_exprs == NULL)
+        remote_exprs = new std::set<AddressSpaceID>();
+#ifdef DEBUG_LEGION
+      assert(remote_exprs->find(target) == remote_exprs->end());
+#endif
+      remote_exprs->insert(target);
     }
 
     /////////////////////////////////////////////////////////////

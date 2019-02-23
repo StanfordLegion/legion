@@ -214,9 +214,6 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
-      virtual VirtualChannelKind get_virtual_channel(void) const 
-        { return DEFAULT_VIRTUAL_CHANNEL; }
-    public:
       void get_void_result(bool silence_warnings = true);
       void* get_untyped_result(bool silence_warnings = true);
       bool is_empty(bool block, bool silence_warnings = true);
@@ -909,6 +906,7 @@ namespace Legion {
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
                            const void *args, size_t arglen);
+      void filter_unordered_events(void);
     private:
       mutable LocalLock send_lock;
       char *const sending_buffer;
@@ -918,6 +916,11 @@ namespace Legion {
       MessageHeader header;
       unsigned packaged_messages;
       bool partial;
+    private:
+      const bool ordered_channel;
+      static const unsigned MAX_UNORDERED_EVENTS = 32;
+      std::set<RtEvent> unordered_events;
+    private:
       // State for receiving messages
       // No lock for receiving messages since we know
       // that they are ordered
@@ -2131,8 +2134,8 @@ namespace Legion {
                                                       Serializer &rez);
       void send_index_space_remote_expression_response(AddressSpaceID target,
                                                        Serializer &rez);
-      void send_remote_expression_invalidation(AddressSpaceID target,
-                                               Serializer &rez);
+      void send_index_space_remote_expression_invalidation(
+                                    AddressSpaceID target, Serializer &rez);
       void send_index_partition_notification(AddressSpaceID target, 
                                              Serializer &rez);
       void send_index_partition_node(AddressSpaceID target, Serializer &rez);
@@ -2332,8 +2335,10 @@ namespace Legion {
       void handle_index_space_colors_response(Deserializer &derez);
       void handle_index_space_remote_expression_request(Deserializer &derez,
                                                         AddressSpaceID source);
-      void handle_index_space_remote_expression_response(Deserializer &derez);
-      void handle_remote_expression_invalidation(Deserializer &derez);
+      void handle_index_space_remote_expression_response(Deserializer &derez,
+                                                         AddressSpaceID source);
+      void handle_index_space_remote_expression_invalidation(
+                                                         Deserializer &derez);
       void handle_index_partition_notification(Deserializer &derez);
       void handle_index_partition_node(Deserializer &derez,
                                        AddressSpaceID source);
