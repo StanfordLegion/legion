@@ -690,13 +690,13 @@ namespace Legion {
       void record_precondition(InstanceView *view, bool reading,
                                ApEvent event, const FieldMask &mask,
                                IndexSpaceExpression *expr);
-      RtEvent issue_updates(const PhysicalTraceInfo &trace_info, 
-                            ApEvent precondition,
-                            // Next two flags are used for across-copies
-                            // to indicate when we already know preconditions
-                            const bool has_src_preconditions = false,
-                            const bool has_dst_preconditions = false,
-                            const bool need_deferral = false);
+      void issue_updates(const PhysicalTraceInfo &trace_info, 
+                         ApEvent precondition,
+                         // Next two flags are used for across-copies
+                         // to indicate when we already know preconditions
+                         const bool has_src_preconditions = false,
+                         const bool has_dst_preconditions = false,
+                         const bool need_deferral = false);
       void record_guard_set(EquivalenceSet *set);
       bool release_guards(std::set<RtEvent> &applied);
       ApEvent summarize(const PhysicalTraceInfo &trace_info) const;
@@ -738,9 +738,9 @@ namespace Legion {
       const unsigned dst_index;
       const RtEvent guard_precondition;
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      const RtUserEvent performed_postcondition;
-#endif
       const RtUserEvent guard_postcondition;
+#endif
+      const RtUserEvent effects_applied;
       const PredEvent predicate_guard;
       const bool track_events;
     protected:
@@ -810,11 +810,11 @@ namespace Legion {
         RemoteSet(void)
           : set(NULL), source(0) { }
         RemoteSet(EquivalenceSet *s, AddressSpaceID src, const FieldMask &m)
-          : set(s), source(src), mask(m) { }
+          : mask(m), set(s), source(src) { }
       public:
+        FieldMask mask;
         EquivalenceSet *set;
         AddressSpaceID source;
-        FieldMask mask;
       };
     public:
       RemoteEqTracker(Runtime *rt);

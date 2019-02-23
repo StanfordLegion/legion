@@ -22,8 +22,9 @@ do
   local circuit_cc = root_dir .. "circuit.cc"
   local circuit_so = os.tmpname() .. ".so" -- root_dir .. "circuit.so"
   local cxx = os.getenv('CXX') or 'c++'
+  local max_dim = os.getenv('MAX_DIM') or '3'
 
-  local cxx_flags = "-O2 -std=c++0x -Wall -Werror"
+  local cxx_flags = "-O2 -std=c++0x -Wall -Werror -DLEGION_MAX_DIM=" .. max_dim .. " -DREALM_MAX_DIM=" .. max_dim
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
       (cxx_flags ..

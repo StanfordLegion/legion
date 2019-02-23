@@ -678,7 +678,7 @@ function analyze_access.stat_var(cx, node)
       local value_private, value_center =
         analyze_access.expr(cx, node.value, std.reads)
       cx:update_center(symbol, value_center)
-      return value_private
+      return false
     end)
   end
   local cx = cx:current_context()

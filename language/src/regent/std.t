@@ -2222,20 +2222,18 @@ if max_dim >= 1 then
   std.int1d = std.index_type(int64, "int1d")
   std.rect1d = std.rect_type(std.int1d)
 end
-if max_dim >= 2 then
-  struct std.__int2d { x : int64, y : int64 }
-  std.int2d = std.index_type(std.__int2d, "int2d")
-  std.rect2d = std.rect_type(std.int2d)
-end
-if max_dim >= 3 then
-  struct std.__int3d { x : int64, y : int64, z : int64 }
-  std.int3d = std.index_type(std.__int3d, "int3d")
-  std.rect3d = std.rect_type(std.int3d)
-end
-if max_dim >= 4 then
-  struct std.__int4d { x : int64, y : int64, z : int64, w : int64 }
-  std.int4d = std.index_type(std.__int4d, "int4d")
-  std.rect4d = std.rect_type(std.int4d)
+do
+  local dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
+  for dim = 2, max_dim do
+    local st = terralib.types.newstruct("__int" .. dim .. "d")
+    st.entries = data.take(dim, dim_names):map(
+      function(name)
+        return { name, int64 }
+      end)
+    std["__int" .. dim .. "d"] = st
+    std["int" .. dim .. "d"] = std.index_type(st, "int" .. dim .. "d")
+    std["rect" .. dim .. "d"] = std.rect_type(std["int" .. dim .. "d"])
+  end
 end
 
 do
@@ -3475,6 +3473,8 @@ local function make_ordering_constraint(layout, dim)
   result:insert(quote dims[0] = c.DIM_X end)
   if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
   if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
+  if dim >= 4 then result:insert(quote dims[3] = c.DIM_W end) end
+  if dim >= 5 then result:insert(quote dims[4] = c.DIM_V end) end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
   result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
 
@@ -4460,6 +4460,8 @@ std.layout = {}
 std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
 std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
 std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
+std.layout.dimw = ast.layout.Dim { index = c.DIM_W }
+std.layout.dimv = ast.layout.Dim { index = c.DIM_V }
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
 
 function std.layout.field_path(...)
@@ -4487,6 +4489,10 @@ function std.layout.make_index_ordering_from_constraint(constraint)
         ordering:insert(2)
       elseif dimension == std.layout.dimz then
         ordering:insert(3)
+      elseif dimension == std.layout.dimw then
+        ordering:insert(4)
+      elseif dimension == std.layout.dimv then
+        ordering:insert(5)
       end
     end)
   assert(#ordering == #constraint.dimensions - 1)
@@ -4500,6 +4506,12 @@ std.layout.default_layout = terralib.memoize(function(index_type)
   end
   if index_type.dim > 2 then
     dimensions:insert(std.layout.dimz)
+  end
+  if index_type.dim > 3 then
+    dimensions:insert(std.layout.dimw)
+  end
+  if index_type.dim > 4 then
+    dimensions:insert(std.layout.dimv)
   end
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)

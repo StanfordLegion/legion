@@ -886,12 +886,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceUnion<DIM,T>::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target)
+                                                          AddressSpaceID target,
+                                                          const bool top)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
+      if (top)
+        this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -907,7 +910,7 @@ namespace Legion {
           rez.serialize<size_t>(sub_expressions.size());
           for (std::vector<IndexSpaceExpression*>::const_iterator it = 
                 sub_expressions.begin(); it != sub_expressions.end(); it++)
-            (*it)->pack_expression_structure(rez, target);
+            (*it)->pack_expression_structure(rez, target, false/*top*/);
         }
         else
           rez.serialize<size_t>(0);
@@ -1087,12 +1090,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceIntersection<DIM,T>::pack_expression_structure(
-                                         Serializer &rez, AddressSpaceID target)
+                         Serializer &rez, AddressSpaceID target, const bool top)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
+      if (top)
+        this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -1108,7 +1113,7 @@ namespace Legion {
           rez.serialize<size_t>(sub_expressions.size());
           for (std::vector<IndexSpaceExpression*>::const_iterator it = 
                 sub_expressions.begin(); it != sub_expressions.end(); it++)
-            (*it)->pack_expression_structure(rez, target);
+            (*it)->pack_expression_structure(rez, target, false/*top*/);
         }
         else
           rez.serialize<size_t>(0);
@@ -1295,12 +1300,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceDifference<DIM,T>::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target)
+                                          AddressSpaceID target, const bool top)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(target != this->context->runtime->address_space);
 #endif
+      if (top)
+        this->record_remote_expression(target);
       rez.serialize<bool>(false); // not an index space
       if (target == this->origin_space)
       {
@@ -1314,8 +1321,8 @@ namespace Legion {
         if (!local_empty)
         {
           rez.serialize<size_t>(2);
-          lhs->pack_expression_structure(rez, target);
-          rhs->pack_expression_structure(rez, target);
+          lhs->pack_expression_structure(rez, target, false/*top*/);
+          rhs->pack_expression_structure(rez, target, false/*top*/);
         }
         else
           rez.serialize<size_t>(0);
@@ -1634,11 +1641,18 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::pack_expression_structure(Serializer &rez,
-                                                          AddressSpaceID target) 
+                                                          AddressSpaceID target,
+                                                          const bool top) 
     //--------------------------------------------------------------------------
     {
       rez.serialize<bool>(true/*index space*/);
       rez.serialize(handle);
+      // Make sure this doesn't get collected until we're unpacked
+      // This could be a performance bug since it will block if we
+      // have to send a reference to a remote node, but that should
+      // never actually happen
+      LocalReferenceMutator mutator;
+      add_base_gc_ref(REMOTE_DID_REF, &mutator);
     }
 
     //--------------------------------------------------------------------------

@@ -2187,9 +2187,9 @@ namespace Legion {
         local_space(f->runtime->address_space), op(o), src_index(idx), 
         dst_index(idx), guard_precondition(g), 
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-        performed_postcondition(Runtime::create_rt_user_event()),
-#endif
         guard_postcondition(Runtime::create_rt_user_event()),
+#endif
+        effects_applied(Runtime::create_rt_user_event()),
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
@@ -2203,9 +2203,9 @@ namespace Legion {
         local_space(f->runtime->address_space), op(o), src_index(src_idx), 
         dst_index(dst_idx), guard_precondition(g),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-        performed_postcondition(Runtime::create_rt_user_event()),
-#endif
         guard_postcondition(Runtime::create_rt_user_event()),
+#endif
+        effects_applied(Runtime::create_rt_user_event()),
         predicate_guard(p), track_events(t)
     //--------------------------------------------------------------------------
     {
@@ -2218,9 +2218,9 @@ namespace Legion {
         src_index(rhs.src_index), dst_index(rhs.dst_index), 
         guard_precondition(rhs.guard_precondition),
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-        performed_postcondition(rhs.performed_postcondition),
-#endif
         guard_postcondition(rhs.guard_postcondition),
+#endif
+        effects_applied(rhs.effects_applied),
         predicate_guard(rhs.predicate_guard), track_events(rhs.track_events)
     //--------------------------------------------------------------------------
     {
@@ -2234,9 +2234,9 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      assert(performed_postcondition.has_triggered());
-#endif
       assert(guard_postcondition.has_triggered());
+#endif
+      assert(effects_applied.has_triggered());
       assert(guarded_sets.empty());
 #endif
       // Remove references from any views that we have
@@ -2703,7 +2703,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    RtEvent CopyFillAggregator::issue_updates(
+    void CopyFillAggregator::issue_updates(
                                            const PhysicalTraceInfo &trace_info,
                                            ApEvent precondition,
                                            const bool has_src_preconditions,
@@ -2721,7 +2721,7 @@ namespace Legion {
           has_src_preconditions, has_dst_preconditions, op->get_unique_op_id());
         op->runtime->issue_runtime_meta_task(args, 
                            LG_THROUGHPUT_DEFERRED_PRIORITY, guard_precondition);
-        return guard_postcondition;
+        return;
       }
 #ifdef DEBUG_LEGION
       assert(!guard_precondition.exists() || 
@@ -2741,20 +2741,14 @@ namespace Legion {
                           has_src_preconditions, has_dst_preconditions);
       }
 #ifndef NON_AGGRESSIVE_AGGREGATORS
-      Runtime::trigger_event(performed_postcondition);
+      Runtime::trigger_event(guard_postcondition);
 #endif
       // We can also trigger our guard event once the effects are applied
       if (!effects.empty())
-      {
-        Runtime::trigger_event(guard_postcondition,
+        Runtime::trigger_event(effects_applied,
             Runtime::merge_events(effects));
-        return guard_postcondition;
-      }
       else
-      {
-        Runtime::trigger_event(guard_postcondition);
-        return RtEvent::NO_RT_EVENT;
-      }
+        Runtime::trigger_event(effects_applied);
     }
     
     //--------------------------------------------------------------------------
@@ -2768,13 +2762,13 @@ namespace Legion {
     bool CopyFillAggregator::release_guards(std::set<RtEvent> &applied)
     //--------------------------------------------------------------------------
     {
-      if (!guard_postcondition.has_triggered())
+      if (!effects_applied.has_triggered())
       {
         // Meta-task will take responsibility for deletion
         CopyFillDeletion args(this, op->get_unique_op_id(), 
                               !guarded_sets.empty());
         const RtEvent done = op->runtime->issue_runtime_meta_task(args,
-            LG_LATENCY_DEFERRED_PRIORITY, guard_postcondition);
+            LG_LATENCY_DEFERRED_PRIORITY, effects_applied);
         applied.insert(done);
         return false;
       }
@@ -4469,10 +4463,18 @@ namespace Legion {
         for (std::map<RtEvent,CopyFillAggregator*>::const_iterator it = 
               input_aggregators.begin(); it != input_aggregators.end(); it++)
         {
-          const RtEvent done = 
-            it->second->issue_updates(trace_info, precondition);
-          if (done.exists())
-            guard_events.insert(done);
+          it->second->issue_updates(trace_info, precondition);
+          // We can only use the guard_postcondition if we're on
+          // the same node as the original, otherwise we need to use
+          // the full effects_applied
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+          guard_events.insert(it->second->effects_applied);
+#else
+          if (source == runtime->address_space)
+            guard_events.insert(it->second->guard_postcondition);
+          else
+            guard_events.insert(it->second->effects_applied);
+#endif
           if (it->second->release_guards(map_applied_events))
             delete it->second;
         }
@@ -4690,12 +4692,17 @@ namespace Legion {
       // Issue any release copies/fills that need to be done
       if (release_aggregator != NULL)
       {
-        const RtEvent done = 
-          release_aggregator->issue_updates(trace_info, precondition);
+        release_aggregator->issue_updates(trace_info, precondition);
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        guard_events.insert(release_aggregator->effects_applied);
+#else
+        if (source == runtime->address_space)
+          guard_events.insert(release_aggregator->guard_postcondition);
+        else
+          guard_events.insert(release_aggregator->effects_applied);
+#endif
         if (release_aggregator->release_guards(map_applied_events))
           delete release_aggregator;
-        if (done.exists() && !done.has_triggered())
-          guard_events.insert(done);
       }
       // If we have response to send then we do that now
       if ((inst_target != NULL) && !instances.empty())
@@ -4964,11 +4971,16 @@ namespace Legion {
             }
           }
         }
-        const RtEvent done = 
-          across_aggregator->issue_updates(trace_info, precondition,
-              false/*has src preconditions*/, true/*has dst preconditions*/);
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+        across_aggregator->issue_updates(trace_info, precondition,
+            false/*has src preconditions*/, true/*has dst preconditions*/);
+        // Need to wait before we can get the summary
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (!across_aggregator->effects_applied.has_triggered())
+          across_aggregator->effects_applied.wait();
+#else
+        if (!across_aggregator->guard_postcondition.has_triggered())
+          across_aggregator->guard_postcondition.wait();
+#endif
         const ApEvent result = across_aggregator->summarize(trace_info);
         if (result.exists())
           copy_events.insert(result);
@@ -5237,11 +5249,15 @@ namespace Legion {
       std::set<RtEvent> map_applied;
       if (dargs->summary.exists())
       {
-        const RtEvent done = 
-          dargs->aggregator->issue_updates(trace_info, dargs->precondition);
+        dargs->aggregator->issue_updates(trace_info, dargs->precondition);
         // Need to wait before we can get the summary
-        if (done.exists() && !done.has_triggered())
-          done.wait();
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+        if (!dargs->aggregator->effects_applied.has_triggered())
+          dargs->aggregator->effects_applied.wait();
+#else
+        if (!dargs->aggregator->guard_postcondition.has_triggered())
+          dargs->aggregator->guard_postcondition.wait();
+#endif
         const ApEvent summary = dargs->aggregator->summarize(trace_info);
         Runtime::trigger_event(dargs->summary, summary);
         if (dargs->aggregator->release_guards(map_applied))
@@ -6659,7 +6675,7 @@ namespace Legion {
       {
         for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
               update_guards.begin(); it != update_guards.end(); it++)
-          rez.serialize(it->first->guard_postcondition);
+          rez.serialize(it->first->effects_applied);
         update_guards.clear();
       }
       // Pack subsets
@@ -7337,9 +7353,12 @@ namespace Legion {
             continue;
           // No matter what record our dependences on the prior guards
 #ifdef NON_AGGRESSIVE_AGGREGATORS
-          const RtEvent guard_event = it->first->guard_postcondition;
+          const RtEvent guard_event = it->first->effects_applied;
 #else
-          const RtEvent guard_event = it->first->performed_postcondition;
+          const RtEvent guard_event = 
+            (remote_tracker.original_source == local_space) ?
+            it->first->guard_postcondition :
+            it->first->effects_applied;
 #endif
           guard_events.insert(guard_event);
           CopyFillAggregator *input_aggregator = NULL;
@@ -7361,6 +7380,11 @@ namespace Legion {
               ((finder == input_aggregators.end()) ||
                input_aggregator->has_update_fields()))
           {
+#ifndef NON_AGGRESSIVE_AGGREGATORS
+            // We also have to chain effects in this case 
+            input_aggregator->record_reference_mutation_effect(
+                                it->first->effects_applied);
+#endif
             if (finder == input_aggregators.end())
               input_aggregators[guard_event] = input_aggregator;
             // Record this as a guard for later operations

@@ -822,9 +822,12 @@ namespace Legion {
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
       void handle_remote_expression_request(Deserializer &derez,
                                             AddressSpaceID source);
-      void handle_remote_expression_response(Deserializer &derez);
+      void handle_remote_expression_response(Deserializer &derez,
+                                             AddressSpaceID source);
+      void handle_remote_expression_invalidation(Deserializer &derez);
     protected:
-      IndexSpaceExpression* unpack_expression_structure(Deserializer &derez);
+      IndexSpaceExpression* unpack_expression_structure(Deserializer &derez,
+                                                        AddressSpaceID source);
     public:
       Runtime *const runtime;
     protected:
@@ -929,7 +932,8 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target) = 0;
+                                             AddressSpaceID target,
+                                             const bool top) = 0;
       virtual void add_expression_reference(void) = 0;
       virtual bool remove_expression_reference(void) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
@@ -1079,12 +1083,15 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target) = 0;
+                                             AddressSpaceID target,
+                                             const bool top) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
                                           const bool notify_remote = true) = 0;
+    protected:
+      void record_remote_expression(AddressSpaceID target);
     public:
       static void handle_expression_invalidation(Deserializer &derez,
                                                  RegionTreeForest *forest);
@@ -1097,6 +1104,7 @@ namespace Legion {
       // We only make this if we actually need to since IndexSpaceNodes
       // are more expensive to maintain
       IndexSpaceNode *node; 
+      std::set<AddressSpaceID> *remote_exprs;
     };
 
     class IndexSpaceOperation : public IntermediateExpression {
@@ -1121,7 +1129,8 @@ namespace Legion {
       virtual size_t get_volume(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0; 
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target) = 0;
+                                             AddressSpaceID target,
+                                             const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
@@ -1168,7 +1177,8 @@ namespace Legion {
       virtual void activate_remote(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target) = 0;
+                                             AddressSpaceID target,
+                                             const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
                                           const bool notify_remote = true);
@@ -1234,7 +1244,8 @@ namespace Legion {
       IndexSpaceUnion& operator=(const IndexSpaceUnion &rhs);
     public:
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target);
+                                             AddressSpaceID target,
+                                             const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceExpression* find_congruence(void);
     protected:
@@ -1310,7 +1321,8 @@ namespace Legion {
       IndexSpaceIntersection& operator=(const IndexSpaceIntersection &rhs);
     public:
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target);
+                                             AddressSpaceID target,
+                                             const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceExpression* find_congruence(void);
     protected:
@@ -1386,7 +1398,8 @@ namespace Legion {
       IndexSpaceDifference& operator=(const IndexSpaceDifference &rhs);
     public:
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target);
+                                             AddressSpaceID target,
+                                             const bool top);
       virtual bool remove_operation(RegionTreeForest *forest);
       virtual IndexSpaceExpression* find_congruence(void);
     protected:
@@ -1711,7 +1724,8 @@ namespace Legion {
       virtual bool check_empty(void) = 0;
       virtual void pack_expression(Serializer &rez, AddressSpaceID target) = 0;
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target) = 0;
+                                             AddressSpaceID target,
+                                             const bool top) = 0;
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest);
@@ -1911,7 +1925,8 @@ namespace Legion {
       virtual bool check_empty(void);
       virtual void pack_expression(Serializer &rez, AddressSpaceID target);
       virtual void pack_expression_structure(Serializer &rez,
-                                             AddressSpaceID target);
+                                             AddressSpaceID target,
+                                             const bool top);
       virtual void create_sharded_alias(IndexSpace alias, DistributedID did);
     public:
       virtual void log_index_space_points(void);

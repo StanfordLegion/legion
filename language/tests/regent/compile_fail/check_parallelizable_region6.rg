@@ -13,9 +13,9 @@
 -- limitations under the License.
 
 -- fails-with:
--- check_parallelizable_region6.rg:26: vectorization failed: found a loop-carried dependence
---     for e2 in r do
---       ^
+-- check_parallelizable_region6.rg:27: vectorization failed: found a loop-carried dependence
+--       r[e1] = r[e2]
+--        ^
 
 import "regent"
 
