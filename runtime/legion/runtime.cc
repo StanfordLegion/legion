@@ -11988,7 +11988,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag)
+                                         MapperID mid, MappingTagID tag,
+                                         const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
@@ -12006,11 +12007,11 @@ namespace Legion {
       // Make this here to get a local reference on it now
       Future result_future(result);
       result->add_base_gc_ref(FUTURE_HANDLE_REF);
-      SelectTunableArgs args(ctx->get_owner_task()->get_unique_op_id(),
-          mid, tag, tid, ctx, result);
+      SelectTunableArgs task_args(ctx->get_owner_task()->get_unique_op_id(),
+          mid, tag, tid, args, argsize, ctx, result);
       if (legion_spy_enabled)
-        args.tunable_index = ctx->get_tunable_index();
-      issue_runtime_meta_task(args, LG_LATENCY_WORK_PRIORITY); 
+        task_args.tunable_index = ctx->get_tunable_index();
+      issue_runtime_meta_task(task_args, LG_LATENCY_WORK_PRIORITY); 
       ctx->end_runtime_call();
       return result_future;
     }
@@ -12023,7 +12024,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context get tunable value!");
       ctx->begin_runtime_call();
-      Future f = select_tunable_value(ctx, tid, mid, tag);
+      Future f = select_tunable_value(ctx, tid, mid, tag, NULL, 0);
       int result = f.get_result<int>();
       if (legion_spy_enabled)
       {
@@ -12046,6 +12047,8 @@ namespace Legion {
       Mapper::SelectTunableOutput output;
       input.tunable_id = args->tunable_id;
       input.mapping_tag = args->tag;
+      input.args = args->args;
+      input.size = args->argsize;
       output.value = NULL;
       output.size = 0;
       output.take_ownership = true;
@@ -12058,7 +12061,7 @@ namespace Legion {
       if ((output.value != NULL) && (output.size > 0))
         args->result->set_result(output.value, output.size, 
                                  output.take_ownership);
-      args->result->complete_future();
+      args->result->complete_future(); 
     }
 
     //--------------------------------------------------------------------------
@@ -20302,6 +20305,8 @@ namespace Legion {
             // Remove the reference that we added
             if (tunable_args->result->remove_base_gc_ref(FUTURE_HANDLE_REF)) 
               delete (tunable_args->result);
+            if (tunable_args->args != NULL)
+              free(tunable_args->args);
             break;
           }
         case LG_DEFERRED_ENQUEUE_OP_ID:

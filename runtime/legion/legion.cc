@@ -5861,10 +5861,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::select_tunable_value(Context ctx, TunableID tid,
-                                         MapperID mid, MappingTagID tag)
+                                         MapperID mid, MappingTagID tag,
+                                         const void *args, size_t argsize)
     //--------------------------------------------------------------------------
     {
-      return runtime->select_tunable_value(ctx, tid, mid, tag);
+      return runtime->select_tunable_value(ctx, tid, mid, tag, args, argsize);
     }
 
     //--------------------------------------------------------------------------
