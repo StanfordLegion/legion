@@ -1542,13 +1542,18 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_SELECT_TUNABLE_TASK_ID;
       public:
         SelectTunableArgs(UniqueID uid, MapperID mid, MappingTagID t,
-                          TunableID tune, TaskContext *c, FutureImpl *f)
+                          TunableID tune, const void *arg, size_t size,
+                          TaskContext *c, FutureImpl *f)
           : LgTaskArgs<SelectTunableArgs>(uid), mapper_id(mid), tag(t),
-            tunable_id(tune), ctx(c), result(f) { }
+            tunable_id(tune), args((size > 0) ? malloc(size) : NULL),
+            argsize(size), ctx(c), result(f) 
+            { if (argsize > 0) memcpy(args, arg, argsize); }
       public:
         const MapperID mapper_id;
         const MappingTagID tag;
         const TunableID tunable_id;
+        void *const args;
+        const size_t argsize;
         unsigned tunable_index; // only valid for LegionSpy
         TaskContext *const ctx;
         FutureImpl *const result;
@@ -1991,7 +1996,8 @@ namespace Legion {
                                       const TimingLauncher &launcher);
     public:
       Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mid, MappingTagID tag);
+                                  MapperID mid, MappingTagID tag,
+                                  const void *args, size_t argsize);
       int get_tunable_value(Context ctx, TunableID tid, 
                             MapperID mid, MappingTagID tag);
       void perform_tunable_selection(const SelectTunableArgs *args);

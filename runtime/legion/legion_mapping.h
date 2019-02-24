@@ -1280,6 +1280,8 @@ namespace Legion {
       struct SelectTunableInput {
         TunableID                               tunable_id;
         MappingTagID                            mapping_tag;
+        const void*                             args;
+        size_t                                  size;
       };
       struct SelectTunableOutput {
         void*                                   value;
