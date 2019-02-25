@@ -3671,6 +3671,39 @@ namespace Legion {
       ///@}
       ///@{
       /**
+       * This version of create partition by intersection will intersect an
+       * existing partition with a parent index space in order to generate
+       * a new partition where each subregion is the intersection of the
+       * parent with the corresponding subregion in the original partition.
+       * We require that the partition and the parent index space both have
+       * the same dimensionality and coordinate type, but they can be 
+       * otherwise unrelated. The application can also optionally indicate
+       * that the parent will dominate all the subregions in the partition
+       * which will allow the runtime to elide the intersection test and
+       * turn this into a partition copy operation.
+       * @param ctx the enclosing task context
+       * @param parent the new parent index space for the mirrored partition
+       * @param partition the partition to mirror
+       * @param part_kind optinally specify the completenss of the partition
+       * @param color optional new color for the mirrored partition
+       * @param dominates whether the parent dominates the partition
+       */
+      IndexPartition create_partition_by_intersection(Context ctx,
+                                         IndexSpace parent,
+                                         IndexPartition partition,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         Color color = AUTO_GENERATE_ID,
+                                         bool dominates = false);
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(Context ctx,
+                                         IndexSpaceT<DIM,COORD_T> parent,
+                                         IndexPartitionT<DIM,COORD_T> partition,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         Color color = AUTO_GENERATE_ID,
+                                         bool dominates = false);
+      ///@}
+      ///@{
+      /**
        * This function zips a set difference operation over all the index 
        * subspaces in two different partitions. The zip operation is only
        * applied to the points contained in the intersection of the two
@@ -4085,43 +4118,7 @@ namespace Legion {
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
-      ///@}
-      ///@{
-      /**
-       * Create partition by mirroring takes a partition from one part of the
-       * index space tree and mirrors it as a new partition of a different
-       * index space resulting in a new partition. We require that the
-       * partition being mirrored and the new parent index space both have
-       * the same dimensionality and coordinate type, but they can be otherwise
-       * unrelated. This is in general an unsafe operation and the runtime
-       * will check that the parent index space dominates the partition being
-       * mirrored unless the application asks it not to be setting the 'safe'
-       * argument to false. While the disjointness properties of the mirrored
-       * partition will already be known from the original partition, it is
-       * not clear if the partition is complete or not, so the runtime will
-       * compute the completeness unless the application specifies it in the 
-       * 'part_kind' argument.
-       * @param ctx the enclosing task context
-       * @param parent the new parent index space for the mirrored partition
-       * @param partition the partition to mirror
-       * @param part_kind optinally specify the completenss of the partition
-       * @param color optional new color for the mirrored partition
-       * @param safe whether to check the safety of this operation
-       */
-      IndexPartition create_partition_by_mirroring(Context ctx,
-                                         IndexSpace parent,
-                                         IndexPartition partition,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
-                                         bool safe = true);
-      template<int DIM, typename COORD_T>
-      IndexPartitionT<DIM,COORD_T> create_partition_by_mirroring(Context ctx,
-                                         IndexSpaceT<DIM,COORD_T> parent,
-                                         IndexPartitionT<DIM,COORD_T> partition,
-                                         PartitionKind part_kind = COMPUTE_KIND,
-                                         Color color = AUTO_GENERATE_ID,
-                                         bool safe = true);
-      ///@}
+      ///@} 
     public:
       //------------------------------------------------------------------------
       // Computed Index Spaces and Partitions 
