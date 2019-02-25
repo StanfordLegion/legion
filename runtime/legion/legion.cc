@@ -3930,6 +3930,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_intersection(Context ctx,
+                           IndexSpace parent, IndexPartition partition,
+                           PartitionKind part_kind, Color color, bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this
+      assert(false);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_difference(
                                                 Context ctx, IndexSpace parent,
                                                 IndexPartition handle1,
@@ -4144,7 +4155,7 @@ namespace Legion {
       return runtime->create_partition_by_preimage_range(ctx, projection,handle,
                                                        parent, fid, color_space,
                                                        part_kind, color,id,tag);
-    }
+    } 
 
     //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,

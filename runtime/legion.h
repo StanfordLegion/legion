@@ -3674,6 +3674,39 @@ namespace Legion {
       ///@}
       ///@{
       /**
+       * This version of create partition by intersection will intersect an
+       * existing partition with a parent index space in order to generate
+       * a new partition where each subregion is the intersection of the
+       * parent with the corresponding subregion in the original partition.
+       * We require that the partition and the parent index space both have
+       * the same dimensionality and coordinate type, but they can be 
+       * otherwise unrelated. The application can also optionally indicate
+       * that the parent will dominate all the subregions in the partition
+       * which will allow the runtime to elide the intersection test and
+       * turn this into a partition copy operation.
+       * @param ctx the enclosing task context
+       * @param parent the new parent index space for the mirrored partition
+       * @param partition the partition to mirror
+       * @param part_kind optinally specify the completenss of the partition
+       * @param color optional new color for the mirrored partition
+       * @param dominates whether the parent dominates the partition
+       */
+      IndexPartition create_partition_by_intersection(Context ctx,
+                                         IndexSpace parent,
+                                         IndexPartition partition,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         Color color = AUTO_GENERATE_ID,
+                                         bool dominates = false);
+      template<int DIM, typename COORD_T>
+      IndexPartitionT<DIM,COORD_T> create_partition_by_intersection(Context ctx,
+                                         IndexSpaceT<DIM,COORD_T> parent,
+                                         IndexPartitionT<DIM,COORD_T> partition,
+                                         PartitionKind part_kind = COMPUTE_KIND,
+                                         Color color = AUTO_GENERATE_ID,
+                                         bool dominates = false);
+      ///@}
+      ///@{
+      /**
        * This function zips a set difference operation over all the index 
        * subspaces in two different partitions. The zip operation is only
        * applied to the points contained in the intersection of the two
@@ -4088,7 +4121,7 @@ namespace Legion {
                               PartitionKind part_kind = COMPUTE_KIND,
                               Color color = AUTO_GENERATE_ID,
                               MapperID id = 0, MappingTagID tag = 0);
-      ///@}
+      ///@} 
     public:
       //------------------------------------------------------------------------
       // Computed Index Spaces and Partitions 
