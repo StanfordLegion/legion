@@ -130,6 +130,7 @@ function loop_context.new_scope(task, loop, loop_var)
     parallel = { true, nil },
     -- True if the loop is the innermost loop that needs an index space iterator
     innermost = needs_iterator,
+    outermost = false,
   }
   cx = setmetatable(cx, loop_context)
   if loop_var then
@@ -296,6 +297,10 @@ function loop_context:set_innermost(value)
   self.innermost = value
 end
 
+function loop_context:set_outermost(value)
+  self.outermost = value
+end
+
 -- Context that maintains parallelizability of the whole task
 
 local context = {}
@@ -321,6 +326,7 @@ function context.new_task_scope(task)
                       task.annotations.parallel:is(ast.annotation.Demand),
     contexts = terralib.newlist({loop_context.new_scope(task, task, false)}),
   }
+  cx.contexts[1]:set_outermost(true)
   return setmetatable(cx, context)
 end
 
@@ -361,8 +367,10 @@ function context:pop_loop_context(node)
   -- Propagate all reduction variables accesses in the scope to the outer ones
   local to_propagate = cx:filter_shared_variables(cx.reductions)
   self:forall_context(function(cx_outer)
+    if not cx_outer.outermost then
+      to_propagate = cx_outer:filter_shared_variables(to_propagate)
+    end
     cx_outer:union_reduction_variables(to_propagate)
-    to_propagate = cx_outer:filter_shared_variables(to_propagate)
     return to_propagate:is_empty()
   end)
 
@@ -426,7 +434,7 @@ function analyze_access.expr_id(cx, node, new_privilege, field_path)
   privilege = std.meet_privilege(privilege, new_privilege)
   cx:update_scalar(symbol, privilege, private)
   cx:check_privilege(node, privilege, private)
-  return private, center
+  return private, center, false
 end
 
 function analyze_access.expr_field_access(cx, node, privilege, field_path)
@@ -437,6 +445,7 @@ end
 function analyze_access.expr_deref(cx, node, privilege, field_path)
   local expr_type = node.expr_type
   local private, center = analyze_access.expr(cx, node.value, std.reads)
+  local region_access = false
   if std.is_ref(expr_type) then
     -- We disallow any multi-region pointer in a parallelizable loop
     -- when the task demands partition driven auto-parallelization
@@ -445,12 +454,13 @@ function analyze_access.expr_deref(cx, node, privilege, field_path)
     else
       cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
     end
+    region_access = true
   elseif std.as_read(node.value.expr_type):ispointer() then
     -- We disallow any raw pointer dereferences in a parallelizable loop
     -- as we do not know about their aliasing.
     cx:mark_inadmissible(node)
   end
-  return center, false
+  return center, false, region_access
 end
 
 function analyze_access.expr_index_access(cx, node, privilege, field_path)
@@ -459,24 +469,24 @@ function analyze_access.expr_index_access(cx, node, privilege, field_path)
     analyze_access.expr(cx, node.value, nil)
     local private, center = analyze_access.expr(cx, node.index, std.reads)
     cx:update_privileges(node, expr_type:bounds(), field_path, privilege, center)
-    return center, false
+    return center, false, true
   else
     local value_type = std.as_read(node.value.expr_type)
     local value_symbol =
       node.value:is(ast.typed.expr.ID) and node.value.value or false
     if value_type:isarray() and value_symbol then
-      local value_private, value_center =
+      local value_private, value_center, region_access =
         analyze_access.expr(cx, node.value)
       local index_private, index_center =
         analyze_access.expr(cx, node.index, std.reads)
       local private = value_private or index_center
       cx:update_array_access(node, value_symbol, privilege, private)
-      return private, false
+      return private, false, region_access
     elseif value_type:ispointer() then
       -- We disallow any raw pointer dereferences in a parallelizable loop
       -- as we do not know about their aliasing.
       cx:mark_inadmissible(node)
-      return false, false
+      return false, false, false
     else
       analyze_access.expr(cx, node.index, std.reads)
       return analyze_access.expr(cx, node.value, privilege)
@@ -486,18 +496,18 @@ function analyze_access.expr_index_access(cx, node, privilege, field_path)
 end
 
 function analyze_access.expr_constant(cx, node, privilege, field_path)
-  return true, false
+  return true, false, false
 end
 
 function analyze_access.expr_binary(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.lhs, privilege)
   analyze_access.expr(cx, node.rhs, privilege)
-  return false, false
+  return false, false, false
 end
 
 function analyze_access.expr_unary(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.rhs, privilege)
-  return false, false
+  return false, false, false
 end
 
 function analyze_access.expr_cast(cx, node, privilege, field_path)
@@ -532,24 +542,24 @@ function analyze_access.expr_call(cx, node, privilege, field_path)
   node.args:map(function(arg)
     analyze_access.expr(cx, arg, std.reads)
   end)
-  return false, false
+  return false, false, false
 end
 
 function analyze_access.expr_isnull(cx, node, privilege, field_path)
   analyze_access.expr(cx, node.pointer, std.reads)
-  return false, false
+  return false, false, false
 end
 
 function analyze_access.expr_ctor(cx, node, privilege, field_path)
   node.fields:map(function(field)
     analyze_access.expr(cx, field.value, std.reads)
   end)
-  return false, false
+  return false, false, false
 end
 
 function analyze_access.expr_not_analyzable(cx, node, privilege, field_path)
   cx:mark_inadmissible(node)
-  return false, false
+  return false, false, false
 end
 
 local analyze_access_expr_table = {
@@ -705,21 +715,14 @@ function analyze_access.stat_assignment(cx, node)
     return analyze_access.expr(cx, node.rhs, std.reads)
   end)
 
-  local first = true
-  local atomic = nil
   cx:forall_context(function(cx)
     local private, center = analyze_access.expr(cx, node.lhs, std.writes)
-    if first then
-      atomic = not private
-      first = false
-    end
     return private
   end)
 
-  assert(atomic ~= nil)
   return node {
     metadata = ast.metadata.Stat {
-      atomic = atomic,
+      atomic = false,
       scalar = false,
     }
   }
@@ -731,6 +734,7 @@ function analyze_access.stat_reduce(cx, node)
   end)
 
   local lhs_type = std.as_read(node.lhs.expr_type)
+  local lhs_scalar = node.lhs:is(ast.typed.expr.ID)
   local rhs_type = std.as_read(node.rhs.expr_type)
   local first = true
   local atomic = nil
@@ -739,13 +743,18 @@ function analyze_access.stat_reduce(cx, node)
     (lhs_type:isprimitive() and rhs_type:isprimitive() and std.reduces(node.op)) or
     "reads_writes"
   cx:forall_context(function(cx)
-    local private, center =
+    local private, center, region_access =
       analyze_access.expr(cx, node.lhs, privilege)
+    if (cx.demand_openmp or cx.demand_cuda) and
+       not (private or lhs_scalar or region_access)
+    then
+      cx:mark_inadmissible(node)
+    end
     if first then
-      if node.lhs:is(ast.typed.expr.ID) then
+      if lhs_scalar then
         scalar = not cx:is_local_variable(node.lhs.value)
       end
-      atomic = not private and std.is_reduce(privilege)
+      atomic = not private and region_access and std.is_reduce(privilege)
       first = false
     end
     return private

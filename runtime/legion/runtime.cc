@@ -16830,7 +16830,9 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          delete (result);
+          if (!result->is_owner() && 
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureImpl*>(finder->second);
           assert(result != NULL);
@@ -16877,7 +16879,9 @@ namespace Legion {
         if (finder != dist_collectables.end())
         {
           // We lost the race
-          delete (result);
+          if (!result->is_owner() &&
+              result->remove_base_resource_ref(REMOTE_DID_REF))
+            delete (result);
 #ifdef DEBUG_LEGION
           result = dynamic_cast<FutureMapImpl*>(finder->second);
           assert(result != NULL);
