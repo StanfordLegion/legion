@@ -2223,10 +2223,10 @@ if max_dim >= 1 then
   std.rect1d = std.rect_type(std.int1d)
 end
 do
-  local dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
+  std.dim_names = {"x", "y", "z", "w", "v", "u", "t", "s", "r"}
   for dim = 2, max_dim do
     local st = terralib.types.newstruct("__int" .. dim .. "d")
-    st.entries = data.take(dim, dim_names):map(
+    st.entries = data.take(dim, std.dim_names):map(
       function(name)
         return { name, int64 }
       end)
@@ -3470,11 +3470,9 @@ local function make_ordering_constraint(layout, dim)
   -- SOA, Fortran array order
   local dims = terralib.newsymbol(c.legion_dimension_kind_t[dim+1], "dims")
   result:insert(quote var [dims] end)
-  result:insert(quote dims[0] = c.DIM_X end)
-  if dim >= 2 then result:insert(quote dims[1] = c.DIM_Y end) end
-  if dim >= 3 then result:insert(quote dims[2] = c.DIM_Z end) end
-  if dim >= 4 then result:insert(quote dims[3] = c.DIM_W end) end
-  if dim >= 5 then result:insert(quote dims[4] = c.DIM_V end) end
+  for k, dim in pairs(data.take(dim, std.layout.spatial_dims)) do
+    result:insert(quote dims[ [k-1] ] = [dim.index] end)
+  end
   result:insert(quote dims[ [dim] ] = c.DIM_F end)
   result:insert(quote c.legion_layout_constraint_set_add_ordering_constraint([layout], [dims], [dim+1], true) end)
 
@@ -4457,11 +4455,17 @@ end
 -- #################
 
 std.layout = {}
-std.layout.dimx = ast.layout.Dim { index = c.DIM_X }
-std.layout.dimy = ast.layout.Dim { index = c.DIM_Y }
-std.layout.dimz = ast.layout.Dim { index = c.DIM_Z }
-std.layout.dimw = ast.layout.Dim { index = c.DIM_W }
-std.layout.dimv = ast.layout.Dim { index = c.DIM_V }
+std.layout.spatial_dims = terralib.newlist()
+std.layout.spatial_dims_map = {}
+do
+  for k, name in ipairs(data.take(max_dim, std.dim_names)) do
+    local regent_name = "dim" .. name
+    local legion_name = "DIM_" .. string.upper(name)
+    std.layout[regent_name] = ast.layout.Dim { index = c[legion_name] }
+    std.layout.spatial_dims:insert(std.layout[regent_name])
+    std.layout.spatial_dims_map[std.layout[regent_name]] = k
+  end
+end
 std.layout.dimf = ast.layout.Dim { index = c.DIM_F }
 
 function std.layout.field_path(...)
@@ -4481,38 +4485,17 @@ end
 
 function std.layout.make_index_ordering_from_constraint(constraint)
   assert(constraint:is(ast.layout.Ordering))
-  local ordering = terralib.newlist()
-  constraint.dimensions:map(function(dimension)
-      if dimension == std.layout.dimx then
-        ordering:insert(1)
-      elseif dimension == std.layout.dimy then
-        ordering:insert(2)
-      elseif dimension == std.layout.dimz then
-        ordering:insert(3)
-      elseif dimension == std.layout.dimw then
-        ordering:insert(4)
-      elseif dimension == std.layout.dimv then
-        ordering:insert(5)
-      end
-    end)
+  local ordering = data.filter(function(dimension)
+    return std.layout.spatial_dims_map[dimension]
+  end, constraint.dimensions):map(function(dimension)
+    return std.layout.spatial_dims_map[dimension]
+  end)
   assert(#ordering == #constraint.dimensions - 1)
   return ordering
 end
 
 std.layout.default_layout = terralib.memoize(function(index_type)
-  local dimensions = terralib.newlist { std.layout.dimx }
-  if index_type.dim > 1 then
-    dimensions:insert(std.layout.dimy)
-  end
-  if index_type.dim > 2 then
-    dimensions:insert(std.layout.dimz)
-  end
-  if index_type.dim > 3 then
-    dimensions:insert(std.layout.dimw)
-  end
-  if index_type.dim > 4 then
-    dimensions:insert(std.layout.dimv)
-  end
+  local dimensions = data.take(index_type.dim, std.layout.spatial_dims)
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
 end)

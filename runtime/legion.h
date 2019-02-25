@@ -5878,7 +5878,8 @@ namespace Legion {
        * the mapper.
        */
       Future select_tunable_value(Context ctx, TunableID tid,
-                                  MapperID mapper = 0, MappingTagID tag = 0);
+                                  MapperID mapper = 0, MappingTagID tag = 0,
+                                  const void *args = NULL, size_t argsize = 0);
 
       /**
        * @deprecated

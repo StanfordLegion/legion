@@ -1337,13 +1337,13 @@ typedef enum legion_dimension_kind_t {
   DIM_Y = 1, // second logical index space dimension
   DIM_Z = 2, // ...
   // field dimension (this is here for legacy reasons: Regent has hard coded it)
-  DIM_F = 3, 
-  DIM_W = 4, // fourth logical index space dimension
-  DIM_V = 5, // fifth logical index space dimension
-  DIM_U = 6, // ...
-  DIM_T = 7,
-  DIM_S = 8,
-  DIM_R = 9,
+  DIM_W = 3, // fourth logical index space dimension
+  DIM_V = 4, // fifth logical index space dimension
+  DIM_U = 5, // ...
+  DIM_T = 6,
+  DIM_S = 7,
+  DIM_R = 8,
+  DIM_F = 9, 
   INNER_DIM_X = 10, // inner dimension for tiling X
   OUTER_DIM_X = 11, // outer dimension for tiling X
   INNER_DIM_Y = 12, // ...
