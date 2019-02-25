@@ -4106,10 +4106,12 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
                      data.dict(data.zip(field_paths:map(data.hash), strides)))
 
-  local fs_naming_actions
+  local fs_naming_actions = quote
+    c.legion_field_space_attach_name([cx.runtime], [fs], [tostring(fspace_type)], false)
+  end
   if fspace_type:isstruct() then
     fs_naming_actions = quote
-      c.legion_field_space_attach_name([cx.runtime], [fs], [fspace_type.name], false)
+      [fs_naming_actions]
       [data.flatmap(
          function(field)
            local field_path, field_type, field_id = unpack(field)
@@ -4130,7 +4132,12 @@ function codegen.expr_region(cx, node)
          data.zip(field_paths, field_types, field_ids))]
     end
   else
-    fs_naming_actions = quote end
+    assert(#field_ids == 1)
+    fs_naming_actions = quote
+      [fs_naming_actions]
+      c.legion_field_id_attach_name(
+        [cx.runtime], [fs], [field_ids[1]], "__value", false)
+    end
   end
 
   actions = quote
