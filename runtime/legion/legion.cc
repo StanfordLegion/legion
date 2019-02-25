@@ -4145,6 +4145,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_mirroring(Context ctx,
+                                IndexSpace parent, IndexPartition partition,
+                                PartitionKind part_kind, Color color, bool safe)
+    //--------------------------------------------------------------------------
+    {
+      // TODO: implement this
+      assert(false);
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_pending_partition(Context ctx,
                              IndexSpace parent, IndexSpace color_space, 
                              PartitionKind part_kind, Color color)

@@ -8229,6 +8229,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    IndexPartitionT<DIM,T> Runtime::create_partition_by_mirroring(Context ctx,
+                                              IndexSpaceT<DIM,T> parent,
+                                              IndexPartitionT<DIM,T> partition,
+                                              PartitionKind part_kind, 
+                                              Color color, bool safe)
+    //--------------------------------------------------------------------------
+    {
+      return IndexPartitionT<DIM,T>(create_partition_by_mirroring(ctx,
+                        IndexSpace(parent), IndexPartition(partition),
+                        part_kind, color, safe));
+    }
+
+    //--------------------------------------------------------------------------
     template<int DIM, typename T, int COLOR_DIM, typename COLOR_T>
     IndexPartitionT<DIM,T> Runtime::create_pending_partition(Context ctx,
                               IndexSpaceT<DIM,T> parent,
