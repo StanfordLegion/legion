@@ -3192,6 +3192,10 @@ namespace Legion {
       std::map<RegionTreeID,RegionNode*> trees;
       {
         AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        // Need to hold references to prevent deletion race
+        for (std::map<RegionTreeID,RegionNode*>::const_iterator it = 
+              tree_nodes.begin(); it != tree_nodes.end(); it++)
+          it->second->add_base_resource_ref(REGION_TREE_REF);
         trees = tree_nodes;
       }
       CurrentInitializer init(ctx.get_id());
@@ -3199,6 +3203,8 @@ namespace Legion {
             trees.begin(); it != trees.end(); it++)
       {
         it->second->visit_node(&init);
+        if (it->second->remove_base_resource_ref(REGION_TREE_REF))
+          delete it->second;
       }
     }
 
