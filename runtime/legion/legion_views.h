@@ -444,6 +444,24 @@ namespace Legion {
       typedef LegionMap<VersionID,FieldMaskSet<IndexSpaceExpression>,
                       PHYSICAL_VERSION_ALLOC>::track_aligned VersionFieldExprs;  
     public:
+      struct DeferMaterializedViewArgs : 
+        public LgTaskArgs<DeferMaterializedViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_MATERIALIZED_VIEW_TASK_ID;
+      public:
+        DeferMaterializedViewArgs(DistributedID d, PhysicalManager *m,
+            AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
+          : LgTaskArgs<DeferMaterializedViewArgs>(implicit_provenance),
+            did(d), manager(m), owner_space(own), 
+            logical_owner(log), context_uid(ctx) { }
+      public:
+        const DistributedID did;
+        PhysicalManager *const manager;
+        const AddressSpaceID owner_space;
+        const AddressSpaceID logical_owner;
+        const UniqueID context_uid;
+      };
+    public:
       MaterializedView(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_proc, 
                        AddressSpaceID logical_owner, InstanceManager *manager,
@@ -556,6 +574,12 @@ namespace Legion {
     public:
       static void handle_send_materialized_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_defer_materialized_view(const void *args, Runtime *rt);
+      static void create_remote_view(Runtime *runtime, DistributedID did, 
+                                     PhysicalManager *manager,
+                                     AddressSpaceID owner_space, 
+                                     AddressSpaceID logical_owner, 
+                                     UniqueID context_uid);
     public:
       InstanceManager *const manager;
     protected:
@@ -611,6 +635,24 @@ namespace Legion {
                           public LegionHeapify<ReductionView> {
     public:
       static const AllocationType alloc_type = REDUCTION_VIEW_ALLOC;
+    public:
+      struct DeferReductionViewArgs : 
+        public LgTaskArgs<DeferReductionViewArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_VIEW_TASK_ID;
+      public:
+        DeferReductionViewArgs(DistributedID d, PhysicalManager *m,
+            AddressSpaceID own, AddressSpaceID log, UniqueID ctx)
+          : LgTaskArgs<DeferReductionViewArgs>(implicit_provenance),
+            did(d), manager(m), owner_space(own), 
+            logical_owner(log), context_uid(ctx) { }
+      public:
+        const DistributedID did;
+        PhysicalManager *const manager;
+        const AddressSpaceID owner_space;
+        const AddressSpaceID logical_owner;
+        const UniqueID context_uid;
+      };
     public:
       ReductionView(RegionTreeForest *ctx, DistributedID did,
                     AddressSpaceID owner_proc,
@@ -710,6 +752,12 @@ namespace Legion {
     public:
       static void handle_send_reduction_view(Runtime *runtime,
                               Deserializer &derez, AddressSpaceID source);
+      static void handle_defer_reduction_view(const void *args, Runtime *rt);
+      static void create_remote_view(Runtime *runtime, DistributedID did, 
+                                     PhysicalManager *manager,
+                                     AddressSpaceID owner_space, 
+                                     AddressSpaceID logical_owner, 
+                                     UniqueID context_uid);
     public:
       ReductionOpID get_redop(void) const;
     public:

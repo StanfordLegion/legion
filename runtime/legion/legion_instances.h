@@ -83,7 +83,7 @@ namespace Legion {
     public:
       void pack_layout_description(Serializer &rez, AddressSpaceID target);
       static LayoutDescription* handle_unpack_layout_description(
-                            Deserializer &derez, Runtime *runtime,
+                            LayoutConstraints *constraints,
                             FieldSpaceNode *field_space, size_t total_dims);
     public:
       const FieldMask allocated_fields;
@@ -287,6 +287,35 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = INSTANCE_MANAGER_ALLOC;
     public:
+      struct DeferInstanceManagerArgs : 
+        public LgTaskArgs<DeferInstanceManagerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_INSTANCE_MANAGER_TASK_ID;
+      public:
+        DeferInstanceManagerArgs(DistributedID d, AddressSpaceID own, Memory m,
+            PhysicalInstance i, size_t f, bool is, IndexSpace dh, 
+            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
+            LayoutConstraintID l, PointerConstraint &p, ApEvent use)
+          : LgTaskArgs<DeferInstanceManagerArgs>(implicit_provenance),
+            did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
+            domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
+            layout_id(l), pointer(new PointerConstraint(p)) { }
+      public:
+        const DistributedID did;
+        const AddressSpaceID owner;
+        const Memory mem;
+        const PhysicalInstance inst;
+        const size_t footprint;
+        const bool domain_is;
+        const IndexSpace domain_handle;
+        const IndexSpaceExprID domain_expr;
+        const FieldSpace handle;
+        const RegionTreeID tree_id;
+        const LayoutConstraintID layout_id;
+        PointerConstraint *const pointer;
+        const ApEvent use_event;
+      };
+    public:
       InstanceManager(RegionTreeForest *ctx, DistributedID did,
                       AddressSpaceID owner_space,
                       MemoryManager *memory, PhysicalInstance inst, 
@@ -327,6 +356,13 @@ namespace Legion {
       static void handle_send_manager(Runtime *runtime, 
                                       AddressSpaceID source,
                                       Deserializer &derez); 
+      static void handle_defer_manager(const void *args, Runtime *runtime);
+      static void create_remote_manager(Runtime *runtime, DistributedID did,
+          AddressSpaceID owner_space, Memory mem, PhysicalInstance inst,
+          size_t inst_footprint, IndexSpaceExpression *inst_domain,
+          FieldSpaceNode *space_node, RegionTreeID tree_id,
+          LayoutConstraints *constraints, ApEvent use_event,
+          PointerConstraint &pointer_constraint);
     public:
       // Event that needs to trigger before we can start using
       // this physical instance.
@@ -338,6 +374,40 @@ namespace Legion {
      * An abstract class for managing reduction physical instances
      */
     class ReductionManager : public PhysicalManager {
+    public:
+      struct DeferReductionManagerArgs : 
+        public LgTaskArgs<DeferReductionManagerArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_MANAGER_TASK_ID;
+      public:
+        DeferReductionManagerArgs(DistributedID d, AddressSpaceID own, Memory m,
+            PhysicalInstance i, size_t f, bool is, IndexSpace dh, 
+            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
+            LayoutConstraintID l, PointerConstraint &p, ApEvent use,
+            bool fold, const Domain &ptr, ReductionOpID r)
+          : LgTaskArgs<DeferReductionManagerArgs>(implicit_provenance),
+            did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
+            domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
+            layout_id(l), pointer(new PointerConstraint(p)), foldable(fold),
+            ptr_space(ptr), redop(r) { }
+      public:
+        const DistributedID did;
+        const AddressSpaceID owner;
+        const Memory mem;
+        const PhysicalInstance inst;
+        const size_t footprint;
+        const bool domain_is;
+        const IndexSpace domain_handle;
+        const IndexSpaceExprID domain_expr;
+        const FieldSpace handle;
+        const RegionTreeID tree_id;
+        const LayoutConstraintID layout_id;
+        PointerConstraint *const pointer;
+        const ApEvent use_event;
+        const bool foldable;
+        const Domain ptr_space;
+        const ReductionOpID redop;
+      };
     public:
       ReductionManager(RegionTreeForest *ctx, DistributedID did,
                        AddressSpaceID owner_space,
@@ -370,6 +440,14 @@ namespace Legion {
       static void handle_send_manager(Runtime *runtime,
                                       AddressSpaceID source,
                                       Deserializer &derez);
+      static void handle_defer_manager(const void *args, Runtime *runtime);
+      static void create_remote_manager(Runtime *runtime, DistributedID did,
+          AddressSpaceID owner_space, Memory mem, PhysicalInstance inst,
+          size_t inst_footprint, IndexSpaceExpression *inst_domain,
+          FieldSpaceNode *space_node, RegionTreeID tree_id,
+          LayoutConstraints *constraints, ApEvent use_event,
+          PointerConstraint &pointer_constraint, bool foldable,
+          const Domain &ptr_space, ReductionOpID redop);
     public:
       virtual InstanceView* create_instance_top_view(InnerContext *context,
                                             AddressSpaceID logical_owner);

@@ -318,6 +318,8 @@ namespace Legion {
       LG_DEFER_LAUNCH_TASK_ID,
       LG_MISSPECULATE_TASK_ID,
       LG_DEFER_FIND_COPY_PRE_TASK_ID,
+      LG_DEFER_MATERIALIZED_VIEW_TASK_ID,
+      LG_DEFER_REDUCTION_VIEW_TASK_ID,
       LG_DEFER_PHI_VIEW_REF_TASK_ID,
       LG_DEFER_PHI_VIEW_REGISTRATION_TASK_ID,
       LG_CONTROL_REP_LAUNCH_TASK_ID,
@@ -343,6 +345,8 @@ namespace Legion {
       LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
       LG_DEFER_REMOTE_OUTPUT_TASK_ID,
+      LG_DEFER_INSTANCE_MANAGER_TASK_ID,
+      LG_DEFER_REDUCTION_MANAGER_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
       LG_RETRY_SHUTDOWN_TASK_ID,
       LG_LAST_TASK_ID, // This one should always be last
@@ -408,6 +412,8 @@ namespace Legion {
         "Defer Task Launch",                                      \
         "Handle Mapping Misspeculation",                          \
         "Defer Find Copy Preconditions",                          \
+        "Defer Materialized View Registration",                   \
+        "Defer Reduction View Registration"                       \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
         "Control Replication Launch",                             \
@@ -433,6 +439,8 @@ namespace Legion {
         "Deferred Copy Across",                                   \
         "Defer Remote Op Deletion",                               \
         "Defer Remote Output",                                    \
+        "Defer Instance Manager Registration",                    \
+        "Defer Reduction Manager Registration",                   \
         "Remote Message",                                         \
         "Retry Shutdown",                                         \
       };

@@ -511,16 +511,10 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ LayoutDescription* LayoutDescription::
-      handle_unpack_layout_description(Deserializer &derez, Runtime *runtime, 
+      handle_unpack_layout_description(LayoutConstraints *constraints,
                             FieldSpaceNode *field_space_node, size_t total_dims)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraintID layout_id;
-      derez.deserialize(layout_id);
-
-      LayoutConstraints *constraints = 
-        runtime->find_layout_constraints(layout_id);
-
       FieldMask instance_mask;
       const std::vector<FieldID> &field_set = 
         constraints->field_constraint.get_field_set(); 
@@ -1307,20 +1301,82 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
+      bool domain_is;
+      IndexSpace domain_handle;
+      IndexSpaceExprID domain_expr_id;
+      RtEvent domain_ready;
       IndexSpaceExpression *inst_domain = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
+            source, domain_is, domain_handle, domain_expr_id, domain_ready);
       FieldSpace handle;
       derez.deserialize(handle);
+      RtEvent fs_ready;
+      FieldSpaceNode *space_node = runtime->forest->get_node(handle, &fs_ready);
       RegionTreeID tree_id;
       derez.deserialize(tree_id);
       ApEvent use_event;
       derez.deserialize(use_event);
-      FieldSpaceNode *space_node = runtime->forest->get_node(handle);
-      LayoutDescription *layout = 
-        LayoutDescription::handle_unpack_layout_description(derez, runtime,
-                                    space_node, inst_domain->get_num_dims());
+      LayoutConstraintID layout_id;
+      derez.deserialize(layout_id);
+      RtEvent layout_ready;
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(layout_id, 
+                    false/*can fail*/, &layout_ready);
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
+      if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
+      {
+        const RtEvent precondition = 
+          Runtime::merge_events(domain_ready, fs_ready, layout_ready);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          // We need to defer this instance creation
+          DeferInstanceManagerArgs args(did, owner_space, mem, inst,
+              inst_footprint, domain_is, domain_handle, domain_expr_id, 
+              handle, tree_id, layout_id, pointer_constraint, use_event);
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_RESPONSE_PRIORITY, precondition);
+          return;
+        }
+      }
+      // If we fall through here we can create the manager now
+      create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
+                            inst_domain, space_node, tree_id, constraints, 
+                            use_event, pointer_constraint);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceManager::handle_defer_manager(const void *args,
+                                                          Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferInstanceManagerArgs *dargs = 
+        (const DeferInstanceManagerArgs*)args; 
+      IndexSpaceExpression *inst_domain = dargs->domain_is ? 
+        runtime->forest->get_node(dargs->domain_handle) :
+        runtime->forest->find_remote_expression(dargs->domain_expr);
+      FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(dargs->layout_id);
+      create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
+          dargs->inst, dargs->footprint, inst_domain, space_node, 
+          dargs->tree_id, constraints, dargs->use_event, *(dargs->pointer));
+      // Free up the pointer memory
+      delete dargs->pointer;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InstanceManager::create_remote_manager(Runtime *runtime, 
+          DistributedID did, AddressSpaceID owner_space, Memory mem, 
+          PhysicalInstance inst, size_t inst_footprint, 
+          IndexSpaceExpression *inst_domain, FieldSpaceNode *space_node, 
+          RegionTreeID tree_id, LayoutConstraints *constraints, 
+          ApEvent use_event, PointerConstraint &pointer_constraint)
+    //--------------------------------------------------------------------------
+    {
+      LayoutDescription *layout = 
+        LayoutDescription::handle_unpack_layout_description(constraints,
+                                space_node, inst_domain->get_num_dims());
       MemoryManager *memory = runtime->find_memory_manager(mem);
       void *location;
       InstanceManager *man = NULL;
@@ -1424,12 +1480,19 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
-      IndexSpaceExpression *inst_dom = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+      bool domain_is;
+      IndexSpace domain_handle;
+      IndexSpaceExprID domain_expr_id;
+      RtEvent domain_ready;
+      IndexSpaceExpression *inst_domain = 
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
+            domain_is, domain_handle, domain_expr_id, domain_ready);
       ReductionOpID redop;
       derez.deserialize(redop);
       FieldSpace handle;
       derez.deserialize(handle);
+      RtEvent fs_ready;
+      FieldSpaceNode *field_node = runtime->forest->get_node(handle, &fs_ready);
       RegionTreeID tree_id;
       derez.deserialize(tree_id);
       bool foldable;
@@ -1438,12 +1501,70 @@ namespace Legion {
       derez.deserialize(ptr_space);
       ApEvent use_event;
       derez.deserialize(use_event);
-      FieldSpaceNode *field_node = runtime->forest->get_node(handle);
-      LayoutDescription *layout = 
-        LayoutDescription::handle_unpack_layout_description(derez, runtime,
-                                      field_node, inst_dom->get_num_dims());
+      LayoutConstraintID layout_id;
+      derez.deserialize(layout_id);
+      RtEvent layout_ready;
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(layout_id, 
+                    false/*can fail*/, &layout_ready);
       PointerConstraint pointer_constraint;
       pointer_constraint.deserialize(derez);
+      if (domain_ready.exists() || fs_ready.exists() || layout_ready.exists())
+      {
+        const RtEvent precondition = 
+          Runtime::merge_events(domain_ready, fs_ready, layout_ready);
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          // We need to defer this instance creation
+          DeferReductionManagerArgs args(did, owner_space, mem, inst,
+              inst_footprint, domain_is, domain_handle, domain_expr_id, 
+              handle, tree_id, layout_id, pointer_constraint, use_event,
+              foldable, ptr_space, redop);
+          runtime->issue_runtime_meta_task(args,
+              LG_LATENCY_RESPONSE_PRIORITY, precondition);
+          return;
+        }
+      }
+      // If we fall through here we can create the manager now
+      create_remote_manager(runtime, did, owner_space, mem, inst, 
+          inst_footprint, inst_domain, field_node, tree_id, constraints,
+          use_event, pointer_constraint, foldable, ptr_space, redop);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionManager::handle_defer_manager(const void *args,
+                                                           Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferReductionManagerArgs *dargs = 
+        (const DeferReductionManagerArgs*)args; 
+      IndexSpaceExpression *inst_domain = dargs->domain_is ? 
+        runtime->forest->get_node(dargs->domain_handle) :
+        runtime->forest->find_remote_expression(dargs->domain_expr);
+      FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
+      LayoutConstraints *constraints = 
+        runtime->find_layout_constraints(dargs->layout_id);
+      create_remote_manager(runtime, dargs->did, dargs->owner, dargs->mem,
+          dargs->inst, dargs->footprint, inst_domain, space_node, 
+          dargs->tree_id, constraints, dargs->use_event, *(dargs->pointer),
+          dargs->foldable, dargs->ptr_space, dargs->redop);
+      // Free up the pointer memory
+      delete dargs->pointer;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionManager::create_remote_manager(Runtime *runtime, 
+          DistributedID did, AddressSpaceID owner_space, Memory mem, 
+          PhysicalInstance inst, size_t inst_footprint, 
+          IndexSpaceExpression *inst_domain, FieldSpaceNode *space_node, 
+          RegionTreeID tree_id, LayoutConstraints *constraints, 
+          ApEvent use_event, PointerConstraint &pointer_constraint, 
+          bool foldable, const Domain &ptr_space, ReductionOpID redop)
+    //--------------------------------------------------------------------------
+    {
+      LayoutDescription *layout = 
+        LayoutDescription::handle_unpack_layout_description(constraints,
+                                space_node, inst_domain->get_num_dims());
       MemoryManager *memory = runtime->find_memory_manager(mem);
       const ReductionOp *op = Runtime::get_reduction_op(redop);
       ReductionManager *man = NULL;
@@ -1455,16 +1576,16 @@ namespace Legion {
                                                    did, owner_space,
                                                    memory, inst, layout,
                                                    pointer_constraint, 
-                                                   inst_dom, field_node, 
+                                                   inst_domain, space_node,
                                                    tree_id, redop, op,
                                                    use_event, inst_footprint,
                                                    false/*reg now*/);
         else
           man = new FoldReductionManager(runtime->forest, 
                                          did, owner_space, memory, inst,
-                                         layout, pointer_constraint, inst_dom,
-                                         field_node, tree_id, redop, op,
-                                         use_event, inst_footprint, 
+                                         layout, pointer_constraint, 
+                                         inst_domain, space_node, tree_id, 
+                                         redop, op, use_event, inst_footprint,
                                          false/*reg now*/);
       }
       else
@@ -1475,7 +1596,7 @@ namespace Legion {
                                                    did, owner_space, 
                                                    memory, inst, layout,
                                                    pointer_constraint, 
-                                                   inst_dom, field_node, 
+                                                   inst_domain, space_node,
                                                    tree_id, redop,
                                                    op, ptr_space, 
                                                    use_event, inst_footprint,
@@ -1484,7 +1605,7 @@ namespace Legion {
           man = new ListReductionManager(runtime->forest, did, 
                                          owner_space, memory, inst,
                                          layout, pointer_constraint, 
-                                         inst_dom, field_node, 
+                                         inst_domain, space_node, 
                                          tree_id, redop, op,
                                          ptr_space, use_event,
                                          inst_footprint, false/*reg now*/);

@@ -3644,14 +3644,43 @@ namespace Legion {
       UniqueID context_uid;
       derez.deserialize(context_uid);
       RtEvent man_ready;
-      PhysicalManager *phy_man = 
+      PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
-      if (man_ready.exists())
-        man_ready.wait();
+      if (man_ready.exists() && !man_ready.has_triggered())
+      {
+        // Defer this until the manager is ready
+        DeferMaterializedViewArgs args(did, manager, owner_space,
+                                       logical_owner, context_uid);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_RESPONSE_PRIORITY, man_ready);
+      }
+      else
+        create_remote_view(runtime, did, manager, owner_space, 
+                           logical_owner, context_uid); 
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::handle_defer_materialized_view(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferMaterializedViewArgs *dargs = 
+        (const DeferMaterializedViewArgs*)args; 
+      create_remote_view(runtime, dargs->did, dargs->manager, 
+          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void MaterializedView::create_remote_view(Runtime *runtime,
+                            DistributedID did, PhysicalManager *manager,
+                            AddressSpaceID owner_space,
+                            AddressSpaceID logical_owner, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(phy_man->is_instance_manager());
+      assert(manager->is_instance_manager());
 #endif
-      InstanceManager *inst_manager = phy_man->as_instance_manager();
+      InstanceManager *inst_manager = manager->as_instance_manager();
       void *location;
       MaterializedView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))
@@ -5141,14 +5170,43 @@ namespace Legion {
       derez.deserialize(context_uid);
 
       RtEvent man_ready;
-      PhysicalManager *phy_man = 
+      PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(manager_did, man_ready);
-      if (man_ready.exists())
-        man_ready.wait();
+      if (man_ready.exists() && !man_ready.has_triggered())
+      {
+        // Defer this until the manager is ready
+        DeferReductionViewArgs args(did, manager, owner_space,
+                                    logical_owner, context_uid);
+        runtime->issue_runtime_meta_task(args,
+            LG_LATENCY_RESPONSE_PRIORITY, man_ready);
+      }
+      else
+        create_remote_view(runtime, did, manager, owner_space, 
+                           logical_owner, context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionView::handle_defer_reduction_view(
+                                             const void *args, Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferReductionViewArgs *dargs = 
+        (const DeferReductionViewArgs*)args; 
+      create_remote_view(runtime, dargs->did, dargs->manager, 
+          dargs->owner_space, dargs->logical_owner, dargs->context_uid);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ReductionView::create_remote_view(Runtime *runtime,
+                            DistributedID did, PhysicalManager *manager,
+                            AddressSpaceID owner_space, 
+                            AddressSpaceID logical_owner, UniqueID context_uid)
+    //--------------------------------------------------------------------------
+    {
 #ifdef DEBUG_LEGION
-      assert(phy_man->is_reduction_manager());
+      assert(manager->is_reduction_manager());
 #endif
-      ReductionManager *red_manager = phy_man->as_reduction_manager();
+      ReductionManager *red_manager = manager->as_reduction_manager();
       void *location;
       ReductionView *view = NULL;
       if (runtime->find_pending_collectable_location(did, location))

@@ -3421,7 +3421,8 @@ namespace Legion {
                                   LayoutConstraintSet &layout_constraints);
       const char* get_layout_constraints_name(LayoutConstraintID layout_id);
       LayoutConstraints* find_layout_constraints(LayoutConstraintID layout_id,
-                                                 bool can_fail = false);
+                                                 bool can_fail = false,
+                                                 RtEvent *wait_for = NULL);
     public:
       // Static methods for start-up and callback phases
       static int start(int argc, char **argv, bool background);
