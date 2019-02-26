@@ -408,7 +408,7 @@ namespace Legion {
         "Handle Mapping Misspeculation",                          \
         "Defer Find Copy Preconditions",                          \
         "Defer Materialized View Registration",                   \
-        "Defer Reduction View Registration"                       \
+        "Defer Reduction View Registration",                      \
         "Defer Phi View Reference",                               \
         "Defer Phi View Registration",                            \
         "Tighten Index Space",                                    \
