@@ -18900,7 +18900,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     LayoutConstraints* Runtime::find_layout_constraints(
-                        LayoutConstraintID layout_id, bool can_fail /*= false*/)
+                      LayoutConstraintID layout_id, bool can_fail /*= false*/, 
+                      RtEvent *wait_for /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       // See if we can find it first
@@ -18942,6 +18943,12 @@ namespace Legion {
           else
             wait_on = wait_on_finder->second;
         }
+      }
+      // If we want the wait event, just return
+      if (wait_for != NULL)
+      {
+        *wait_for = wait_on;
+        return NULL;
       }
       // If we didn't find it send a remote request for the constraints
       wait_on.wait();
@@ -20508,6 +20515,16 @@ namespace Legion {
             InstanceView::handle_view_find_copy_pre_request(args, runtime);
             break;
           }
+        case LG_DEFER_MATERIALIZED_VIEW_TASK_ID:
+          {
+            MaterializedView::handle_defer_materialized_view(args, runtime);
+            break;
+          }
+        case LG_DEFER_REDUCTION_VIEW_TASK_ID:
+          {
+            ReductionView::handle_defer_reduction_view(args, runtime);
+            break;
+          }
         case LG_DEFER_PHI_VIEW_REF_TASK_ID:
           {
             PhiView::handle_deferred_view_ref(args);
@@ -20611,6 +20628,16 @@ namespace Legion {
         case LG_DEFER_REMOTE_OUTPUT_TASK_ID:
           {
             RemoteEqTracker::handle_deferred_output(args);
+            break;
+          }
+        case LG_DEFER_INSTANCE_MANAGER_TASK_ID:
+          {
+            InstanceManager::handle_defer_manager(args, runtime);
+            break;
+          }
+        case LG_DEFER_REDUCTION_MANAGER_TASK_ID:
+          {
+            ReductionManager::handle_defer_manager(args, runtime);
             break;
           }
         case LG_RETRY_SHUTDOWN_TASK_ID:

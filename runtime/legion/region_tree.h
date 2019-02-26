@@ -603,9 +603,9 @@ namespace Legion {
       RegionNode*     create_node(LogicalRegion r, PartitionNode *par);
       PartitionNode*  create_node(LogicalPartition p, RegionNode *par);
     public:
-      IndexSpaceNode* get_node(IndexSpace space);
+      IndexSpaceNode* get_node(IndexSpace space, RtEvent *defer = NULL);
       IndexPartNode*  get_node(IndexPartition part, RtEvent *defer = NULL);
-      FieldSpaceNode* get_node(FieldSpace space);
+      FieldSpaceNode* get_node(FieldSpace space, RtEvent *defer = NULL);
       RegionNode*     get_node(LogicalRegion handle, bool need_check = true);
       PartitionNode*  get_node(LogicalPartition handle, bool need_check = true);
       RegionNode*     get_tree(RegionTreeID tid);
@@ -763,7 +763,8 @@ namespace Legion {
     public:
       // Remote expression methods
       IndexSpaceExpression* find_or_request_remote_expression(
-              IndexSpaceExprID remote_expr_id, IndexSpaceExpression *origin);
+              IndexSpaceExprID remote_expr_id, 
+              IndexSpaceExpression *origin, RtEvent *wait_for = NULL);
       IndexSpaceExpression* find_remote_expression(
               IndexSpaceExprID remote_expr_id);
       void unregister_remote_expression(IndexSpaceExprID remote_expr_id);
@@ -997,6 +998,10 @@ namespace Legion {
     public:
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source);
+      static IndexSpaceExpression* unpack_expression(Deserializer &derez,
+                         RegionTreeForest *forest, AddressSpaceID source,
+                         bool &is_index_space, IndexSpace &handle,
+                         IndexSpaceExprID &remote_expr_id, RtEvent &wait_for);
     public:
       const TypeTag type_tag;
       const IndexSpaceExprID expr_id;

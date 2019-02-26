@@ -3860,7 +3860,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space)
+    IndexSpaceNode* RegionTreeForest::get_node(IndexSpace space,
+                                               RtEvent *defer /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
@@ -3903,16 +3904,24 @@ namespace Legion {
         else
           wait_on = wait_finder->second;
       }
-      // Wait on the event
-      wait_on.wait();
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
-          index_nodes.find(space);
-      if (finder == index_nodes.end())
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for index space %x."
-                        "This is definitely a runtime bug.", space.id)
-      return finder->second;
+      if (defer == NULL)
+      {
+        // Wait on the event
+        wait_on.wait();
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<IndexSpace,IndexSpaceNode*>::const_iterator finder = 
+            index_nodes.find(space);
+        if (finder == index_nodes.end())
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for index space %x."
+                          "This is definitely a runtime bug.", space.id)
+        return finder->second;
+      }
+      else
+      {
+        *defer = wait_on;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3981,7 +3990,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space) 
+    FieldSpaceNode* RegionTreeForest::get_node(FieldSpace space,
+                                               RtEvent *defer /*=NULL*/) 
     //--------------------------------------------------------------------------
     {
       if (!space.exists())
@@ -4024,16 +4034,24 @@ namespace Legion {
         else
           wait_on = wait_finder->second;
       }
-      // Wait for the event to be ready
-      wait_on.wait();
-      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-      std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
-        field_nodes.find(space);
-      if (finder == field_nodes.end())
-        REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
-          "Unable to find entry for field space %x. "
-                        "This is definitely a runtime bug.", space.id)
-      return finder->second;
+      if (defer == NULL)
+      {
+        // Wait for the event to be ready
+        wait_on.wait();
+        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+        std::map<FieldSpace,FieldSpaceNode*>::const_iterator finder = 
+          field_nodes.find(space);
+        if (finder == field_nodes.end())
+          REPORT_LEGION_ERROR(ERROR_UNABLE_FIND_ENTRY,
+            "Unable to find entry for field space %x. "
+                          "This is definitely a runtime bug.", space.id)
+        return finder->second;
+      }
+      else
+      {
+        *defer = wait_on;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5459,7 +5477,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpaceExpression* RegionTreeForest::find_or_request_remote_expression(
-                  IndexSpaceExprID remote_expr_id, IndexSpaceExpression *origin)
+                                IndexSpaceExprID remote_expr_id, 
+                                IndexSpaceExpression *origin, RtEvent *wait_for)
     //--------------------------------------------------------------------------
     {
       // See if we can find it with the read-only lock first
@@ -5507,15 +5526,23 @@ namespace Legion {
         }
         runtime->send_index_space_remote_expression_request(owner, rez);
       }
-      wait_on.wait();
-      // When we get the lock again it should be there
-      AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
-      std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
-        finder = remote_expressions.find(remote_expr_id);
+      if (wait_for == NULL)
+      {
+        wait_on.wait();
+        // When we get the lock again it should be there
+        AutoLock l_lock(lookup_is_op_lock, 1, false/*exclusive*/);
+        std::map<IndexSpaceExprID,IndexSpaceExpression*>::const_iterator 
+          finder = remote_expressions.find(remote_expr_id);
 #ifdef DEBUG_LEGION
-      assert(finder != remote_expressions.end());
+        assert(finder != remote_expressions.end());
 #endif
-      return finder->second;
+        return finder->second;
+      }
+      else
+      {
+        *wait_for = wait_on;
+        return NULL;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -5773,7 +5800,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
-           Deserializer &derez, RegionTreeForest *forest, AddressSpaceID source)
+                             Deserializer &derez, RegionTreeForest *forest, 
+                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       // Handle the special case where this is a local index space expression 
@@ -5799,6 +5827,37 @@ namespace Legion {
       IndexSpaceExpression *origin;
       derez.deserialize(origin);
       return forest->find_or_request_remote_expression(remote_expr_id, origin);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
+                           Deserializer &derez, RegionTreeForest *forest, 
+                           AddressSpaceID source, bool &is_index_space,
+                           IndexSpace &handle, IndexSpaceExprID &remote_expr_id,
+                           RtEvent &wait_for)
+    //--------------------------------------------------------------------------
+    {
+      // Handle the special case where this is a local index space expression 
+      bool is_local;
+      derez.deserialize(is_local);
+      if (is_local)
+      {
+        IndexSpaceExpression *result;
+        derez.deserialize(result);
+        return result;
+      }
+      derez.deserialize(is_index_space);
+      // If this is an index space it is easy
+      if (is_index_space)
+      {
+        derez.deserialize(handle);
+        return forest->get_node(handle, &wait_for);
+      }
+      derez.deserialize(remote_expr_id);
+      IndexSpaceExpression *origin;
+      derez.deserialize(origin);
+      return forest->find_or_request_remote_expression(remote_expr_id, 
+                                                       origin, &wait_for);
     }
 
     /////////////////////////////////////////////////////////////
