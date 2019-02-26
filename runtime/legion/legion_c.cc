@@ -1122,6 +1122,27 @@ legion_index_partition_create_by_intersection(
 }
 
 legion_index_partition_t
+legion_index_partition_create_by_intersection_mirror(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_index_partition_t handle_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */,
+  bool dominates /* = false */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  IndexPartition ip =
+    runtime->create_partition_by_intersection(ctx, parent, handle, part_kind,
+                                              color, dominates);
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_partition_t
 legion_index_partition_create_by_difference(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
