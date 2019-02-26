@@ -4621,11 +4621,15 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                // No footprint for us to pass back here
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<size_t>(0);
               }
               runtime->send_instance_response(source, rez);
             }
@@ -4656,11 +4660,15 @@ namespace Legion {
                 RezCheck z(rez);
                 rez.serialize(memory);
                 rez.serialize(to_trigger);
+                rez.serialize<bool>(true); // success
                 rez.serialize(manager->did);
                 rez.serialize<bool>(acquire);
                 rez.serialize(remote_target);
                 rez.serialize(remote_success);
                 rez.serialize(kind);
+                // No footprint for us to pass back here
+                rez.serialize<size_t*>(NULL);
+                rez.serialize<size_t>(0);
               }
               runtime->send_instance_response(source, rez);
             }
