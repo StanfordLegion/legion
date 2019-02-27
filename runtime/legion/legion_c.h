@@ -1123,6 +1123,21 @@ extern "C" {
   /**
    * @return Caller takes ownership of return value.
    *
+   * @see Legion::Runtime::create_partition_by_intersection()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_by_intersection_mirror(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_index_partition_t handle,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */,
+    bool dominates /* = false */);
+
+  /**
+   * @return Caller takes ownership of return value.
+   *
    * @see Legion::Runtime::create_partition_by_difference()
    */
   legion_index_partition_t
