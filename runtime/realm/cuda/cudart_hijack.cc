@@ -521,6 +521,47 @@ namespace Realm {
 	return cudaSuccess;
       }
 
+      cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *numBlocks,
+                                                                const void *func,
+                                                                int blockSize,
+                                                                size_t dynamicSMemSize)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessor");
+        CUfunction handle = p->gpu->lookup_function(func);
+        CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks, handle,
+                                                         blockSize, dynamicSMemSize) );
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *numBlocks, 
+                                                                         const void *func, 
+                                                                         int blockSize, 
+                                                                         size_t dynamicSMemSize,
+                                                                         unsigned int flags)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags");
+        CUfunction handle = p->gpu->lookup_function(func);
+        CHECK_CU( cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks, handle,
+                                                       blockSize, dynamicSMemSize, flags) );
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaGetLastError(void)
+      {
+        get_gpu_or_die("cudaGetLastError");
+        // For now we're not tracking this so if we were
+        // going to die we already would have
+        return cudaSuccess;
+      }
+
+      cudaError_t cudaPeekAtLastError(void)
+      {
+        get_gpu_or_die("cudaPeekAtLastError");
+        // For now we're not tracking this so if we were
+        // going to die we already would have
+        return cudaSuccess;
+      }
+
     }; // extern "C"
   }; // namespace Cuda
 }; // namespace Realm
