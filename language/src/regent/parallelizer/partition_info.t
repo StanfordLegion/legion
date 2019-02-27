@@ -12,11 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+local base = require("regent/std_base")
+
 local partition_info = {}
 
 partition_info.__index = partition_info
 
 function partition_info.new(region_symbol, disjoint, complete)
+  assert(base.is_symbol(region_symbol))
   local tuple = {
     region = region_symbol,
     disjoint = disjoint or false,
@@ -25,11 +28,10 @@ function partition_info.new(region_symbol, disjoint, complete)
   return setmetatable(tuple, partition_info)
 end
 
-function partition_info:clone(mapping)
-  local region = self.region
-  if mapping then region = mapping(region) end
-  assert(region ~= nil)
-  return partition_info.new(region, self.disjoint, self.complete)
+function partition_info:clone(region_mapping)
+  return partition_info.new(region_mapping(self.region),
+                            self.disjoint,
+                            self.complete)
 end
 
 function partition_info:meet_disjointness(disjoint)

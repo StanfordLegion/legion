@@ -110,7 +110,7 @@ function parallel_task_context:add_field_access(region_symbol, range, field_path
 end
 
 function parallel_task_context:summarize_accesses()
-  local range_mapping = {}
+  local range_mapping = data.newmap()
   local needs_unification = false
   local num_accesses = 0
   for region_symbol, all_field_accesses in self.field_accesses:items() do
@@ -132,14 +132,7 @@ function parallel_task_context:summarize_accesses()
   end
 
   if needs_unification then
-    local unified, error_message = self.constraints:unify_ranges(range_mapping)
-    if not unified then
-      self.constraints:print_constraints()
-      report.error(self.task,
-        prefix .. " failed: found an unsatisfiable constraint during unification: " ..
-        error_message)
-    end
-    self.constraints = unified
+    self.constraints = self.constraints:clone(range_mapping)
     self.loop_ranges = self.loop_ranges:map(function(_, range)
       return range_mapping[range] or range
     end)
