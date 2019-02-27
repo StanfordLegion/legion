@@ -2598,6 +2598,62 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition InnerContext::create_partition_by_intersection(
+                                              RegionTreeForest *forest,
+                                              IndexSpace parent,
+                                              IndexPartition partition,
+                                              PartitionKind kind, Color color,
+                                              bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      IndexPartition pid(runtime->get_unique_index_partition_id(), 
+                         parent.get_tree_id(), parent.get_type_tag());
+      DistributedID did = runtime->get_available_distributed_id();
+#ifdef DEBUG_LEGION
+      log_index.debug("Creating intersection partition %d with parent "
+                      "index space %x in task %s (ID %lld)", pid.id, parent.id,
+                      get_task_name(), get_unique_id());
+      if (parent.get_type_tag() != partition.get_type_tag())
+        REPORT_LEGION_ERROR(ERROR_INDEXPARTITION_NOT_SAME_INDEX_TREE,
+            "IndexPartition %d does not have the same type as the "
+            "parent index space %x in task %s (UID %lld)", partition.id,
+            parent.id, get_task_name(), get_unique_id())
+#endif
+      LegionColor partition_color = INVALID_COLOR;
+      if (color != AUTO_GENERATE_ID)
+        partition_color = color;
+      PendingPartitionOp *part_op = 
+        runtime->get_available_pending_partition_op();
+      part_op->initialize_intersection_partition(this,pid,partition,dominates);
+      ApEvent term_event = part_op->get_completion_event();
+      IndexPartNode *part_node = forest->get_node(partition);
+      // See if we can determine disjointness if we weren't told
+      if ((kind == COMPUTE_KIND) || (kind == COMPUTE_COMPLETE_KIND) ||
+          (kind == COMPUTE_INCOMPLETE_KIND))
+      {
+        if (part_node->is_disjoint(true/*from app*/))
+        {
+          if (kind == COMPUTE_KIND)
+            kind = DISJOINT_KIND;
+          else if (kind == COMPUTE_COMPLETE_KIND)
+            kind = DISJOINT_COMPLETE_KIND;
+          else
+            kind = DISJOINT_INCOMPLETE_KIND;
+        }
+      }
+      // Tell the region tree forest about this partition
+      RtEvent safe = forest->create_pending_partition(pid, parent, 
+        part_node->color_space->handle, partition_color, kind, did, term_event);
+      // Now we can add the operation to the queue
+      runtime->add_to_dependence_queue(this, executing_processor, part_op);
+      // Wait for any notifications to occur before returning
+      if (safe.exists())
+        safe.wait();
+      return pid;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition InnerContext::create_partition_by_difference(
                                                   RegionTreeForest *forest,
                                                   IndexSpace parent,
@@ -7830,6 +7886,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition LeafContext::create_partition_by_intersection(
+                                                RegionTreeForest *forest,
+                                                IndexSpace parent,
+                                                IndexPartition partition,
+                                                PartitionKind kind, Color color,
+                                                bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INTERSECTION_PARTITION_CREATION,
+        "Illegal intersection partition creation performed in "
+                     "leaf task %s (ID %lld)", get_task_name(),get_unique_id())
+      return IndexPartition::NO_PART;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition LeafContext::create_partition_by_difference(
                                                       RegionTreeForest *forest,
                                                       IndexSpace parent,
@@ -9063,6 +9134,19 @@ namespace Legion {
       return enclosing->create_partition_by_intersection(forest, parent,
                                           handle1, handle2, color_space, 
                                           kind, color);
+    }
+
+    //--------------------------------------------------------------------------
+    IndexPartition InlineContext::create_partition_by_intersection(
+                                      RegionTreeForest *forest,
+                                      IndexSpace parent,
+                                      IndexPartition partition,
+                                      PartitionKind kind, Color color,
+                                      bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->create_partition_by_intersection(forest, parent,
+                                        partition, kind, color, dominates);
     }
 
     //--------------------------------------------------------------------------
