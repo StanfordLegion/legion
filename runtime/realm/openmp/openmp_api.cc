@@ -110,6 +110,16 @@ namespace Realm {
       fnptr(data);
       GOMP_parallel_end();
     }
+
+    bool GOMP_single_start(void)
+    {
+      Realm::ThreadPool::WorkerInfo *wi = Realm::ThreadPool::get_worker_info();
+      // if this isn't called from a openmp-enabled thread, we already
+      //  complained above
+      if(!wi)
+	return true;
+      return (wi->thread_id == 0);
+    }
   };
 #endif
 
