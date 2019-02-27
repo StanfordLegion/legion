@@ -2812,7 +2812,7 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
-      ApEvent result;
+      ApEvent result, precondition;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
       if (dominates)
       {
@@ -2833,7 +2833,7 @@ namespace Legion {
           preconditions.insert(left_ready);
         if (op->has_execution_fence_event())
           preconditions.insert(op->get_execution_fence_event());
-        ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+        precondition = Runtime::merge_events(NULL, preconditions);
         result = ApEvent(Realm::IndexSpace<DIM,T>::compute_intersections(
               lhs_space, rhs_spaces, subspaces, requests, precondition));  
       }
