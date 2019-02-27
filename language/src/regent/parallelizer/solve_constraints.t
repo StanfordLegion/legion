@@ -179,7 +179,7 @@ solver_context.__index = solver_context
 
 function solver_context.new()
   local cx                   = {
-    sources                  = data.newmap(),
+    sources                  = hash_set.new(),
     sources_by_regions       = data.newmap(),
     constraints              = partitioning_constraints.new(),
     field_accesses           = data.newmap(),
@@ -199,8 +199,8 @@ local function find_unifiable_ranges(constraints1, constraints2, source1, source
     local range1, range2 = unpack(worklist[idx])
     mapping[range1] = range2
     idx = idx + 1
-    local all_constraints1 = constraints1.image_constraints[range1]
-    local all_constraints2 = constraints2.image_constraints[range2]
+    local all_constraints1 = constraints1.constraints[range1]
+    local all_constraints2 = constraints2.constraints[range2]
     if all_constraints1 ~= nil and all_constraints2 ~= nil then
       for key, dst_range1 in all_constraints1:items() do
         local dst_range2 = all_constraints2[key]
@@ -219,7 +219,7 @@ function solver_context:unify(name, new_constraints, region_mapping)
     return range_mapping
   elseif self.constraints:is_empty() then
     for source, _ in new_constraints.sources:items() do
-      self.sources[source] = true
+      self.sources:insert(source)
     end
     for region, source in new_constraints.sources_by_regions:items() do
       local my_region = region_mapping[region]
@@ -272,7 +272,7 @@ function solver_context:unify(name, new_constraints, region_mapping)
     if range_mapping[range] == nil then
       range_mapping[range] = range
       if new_constraints.sources[range] then
-        self.sources[range] = true
+        self.sources:insert(range)
         assert(self.sources_by_regions[partition.region] == nil)
         self.sources_by_regions[partition.region] = range
       end
@@ -527,8 +527,9 @@ function solver_context:synthesize_partitions(color_space_symbol)
         stats:insert(create_equal_partition(range, partition.region, color_space_symbol))
       else
         assert(parent ~= nil)
+        local type, info = unpack(key)
         stats:insert(
-          create_preimage_partition(range, partition.region, parent, key))
+          create_preimage_partition(range, partition.region, parent, info))
       end
       parent = range
     end
@@ -543,14 +544,15 @@ function solver_context:synthesize_partitions(color_space_symbol)
   while idx <= #worklist do
     local src_range = worklist[idx]
     idx = idx + 1
-    -- TODO: We need to create partitions other than image partitions
-    local image_constraints = self.constraints.image_constraints[src_range]
+    local image_constraints = self.constraints.constraints[src_range]
     if image_constraints ~= nil then
       for key, dst_range in image_constraints:items() do
+        -- TODO: We need to create partitions other than image partitions
+        local type, info = unpack(key)
         if created[dst_range] == nil then
           local dst_partition = self.constraints:get_partition(dst_range)
           stats:insert(
-            create_image_partition(dst_range, dst_partition.region, src_range, key))
+            create_image_partition(dst_range, dst_partition.region, src_range, info))
           created[dst_range] = true
         end
         worklist:insert(dst_range)
@@ -705,6 +707,8 @@ function solve_constraints.solve(stat)
     local range_mapping = solver_cx:unify(task.name, constraints, region_mapping)
     return {range_mapping, region_mapping}
   end)
+
+  solver_cx.constraints:print_constraints()
 
   local partition_stats =
     solver_cx:synthesize_partitions(color_space_symbol)
