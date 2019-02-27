@@ -3933,9 +3933,8 @@ namespace Legion {
                            PartitionKind part_kind, Color color, bool dominates)
     //--------------------------------------------------------------------------
     {
-      // TODO: implement this
-      assert(false);
-      return IndexPartition::NO_PART;
+      return runtime->create_partition_by_intersection(ctx, parent, partition,
+                                                  part_kind, color, dominates);
     }
 
     //--------------------------------------------------------------------------

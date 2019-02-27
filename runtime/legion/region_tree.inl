@@ -1389,7 +1389,8 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       // Left is implicit "this"
-                                                      IndexPartNode *right)
+                                                      IndexPartNode *right,
+                                                      const bool dominates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1435,20 +1436,31 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
+      ApEvent result;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_INTERSECTIONS);
-      Realm::IndexSpace<DIM,T> lhs_space;
-      ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
-      if (left_ready.exists())
-        preconditions.insert(left_ready);
-      if (op->has_execution_fence_event())
-        preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(preconditions);
-      ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
-            lhs_space, rhs_spaces, subspaces, requests, precondition));
+      if (dominates)
+      {
+        // If we've been told that we dominate then there is no
+        // need to event do the intersection tests at all
+        subspaces.swap(rhs_spaces);
+        result = Runtime::merge_events(preconditions);
+      }
+      else
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_INTERSECTIONS);
+        Realm::IndexSpace<DIM,T> lhs_space;
+        ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
+        if (left_ready.exists())
+          preconditions.insert(left_ready);
+        if (op->has_execution_fence_event())
+          preconditions.insert(op->get_execution_fence_event());
+        ApEvent precondition = Runtime::merge_events(preconditions);
+        result = ApEvent(Realm::IndexSpace<DIM,T>::compute_intersections(
+              lhs_space, rhs_spaces, subspaces, requests, precondition));
+      }
 #ifdef LEGION_SPY
       if (!result.exists() || (result == precondition))
       {

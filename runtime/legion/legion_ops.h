@@ -2241,6 +2241,7 @@ namespace Legion {
         EQUAL_PARTITION = 0,
         UNION_PARTITION,
         INTERSECTION_PARTITION,
+        INTERSECTION_WITH_REGION,
         DIFFERENCE_PARTITION,
         RESTRICTED_PARTITION,
       };
@@ -2299,6 +2300,22 @@ namespace Legion {
         IndexPartition pid;
         IndexPartition handle1;
         IndexPartition handle2;
+      };
+      class IntersectionWithRegionThunk: public PendingPartitionThunk {
+      public:
+        IntersectionWithRegionThunk(IndexPartition id, IndexPartition p, bool d)
+          : pid(id), part(p), dominates(d) { }
+        virtual ~IntersectionWithRegionThunk(void) { }
+      public:
+        virtual ApEvent perform(PendingPartitionOp *op,
+                                RegionTreeForest *forest)
+        { return forest->create_partition_by_intersection(op, pid, 
+                                                          part, dominates); }
+        virtual void perform_logging(PendingPartitionOp* op);
+      protected:
+        IndexPartition pid;
+        IndexPartition part;
+        const bool dominates;
       };
       class DifferencePartitionThunk : public PendingPartitionThunk {
       public:
@@ -2407,6 +2424,10 @@ namespace Legion {
                                              IndexPartition pid, 
                                              IndexPartition handle1,
                                              IndexPartition handle2);
+      void initialize_intersection_partition(TaskContext *ctx,
+                                             IndexPartition pid, 
+                                             IndexPartition part,
+                                             const bool dominates);
       void initialize_difference_partition(TaskContext *ctx,
                                            IndexPartition pid, 
                                            IndexPartition handle1,

@@ -1730,6 +1730,11 @@ namespace Legion {
                                                IndexPartition handle2,
                                                IndexSpace color_space,
                                                PartitionKind kind, Color color);
+      IndexPartition create_partition_by_intersection(Context ctx,
+                                               IndexSpace parent,
+                                               IndexPartition partition,
+                                               PartitionKind kind,
+                                               Color color, bool dominates);
       IndexPartition create_partition_by_difference(Context ctx, 
                                                IndexSpace parent,
                                                IndexPartition handle1,

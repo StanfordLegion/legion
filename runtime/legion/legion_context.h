@@ -115,6 +115,13 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color) = 0;
+      virtual IndexPartition create_partition_by_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition partition,
+                                            PartitionKind kind,
+                                            Color color, 
+                                            bool dominates) = 0;
       virtual IndexPartition create_partition_by_difference(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -760,6 +767,13 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color);
+      virtual IndexPartition create_partition_by_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition partition,
+                                            PartitionKind kind,
+                                            Color color,
+                                            bool dominates);
       virtual IndexPartition create_partition_by_difference(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1385,6 +1399,13 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color);
+      virtual IndexPartition create_partition_by_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition partition,
+                                            PartitionKind kind,
+                                            Color color,
+                                            bool dominates);
       virtual IndexPartition create_partition_by_difference(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,
@@ -1702,6 +1723,13 @@ namespace Legion {
                                             IndexSpace color_space,
                                             PartitionKind kind,
                                             Color color);
+      virtual IndexPartition create_partition_by_intersection(
+                                            RegionTreeForest *forest,
+                                            IndexSpace parent,
+                                            IndexPartition partition,
+                                            PartitionKind kind,
+                                            Color color,
+                                            bool dominates);
       virtual IndexPartition create_partition_by_difference(
                                             RegionTreeForest *forest,
                                             IndexSpace parent,

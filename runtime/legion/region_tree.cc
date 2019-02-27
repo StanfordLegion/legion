@@ -464,6 +464,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
+                                                           IndexPartition pid,
+                                                           IndexPartition part,
+                                                           const bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      IndexPartNode *node = get_node(part);
+      return new_part->create_by_intersection(op, node, dominates); 
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
@@ -6717,6 +6729,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return parent->create_by_intersection(op, this, left, right);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexPartNode::create_by_intersection(Operation *op,
+                                                  IndexPartNode *other,
+                                                  const bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      return parent->create_by_intersection(op, this, other, dominates);
     }
 
     //--------------------------------------------------------------------------

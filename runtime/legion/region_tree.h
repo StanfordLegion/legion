@@ -122,6 +122,10 @@ namespace Legion {
                                                IndexPartition pid,
                                                IndexPartition handle1,
                                                IndexPartition handle2);
+      ApEvent create_partition_by_intersection(Operation *op,
+                                               IndexPartition pid,
+                                               IndexPartition part,
+                                               const bool dominates);
       ApEvent create_partition_by_difference(Operation *op,
                                            IndexPartition pid,
                                            IndexPartition handle1,
@@ -933,7 +937,8 @@ namespace Legion {
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
-                                             IndexPartNode *right) = 0;
+                                             IndexPartNode *right,
+                                             const bool dominates = false) = 0;
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
@@ -1133,7 +1138,8 @@ namespace Legion {
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
-                                             IndexPartNode *right);
+                                             IndexPartNode *right,
+                                             const bool dominates = false);
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
@@ -1597,6 +1603,8 @@ namespace Legion {
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_intersection(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
+      ApEvent create_by_intersection(Operation *op, IndexPartNode *original,
+                                     const bool dominates);
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right);
       ApEvent create_by_restriction(const void *transform, const void *extent);
