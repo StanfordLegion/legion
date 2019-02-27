@@ -2761,11 +2761,15 @@ namespace Legion {
     ApEvent IndexSpaceNodeT<DIM,T>::create_by_intersection(Operation *op,
                                                       IndexPartNode *partition,
                                                       // Left is implicit "this"
-                                                      IndexPartNode *right)
+                                                      IndexPartNode *right,
+                                                      ShardID shard,
+                                                      size_t total_shards,
+                                                      const bool dominates)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(partition->parent == this);
+      assert(total_shards >= 1);
 #endif
       const size_t count = partition->color_space->get_volume();
       std::vector<Realm::IndexSpace<DIM,T> > rhs_spaces(count);
@@ -2774,7 +2778,8 @@ namespace Legion {
       unsigned subspace_index = 0;
       if (partition->total_children == partition->max_linearized_color)
       {
-        for (LegionColor color = 0; color < partition->total_children; color++)
+        for (LegionColor color = shard; 
+              color < partition->total_children; color += total_shards)
         {
           IndexSpaceNodeT<DIM,T> *right_child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(right->get_child(color));
@@ -2790,8 +2795,8 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0;
-              color < partition->max_linearized_color; color++)
+        for (LegionColor color = shard;
+              color < partition->max_linearized_color; color += total_shards)
         {
           if (!partition->color_space->contains_color(color))
             continue;
@@ -2807,20 +2812,31 @@ namespace Legion {
             preconditions.insert(right_ready);
         }
       }
+      ApEvent result;
       std::vector<Realm::IndexSpace<DIM,T> > subspaces;
-      Realm::ProfilingRequestSet requests;
-      if (context->runtime->profiler != NULL)
-        context->runtime->profiler->add_partition_request(requests,
-                                        op, DEP_PART_INTERSECTIONS);
-      Realm::IndexSpace<DIM,T> lhs_space;
-      ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
-      if (left_ready.exists())
-        preconditions.insert(left_ready);
-      if (op->has_execution_fence_event())
-        preconditions.insert(op->get_execution_fence_event());
-      ApEvent precondition = Runtime::merge_events(NULL, preconditions);
-      ApEvent result(Realm::IndexSpace<DIM,T>::compute_intersections(
-            lhs_space, rhs_spaces, subspaces, requests, precondition));
+      if (dominates)
+      {
+        // If we've been told that we dominate then there is no
+        // need to event do the intersection tests at all
+        subspaces.swap(rhs_spaces);
+        result = Runtime::merge_events(NULL, preconditions);
+      }
+      else
+      {
+        Realm::ProfilingRequestSet requests;
+        if (context->runtime->profiler != NULL)
+          context->runtime->profiler->add_partition_request(requests,
+                                          op, DEP_PART_INTERSECTIONS);
+        Realm::IndexSpace<DIM,T> lhs_space;
+        ApEvent left_ready = get_realm_index_space(lhs_space, false/*tight*/);
+        if (left_ready.exists())
+          preconditions.insert(left_ready);
+        if (op->has_execution_fence_event())
+          preconditions.insert(op->get_execution_fence_event());
+        ApEvent precondition = Runtime::merge_events(NULL, preconditions);
+        result = ApEvent(Realm::IndexSpace<DIM,T>::compute_intersections(
+              lhs_space, rhs_spaces, subspaces, requests, precondition));  
+      }
 #ifdef LEGION_SPY
       if (!result.exists() || (result == precondition))
       {
@@ -2835,7 +2851,8 @@ namespace Legion {
       subspace_index = 0;
       if (partition->total_children == partition->max_linearized_color)
       {
-        for (LegionColor color = 0; color < partition->total_children; color++)
+        for (LegionColor color = shard; 
+              color < partition->total_children; color += total_shards)
         {
           IndexSpaceNodeT<DIM,T> *child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
@@ -2848,8 +2865,8 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0; 
-              color < partition->max_linearized_color; color++)
+        for (LegionColor color = shard;
+              color < partition->max_linearized_color; color += total_shards)
         {
           if (!partition->color_space->contains_color(color))
             continue;

@@ -678,6 +678,21 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ApEvent RegionTreeForest::create_partition_by_intersection(Operation *op,
+                                                           IndexPartition pid,
+                                                           IndexPartition part,
+                                                           const bool dominates,
+                                                           ShardID shard,
+                                                           size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      IndexPartNode *new_part = get_node(pid);
+      IndexPartNode *node = get_node(part);
+      return new_part->create_by_intersection(op, node, dominates,
+                                              shard, total_shards); 
+    }
+
+    //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::create_partition_by_difference(Operation *op,
                                                        IndexPartition pid,
                                                        IndexPartition handle1,
@@ -8961,6 +8976,22 @@ namespace Legion {
                                               shard, total_shards);
       else
         return parent->create_by_intersection(op, this, left, right);
+    }
+
+    //--------------------------------------------------------------------------
+    ApEvent IndexPartNode::create_by_intersection(Operation *op,
+                                                  IndexPartNode *original,
+                                                  const bool dominates,
+                                                  ShardID shard,
+                                                  size_t total_shards)
+    //--------------------------------------------------------------------------
+    {
+      if (total_shards > 1)
+        return parent->create_by_intersection(op, this, original,
+                                              shard, total_shards, dominates);
+      else
+        return parent->create_by_intersection(op, this, original, 0/*shard*/, 
+                                              1/*total shards*/, dominates);
     }
 
     //--------------------------------------------------------------------------

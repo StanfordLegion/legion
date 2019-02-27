@@ -220,6 +220,12 @@ namespace Legion {
                                                IndexPartition handle2,
                                                ShardID shard = 0,
                                                size_t total_shards = 1);
+      ApEvent create_partition_by_intersection(Operation *op,
+                                               IndexPartition pid,
+                                               IndexPartition part,
+                                               const bool dominates,
+                                               ShardID shard = 0,
+                                               size_t total_shards = 1);
       ApEvent create_partition_by_difference(Operation *op,
                                            IndexPartition pid,
                                            IndexPartition handle1,
@@ -1805,7 +1811,10 @@ namespace Legion {
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
-                                             IndexPartNode *right) = 0;
+                                             IndexPartNode *right,
+                                             ShardID shard = 0,
+                                             size_t total_shards = 1,
+                                             const bool dominates = false) = 0;
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
@@ -1996,7 +2005,10 @@ namespace Legion {
       virtual ApEvent create_by_intersection(Operation *op,
                                              IndexPartNode *partition,
                                              // Left is implicit "this"
-                                             IndexPartNode *right);
+                                             IndexPartNode *right,
+                                             ShardID shard = 0,
+                                             size_t total_shards = 1,
+                                             const bool dominates = false);
       virtual ApEvent create_by_difference(Operation *op,
                                            IndexPartNode *partition,
                                            IndexPartNode *left,
@@ -2502,6 +2514,9 @@ namespace Legion {
       ApEvent create_by_intersection(Operation *op,
                               IndexPartNode *left, IndexPartNode *right,
                               ShardID shard, size_t total_shards);
+      ApEvent create_by_intersection(Operation *op, IndexPartNode *original,
+                                     const bool dominates,
+                                     ShardID shard, size_t total_shards);
       ApEvent create_by_difference(Operation *op,
                               IndexPartNode *left, IndexPartNode *right,
                               ShardID shard, size_t total_shards);

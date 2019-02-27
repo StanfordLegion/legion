@@ -11547,6 +11547,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void PendingPartitionOp::initialize_intersection_partition(TaskContext *ctx,
+                                                           IndexPartition pid,
+                                                           IndexPartition part,
+                                                           const bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+#ifdef DEBUG_LEGION
+      assert(thunk == NULL);
+#endif
+      thunk = new IntersectionWithRegionThunk(pid, part, dominates);
+      if (runtime->legion_spy_enabled)
+        perform_logging();
+    }
+
+    //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_difference_partition(TaskContext *ctx,
                                                              IndexPartition pid,
                                                              IndexPartition h1,
@@ -11773,6 +11789,15 @@ namespace Legion {
       LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
           INTERSECTION_PARTITION);
     } 
+
+    //--------------------------------------------------------------------------
+    void PendingPartitionOp::IntersectionWithRegionThunk::perform_logging(
+                                                         PendingPartitionOp* op)
+    //--------------------------------------------------------------------------
+    {
+      LegionSpy::log_target_pending_partition(op->unique_op_id, pid.id,
+          INTERSECTION_PARTITION);
+    }
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::DifferencePartitionThunk::perform_logging(

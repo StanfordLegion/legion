@@ -11262,6 +11262,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    IndexPartition Runtime::create_partition_by_intersection(Context ctx, 
+                                                      IndexSpace parent,
+                                                      IndexPartition partition,
+                                                      PartitionKind kind,
+                                                      Color color, 
+                                                      bool dominates)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT(
+            "Illegal dummy context create partition by intersection!");
+      IndexPartition result = 
+        ctx->create_partition_by_intersection(forest, parent, partition,
+                                              kind, color, dominates);
+      if (verify_disjointness && ((kind == DISJOINT_KIND) ||
+            (kind == DISJOINT_COMPLETE_KIND) ||
+            (kind == DISJOINT_INCOMPLETE_KIND)) && !forest->is_disjoint(result))
+        REPORT_LEGION_ERROR(ERROR_DISJOINTNESS_TEST_FAILURE,
+                            "Disjointness test failure for create partition "
+                            "by intersection in task %s (UID %lld)",
+                            ctx->get_task_name(), ctx->get_unique_id())
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     IndexPartition Runtime::create_partition_by_difference(Context ctx, 
                                                       IndexSpace parent,
                                                       IndexPartition handle1,
