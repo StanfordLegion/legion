@@ -3032,6 +3032,28 @@ function type_check.expr_binary(cx, node)
 
     expr_type = std.partition(
       disjointness, lhs_type.parent_region_symbol, lhs_type.colors_symbol)
+  elseif std.is_region(lhs_type) then
+    if not std.is_partition(rhs_type) then
+      report.error(node.rhs, "type mismatch: expected a partition but got " .. tostring(rhs_type))
+    end
+    local lhs_index_type = lhs_type:ispace().index_type
+    local rhs_index_type = rhs_type:parent_region():ispace().index_type
+    if not std.type_eq(lhs_index_type, rhs_index_type) then
+      report.error(node.rhs, "type mismatch: expected partition of " .. tostring(lhs_index_type) ..
+          " but got partition of " .. tostring(rhs_index_type))
+    end
+    if node.op ~= "&" then
+      report.error(node.rhs, "operator " .. tostring(node.op) ..  " not supported on partitions")
+    end
+
+    local region_symbol
+    if lhs:is(ast.typed.expr.ID) then
+      region_symbol = lhs.value
+    else
+      region_symbol = std.newsymbol(lhs_type)
+    end
+    expr_type = std.partition(
+      rhs_type.disjointness, region_symbol, rhs_type.colors_symbol)
   elseif std.is_index_type(lhs_type) and (std.is_region(rhs_type) or std.is_ispace(rhs_type)) then
     if node.op ~= "<=" then
       report.error(node.rhs, "operator " .. tostring(node.op) ..
