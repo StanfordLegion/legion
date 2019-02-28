@@ -139,7 +139,7 @@ namespace Realm {
       //log_part.info() << "dim " << i << ": half=" << lo_half[i] << " vol=" << lo_volume[i] << "/" << volume << " count=" << lo_count[i] << "/" << count << " delta=" << delta << " ineff=" << inefficiency[i];
     }
     int best_dim = -1;
-    for(int i = 1; i < N; i++) {
+    for(int i = 0; i < N; i++) {
       // can't split a dimension that was already minimal size
       if(bounds.lo[i] == bounds.hi[i]) continue;
       if((best_dim < 0) || (inefficiency[i] < inefficiency[best_dim]))
