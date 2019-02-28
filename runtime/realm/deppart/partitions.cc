@@ -66,6 +66,106 @@ namespace Realm {
   //
   // class IndexSpace<N,T>
 
+  // this is used by create_equal_subspace(s) to decompose an N-D rectangle
+  //  into bounds with roughly-even volumes in a sparse index space
+  template <int N, typename T>
+  static void recursive_decomposition(const Rect<N,T>& bounds,
+				      size_t start, size_t count, size_t volume,
+				      IndexSpace<N,T> *results,
+				      size_t first_result, size_t last_result,
+				      const std::vector<SparsityMapEntry<N,T> >& entries)
+  {
+    // should never be here with empty bounds
+    assert(!bounds.empty());
+
+    // if we have more subspaces than elements, the last subspaces will be
+    //  empty
+    if(count > volume) {
+      size_t first_empty = std::max(first_result, start + volume);
+      size_t last_empty = std::min(start + count - 1, last_result);
+      for(size_t i = first_empty; i <= last_empty; i++)
+	results[i - first_result] = IndexSpace<N,T>::make_empty();
+      count = volume;
+    }
+
+    // base case
+    if(count == 1) {
+      //log_part.info() << "split result " << start << " = " << bounds;
+      // save these bounds if they're one we care about
+      if((start >= first_result) && (start <= last_result))
+	results[start - first_result].bounds = bounds;
+      return;
+    }
+
+    // look at half-ish splits in each dimension and choose the one that
+    //  yields the best division
+    Rect<N,T> lo_half[N];
+    for(int i = 0; i < N; i++) {
+      T split = bounds.lo[i] + ((bounds.hi[i] - bounds.lo[i]) >> 1);
+      lo_half[i] = bounds;  lo_half[i].hi[i] = split;
+    }
+    // compute the volume within each split domain
+    size_t lo_volume[N];
+    for(int i = 0; i < N; i++)
+      lo_volume[i] = 0;
+    for(typename std::vector<SparsityMapEntry<N,T> >::const_iterator it = entries.begin();
+	it != entries.end();
+	it++) {
+      for(int i = 0; i < N; i++)
+	lo_volume[i] += it->bounds.intersection(lo_half[i]).volume();
+    }
+    // now compute how many subspaces would fall in each half and the 
+    //  inefficiency of the split
+    size_t lo_count[N], inefficiency[N];
+    for(int i = 0; i < N; i++) {
+      lo_count[i] = (count * lo_volume[i] + (volume >> 1)) / volume;
+      // lo_count can't be 0 or count if the volume split is nontrivial
+      if((lo_volume[i] > 0) && (lo_count[i] == 0))
+	lo_count[i] = 1;
+      if((lo_volume[i] < volume) && (lo_count[i] == count))
+	lo_count[i] = count - 1;
+      int delta = (count * lo_volume[i]) - (lo_count[i] * volume);
+      // the high-order inefficiency comes from subspaces with extra elements
+      inefficiency[i] = 0;
+      if(delta > 0)
+	// low half has too many
+	inefficiency[i] = (delta + lo_count[i] - 1) / lo_count[i];
+      if(delta < 0)
+	// hi half has too many
+	inefficiency[i] = (-delta + (count - lo_count[i]) - 1) / (count - lo_count[i]);
+      // low-order inefficiency comes from an uneven split in the coutns
+      inefficiency[i] = inefficiency[i] * count + std::max(lo_count[i],
+							   count - lo_count[i]);
+      //log_part.info() << "dim " << i << ": half=" << lo_half[i] << " vol=" << lo_volume[i] << "/" << volume << " count=" << lo_count[i] << "/" << count << " delta=" << delta << " ineff=" << inefficiency[i];
+    }
+    int best_dim = -1;
+    for(int i = 1; i < N; i++) {
+      // can't split a dimension that was already minimal size
+      if(bounds.lo[i] == bounds.hi[i]) continue;
+      if((best_dim < 0) || (inefficiency[i] < inefficiency[best_dim]))
+	best_dim = i;
+    }
+    assert(best_dim >= 0);
+
+    //log_part.info() << "split: " << bounds << " count=" << count << " dim=" << best_dim << " half=" << lo_half[best_dim] << " count=" << lo_count[best_dim] << " ineff=" << inefficiency[best_dim];
+    // recursive split
+    if(lo_count[best_dim] > 0)
+      recursive_decomposition(lo_half[best_dim],
+			      start, lo_count[best_dim], lo_volume[best_dim],
+			      results, first_result, last_result,
+			      entries);
+    if(lo_count[best_dim] < count) {
+      Rect<N,T> hi_half = bounds;
+      hi_half.lo[best_dim] = lo_half[best_dim].hi[best_dim] + 1;
+      recursive_decomposition(hi_half,
+			      start + lo_count[best_dim],
+			      count - lo_count[best_dim],
+			      volume - lo_volume[best_dim],
+			      results, first_result, last_result,
+			      entries);
+    }
+  }
+
   template <int N, typename T>
   Event IndexSpace<N,T>::create_equal_subspace(size_t count, size_t granularity,
 						unsigned index, IndexSpace<N,T> &subspace,
@@ -108,8 +208,17 @@ namespace Realm {
       return wait_on;
     }
 
-    // TODO: sparse case
-    assert(0);
+    // TODO: sparse case where we have to wait
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    assert(impl->is_valid());
+    const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+    // initially every subspace will be a copy of this one, and then
+    //  we'll decompose the bounds
+    subspace = *this;
+    recursive_decomposition(this->bounds, 0, count, this->volume(),
+			    &subspace, index, index,
+			    entries);
+    PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return wait_on;
   }
 
@@ -145,8 +254,17 @@ namespace Realm {
       return wait_on;
     }
 
-    // TODO: sparse case
-    assert(0);
+    // TODO: sparse case where we have to wait
+    SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    assert(impl->is_valid());
+    const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
+    // initially every subspace will be a copy of this one, and then
+    //  we'll decompose the bounds
+    subspaces.resize(count, *this);
+    recursive_decomposition(this->bounds, 0, count, this->volume(),
+			    subspaces.data(), 0, count-1,
+			    entries);
+    PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return wait_on;
   }
 
