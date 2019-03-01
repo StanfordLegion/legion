@@ -1130,7 +1130,7 @@ namespace Legion {
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
       void find_valid_variants(std::vector<VariantID> &valid_variants, 
-                               Processor::Kind kind, bool strict_kind) const;
+                               Processor::Kind kind) const;
     public:
       const char* get_name(bool needs_lock = true);
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -1208,7 +1208,7 @@ namespace Legion {
           int priority, Realm::ProfilingRequestSet &requests);
       void dispatch_inline(Processor current, InlineContext *ctx);
     public:
-      Processor::Kind get_processor_kind(bool warn) const;
+      bool can_use(Processor::Kind kind, bool warn) const;
     public:
       void send_variant_response(AddressSpaceID source, RtUserEvent done_event);
       void broadcast_variant(RtUserEvent done, AddressSpaceID origin,

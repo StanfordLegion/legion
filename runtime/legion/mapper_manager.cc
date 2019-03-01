@@ -1486,12 +1486,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::find_valid_variants(MappingCallInfo *ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
-                                         Processor::Kind kind, bool strict_kind)
+                                         Processor::Kind kind)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       TaskImpl *task_impl = runtime->find_or_create_task_impl(task_id);
-      task_impl->find_valid_variants(valid_variants, kind, strict_kind);
+      task_impl->find_valid_variants(valid_variants, kind);
       resume_mapper_call(ctx);
     }
     

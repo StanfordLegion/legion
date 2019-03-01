@@ -55,8 +55,8 @@ namespace Legion {
     /**
      * \class ProcessorConstraint
      * Processor constraints are used to declare that a task variant
-     * should only be able to executed on processors of a certain
-     * kind. This is necessary for example, to distinguish I/O tasks
+     * should only be able to executed on processors of certain
+     * kinds. This is necessary for example, to distinguish I/O tasks
      * which can run on all x86 cores by their ISA constraints, but
      * users want to restrict their execution to just I/O processors.
      */
@@ -65,11 +65,11 @@ namespace Legion {
       static const ExecutionConstraintKind constraint_kind = 
                                             PROCESSOR_CONSTRAINT;
     public:
-      ProcessorConstraint(void);
-      ProcessorConstraint(Processor::Kind kind);
+      ProcessorConstraint(Processor::Kind kind = Processor::NO_KIND);
     public:
-      inline bool is_valid(void) const { return valid; }
-      inline Processor::Kind get_kind(void) const { return kind; }
+      inline bool is_valid(void) const { return !valid_kinds.empty(); }
+      void add_kind(Processor::Kind kind);
+      bool can_use(Processor::Kind kind) const;
     public:
       bool entails(const ProcessorConstraint &other) const;
       bool conflicts(const ProcessorConstraint &other) const;
@@ -77,8 +77,7 @@ namespace Legion {
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);
     public:
-      Processor::Kind kind;
-      bool valid;
+      std::vector<Processor::Kind> valid_kinds;
     };
 
     /**

@@ -212,35 +212,57 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    ProcessorConstraint::ProcessorConstraint(void)
-      : valid(false)
+    ProcessorConstraint::ProcessorConstraint(Processor::Kind kind)
     //--------------------------------------------------------------------------
     {
+      if ((kind != Processor::NO_KIND) && (kind != Processor::PROC_GROUP))
+        valid_kinds.push_back(kind);
     }
 
     //--------------------------------------------------------------------------
-    ProcessorConstraint::ProcessorConstraint(Processor::Kind k)
-      : kind(k), valid(true)
+    void ProcessorConstraint::add_kind(Processor::Kind kind)
     //--------------------------------------------------------------------------
     {
+      if ((kind == Processor::NO_KIND) || (kind == Processor::PROC_GROUP))
+        return;
+      for (unsigned idx = 0; idx < valid_kinds.size(); idx++)
+        if (valid_kinds[idx] == kind)
+          return;
+      valid_kinds.push_back(kind);
+    }
+
+    //--------------------------------------------------------------------------
+    bool ProcessorConstraint::can_use(Processor::Kind kind) const
+    //--------------------------------------------------------------------------
+    {
+      for (unsigned idx = 0; idx < valid_kinds.size(); idx++)
+        if (valid_kinds[idx] == kind)
+          return true;
+      return false;
     }
 
     //--------------------------------------------------------------------------
     void ProcessorConstraint::serialize(Serializer &rez) const
     //--------------------------------------------------------------------------
     {
-      rez.serialize(valid);
-      if (valid)
-        rez.serialize(kind);
+      rez.serialize<size_t>(valid_kinds.size());
+      for (std::vector<Processor::Kind>::const_iterator it = 
+            valid_kinds.begin(); it != valid_kinds.end(); it++)
+        rez.serialize(*it);
     }
     
     //--------------------------------------------------------------------------
     void ProcessorConstraint::deserialize(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      derez.deserialize(valid);
-      if (valid)
-        derez.deserialize(kind);
+      size_t num_kinds;
+      derez.deserialize(num_kinds);
+      if (num_kinds > 0)
+      {
+        valid_kinds.resize(num_kinds);
+        for (unsigned idx = 0; idx < num_kinds; idx++)
+          derez.deserialize(valid_kinds[idx]);
+      }
     }
 
     /////////////////////////////////////////////////////////////

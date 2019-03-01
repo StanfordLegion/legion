@@ -1643,8 +1643,7 @@ namespace Legion {
       //------------------------------------------------------------------------
       void find_valid_variants(MapperContext ctx, TaskID task_id, 
                                std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind = Processor::NO_KIND,
-                               bool strict_kind = true) const;
+                               Processor::Kind kind = Processor::NO_KIND) const;
       void find_generator_variants(MapperContext ctx, TaskID task_id,
                   std::vector<std::pair<TaskID,VariantID> > &generator_variants,
                   Processor::Kind kind = Processor::NO_KIND) const;

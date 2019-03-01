@@ -512,10 +512,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperRuntime::find_valid_variants(MapperContext ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
-                                         Processor::Kind kind,bool strict) const
+                                         Processor::Kind kind) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->find_valid_variants(ctx,task_id,valid_variants,kind,strict);
+      ctx->manager->find_valid_variants(ctx, task_id, valid_variants, kind);
     }
 
     //--------------------------------------------------------------------------
