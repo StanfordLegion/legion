@@ -469,6 +469,7 @@ namespace Legion {
       SplittingConstraint(void);
       SplittingConstraint(DimensionKind dim); // chunks
       SplittingConstraint(DimensionKind dim, size_t value);
+      virtual ~SplittingConstraint() {}
     public:
       bool entails(const SplittingConstraint &other) const;
       bool conflicts(const SplittingConstraint &other) const;
@@ -494,6 +495,7 @@ namespace Legion {
     public:
       DimensionConstraint(void);
       DimensionConstraint(DimensionKind dim, EqualityKind eq, size_t value);
+      virtual ~DimensionConstraint() {}
     public:
       bool entails(const DimensionConstraint &other) const;
       bool conflicts(const DimensionConstraint &other) const;
@@ -521,6 +523,7 @@ namespace Legion {
       AlignmentConstraint(void);
       AlignmentConstraint(FieldID fid, EqualityKind kind, 
                           size_t byte_boundary);
+      virtual ~AlignmentConstraint() {}
     public:
       bool entails(const AlignmentConstraint &other) const;
       bool conflicts(const AlignmentConstraint &other) const;
@@ -545,6 +548,7 @@ namespace Legion {
     public:
       OffsetConstraint(void);
       OffsetConstraint(FieldID fid, size_t offset);
+      virtual ~OffsetConstraint() {}
     public:
       bool entails(const OffsetConstraint &other) const;
       bool conflicts(const OffsetConstraint &other) const;

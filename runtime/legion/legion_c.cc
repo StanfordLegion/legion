@@ -1317,6 +1317,132 @@ legion_index_partition_create_by_restriction(
   return CObjectWrapper::wrap(ip);
 }
 
+legion_index_partition_t
+legion_index_partition_create_pending_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t parent_,
+  legion_index_space_t color_space_,
+  legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+  int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace parent = CObjectWrapper::unwrap(parent_);
+  IndexSpace color_space = CObjectWrapper::unwrap(color_space_);
+
+  IndexPartition ip =
+    runtime->create_pending_partition(
+        ctx, parent, color_space, part_kind, color);
+
+  return CObjectWrapper::wrap(ip);
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_union_spaces(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_union(ctx, parent, color, handles));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_union_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_union(ctx, parent, color, handle));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_intersection_spaces(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_intersection(ctx, parent, color, handles));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_intersection_partition(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_partition_t handle_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexPartition handle = CObjectWrapper::unwrap(handle_);
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_intersection(ctx, parent, color, handle));
+}
+
+legion_index_space_t
+legion_index_partition_create_index_space_difference(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_partition_t parent_,
+  legion_domain_point_t color_,
+  legion_index_space_t initial_,
+  const legion_index_space_t *spaces_,
+  size_t num_spaces)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexPartition parent = CObjectWrapper::unwrap(parent_);
+  DomainPoint color = CObjectWrapper::unwrap(color_);
+  IndexSpace initial = CObjectWrapper::unwrap(initial_);
+
+  std::vector<IndexSpace> handles;
+  for (size_t idx = 0; idx < num_spaces; ++idx)
+    handles.push_back(CObjectWrapper::unwrap(spaces_[idx]));
+
+  return CObjectWrapper::wrap(
+      runtime->create_index_space_difference(
+        ctx, parent, color, initial, handles));
+}
+
 bool
 legion_index_partition_is_disjoint(legion_runtime_t runtime_,
                                    legion_index_partition_t handle_)
