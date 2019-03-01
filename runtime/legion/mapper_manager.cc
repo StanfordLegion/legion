@@ -1461,7 +1461,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperManager::do_constraints_conflict(MappingCallInfo *ctx,
-                               LayoutConstraintID set1, LayoutConstraintID set2)
+                               LayoutConstraintID set1, LayoutConstraintID set2,
+                               const LayoutConstraint **conflict_constraint)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
@@ -1476,14 +1477,16 @@ namespace Legion {
                       "is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? set1 : set2, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->conflicts(c2, 0/*dont care about dimensions*/);
+      const bool result = 
+        c1->conflicts(c2, 0/*dont care about dimensions*/, conflict_constraint);
       resume_mapper_call(ctx);
       return result;
     }
 
     //--------------------------------------------------------------------------
     bool MapperManager::do_constraints_entail(MappingCallInfo *ctx,
-                           LayoutConstraintID source, LayoutConstraintID target)
+                           LayoutConstraintID source, LayoutConstraintID target,
+                           const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
@@ -1498,7 +1501,8 @@ namespace Legion {
                       "ID is invalid.", mapper->get_mapper_name(), 
                       (c1 == NULL) ? source : target, 
                       get_mapper_call_name(ctx->kind))
-      bool result = c1->entails(c2, 0/*don't care about dimensions*/);
+      const bool result = 
+        c1->entails(c2, 0/*don't care about dimensions*/, failed_constraint);
       resume_mapper_call(ctx);
       return result;
     }
@@ -1506,12 +1510,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapperManager::find_valid_variants(MappingCallInfo *ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
-                                         Processor::Kind kind)
+                                         Processor::Kind kind, bool strict_kind)
     //--------------------------------------------------------------------------
     {
       pause_mapper_call(ctx);
       TaskImpl *task_impl = runtime->find_or_create_task_impl(task_id);
-      task_impl->find_valid_variants(valid_variants, kind);
+      task_impl->find_valid_variants(valid_variants, kind, strict_kind);
       resume_mapper_call(ctx);
     }
     
@@ -1604,7 +1608,7 @@ namespace Legion {
           for (unsigned idx = 0; idx < instances.size(); idx++)
           {
             PhysicalManager *manager = instances[idx].impl;
-            if (manager->conflicts(constraints))
+            if (manager->conflicts(constraints, NULL))
             {
               conflicts = true;
               break;
@@ -1652,7 +1656,7 @@ namespace Legion {
                 instances.begin(); it != instances.end(); /*nothing*/)
           {
             PhysicalManager *manager = it->impl;
-            if (manager->conflicts(constraints))
+            if (manager->conflicts(constraints, NULL))
               it = instances.erase(it);
             else
               it++;
@@ -1700,7 +1704,7 @@ namespace Legion {
               instances.begin(); it != instances.end(); /*nothing*/)
         {
           PhysicalManager *manager = it->impl;
-          if (manager->conflicts(constraints))
+          if (manager->conflicts(constraints, NULL))
             it = instances.erase(it);
           else
             it++;

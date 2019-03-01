@@ -3155,7 +3155,8 @@ namespace Legion {
         for (unsigned idx = 0; idx < chosen_instances.size(); idx++)
         {
           PhysicalManager *manager = chosen_instances[idx].get_manager();
-          if (manager->conflicts(constraints))
+          const LayoutConstraint *conflict_constraint = NULL;
+          if (manager->conflicts(constraints, &conflict_constraint))
             REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                           "Invalid mapper output. Mapper %s selected "
                           "instance for inline mapping (ID %lld) in task %s "

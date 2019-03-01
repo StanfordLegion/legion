@@ -194,6 +194,112 @@ namespace Legion {
     };
 
     /**
+     * \class LayoutConstraint
+     * This is a base class for all layout constraints and provides
+     * implementations for casting to each of the derived types
+     */
+    class LayoutConstraint {
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const = 0;
+    public:
+      virtual SpecializedConstraint* as_specialized_constraint(void) = 0;
+      virtual MemoryConstraint* as_memory_constraint(void) = 0;
+      virtual FieldConstraint* as_field_constraint(void) = 0;
+      virtual OrderingConstraint* as_ordering_constraint(void) = 0;
+      virtual SplittingConstraint* as_splitting_constraint(void) = 0;
+      virtual DimensionConstraint* as_dimension_constraint(void) = 0;
+      virtual AlignmentConstraint* as_alignement_constraint(void) = 0;
+      virtual OffsetConstraint* as_offset_constraint(void) = 0;
+      virtual PointerConstraint* as_pointer_constraint(void) = 0;
+    public:
+      virtual const SpecializedConstraint* 
+        as_specialized_constraint(void) const = 0;
+      virtual const MemoryConstraint* 
+        as_memory_constraint(void) const = 0;
+      virtual const FieldConstraint* 
+        as_field_constraint(void) const = 0;
+      virtual const OrderingConstraint* 
+        as_ordering_constraint(void) const = 0;
+      virtual const SplittingConstraint* 
+        as_splitting_constraint(void) const = 0;
+      virtual const DimensionConstraint* 
+        as_dimension_constraint(void) const = 0;
+      virtual const AlignmentConstraint* 
+        as_alignement_constraint(void) const = 0;
+      virtual const OffsetConstraint* 
+        as_offset_constraint(void) const = 0;
+      virtual const PointerConstraint* 
+        as_pointer_constraint(void) const = 0;
+    };
+
+    /**
+     * A helper class for definiting the virtual methods for all kinds
+     * of layout constraint classes
+     */
+    template<typename T>
+    class LayoutConstraintBase : public LayoutConstraint {
+    public:
+      virtual LayoutConstraintKind get_constraint_kind(void) const
+        { return T::constraint_kind; }
+    public:
+      virtual SpecializedConstraint* as_specialized_constraint(void)
+      { return (T::constraint_kind == SPECIALIZED_CONSTRAINT) ? 
+                reinterpret_cast<SpecializedConstraint*>(this) : NULL; }
+      virtual MemoryConstraint* as_memory_constraint(void)
+      { return (T::constraint_kind == MEMORY_CONSTRAINT) ?
+                reinterpret_cast<MemoryConstraint*>(this) : NULL; }
+      virtual FieldConstraint* as_field_constraint(void)
+      { return (T::constraint_kind == FIELD_CONSTRAINT) ?
+                reinterpret_cast<FieldConstraint*>(this) : NULL; }
+      virtual OrderingConstraint* as_ordering_constraint(void)
+      { return (T::constraint_kind == ORDERING_CONSTRAINT) ?
+                reinterpret_cast<OrderingConstraint*>(this) : NULL; }
+      virtual SplittingConstraint* as_splitting_constraint(void)
+      { return (T::constraint_kind == SPLITTING_CONSTRAINT) ?
+                reinterpret_cast<SplittingConstraint*>(this) : NULL; }
+      virtual DimensionConstraint* as_dimension_constraint(void)
+      { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
+                reinterpret_cast<DimensionConstraint*>(this) : NULL; }
+      virtual AlignmentConstraint* as_alignement_constraint(void)
+      { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
+                reinterpret_cast<AlignmentConstraint*>(this) : NULL; }
+      virtual OffsetConstraint* as_offset_constraint(void)
+      { return (T::constraint_kind == OFFSET_CONSTRAINT) ?
+                reinterpret_cast<OffsetConstraint*>(this) : NULL; }
+      virtual PointerConstraint* as_pointer_constraint(void)
+      { return (T::constraint_kind == POINTER_CONSTRAINT) ?
+                reinterpret_cast<PointerConstraint*>(this) : NULL; }
+    public:
+      virtual const SpecializedConstraint* as_specialized_constraint(void) const
+      { return (T::constraint_kind == SPECIALIZED_CONSTRAINT) ? 
+                reinterpret_cast<const SpecializedConstraint*>(this) : NULL; }
+      virtual const MemoryConstraint* as_memory_constraint(void) const
+      { return (T::constraint_kind == MEMORY_CONSTRAINT) ?
+                reinterpret_cast<const MemoryConstraint*>(this) : NULL; }
+      virtual const FieldConstraint* as_field_constraint(void) const
+      { return (T::constraint_kind == FIELD_CONSTRAINT) ?
+                reinterpret_cast<const FieldConstraint*>(this) : NULL; }
+      virtual const OrderingConstraint* as_ordering_constraint(void) const
+      { return (T::constraint_kind == ORDERING_CONSTRAINT) ?
+                reinterpret_cast<const OrderingConstraint*>(this) : NULL; }
+      virtual const SplittingConstraint* as_splitting_constraint(void) const
+      { return (T::constraint_kind == SPLITTING_CONSTRAINT) ?
+                reinterpret_cast<const SplittingConstraint*>(this) : NULL; }
+      virtual const DimensionConstraint* as_dimension_constraint(void) const
+      { return (T::constraint_kind == DIMENSION_CONSTRAINT) ?
+                reinterpret_cast<const DimensionConstraint*>(this) : NULL; }
+      virtual const AlignmentConstraint* as_alignement_constraint(void) const
+      { return (T::constraint_kind == ALIGNMENT_CONSTRAINT) ?
+                reinterpret_cast<const AlignmentConstraint*>(this) : NULL; }
+      virtual const OffsetConstraint* as_offset_constraint(void) const
+      { return (T::constraint_kind == OFFSET_CONSTRAINT) ?
+                reinterpret_cast<const OffsetConstraint*>(this) : NULL; }
+      virtual const PointerConstraint* as_pointer_constraint(void) const
+      { return (T::constraint_kind == POINTER_CONSTRAINT) ?
+                reinterpret_cast<const PointerConstraint*>(this) : NULL; }
+    };
+
+    /**
      * \class SpecializedConstraint
      * This is a pretty basic constraint for physical instances.
      * Normal is a standard physical instance, while specialized
@@ -207,7 +313,8 @@ namespace Legion {
      * constructor will fall back to the normal case so this
      * kind of constraint won't need to be set in the default case.
      */
-    class SpecializedConstraint {
+    class SpecializedConstraint : 
+      public LayoutConstraintBase<SpecializedConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             SPECIALIZED_CONSTRAINT;
@@ -242,7 +349,7 @@ namespace Legion {
      * ordering of memories in which the runtime should attempt
      * to create a physical instance.
      */
-    class MemoryConstraint {
+    class MemoryConstraint : public LayoutConstraintBase<MemoryConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             MEMORY_CONSTRAINT;
@@ -272,7 +379,7 @@ namespace Legion {
      * flag whether they want the fields to be contiguous in
      * the physical instance layout.
      */
-    class FieldConstraint {
+    class FieldConstraint : public LayoutConstraintBase<FieldConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             FIELD_CONSTRAINT;
@@ -323,7 +430,7 @@ namespace Legion {
      * constraint if there is an associated split constraint
      * saying how to split the logical dimension.
      */
-    class OrderingConstraint {
+    class OrderingConstraint : public LayoutConstraintBase<OrderingConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             ORDERING_CONSTRAINT;
@@ -354,7 +461,8 @@ namespace Legion {
      * These two constructors provide both top-down and bottom-up
      * ways of saying how to break a dimension apart.
      */
-    class SplittingConstraint {
+    class SplittingConstraint : 
+      public LayoutConstraintBase<SplittingConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             SPLITTING_CONSTRAINT;
@@ -379,7 +487,8 @@ namespace Legion {
      * Dimension constraints specify the minimum or maximum 
      * necessary size of a given dimension.
      */
-    class DimensionConstraint {
+    class DimensionConstraint : 
+      public LayoutConstraintBase<DimensionConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                           DIMENSION_CONSTRAINT;
@@ -404,7 +513,8 @@ namespace Legion {
      * set lower or upper bounds or equality for a the 
      * byte-alignment of a given field.
      */
-    class AlignmentConstraint {
+    class AlignmentConstraint : 
+      public LayoutConstraintBase<AlignmentConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             ALIGNMENT_CONSTRAINT;
@@ -429,7 +539,7 @@ namespace Legion {
      * Specify an offset constraint for a given field. In
      * the case of this constraint equality is implied.
      */
-    class OffsetConstraint {
+    class OffsetConstraint : public LayoutConstraintBase<OffsetConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             OFFSET_CONSTRAINT;
@@ -452,7 +562,7 @@ namespace Legion {
      * Specify the assumed pointer for a given field in
      * the physical instance.
      */
-    class PointerConstraint  {
+    class PointerConstraint : public LayoutConstraintBase<PointerConstraint> {
     public:
       static const LayoutConstraintKind constraint_kind = 
                                             POINTER_CONSTRAINT;
@@ -498,10 +608,15 @@ namespace Legion {
       LayoutConstraintSet&
         add_constraint(const PointerConstraint &constraint);
     public:
+      // failed_constraint will be the one from 'other' that wasn't entailed
       bool entails(const LayoutConstraintSet &other, 
-                   unsigned total_dims = 0) const;
+                   unsigned total_dims = 0,
+                   const LayoutConstraint **failed_constraint = NULL) const;
+      // conflict_constraint will be the one from 'this' that conficted
+      // with a constraint from 'other'
       bool conflicts(const LayoutConstraintSet &other,
-                     unsigned total_dims = 0) const;
+                     unsigned total_dims = 0,
+                     const LayoutConstraint **conflict_constraint = NULL) const;
     public:
       void serialize(Serializer &rez) const;
       void deserialize(Deserializer &derez);

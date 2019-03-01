@@ -3317,13 +3317,29 @@ namespace Legion {
           continue;
         LayoutConstraints *constraints = 
           runtime->find_layout_constraints(it->second);
-        bool all_conflicts = true;
+        // If we don't have any fields then this constraint isn't
+        // going to apply to any actual instances
+        const std::vector<FieldID> &field_vec = 
+          constraints->field_constraint.field_set;
+        if (field_vec.empty())
+          continue;
+        FieldSpaceNode *field_node = runtime->forest->get_node(
+                            regions[it->first].region.get_field_space());
+        std::set<FieldID> field_set(field_vec.begin(), field_vec.end());
+        const FieldMask constraint_mask = field_node->get_field_mask(field_set);
+        const LayoutConstraint *conflict_constraint = NULL;
         for (unsigned idx = 0; idx < instances.size(); idx++)
         {
-          PhysicalManager *manager = instances[idx].get_manager();
-          all_conflicts = all_conflicts && manager->conflicts(constraints);
+          const InstanceRef &ref = instances[idx];
+          // Check to see if we have any fields which overlap
+          const FieldMask overlap = constraint_mask & ref.get_valid_fields();
+          if (!overlap)
+            continue;
+          PhysicalManager *manager = ref.get_manager();
+          if (manager->conflicts(constraints, &conflict_constraint))
+            break;
         }
-        if (all_conflicts)
+        if (conflict_constraint != NULL)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
                         "%ld for task %s (ID %lld). But instance selected "
@@ -3337,10 +3353,14 @@ namespace Legion {
         impl->get_execution_constraints();
       // TODO: Check ISA, resource, and launch constraints
       // First check the processor constraint
-      if (execution_constraints.processor_constraint.is_valid() &&
-          (execution_constraints.processor_constraint.get_kind() != 
-           this->target_proc.kind()))
-        REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+      if (execution_constraints.processor_constraint.is_valid())
+      {
+        const Processor::Kind proc_constraint_kind = 
+          execution_constraints.processor_constraint.get_kind(); 
+        // If the constraint is a no processor constraint we can ignore it
+        if ((proc_constraint_kind != Processor::NO_KIND) &&
+            (proc_constraint_kind != this->target_proc.kind()))
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output. Mapper %s selected variant %ld "
                       "for task %s (ID %lld). However, this variant has a "
                       "processor constraint for processors of kind %s, but "
@@ -3350,6 +3370,7 @@ namespace Legion {
                         execution_constraints.processor_constraint.get_kind()),
                       this->target_proc.id, Processor::get_kind_name(
                         this->target_proc.kind()))
+      }
       // Then check the colocation constraints
       for (std::vector<ColocationConstraint>::const_iterator con_it = 
             execution_constraints.colocation_constraints.begin(); con_it !=
