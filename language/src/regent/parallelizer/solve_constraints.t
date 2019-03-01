@@ -232,9 +232,17 @@ function solver_context:unify(name, new_constraints, region_mapping)
       for field_path, summary in accesses_summary:items() do
         local accesses = find_or_create(all_accesses, field_path)
         local ranges_set, privilege = unpack(summary)
-        if privilege == "reads_writes" then privilege = std.writes end
-        local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
-        my_ranges_set:insert_all(ranges_set)
+        local privileges = terralib.newlist()
+        if privilege == "reads_writes" then
+          privileges:insert(std.reads)
+          privileges:insert(std.writes)
+        else
+          privileges:insert(privilege)
+        end
+        privileges:map(function(privilege)
+          local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
+          my_ranges_set:insert_all(ranges_set)
+        end)
       end
     end
     for range, _ in new_constraints.constraints.ranges:items() do
@@ -287,9 +295,18 @@ function solver_context:unify(name, new_constraints, region_mapping)
     for field_path, summary in accesses_summary:items() do
       local accesses = find_or_create(all_accesses, field_path)
       local ranges_set, privilege = unpack(summary)
-      if privilege == "reads_writes" then privilege = std.writes end
-      local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
-      my_ranges_set:insert_all(ranges_set:map_table(range_mapping))
+      local privileges = terralib.newlist()
+      if privilege == "reads_writes" then
+        privileges:insert(std.reads)
+        privileges:insert(std.writes)
+      else
+        privileges:insert(privilege)
+      end
+      local mapped_ranges_set = ranges_set:map_table(range_mapping)
+      privileges:map(function(privilege)
+        local my_ranges_set = find_or_create(accesses, privilege, hash_set.new)
+        my_ranges_set:insert_all(mapped_ranges_set)
+      end)
     end
   end
 
