@@ -189,7 +189,7 @@ namespace Legion {
         const ExecutionConstraintSet &constraints = 
           runtime->find_execution_constraints(ctx, task_id, *it);
         if (constraints.processor_constraint.is_valid())
-          kinds[*it] = constraints.processor_constraint.get_kind();
+          kinds[*it] = constraints.processor_constraint.valid_kinds[0];
         else
           kinds[*it] = Processor::LOC_PROC; // assume CPU
       }

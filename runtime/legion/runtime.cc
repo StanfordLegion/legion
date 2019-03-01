@@ -7326,7 +7326,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskImpl::find_valid_variants(std::vector<VariantID> &valid_variants,
-                                       Processor::Kind kind, bool strict) const
+                                       Processor::Kind kind) const
     //--------------------------------------------------------------------------
     {
       if (kind == Processor::NO_KIND)
@@ -7346,10 +7346,7 @@ namespace Legion {
         for (std::map<VariantID,VariantImpl*>::const_iterator it = 
               variants.begin(); it != variants.end(); it++)
         {
-          const Processor::Kind variant_kind = 
-            it->second->get_processor_kind(false/*warn*/);
-          if ((kind == variant_kind) || 
-              (!strict && (variant_kind == Processor::NO_KIND)))
+          if (it->second->can_use(kind, true/*warn*/))
             valid_variants.push_back(it->first);
         }
       }
@@ -7770,9 +7767,33 @@ namespace Legion {
       if (!runtime->separate_runtime_instances)
       {
         Realm::ProfilingRequestSet profiling_requests;
-        ready_event = ApEvent(Processor::register_task_by_kind(
-            get_processor_kind(true), false/*global*/, descriptor_id, 
-            *realm_descriptor, profiling_requests, user_data, user_data_size));
+        const ProcessorConstraint &proc_constraint = 
+          execution_constraints.processor_constraint;
+        if (proc_constraint.valid_kinds.empty())
+        {
+          REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
+                     "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
+                     " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                     variant_name, vid, owner->get_name(false), owner->task_id)
+          ready_event = ApEvent(Processor::register_task_by_kind(
+                Processor::LOC_PROC, false/*global*/, descriptor_id, 
+                *realm_descriptor, profiling_requests, user_data, user_data_size));
+        }
+        else if (proc_constraint.valid_kinds.size() > 1)
+        {
+          std::set<ApEvent> ready_events;
+          for (std::vector<Processor::Kind>::const_iterator it = 
+                proc_constraint.valid_kinds.begin(); it !=
+                proc_constraint.valid_kinds.end(); it++)
+            ready_events.insert(ApEvent(Processor::register_task_by_kind(*it,
+                false/*global*/, descriptor_id, *realm_descriptor, 
+                profiling_requests, user_data, user_data_size)));
+          ready_event = Runtime::merge_events(ready_events);
+        }
+        else
+          ready_event = ApEvent(Processor::register_task_by_kind(
+                proc_constraint.valid_kinds[0], false/*global*/, descriptor_id, 
+                *realm_descriptor, profiling_requests, user_data, user_data_size));
       }
       else
       {
@@ -7937,19 +7958,19 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Processor::Kind VariantImpl::get_processor_kind(bool warn) const
+    bool VariantImpl::can_use(Processor::Kind kind, bool warn) const
     //--------------------------------------------------------------------------
     {
       const ProcessorConstraint &constraint = 
                                   execution_constraints.processor_constraint;
       if (constraint.is_valid())
-        return constraint.get_kind();
+        return constraint.can_use(kind);
       if (warn)
         REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
            "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
                         " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                       variant_name, vid, owner->get_name(false),owner->task_id)
-      return Processor::LOC_PROC;
+      return (Processor::LOC_PROC == kind);
     }
 
     //--------------------------------------------------------------------------
