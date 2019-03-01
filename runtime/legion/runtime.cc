@@ -7874,7 +7874,7 @@ namespace Legion {
             ready_events.insert(ApEvent(Processor::register_task_by_kind(*it,
                 false/*global*/, descriptor_id, *realm_descriptor, 
                 profiling_requests, user_data, user_data_size)));
-          ready_event = Runtime::merge_events(ready_events);
+          ready_event = Runtime::merge_events(NULL, ready_events);
         }
         else
           ready_event = ApEvent(Processor::register_task_by_kind(
