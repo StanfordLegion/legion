@@ -334,7 +334,7 @@ namespace Legion {
     public:
       void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
                                std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind, bool strict_kind);
+                               Processor::Kind kind);
       const char* find_task_variant_name(MappingCallInfo *ctx,
                     TaskID task_id, VariantID vid);
       bool is_leaf_variant(MappingCallInfo *ctx, TaskID task_id, 

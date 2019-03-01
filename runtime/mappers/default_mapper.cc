@@ -1214,7 +1214,7 @@ namespace Legion {
       {
         const ExecutionConstraintSet exset =
            runtime->find_execution_constraints(ctx, task.task_id, variants[i]);
-        if(exset.processor_constraint.kind == Processor::PROC_SET) {
+        if(exset.processor_constraint.can_use(Processor::PROC_SET)) {
 
            // Before we do anything else, see if it is in the cache
            std::map<Domain,std::vector<TaskSlice> >::const_iterator finder =
@@ -3376,7 +3376,7 @@ namespace Legion {
       {
 	const ExecutionConstraintSet exset =
 	  runtime->find_execution_constraints(ctx, id, variants[i]);
-	if(exset.processor_constraint.kind == kind)
+	if(exset.processor_constraint.can_use(kind))
 	  return true;
       }
       return false; 

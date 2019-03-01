@@ -1250,6 +1250,79 @@ extern "C" {
     int color /* = AUTO_GENERATE_ID */);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::create_pending_partition()
+   */
+  legion_index_partition_t
+  legion_index_partition_create_pending_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t parent,
+    legion_index_space_t color_space,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
+  /**
+   * @see Legion::Runtime::create_index_space_union()
+   */
+  legion_index_space_t
+  legion_index_partition_create_index_space_union_spaces(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t parent,
+    legion_domain_point_t color,
+    const legion_index_space_t *spaces,
+    size_t num_spaces);
+
+  /**
+   * @see Legion::Runtime::create_index_space_union()
+   */
+  legion_index_space_t
+  legion_index_partition_create_index_space_union_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t parent,
+    legion_domain_point_t color,
+    legion_index_partition_t handle);
+
+  /**
+   * @see Legion::Runtime::create_index_space_intersection()
+   */
+  legion_index_space_t
+  legion_index_partition_create_index_space_intersection_spaces(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t parent,
+    legion_domain_point_t color,
+    const legion_index_space_t *spaces,
+    size_t num_spaces);
+
+  /**
+   * @see Legion::Runtime::create_index_space_intersection()
+   */
+  legion_index_space_t
+  legion_index_partition_create_index_space_intersection_partition(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t parent,
+    legion_domain_point_t color,
+    legion_index_partition_t handle);
+
+  /**
+   * @see Legion::Runtime::create_index_space_difference()
+   */
+  legion_index_space_t
+  legion_index_partition_create_index_space_difference(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_partition_t parent,
+    legion_domain_point_t color,
+    legion_index_space_t initial,
+    const legion_index_space_t *spaces,
+    size_t num_spaces);
+
+  /**
    * @see Legion::Runtime::is_index_partition_disjoint()
    */
   bool

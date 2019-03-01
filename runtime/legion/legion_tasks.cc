@@ -3363,22 +3363,18 @@ namespace Legion {
       // First check the processor constraint
       if (execution_constraints.processor_constraint.is_valid())
       {
-        const Processor::Kind proc_constraint_kind = 
-          execution_constraints.processor_constraint.get_kind(); 
         // If the constraint is a no processor constraint we can ignore it
-        if ((proc_constraint_kind != Processor::NO_KIND) &&
-            (proc_constraint_kind != this->target_proc.kind()))
+        if (!execution_constraints.processor_constraint.can_use(
+                                      this->target_proc.kind()))
         {
           if (local_mapper == NULL)
             local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                       "Invalid mapper output. Mapper %s selected variant %ld "
-                      "for task %s (ID %lld). However, this variant has a "
-                      "processor constraint for processors of kind %s, but "
-                      "the target processor " IDFMT " is of kind %s.",
-                      local_mapper->get_mapper_name(),impl->vid,get_task_name(),
-                      get_unique_id(), Processor::get_kind_name(
-                        execution_constraints.processor_constraint.get_kind()),
+                      "for task %s (ID %lld). However, this variant does not "
+                      "permit running on processor " IDFMT " of kind %s.",
+                      local_mapper->get_mapper_name(),
+                      impl->vid,get_task_name(), get_unique_id(),
                       this->target_proc.id, Processor::get_kind_name(
                         this->target_proc.kind()))
         }
