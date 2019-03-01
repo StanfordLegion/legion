@@ -248,7 +248,7 @@ function partitioning_constraints:dump()
   local node_ids = {}
   for range, partition in self.ranges:items() do
     node_ids[range] = next_id
-    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(v) ..
+    print("    " .. tostring(next_id) .. " [ label = \"" .. tostring(range) ..
         " : " .. tostring(partition) .. "\" ];")
     next_id = next_id + 1
   end
