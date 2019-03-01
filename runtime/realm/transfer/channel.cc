@@ -1824,17 +1824,27 @@ namespace Realm {
             break;
           }
 	  // TODO: support 2D/3D for memory side of an HDF transfer?
-	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
+	  size_t mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0,
+					    true /*tentative*/);
 	  if(mem_bytes == hdf5_bytes) {
-	    // looks good - confirm the hdf5 step
+	    // looks good - confirm the steps
 	    hdf5_iter->confirm_step();
+	    mem_iter->confirm_step();
 	  } else {
 	    // cancel the hdf5 step and try to just step by mem_bytes
 	    assert(mem_bytes < hdf5_bytes);  // should never be larger
 	    hdf5_iter->cancel_step();
 	    hdf5_bytes = hdf5_iter->step(mem_bytes, hdf5_info);
-	    // now must match
-	    assert(hdf5_bytes == mem_bytes);
+	    // multi-dimensional hdf5 iterators may round down the size,
+	    //  so re-check the mem bytes
+	    if(hdf5_bytes == mem_bytes) {
+	      mem_iter->confirm_step();
+	    } else {
+	      mem_iter->cancel_step();
+	      mem_bytes = mem_iter->step(hdf5_bytes, mem_info, 0);
+	      // now must match
+	      assert(hdf5_bytes == mem_bytes);
+	    }
 	  }
 
 	  HDFRequest* new_req = (HDFRequest *)(dequeue_request());

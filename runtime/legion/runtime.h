@@ -1130,7 +1130,7 @@ namespace Legion {
       void add_variant(VariantImpl *impl);
       VariantImpl* find_variant_impl(VariantID variant_id, bool can_fail);
       void find_valid_variants(std::vector<VariantID> &valid_variants, 
-                               Processor::Kind kind) const;
+                               Processor::Kind kind, bool strict_kind) const;
     public:
       const char* get_name(bool needs_lock = true);
       void attach_semantic_information(SemanticTag tag, AddressSpaceID source,
@@ -1280,15 +1280,18 @@ namespace Legion {
                                     RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
     public:
-      bool entails(LayoutConstraints *other_constraints, unsigned total_dims);
-      bool entails(const LayoutConstraintSet &other, unsigned total_dims) const;
-      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims);
-      bool conflicts(const LayoutConstraintSet &other, 
-                     unsigned total_dims) const;
-      bool entails_without_pointer(LayoutConstraints *other,
-                                   unsigned total_dims);
+      bool entails(LayoutConstraints *other_constraints, unsigned total_dims,
+                   const LayoutConstraint **failed_constraint);
+      bool entails(const LayoutConstraintSet &other, unsigned total_dims,
+                   const LayoutConstraint **failed_constraint) const;
+      bool conflicts(LayoutConstraints *other_constraints, unsigned total_dims,
+                     const LayoutConstraint **conflict_constraint);
+      bool conflicts(const LayoutConstraintSet &other, unsigned total_dims,
+                     const LayoutConstraint **conflict_constraint) const;
+      bool entails_without_pointer(LayoutConstraints *other,unsigned total_dims,
+                                   const LayoutConstraint **failed_constraint);
       bool entails_without_pointer(const LayoutConstraintSet &other,
-                                   unsigned total_dims) const;
+         unsigned total_dims, const LayoutConstraint **failed_constraint) const;
     public:
       static AddressSpaceID get_owner_space(LayoutConstraintID layout_id,
                                             Runtime *runtime);
@@ -1307,9 +1310,12 @@ namespace Legion {
       char *constraints_name;
       mutable LocalLock layout_lock;
     protected:
-      std::map<LayoutConstraintID,bool> conflict_cache;
-      std::map<LayoutConstraintID,bool> entailment_cache;
-      std::map<LayoutConstraintID,bool> no_pointer_entailment_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> conflict_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> entailment_cache;
+      std::map<std::pair<LayoutConstraintID,unsigned/*total dims*/>,
+                const LayoutConstraint*> no_pointer_entailment_cache;
     };
 
     /**

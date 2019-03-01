@@ -8485,7 +8485,7 @@ namespace Legion {
           }
           else
           {
-            for (LegionColor color = 0; color < total_children; color++)
+            for (LegionColor color = 0; color < max_linearized_color; color++)
             {
               if (!color_space->contains_color(color))
                 continue;

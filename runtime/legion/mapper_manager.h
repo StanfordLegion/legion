@@ -289,13 +289,15 @@ namespace Legion {
                                 FieldSpace handle);
       void release_layout(MappingCallInfo *ctx, LayoutConstraintID layout_id);
       bool do_constraints_conflict(MappingCallInfo *ctx, 
-                    LayoutConstraintID set1, LayoutConstraintID set2);
+                    LayoutConstraintID set1, LayoutConstraintID set2,
+                    const LayoutConstraint **conflict_constraint);
       bool do_constraints_entail(MappingCallInfo *ctx,
-                    LayoutConstraintID source, LayoutConstraintID target);
+                    LayoutConstraintID source, LayoutConstraintID target,
+                    const LayoutConstraint **failed_constraint);
     public:
       void find_valid_variants(MappingCallInfo *ctx, TaskID task_id,
                                std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind);
+                               Processor::Kind kind, bool strict_kind);
       const char* find_task_variant_name(MappingCallInfo *ctx,
                     TaskID task_id, VariantID vid);
       bool is_leaf_variant(MappingCallInfo *ctx, TaskID task_id, 

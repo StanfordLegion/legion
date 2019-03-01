@@ -7131,11 +7131,17 @@ function codegen.expr_binary(cx, node)
       [emit_debuginfo(node)]
     end
 
+    local lhs_type = std.as_read(node.lhs.expr_type)
+    local rhs_type = std.as_read(node.rhs.expr_type)
     local create_partition
     if node.op == "-" then
       create_partition = c.legion_index_partition_create_by_difference
     elseif node.op == "&" then
-      create_partition = c.legion_index_partition_create_by_intersection
+      if std.is_region(lhs_type) then
+        create_partition = c.legion_index_partition_create_by_intersection_mirror
+      else
+        create_partition = c.legion_index_partition_create_by_intersection
+      end
     elseif node.op == "|" then
       create_partition = c.legion_index_partition_create_by_union
     else
@@ -7145,34 +7151,51 @@ function codegen.expr_binary(cx, node)
     local partition_type = std.as_read(node.expr_type)
     local ip = terralib.newsymbol(c.legion_index_partition_t, "ip")
     local lp = terralib.newsymbol(c.legion_logical_partition_t, "lp")
-    actions = quote
-      [actions]
-      var is = c.legion_index_partition_get_parent_index_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
-      var lhs_colors = c.legion_index_partition_get_color_space(
-        [cx.runtime], [lhs.value].impl.index_partition)
-      var rhs_colors = c.legion_index_partition_get_color_space(
-        [cx.runtime], [rhs.value].impl.index_partition)
-      var colors : c.legion_index_space_t
-      if lhs_colors.tid ~= rhs_colors.tid or lhs_colors.id ~= rhs_colors.id then
-        var color_spaces : c.legion_index_space_t[2]
-        color_spaces[0] = lhs_colors
-        color_spaces[1] = rhs_colors
-        colors = c.legion_index_space_union(
-          [cx.runtime], [cx.context], &(color_spaces[0]), 2) -- FIXME: Leaks
-      else
-        colors = lhs_colors
+
+    if std.is_region(lhs_type) then
+      actions = quote
+        [actions]
+        var is = [lhs.value].impl.index_space
+        var [ip] = [create_partition](
+          [cx.runtime], [cx.context],
+          is, [rhs.value].impl.index_partition,
+          [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+          -1, false)
+        var [lp] = c.legion_logical_partition_create_by_tree(
+          [cx.runtime], [cx.context],
+          [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+        [tag_imported(cx, lp)]
       end
-      var [ip] = [create_partition](
-        [cx.runtime], [cx.context],
-        is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
-        colors,
-        [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
-        -1)
-      var [lp] = c.legion_logical_partition_create_by_tree(
-        [cx.runtime], [cx.context],
-        [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
-      [tag_imported(cx, lp)]
+    else
+      actions = quote
+        [actions]
+        var is = c.legion_index_partition_get_parent_index_space(
+          [cx.runtime], [lhs.value].impl.index_partition)
+        var lhs_colors = c.legion_index_partition_get_color_space(
+          [cx.runtime], [lhs.value].impl.index_partition)
+        var rhs_colors = c.legion_index_partition_get_color_space(
+          [cx.runtime], [rhs.value].impl.index_partition)
+        var colors : c.legion_index_space_t
+        if lhs_colors.tid ~= rhs_colors.tid or lhs_colors.id ~= rhs_colors.id then
+          var color_spaces : c.legion_index_space_t[2]
+          color_spaces[0] = lhs_colors
+          color_spaces[1] = rhs_colors
+          colors = c.legion_index_space_union(
+            [cx.runtime], [cx.context], &(color_spaces[0]), 2) -- FIXME: Leaks
+        else
+          colors = lhs_colors
+        end
+        var [ip] = [create_partition](
+          [cx.runtime], [cx.context],
+          is, [lhs.value].impl.index_partition, [rhs.value].impl.index_partition,
+          colors,
+          [(partition_type:is_disjoint() and c.DISJOINT_KIND) or c.COMPUTE_KIND],
+          -1)
+        var [lp] = c.legion_logical_partition_create_by_tree(
+          [cx.runtime], [cx.context],
+          [ip], [lhs.value].impl.field_space, [lhs.value].impl.tree_id)
+        [tag_imported(cx, lp)]
+      end
     end
 
     return values.value(

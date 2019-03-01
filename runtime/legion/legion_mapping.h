@@ -1632,16 +1632,19 @@ namespace Legion {
       void release_layout(MapperContext ctx, 
                                     LayoutConstraintID layout_id) const;
       bool do_constraints_conflict(MapperContext ctx,
-                       LayoutConstraintID set1, LayoutConstraintID set2) const;
+                     LayoutConstraintID set1, LayoutConstraintID set2,
+                     const LayoutConstraint **conflict_constraint = NULL) const;
       bool do_constraints_entail(MapperContext ctx,
-                   LayoutConstraintID source, LayoutConstraintID target) const;
+                   LayoutConstraintID source, LayoutConstraintID target,
+                   const LayoutConstraint **failed_constraint = NULL) const;
     public:
       //------------------------------------------------------------------------
       // Methods for manipulating variants 
       //------------------------------------------------------------------------
       void find_valid_variants(MapperContext ctx, TaskID task_id, 
                                std::vector<VariantID> &valid_variants,
-                               Processor::Kind kind = Processor::NO_KIND) const;
+                               Processor::Kind kind = Processor::NO_KIND,
+                               bool strict_kind = true) const;
       void find_generator_variants(MapperContext ctx, TaskID task_id,
                   std::vector<std::pair<TaskID,VariantID> > &generator_variants,
                   Processor::Kind kind = Processor::NO_KIND) const;
