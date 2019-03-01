@@ -200,10 +200,14 @@ namespace Legion {
       bool meets_region_tree(const std::vector<LogicalRegion> &regions) const;
       bool meets_regions(const std::vector<LogicalRegion> &regions,
                          bool tight_region_bounds = false) const;
-      bool entails(LayoutConstraints *constraints) const;
-      bool entails(const LayoutConstraintSet &constraints) const;
-      bool conflicts(LayoutConstraints *constraints) const;
-      bool conflicts(const LayoutConstraintSet &constraints) const;
+      bool entails(LayoutConstraints *constraints,
+                   const LayoutConstraint **failed_constraint) const;
+      bool entails(const LayoutConstraintSet &constraints,
+                   const LayoutConstraint **failed_constraint) const;
+      bool conflicts(LayoutConstraints *constraints,
+                     const LayoutConstraint **conflict_constraint) const;
+      bool conflicts(const LayoutConstraintSet &constraints,
+                     const LayoutConstraint **conflict_constraint) const;
     public:
       inline PhysicalInstance get_instance(void) const
       {

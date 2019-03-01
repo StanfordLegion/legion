@@ -491,27 +491,31 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::do_constraints_conflict(MapperContext ctx,
-        LayoutConstraintID set1, LayoutConstraintID set2) const
+                             LayoutConstraintID set1, LayoutConstraintID set2,
+                             const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->do_constraints_conflict(ctx, set1, set2);
+      return ctx->manager->do_constraints_conflict(ctx, set1, set2,
+                                                   conflict_constraint);
     }
 
     //--------------------------------------------------------------------------
     bool MapperRuntime::do_constraints_entail(MapperContext ctx,
-        LayoutConstraintID source, LayoutConstraintID target) const
+                           LayoutConstraintID source, LayoutConstraintID target,
+                           const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
-      return ctx->manager->do_constraints_entail(ctx, source, target);
+      return ctx->manager->do_constraints_entail(ctx, source, target, 
+                                                 failed_constraint);
     }
 
     //--------------------------------------------------------------------------
     void MapperRuntime::find_valid_variants(MapperContext ctx,TaskID task_id,
                                          std::vector<VariantID> &valid_variants,
-                                         Processor::Kind kind) const
+                                         Processor::Kind kind,bool strict) const
     //--------------------------------------------------------------------------
     {
-      ctx->manager->find_valid_variants(ctx,task_id,valid_variants,kind);
+      ctx->manager->find_valid_variants(ctx,task_id,valid_variants,kind,strict);
     }
 
     //--------------------------------------------------------------------------

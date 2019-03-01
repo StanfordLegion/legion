@@ -479,7 +479,7 @@ namespace Legion {
       if (num_dims != total_dims)
         return false;
       // Layout descriptions are always complete, so just check for conflicts
-      if (constraints->conflicts(candidate_constraints, total_dims))
+      if (constraints->conflicts(candidate_constraints, total_dims, NULL))
         return false;
       // If they don't conflict they have to be the same
       return true;
@@ -495,7 +495,7 @@ namespace Legion {
       if (layout->allocated_fields != allocated_fields)
         return false;
       // Layout descriptions are always complete so just check for conflicts
-      if (constraints->conflicts(layout->constraints, total_dims))
+      if (constraints->conflicts(layout->constraints, total_dims, NULL))
         return false;
       // If they don't conflict they have to be the same
       return true;
@@ -857,29 +857,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::entails(LayoutConstraints *constraints) const
+    bool PhysicalManager::entails(LayoutConstraints *constraints,
+                               const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       // Always test the pointer constraint locally
       if (!pointer_constraint.entails(constraints->pointer_constraint))
         return false;
       return layout->constraints->entails_without_pointer(constraints,
-              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
+              failed_constraint);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::entails(const LayoutConstraintSet &constraints) const
+    bool PhysicalManager::entails(const LayoutConstraintSet &constraints,
+                               const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       // Always test the pointer constraint locally
       if (!pointer_constraint.entails(constraints.pointer_constraint))
         return false;
       return layout->constraints->entails_without_pointer(constraints,
-              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
+              failed_constraint);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::conflicts(LayoutConstraints *constraints) const
+    bool PhysicalManager::conflicts(LayoutConstraints *constraints,
+                             const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
       // Always test the pointer constraint locally
@@ -887,11 +892,13 @@ namespace Legion {
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
       return layout->constraints->conflicts(constraints,
-              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
+              conflict_constraint);
     }
 
     //--------------------------------------------------------------------------
-    bool PhysicalManager::conflicts(const LayoutConstraintSet &constraints)const
+    bool PhysicalManager::conflicts(const LayoutConstraintSet &constraints,
+                             const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
       // Always test the pointer constraint locally
@@ -899,7 +906,8 @@ namespace Legion {
         return true;
       // We know our layouts don't have a pointer constraint so nothing special
       return layout->constraints->conflicts(constraints,
-              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0);
+              (instance_domain != NULL) ? instance_domain->get_num_dims() : 0,
+              conflict_constraint);
     }
 
     //--------------------------------------------------------------------------

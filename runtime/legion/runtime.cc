@@ -5321,7 +5321,7 @@ namespace Legion {
         {
           if (!(*it)->meets_regions(regions, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5371,7 +5371,7 @@ namespace Legion {
         {
           if (!(*it)->meets_regions(regions, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5420,7 +5420,7 @@ namespace Legion {
         {
           if (!(*it)->meets_regions(regions, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -5469,7 +5469,7 @@ namespace Legion {
         {
           if (!(*it)->meets_regions(regions, tight_region_bounds))
             continue;
-          if ((*it)->entails(constraints))
+          if ((*it)->entails(constraints, NULL))
           {
             // Check to see if we need to acquire
             // If we fail to acquire then keep going
@@ -7748,7 +7748,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TaskImpl::find_valid_variants(std::vector<VariantID> &valid_variants,
-                                       Processor::Kind kind) const
+                                       Processor::Kind kind, bool strict) const
     //--------------------------------------------------------------------------
     {
       if (kind == Processor::NO_KIND)
@@ -7768,7 +7768,10 @@ namespace Legion {
         for (std::map<VariantID,VariantImpl*>::const_iterator it = 
               variants.begin(); it != variants.end(); it++)
         {
-          if (kind == it->second->get_processor_kind(false/*warn*/))
+          const Processor::Kind variant_kind = 
+            it->second->get_processor_kind(false/*warn*/);
+          if ((kind == variant_kind) || 
+              (!strict && (variant_kind == Processor::NO_KIND)))
             valid_variants.push_back(it->first);
         }
       }
@@ -8709,95 +8712,162 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(LayoutConstraints *constraints,
-                                    unsigned total_dims)
+                unsigned total_dims, const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // Check to see if the result is in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          entailment_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+            entailment_cache.find(key);
         if (finder != entailment_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (failed_constraint != NULL)
+              *failed_constraint = finder->second;
+            return false;
+          }
+          else
+            return true;
+        }
       }
       // Didn't find it, so do the test for real
-      bool result = entails(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool entailment = entails(*constraints, total_dims, &result);
+#ifdef DEBUG_LEGION
+      assert(entailment ^ (result != NULL)); // only one should be true
+#endif
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      entailment_cache[constraints->layout_id] = result;
-      return result;
+      entailment_cache[key] = result;
+      if (!entailment && (failed_constraint != NULL))
+        *failed_constraint = result;
+      return entailment;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails(const LayoutConstraintSet &other,
-                                    unsigned total_dims) const
+          unsigned total_dims, const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::entails(other, total_dims);
+      return LayoutConstraintSet::entails(other, total_dims, failed_constraint);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::conflicts(LayoutConstraints *constraints,
-                                      unsigned total_dims)
+              unsigned total_dims, const LayoutConstraint **conflict_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // Check to see if the result is in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          conflict_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+          conflict_cache.find(key);
         if (finder != conflict_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (conflict_constraint != NULL)
+              *conflict_constraint = finder->second;
+            return true;
+          }
+          else
+            return false;
+        }
       }
       // Didn't find it, so do the test for real
-      bool result = conflicts(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool conflicted = conflicts(*constraints, total_dims, &result);
+#ifdef DEBUG_LEGION
+      assert(conflicted ^ (result == NULL)); // only one should be true
+#endif
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      conflict_cache[constraints->layout_id] = result;
-      return result;
+      conflict_cache[key] = result;
+      if (conflicted && (conflict_constraint != NULL))
+        *conflict_constraint = result;
+      return conflicted;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::conflicts(const LayoutConstraintSet &other,
-                                      unsigned total_dims) const
+        unsigned total_dims, const LayoutConstraint **conflict_constraint) const
     //--------------------------------------------------------------------------
     {
-      return LayoutConstraintSet::conflicts(other, total_dims);
+      return LayoutConstraintSet::conflicts(other, total_dims, 
+                                            conflict_constraint);
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                            LayoutConstraints *constraints, unsigned total_dims)
+                            LayoutConstraints *constraints, unsigned total_dims,
+                            const LayoutConstraint **failed_constraint)
     //--------------------------------------------------------------------------
     {
+      const std::pair<LayoutConstraintID,unsigned> 
+        key(constraints->layout_id, total_dims);
       // See if we have it in the cache
       {
         AutoLock lay(layout_lock,1,false/*exclusive*/);
-        std::map<LayoutConstraintID,bool>::const_iterator finder = 
-          no_pointer_entailment_cache.find(constraints->layout_id);
+        std::map<std::pair<LayoutConstraintID,unsigned>,
+                  const LayoutConstraint*>::const_iterator finder = 
+            no_pointer_entailment_cache.find(key);
         if (finder != no_pointer_entailment_cache.end())
-          return finder->second;
+        {
+          if (finder->second != NULL)
+          {
+            if (failed_constraint != NULL)
+              *failed_constraint = finder->second;
+            return false;
+          }
+          else
+            return true;
+        }
       }
       // Didn't find it so do the test for real
-      bool result = entails_without_pointer(*constraints, total_dims);
+      const LayoutConstraint *result = NULL;
+      const bool entailment = 
+        entails_without_pointer(*constraints, total_dims, &result);
       // Save the result in the cache
       AutoLock lay(layout_lock);
-      no_pointer_entailment_cache[constraints->layout_id] = result;
-      return result;
+      no_pointer_entailment_cache[key] = result;
+      if (!entailment && (failed_constraint != NULL))
+        *failed_constraint = result;
+      return entailment;
     }
 
     //--------------------------------------------------------------------------
     bool LayoutConstraints::entails_without_pointer(
-                    const LayoutConstraintSet &other, unsigned total_dims) const
+                          const LayoutConstraintSet &other, unsigned total_dims,
+                          const LayoutConstraint **failed_constraint) const
     //--------------------------------------------------------------------------
     {
       // Do all the normal entailment but don't check the pointer constraint 
       if (!specialized_constraint.entails(other.specialized_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.specialized_constraint; 
         return false;
+      }
       if (!field_constraint.entails(other.field_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.field_constraint;
         return false;
+      }
       if (!memory_constraint.entails(other.memory_constraint))
+      {
+        if (failed_constraint != NULL)
+          *failed_constraint = &other.memory_constraint;
         return false;
+      }
       if (!ordering_constraint.entails(other.ordering_constraint, total_dims))
         return false;
       for (std::vector<SplittingConstraint>::const_iterator it = 
@@ -8814,7 +8884,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<DimensionConstraint>::const_iterator it = 
             other.dimension_constraints.begin(); it != 
@@ -8830,7 +8904,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<AlignmentConstraint>::const_iterator it = 
             other.alignment_constraints.begin(); it != 
@@ -8846,7 +8924,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       for (std::vector<OffsetConstraint>::const_iterator it = 
             other.offset_constraints.begin(); it != 
@@ -8862,7 +8944,11 @@ namespace Legion {
           }
         }
         if (!entailed)
+        {
+          if (failed_constraint != NULL)
+            *failed_constraint = &(*it);
           return false;
+        }
       }
       return true;
     }
