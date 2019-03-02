@@ -4068,7 +4068,9 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     cuda_setup = cudahelper.jit_compile_kernels_and_register(all_kernels)
   end
 
-  local extra_setup = quote end
+  local extra_setup = quote
+    c.legion_terra_register_all_affine_transform_tasks()
+  end
   if extra_setup_thunk then
     extra_setup = quote
       [extra_setup_thunk]()

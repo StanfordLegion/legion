@@ -150,6 +150,25 @@ legion_terra_task_launcher_has_field(
   unsigned idx,
   legion_field_id_t fid);
 
+// Utilities for auto-parallelizer
+
+typedef struct regent_affine_descriptor_t {
+  legion_domain_point_t offset;
+} regent_affine_descriptor_t;
+
+void
+legion_terra_register_all_affine_transform_tasks(void);
+
+legion_index_partition_t
+legion_index_partition_create_by_affine_image(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_index_space_t handle,
+    legion_index_partition_t projection,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
 #ifdef __cplusplus
 }
 #endif
