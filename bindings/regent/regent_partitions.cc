@@ -888,3 +888,290 @@ legion_terra_task_launcher_has_field(
   const RegionRequirement &req = launcher->region_requirements[idx];
   return req.privilege_fields.count(fid) > 0;
 }
+
+template<int DIM, typename COORD_T>
+size_t
+count_num_rectangles(const DomainT<DIM,COORD_T> &domain)
+{
+  size_t num_rectangles = 0;
+  RectInDomainIterator<DIM,COORD_T> it(domain);
+  while (it.valid())
+  {
+    ++num_rectangles;
+    it.step();
+  }
+  return num_rectangles;
+}
+
+template<int DIM, typename COORD_T>
+inline size_t
+get_rect_field_size(const DomainT<DIM,COORD_T> &domain)
+{
+  return sizeof(Rect<DIM,COORD_T>);
+}
+
+template<int DIM, typename COORD_T>
+class AffineTransformRects : public TaskLauncher {
+public:
+  AffineTransformRects(
+      IndexPartitionT<DIM,COORD_T> source_ranges,
+      Point<DIM,COORD_T> offset,
+      LogicalRegion target_ranges,
+      LogicalPartition target_ranges_part,
+      FieldID ranges_fid);
+protected:
+  Serializer rez;
+public:
+  static TaskID TASK_ID;
+  static void register_task(void);
+  static void cpu_variant(const Task *task,
+      const std::vector<PhysicalRegion> &regions,
+      Context ctx, Runtime *runtime);
+};
+
+template<int DIM, typename COORD_T>
+/*static*/ TaskID AffineTransformRects<DIM,COORD_T>::TASK_ID;
+
+template<int DIM, typename COORD_T>
+AffineTransformRects<DIM,COORD_T>::AffineTransformRects(
+      IndexPartitionT<DIM,COORD_T> source_ranges,
+      Point<DIM,COORD_T> offset,
+      LogicalRegion target_ranges,
+      LogicalPartition target_ranges_part,
+      FieldID ranges_fid)
+  : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED, 0)
+{
+  add_region_requirement(
+    RegionRequirement(target_ranges, WRITE_DISCARD, EXCLUSIVE, target_ranges));
+  add_field(0, ranges_fid);
+  rez.serialize<IndexPartitionT<DIM,COORD_T> >(source_ranges);
+  rez.serialize<Point<DIM,COORD_T> >(offset);
+  rez.serialize<LogicalPartition>(target_ranges_part);
+  argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
+}
+
+template<int DIM, typename COORD_T>
+/*static*/ void
+AffineTransformRects<DIM,COORD_T>::register_task(void)
+{
+  TASK_ID = Legion::Runtime::generate_static_task_id();
+  char variant_name[128];
+  snprintf(variant_name,128, "AffineTransform <%d>", DIM);
+  TaskVariantRegistrar registrar(TASK_ID, variant_name);
+  registrar.add_constraint(ProcessorConstraint(Processor::LOC_PROC));
+  registrar.set_leaf();
+  Legion::Runtime::preregister_task_variant<
+    AffineTransformRects<DIM,COORD_T>::cpu_variant>(registrar, variant_name);
+}
+
+template<int DIM, typename COORD_T>
+static Rect<DIM,COORD_T>
+operator+(const Rect<DIM,COORD_T> &lhs, const Point<DIM,COORD_T> &rhs)
+{
+  Rect<DIM,COORD_T> result;
+  for (unsigned idx = 0; idx < DIM; ++idx)
+  {
+    result.lo[idx] = lhs.lo[idx] + rhs[idx];
+    result.hi[idx] = lhs.hi[idx] + rhs[idx];
+  }
+  return result;
+}
+
+
+template<int DIM, typename COORD_T>
+/*static*/ void
+AffineTransformRects<DIM,COORD_T>::cpu_variant(
+    const Task *task,
+    const std::vector<PhysicalRegion> &regions,
+    Context ctx, Runtime *runtime)
+{
+  Deserializer derez(task->args, task->arglen);
+  IndexPartitionT<DIM,COORD_T> source_ranges;
+  derez.deserialize(source_ranges);
+  Point<DIM,COORD_T> offset;
+  derez.deserialize(offset);
+  LogicalPartition target_ranges_part;
+  derez.deserialize(target_ranges_part);
+
+  const FieldAccessor<WRITE_DISCARD,Rect<DIM,COORD_T>,1,coord_t>
+    fa_range(regions[0], task->regions[0].instance_fields[0]);
+  Rect<DIM,COORD_T> empty_rect;
+  for (unsigned idx = 0; idx < DIM; ++idx)
+  {
+    empty_rect.lo[idx] = 1;
+    empty_rect.hi[idx] = 0;
+  }
+
+  Domain color_domain =
+    runtime->get_index_partition_color_space(ctx, source_ranges);
+  Domain::DomainPointIterator it(color_domain);
+  for (Domain::DomainPointIterator dp(color_domain); dp; dp++) {
+    const DomainPoint &color = dp.p;
+    IndexSpace source =
+      runtime->get_index_subspace(ctx, source_ranges, color);
+    RectInDomainIterator<DIM,COORD_T> it(
+        runtime->get_index_space_domain(ctx, source));
+
+    LogicalRegion target =
+      runtime->get_logical_subregion_by_color(ctx, target_ranges_part, color);
+    PointInDomainIterator<1,COORD_T> target_it(
+        runtime->get_index_space_domain(ctx, target.get_index_space()));
+
+    while (it.valid())
+    {
+      Rect<DIM,COORD_T> rect = (*it) + offset;
+      fa_range.write(*target_it, rect);
+      it.step();
+      target_it.step();
+    }
+
+    while (target_it.valid())
+    {
+      fa_range.write(*target_it, empty_rect);
+      target_it.step();
+    }
+  }
+}
+
+void
+legion_terra_register_all_affine_transform_tasks(void)
+{
+#define GENERATE_CASE(DIM) \
+  AffineTransformRects<DIM,coord_t>::register_task();
+  LEGION_FOREACH_N(GENERATE_CASE)
+#undef GENERATE_CASE
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_affine_image(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_index_space_t handle_,
+    legion_index_partition_t projection_,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace handle = CObjectWrapper::unwrap(handle_);
+  IndexPartition projection = CObjectWrapper::unwrap(projection_);
+  // TODO: Need to handle modulo operator
+  DomainPoint offset = CObjectWrapper::unwrap(descriptor.offset);
+  assert(handle.get_dim() == projection.get_dim());
+  assert(projection.get_dim() == offset.get_dim());
+
+  // We compute an affine image using partition by image range in these steps:
+  // 1) Find the maximum M of the number of dense rectangles in each subregion
+  //    of `projection`.
+  // 2) Create a temporary region T whose size is M * |CS|, where CS is the
+  //    color space of `projection`.
+  // 3) Partition T equally by CS
+  // 4) For each dense rectangle R in `projection`, compute R + offset and
+  //    store it to T.
+  // 5) Compute the image of `projection` under T.
+
+  IndexSpace color_space =
+    runtime->get_index_partition_color_space_name(ctx, projection);
+  Domain color_domain = runtime->get_index_space_domain(ctx, color_space);
+  size_t num_colors = color_domain.get_volume();
+
+  // Step 1
+  size_t max_num_rectangles = 0;
+  Domain::DomainPointIterator it(color_domain);
+  for (Domain::DomainPointIterator dp(color_domain); dp; dp++) {
+    const DomainPoint &color = dp.p;
+    IndexSpace subspace = runtime->get_index_subspace(ctx, projection, color);
+#define GENERATE_CASE(DIM)                                         \
+    case DIM:                                                      \
+      {                                                            \
+        DomainT<DIM,coord_t> dom =                                 \
+          runtime->get_index_space_domain(ctx, subspace);          \
+        max_num_rectangles =                                       \
+          std::max(max_num_rectangles, count_num_rectangles(dom)); \
+        break;                                                     \
+      }
+    switch (subspace.get_dim())
+    {
+      LEGION_FOREACH_N(GENERATE_CASE)
+      default:
+        {
+          assert(false);
+          break;
+        }
+    }
+#undef GENERATE_CASE
+  }
+
+  // Step 2
+  size_t size_temp_region = num_colors * max_num_rectangles;
+  Rect<1,coord_t> bounds(Point<1>(0), Point<1>(size_temp_region - 1));
+  IndexSpace temp_is = runtime->create_index_space(ctx, bounds);
+  FieldSpace temp_fs = runtime->create_field_space(ctx);
+  FieldID temp_fid = 0;
+  {
+    FieldAllocator alloc = runtime->create_field_allocator(ctx, temp_fs);
+    size_t rect_size = 0;
+#define GENERATE_CASE(DIM)                                         \
+    case DIM:                                                      \
+      {                                                            \
+        DomainT<DIM,coord_t> dom =                                 \
+          runtime->get_index_space_domain(ctx, handle);            \
+        rect_size = get_rect_field_size(dom);                      \
+        break;                                                     \
+      }
+    switch (handle.get_dim())
+    {
+      LEGION_FOREACH_N(GENERATE_CASE)
+      default:
+        {
+          assert(false);
+          break;
+        }
+    }
+#undef GENERATE_CASE
+    assert(rect_size != 0);
+    fprintf(stderr, "rect_size: %lu\n", rect_size);
+    temp_fid = alloc.allocate_local_field(rect_size);
+  }
+  LogicalRegion temp_lr =
+    runtime->create_logical_region(ctx, temp_is, temp_fs, true);
+
+  // Step 3
+  IndexPartition temp_ip =
+    runtime->create_equal_partition(ctx, temp_is, color_space);
+  LogicalPartition temp_lp =
+    runtime->get_logical_partition(ctx, temp_lr, temp_ip);
+
+  // Step 4
+#define GENERATE_CASE(DIM)                             \
+  case DIM:                                            \
+    {                                                  \
+      Point<DIM,coord_t> o = offset;                   \
+      IndexPartitionT<DIM,coord_t> p(projection);      \
+      AffineTransformRects<DIM,coord_t>                \
+        launcher(p, o, temp_lr, temp_lp, temp_fid);    \
+      Future f = runtime->execute_task(ctx, launcher); \
+      break;                                           \
+    }
+  switch (projection.get_dim())
+  {
+    LEGION_FOREACH_N(GENERATE_CASE)
+    default:
+      {
+        assert(false);
+        break;
+      }
+  }
+#undef GENERATE_CASE
+
+
+  // Step 5
+  IndexPartition result_ip =
+    runtime->create_partition_by_image_range(ctx, handle, temp_lp, temp_lr,
+        temp_fid, color_space);
+  runtime->destroy_logical_region(ctx, temp_lr);
+  runtime->destroy_index_space(ctx, temp_is);
+  runtime->destroy_field_space(ctx, temp_fs);
+  return CObjectWrapper::wrap(result_ip);
+}
