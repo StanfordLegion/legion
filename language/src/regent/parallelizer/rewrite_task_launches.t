@@ -58,8 +58,7 @@ local function create_index_launch(cx, task, call, stat)
   local generator = task:get_parallel_task_generator()
   local pair_of_mappings = cx.mappings[task]
   assert(pair_of_mappings ~= nil)
-  local parallel_task, params_to_partitions, metadata =
-    generator(pair_of_mappings, cx.mappings_by_access_paths, cx.loop_range_partitions)
+  local parallel_task, params_to_partitions, metadata = generator(pair_of_mappings, cx)
 
   -- Create an index space launch
   local loop_var_type = cx.color_space_symbol:gettype().index_type(cx.color_space_symbol)
@@ -290,7 +289,8 @@ function rewrite_task_launches.rewrite(solution, caller_constraints, stat)
   local block = rewrite_task_launches.block(cx, stat.block)
 
   -- TODO: Need a dataflow analysis to find the right place to put partitioning calls
-  local stats = terralib.newlist(solution.partition_stats)
+  local stats = terralib.newlist()
+  stats:insertall(solution.partition_stats)
   stats:insert(ast.typed.stat.Block {
     block = block,
     span = stat.block.span,

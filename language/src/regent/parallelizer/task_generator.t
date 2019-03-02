@@ -239,29 +239,31 @@ function rewrite_accesses.stat_for_list(cx, stat)
     assert(std.is_bounded_type(symbol_type))
     local region_symbol = value.value
     local region_params = cx.loop_var_to_regions[symbol]:to_list()
-    -- TODO: Need to split the loop into multiple loops if the original region
-    --       is mapped to multiple regions
-    assert(#region_params == 1)
-    local region_param = region_params[1]
-
-    cx:update_mapping(region_symbol, region_param)
-    value = ast.typed.expr.ID {
-      value = region_param,
-      expr_type = std.rawref(&region_param:gettype()),
-      span = value.span,
-      annotations = value.annotations,
+    return region_params:map(function(region_param)
+      cx:update_mapping(region_symbol, region_param)
+      value = ast.typed.expr.ID {
+        value = region_param,
+        expr_type = std.rawref(&region_param:gettype()),
+        span = value.span,
+        annotations = value.annotations,
+      }
+      local new_symbol = std.newsymbol(cx:rewrite_type(symbol_type), symbol:getname())
+      cx:update_mapping(symbol, new_symbol)
+      return stat {
+        symbol = new_symbol,
+        value = value,
+        block = rewrite_accesses.block(cx, stat.block),
+        metadata = false,
+      }
+    end)
+  else
+    return stat {
+      symbol = symbol,
+      value = value,
+      block = rewrite_accesses.block(cx, stat.block),
+      metadata = false,
     }
-    local new_symbol = std.newsymbol(cx:rewrite_type(symbol_type), symbol:getname())
-    cx:update_mapping(symbol, new_symbol)
-    symbol = new_symbol
   end
-
-  return stat {
-    symbol = symbol,
-    value = value,
-    block = rewrite_accesses.block(cx, stat.block),
-    metadata = false,
-  }
 end
 
 function rewrite_accesses.stat_if(cx, stat)
@@ -399,6 +401,11 @@ local function has_region_access(expr)
   end
 end
 
+local function get_source_location(node)
+  assert(node.span.source and node.span.start.line)
+  return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
+end
+
 -- TODO: Optimize cases when regions are co-located in one instance
 local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   assert(#ref_type.bounds_symbols == 1)
@@ -446,7 +453,10 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
         std.assert,
         terralib.newlist({
           ast_util.mk_expr_constant(false, bool),
-          ast_util.mk_expr_constant("unreachable", rawstring)}),
+          ast_util.mk_expr_constant(
+              "found an unreachable indirect access at " .. get_source_location(template) ..
+              ". this must be a bug.",
+              rawstring)}),
         true)
       else_block = ast.typed.Block {
         stats = terralib.newlist({
@@ -635,9 +645,9 @@ local task_generator = {}
 
 function task_generator.new(node)
   local cx = node.prototype:get_partitioning_constraints()
-  return function(pair_of_mappings,
-                  mappings_by_access_paths,
-                  loop_range_partitions)
+  return function(pair_of_mappings, caller_cx)
+    local mappings_by_access_paths = caller_cx.mappings_by_access_paths
+    local loop_range_partitions = caller_cx.loop_range_partitions
     local my_ranges_to_caller_ranges, my_regions_to_caller_regions =
       unpack(pair_of_mappings)
     local partitions_to_region_params = data.newmap()
@@ -645,6 +655,7 @@ function task_generator.new(node)
     local my_accesses_to_region_params = data.newmap()
     local loop_var_to_regions = data.newmap()
     local region_params_to_partitions = data.newmap()
+    local param_index = 1
 
     for my_region_symbol, accesses_summary in cx.field_accesses_summary:items() do
       for field_path, summary in accesses_summary:items() do
@@ -666,6 +677,8 @@ function task_generator.new(node)
                 if not partition:gettype():is_disjoint() then
                   new_region_name = new_region_name .. "_g"
                 end
+                new_region_name = new_region_name .. tostring(param_index)
+                param_index = param_index + 1
                 return std.newsymbol(new_region, new_region_name)
               end)
           end)
@@ -682,10 +695,20 @@ function task_generator.new(node)
             local all_privileges = find_or_create(privileges_by_region_params, region_param)
             local field_privileges = find_or_create(all_privileges, field_path, hash_set.new)
             local privilege = my_privilege
-            -- TODO: Need to create private-vs-shared partitions to actually do this
-            --if std.is_reduce(privilege) and partition:gettype():is_disjoint() then
-            --  privilege = "reads_writes"
-            --end
+            if std.is_reduce(privilege) and partition:gettype():is_disjoint() and
+               data.all(unpack(partitions:map(function(other_partition)
+                 if partition == other_partition then return true end
+                 local partition_type = partition:gettype()
+                 local other_partition_type = other_partition:gettype()
+                 local constraint =
+                   std.constraint(partition_type:parent_region(),
+                                  other_partition_type:parent_region(),
+                                  std.disjointness)
+                 return std.check_constraint(caller_cx, constraint) ~= nil
+               end)))
+            then
+              privilege = "reads_writes"
+            end
             if privilege == "reads_writes" then
               field_privileges:insert(std.reads)
               field_privileges:insert(std.writes)
