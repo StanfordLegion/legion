@@ -24,7 +24,7 @@ local rewrite_task_launches = require("regent/parallelizer/rewrite_task_launches
 local parallelize_tasks = {}
 
 function parallelize_tasks.stat_parallelize_with(cx, stat)
-  local solution = solve_constraints.solve(stat)
+  local solution = solve_constraints.solve(cx, stat)
   return rewrite_task_launches.rewrite(solution, cx.constraints, stat)
 end
 
