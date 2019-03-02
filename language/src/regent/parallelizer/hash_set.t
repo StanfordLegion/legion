@@ -169,4 +169,8 @@ function hash_set:size()
   return self.__len
 end
 
+function hash_set:is_empty()
+  return self.__set:is_empty()
+end
+
 return hash_set
