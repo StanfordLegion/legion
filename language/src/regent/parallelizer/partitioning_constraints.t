@@ -39,6 +39,52 @@ constraint_type.subset = constraint_type.Subset {}
 constraint_type.image  = constraint_type.Image {}
 constraint_type.affine = constraint_type.Affine {}
 
+local constraint_info = {}
+
+constraint_info.__index = constraint_info
+
+function constraint_info.new(type, info)
+  local cx = {
+    type = type,
+    info = info,
+  }
+  return setmetatable(cx, constraint_info)
+end
+
+function constraint_info:hash()
+  return tostring(self.type) .. self.info:hash()
+end
+
+function constraint_info:is_affine()
+  return self.type:is(constraint_type.Affine)
+end
+
+function constraint_info:is_image()
+  return self.type:is(constraint_type.Image)
+end
+
+function constraint_info:is_subset()
+  return self.type:is(constraint_type.Subset)
+end
+
+function constraint_info:clone(mapping)
+  local info = self.info
+  if self:is_subset() then
+    info = mapping(info)
+  elseif self:is_image() then
+    local region_symbol, field_path = unpack(info)
+    info = data.newtuple(mapping(region_symbol), field_path)
+  elseif self:is_affine() then
+    local info = data.newtuple(unpack(info))
+    if std.is_symbol(info[#info]) then
+      info[#info] = mapping(info[#info])
+    end
+  else
+    assert(false)
+  end
+  return constraint_info.new(self.type, info)
+end
+
 local partitioning_constraints = {}
 
 partitioning_constraints.__index = partitioning_constraints
@@ -82,14 +128,13 @@ local function render_analytic_constraint(src, offset, dst)
   end
 end
 
-local function render_constraint(src, key, dst)
-  local type, info = unpack(key)
-  if type == constraint_type.subset then
+local function render_constraint(src, info, dst)
+  if info:is_subset() then
     return render_subset_constraint(src, dst)
-  elseif type == constraint_type.image then
-    return render_image_constraint(src, info, dst)
-  elseif type == constraint_type.affine then
-    return render_analytic_constraint(src, info, dst)
+  elseif info:is_image() then
+    return render_image_constraint(src, info.info, dst)
+  elseif info:is_affine() then
+    return render_analytic_constraint(src, info.info, dst)
   else
     assert(false)
   end
@@ -123,38 +168,20 @@ end
 
 function partitioning_constraints:find_or_create_subset_constraint(src_range, region_symbol)
   local constraints = find_or_create(self.constraints, src_range)
-  local key = data.newtuple(constraint_type.subset, region_symbol)
+  local key = constraint_info.new(constraint_type.subset, region_symbol)
   return find_or_create(constraints, key, ranges.new)
 end
 
 function partitioning_constraints:find_or_create_image_constraint(src_range, region_symbol, field_path)
   local constraints = find_or_create(self.constraints, src_range)
-  local key = data.newtuple(constraint_type.image, data.newtuple(region_symbol, field_path))
+  local key = constraint_info.new(constraint_type.image, data.newtuple(region_symbol, field_path))
   return find_or_create(constraints, key, ranges.new)
 end
 
 function partitioning_constraints:find_or_create_analytic_constraint(src_range, offset)
   local constraints = find_or_create(self.constraints, src_range)
-  local key = data.newtuple(constraint_type.affine, offset)
+  local key = constraint_info.new(constraint_type.affine, offset)
   return find_or_create(constraints, key, ranges.new)
-end
-
-local function subst_key(key, mapping)
-  local type, info = unpack(key)
-  if type == constraint_type.subset then
-    return data.newtuple(type, mapping(info))
-  elseif type == constraint_type.image then
-    local region_symbol, field_path = unpack(info)
-    return data.newtuple(type, data.newtuple(mapping(region_symbol), field_path))
-  elseif type == constraint_type.affine then
-    local info = data.newtuple(unpack(info))
-    if std.is_symbol(info[#info]) then
-      info[#info] = mapping(info[#info])
-    end
-    return data.newtuple(type, info)
-  else
-    assert(false)
-  end
 end
 
 local function lift(tbl)
@@ -186,11 +213,11 @@ function partitioning_constraints:join(to_join, mapping)
     local new_src = mapping(src)
     local my_constraints = find_or_create(self.constraints, new_src)
 
-    for key, dst in constraints:items() do
-      local new_key = subst_key(key, mapping)
+    for info, dst in constraints:items() do
+      local new_info = info:clone(mapping)
       local new_dst = mapping(dst)
-      assert(my_constraints[new_key] == nil or my_constraints[new_key] == new_dst)
-      my_constraints[new_key] = new_dst
+      assert(my_constraints[new_info] == nil or my_constraints[new_info] == new_dst)
+      my_constraints[new_info] = new_dst
     end
   end
 end
@@ -227,6 +254,8 @@ function partitioning_constraints:propagate_disjointness()
         disjoint_images[key] = dst
         num_disjoint_images = num_disjoint_images + 1
         src_partition:meet_disjointness(dst_partition.disjoint)
+        -- TODO: We assume that we will synthesize an equal partition for this
+        dst_partition:meet_completeness(true)
       end
     end
     if num_disjoint_images > 1 then
@@ -283,13 +312,13 @@ function partitioning_constraints:find_path_to_disjoint_child(range)
 
   local edges = self.constraints[range]
   if edges ~= nil then
-    for key, child in edges:items() do
+    for info, child in edges:items() do
       local found, path = self:find_path_to_disjoint_child(child)
       assert(not (found_any and found))
       if found then
         found_any = found
         found_path = path
-        found_path:insert({key, range})
+        found_path:insert({info, range})
       end
     end
   end

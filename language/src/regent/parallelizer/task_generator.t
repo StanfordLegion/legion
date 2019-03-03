@@ -731,8 +731,20 @@ function task_generator.new(node)
       local range = my_ranges_to_caller_ranges[my_range]
       local partitions = loop_range_partitions[range]
       local region_params = partitions:map(function(partition)
-        local region_param = partitions_to_region_params[partition]
-        assert(region_param ~= nil)
+        local region_param =
+          find_or_create(partitions_to_region_params, partition,
+            function()
+              local my_region_symbol = cx.constraints:get_partition(my_range).region
+              local region = my_region_symbol:gettype()
+              local ispace = std.newsymbol(std.ispace(region:ispace().index_type))
+              local new_region = std.region(ispace, region:fspace())
+              local new_region_name = my_region_symbol:getname() .. tostring(param_index)
+              param_index = param_index + 1
+              local region_param = std.newsymbol(new_region, new_region_name)
+              assert(region_params_to_partitions[region_param] == nil)
+              region_params_to_partitions[region_param] = partition
+              return region_param
+            end)
         return region_param
       end)
       assert(loop_var_to_regions[loop_var] == nil)
@@ -748,6 +760,7 @@ function task_generator.new(node)
     local region_universe = data.newmap()
     -- TODO: Inherit coherence modes from the serial task
     local coherence_modes = data.new_recursive_map(1)
+    local region_params_with_accesses = hash_set.new()
     for region_param, all_privileges in privileges_by_region_params:items() do
       local region = region_param:gettype()
       params:insert(ast.typed.top.TaskParam {
@@ -765,6 +778,22 @@ function task_generator.new(node)
         end)
       end
       privileges:insert(region_privileges)
+      region_params_with_accesses:insert(region_param)
+    end
+    for loop_var, region_params in loop_var_to_regions:items() do
+      region_params:foreach(function(region_param)
+        if not region_params_with_accesses:has(region_param) then
+          local region = region_param:gettype()
+          params:insert(ast.typed.top.TaskParam {
+            symbol = region_param,
+            param_type = region_param:gettype(),
+            future = false,
+            span = serial_task_ast.span,
+            annotations = ast.default_annotations(),
+          })
+          region_universe[region] = true
+        end
+      end)
     end
 
     local param_mapping = data.newmap()
