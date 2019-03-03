@@ -349,12 +349,13 @@ local function create_equal_partition(variable, region_symbol, color_space_symbo
   }
 end
 
-local function create_preimage_partition(variable, region_symbol, src_partition, key)
+local function create_preimage_partition(variable, region_symbol, src_partition, info)
+  assert(not info:is_affine())
   local src_partition_type = src_partition:gettype()
   local partition_type = std.partition(src_partition_type.disjointness, region_symbol,
       src_partition_type.colors_symbol)
   variable:settype(partition_type)
-  local mapping_region_symbol, field_path = unpack(key)
+  local mapping_region_symbol, field_path = unpack(info.info)
   return ast.typed.stat.Var {
     symbol = variable,
     type = partition_type,
@@ -392,46 +393,253 @@ local function create_preimage_partition(variable, region_symbol, src_partition,
   }
 end
 
-local function create_image_partition(variable, region_symbol, src_partition, key)
-  local partition_type = std.partition(std.aliased, region_symbol,
-      src_partition:gettype().colors_symbol)
-  variable:settype(partition_type)
-  local mapping_region_symbol, field_path = unpack(key)
-  return ast.typed.stat.Var {
-    symbol = variable,
-    type = partition_type,
-    value = ast.typed.expr.Image {
-      expr_type = partition_type,
-      parent = ast.typed.expr.ID {
-        value = region_symbol,
-        expr_type = std.rawref(&region_symbol:gettype()),
-        span = ast.trivial_span(),
-        annotations = ast.default_annotations(),
-      },
-      partition = ast.typed.expr.ID {
-        value = src_partition,
-        expr_type = std.rawref(&src_partition:gettype()),
-        span = ast.trivial_span(),
-        annotations = ast.default_annotations(),
-      },
-      region = ast.typed.expr.RegionRoot {
-        expr_type = mapping_region_symbol:gettype(),
-        region = ast.typed.expr.ID {
-          value = mapping_region_symbol,
-          expr_type = std.rawref(&mapping_region_symbol:gettype()),
+local function create_image_partition(variable, region_symbol, src_partition, info)
+  if info:is_image() then
+    local partition_type = std.partition(std.aliased, region_symbol,
+        src_partition:gettype().colors_symbol)
+    variable:settype(partition_type)
+    local mapping_region_symbol, field_path = unpack(info.info)
+    return ast.typed.stat.Var {
+      symbol = variable,
+      type = partition_type,
+      value = ast.typed.expr.Image {
+        expr_type = partition_type,
+        parent = ast.typed.expr.ID {
+          value = region_symbol,
+          expr_type = std.rawref(&region_symbol:gettype()),
           span = ast.trivial_span(),
           annotations = ast.default_annotations(),
         },
-        fields = terralib.newlist {field_path},
+        partition = ast.typed.expr.ID {
+          value = src_partition,
+          expr_type = std.rawref(&src_partition:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        region = ast.typed.expr.RegionRoot {
+          expr_type = mapping_region_symbol:gettype(),
+          region = ast.typed.expr.ID {
+            value = mapping_region_symbol,
+            expr_type = std.rawref(&mapping_region_symbol:gettype()),
+            span = ast.trivial_span(),
+            annotations = ast.default_annotations(),
+          },
+          fields = terralib.newlist {field_path},
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
         span = ast.trivial_span(),
         annotations = ast.default_annotations(),
       },
       span = ast.trivial_span(),
       annotations = ast.default_annotations(),
-    },
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
+    }
+  else
+    -- TODO: Handle modulo case
+    assert(info:is_affine())
+
+    local src_partition_type = src_partition:gettype()
+    local colors_symbol = src_partition_type.colors_symbol
+    -- TODO: affine partitions are actually disjoint except for modulo case
+    local partition_type = std.partition(std.aliased, region_symbol, colors_symbol)
+    variable:settype(partition_type)
+    local stats = terralib.newlist()
+
+    local arg_symbols = terralib.newlist({
+      std.newsymbol(c.legion_runtime_t, "runtime"),
+      std.newsymbol(c.legion_context_t, "context"),
+      std.newsymbol(c.legion_logical_region_t, "handle"),
+      std.newsymbol(c.legion_logical_partition_t, "projection"),
+      std.newsymbol(c.regent_affine_descriptor_t, "descriptor"),
+    })
+
+    stats:insert(ast.typed.stat.Var {
+      symbol = arg_symbols[1],
+      type = arg_symbols[1]:gettype(),
+      value = ast.typed.expr.RawRuntime {
+        expr_type = c.legion_runtime_t,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = arg_symbols[2],
+      type = arg_symbols[2]:gettype(),
+      value = ast.typed.expr.RawContext {
+        expr_type = c.legion_context_t,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = arg_symbols[3],
+      type = arg_symbols[3]:gettype(),
+      value = ast.typed.expr.RawValue {
+        value = ast.typed.expr.ID {
+          value = region_symbol,
+          expr_type = std.rawref(&region_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = c.legion_logical_region_t,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = arg_symbols[4],
+      type = arg_symbols[4]:gettype(),
+      value = ast.typed.expr.RawValue {
+        value = ast.typed.expr.ID {
+          value = src_partition,
+          expr_type = std.rawref(&src_partition:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = c.legion_logical_partition_t,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = arg_symbols[5],
+      type = arg_symbols[5]:gettype(),
+      value = false,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    local offset = terralib.newlist({unpack(info.info)})
+    local index_type = std["int" .. #offset .. "d"]
+    stats:insert(ast.typed.stat.Assignment {
+      lhs = ast.typed.expr.FieldAccess {
+        value = ast.typed.expr.ID {
+          value = arg_symbols[5],
+          expr_type = std.rawref(&arg_symbols[5]:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        field_name = "offset",
+        expr_type = std.rawref(&c.legion_domain_point_t),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      rhs = ast.typed.expr.Cast {
+        fn = ast.typed.expr.Function {
+          value = index_type,
+          expr_type = index_type,
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        arg = ast.typed.expr.Ctor {
+          named = false,
+          fields = offset:map(function(o)
+            return ast.typed.expr.CtorListField {
+              value = ast.typed.expr.Constant {
+                value = o,
+                expr_type = int,
+                span = ast.trivial_span(),
+                annotations = ast.default_annotations(),
+              },
+              expr_type = int,
+              span = ast.trivial_span(),
+              annotations = ast.default_annotations(),
+            }
+          end),
+          expr_type = std.ctor_tuple(offset:map(function(_) return int end)),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = index_type,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      metadata = false,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+
+    local args = arg_symbols:map(function(arg)
+      return ast.typed.expr.ID {
+        value = arg,
+        expr_type = std.rawref(&arg:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      }
+    end)
+    args:insert(ast.typed.expr.Constant {
+      value = partition_type:is_disjoint() and c.DISJOINT_KIND or c.COMPUTE_KIND,
+      expr_type = c.legion_partition_kind_t,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    args:insert(ast.typed.expr.Constant {
+      value = -1,
+      expr_type = int,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    local raw_result_lp = std.newsymbol(c.legion_logical_partition_t, "raw_result_lp")
+    stats:insert(ast.typed.stat.Var {
+      symbol = raw_result_lp,
+      type = raw_result_lp:gettype(),
+      value = ast.typed.expr.Call {
+        fn = ast.typed.expr.Function {
+          value = c.legion_logical_partition_create_by_affine_image,
+          expr_type = c.legion_logical_partition_create_by_affine_image:gettype(),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = c.legion_logical_partition_t,
+        args = args,
+        conditions = terralib.newlist(),
+        replicable = true,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+
+    stats:insert(ast.typed.stat.Var {
+      symbol = variable,
+      type = variable:gettype(),
+      value = ast.typed.expr.ImportPartition {
+        region = ast.typed.expr.ID {
+          value = region_symbol,
+          expr_type = std.rawref(&region_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        colors = ast.typed.expr.ID {
+          value = colors_symbol,
+          expr_type = std.rawref(&colors_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        value = ast.typed.expr.ID {
+          value = raw_result_lp,
+          expr_type = std.rawref(&raw_result_lp:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = partition_type,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+
+    return stats
+  end
 end
 
 local op_name = {
@@ -759,12 +967,16 @@ local function retrieve_private_shared_subregions(cx, pvs)
   return private_subregion, shared_subregion, stats
 end
 
-local function create_intersection_partition_subregion(lhs, rhs)
+local function create_intersection_partition_subregion(lhs, rhs, result_symbol)
   local rhs_type = rhs:gettype()
   local result_type =
     std.partition(rhs_type.disjointness, lhs, rhs_type.colors_symbol)
-  local result_symbol =
-    std.newsymbol(result_type, "(" .. lhs:getname() .. "&" .. rhs:getname() .. ")")
+  if result_symbol ~= nil then
+    result_symbol:settype(result_type)
+  else
+    result_symbol =
+      std.newsymbol(result_type, "(" .. lhs:getname() .. "&" .. rhs:getname() .. ")")
+  end
 
   return result_symbol, ast.typed.stat.Var {
     symbol = result_symbol,
@@ -859,26 +1071,33 @@ function solver_context:synthesize_partitions(color_space_symbol)
   local paths = data.filter(function(path)
       assert(#path > 0)
       if #path > 1 then return true end
-      local key, range = unpack(path[1])
+      local _, range = unpack(path[1])
       return self.constraints:is_constrained(range)
     end, self.constraints:find_paths_to_disjoint_children(self.sources))
   paths:map(function(path)
     local parent = nil
     for idx = 1, #path do
-      local key, range = unpack(path[idx])
+      local info, range = unpack(path[idx])
       local partition = self.constraints:get_partition(range)
       assert(not created:has(range))
       assert(disjoint_partitions[range] == nil)
       created:insert(range)
       find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
-      if key == nil then
+      if info == nil then
         assert(parent == nil)
         stats:insert(create_equal_partition(range, partition.region, color_space_symbol))
       else
-        assert(parent ~= nil)
-        local type, info = unpack(key)
-        stats:insert(
-          create_preimage_partition(range, partition.region, parent, info))
+        if info:is_image() then
+          assert(parent ~= nil)
+          stats:insert(
+            create_preimage_partition(range, partition.region, parent, info))
+        elseif info:is_subset() then
+          local range, partition_stat =
+            create_intersection_partition_subregion(partition.region, parent, range)
+          stats:insert(partition_stat)
+        else
+          assert(false)
+        end
       end
       parent = range
     end
@@ -907,27 +1126,30 @@ function solver_context:synthesize_partitions(color_space_symbol)
     idx = idx + 1
     local image_constraints = self.constraints.constraints[src_range]
     if image_constraints ~= nil then
-      for key, dst_range in image_constraints:items() do
-        -- TODO: We need to create partitions other than image partitions
-        local type, info = unpack(key)
+      for info, dst_range in image_constraints:items() do
         if not created:has(dst_range) then
-          if tostring(type) == "image" then
-            -- We are about to synthesize a new image partition
-            if not created:has(src_range) then
-              local src_partition = self.constraints:get_partition(src_range)
-              stats:insert(
-                create_equal_partition(src_range, src_partition.region, color_space_symbol))
-              created:insert(src_range)
-              find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
-            end
-            local dst_partition = self.constraints:get_partition(dst_range)
+          assert(not info:is_subset())
+          -- We are about to synthesize a new image partition
+          if not created:has(src_range) then
+            local src_partition = self.constraints:get_partition(src_range)
             stats:insert(
-              create_image_partition(dst_range, dst_partition.region, src_range, info))
-            created:insert(dst_range)
-            image_partitions[dst_range] = {info, src_range}
-          else
-            assert(false)
+              create_equal_partition(src_range, src_partition.region, color_space_symbol))
+            created:insert(src_range)
+            find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
           end
+
+          assert(not (info:is_affine() and std.is_symbol(info.info[#info.info])),
+                 "not supported yet")
+          local dst_partition = self.constraints:get_partition(dst_range)
+          local partition_stats =
+            create_image_partition(dst_range, dst_partition.region, src_range, info)
+          if terralib.islist(partition_stats) then
+            stats:insertall(partition_stats)
+          else
+            stats:insert(partition_stats)
+          end
+          created:insert(dst_range)
+          image_partitions[dst_range] = {info, src_range}
         end
         worklist:insert(dst_range)
       end
@@ -1046,8 +1268,13 @@ function solver_context:synthesize_partitions(color_space_symbol)
         local info, dst_range = unpack(image_infos[idx])
         local dst_partition = self.constraints:get_partition(dst_range)
         shared_range = new_range()
-        stats:insert(
-          create_image_partition(shared_range, dst_partition.region, prev_shared_range, info))
+        local partition_stats =
+          create_image_partition(shared_range, dst_partition.region, prev_shared_range, info)
+        if terralib.islist(partition_stats) then
+          stats:insertall(partition_stats)
+        else
+          stats:insert(partition_stats)
+        end
         prev_shared_range = shared_range
       end
 
@@ -1182,15 +1409,23 @@ function solver_context:synthesize_partitions(color_space_symbol)
     end
   end
 
+  self.loop_ranges:foreach(function(range)
+    if self.loop_range_partitions[range] == nil then
+      local partition = self.constraints:get_partition(range)
+      assert(range:hastype() and range:gettype():is_disjoint() and partition.complete)
+      self.loop_range_partitions[range] = terralib.newlist({range})
+    end
+  end)
+
   return stats
 end
 
 function solver_context:print_all_constraints()
   print("################")
   print("* sources:")
-  for source, _ in self.sources:items() do
+  self.sources:foreach(function(source)
     print("    " .. tostring(source))
-  end
+  end)
   print("* sources by regions:")
   for region, source in self.sources_by_regions:items() do
     print("    " .. tostring(region) .. " -> " .. tostring(source))
@@ -1254,7 +1489,7 @@ function solve_constraints.solve(cx, stat)
     return {range_mapping, region_mapping}
   end)
 
-  solver_cx.constraints:print_constraints()
+  solver_cx:print_all_constraints()
 
   local partition_stats =
     solver_cx:synthesize_partitions(color_space_symbol)
