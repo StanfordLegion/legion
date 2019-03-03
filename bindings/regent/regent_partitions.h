@@ -169,6 +169,16 @@ legion_index_partition_create_by_affine_image(
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     int color /* = AUTO_GENERATE_ID */);
 
+legion_logical_partition_t
+legion_logical_partition_create_by_affine_image(
+    legion_runtime_t runtime,
+    legion_context_t ctx,
+    legion_logical_region_t handle,
+    legion_logical_partition_t projection,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */);
+
 #ifdef __cplusplus
 }
 #endif

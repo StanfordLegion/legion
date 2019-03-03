@@ -1131,7 +1131,6 @@ legion_index_partition_create_by_affine_image(
     }
 #undef GENERATE_CASE
     assert(rect_size != 0);
-    fprintf(stderr, "rect_size: %lu\n", rect_size);
     temp_fid = alloc.allocate_local_field(rect_size);
   }
   LogicalRegion temp_lr =
@@ -1169,9 +1168,26 @@ legion_index_partition_create_by_affine_image(
   // Step 5
   IndexPartition result_ip =
     runtime->create_partition_by_image_range(ctx, handle, temp_lp, temp_lr,
-        temp_fid, color_space);
+        temp_fid, color_space, part_kind, color);
   runtime->destroy_logical_region(ctx, temp_lr);
   runtime->destroy_index_space(ctx, temp_is);
   runtime->destroy_field_space(ctx, temp_fs);
   return CObjectWrapper::wrap(result_ip);
+}
+
+legion_logical_partition_t
+legion_logical_partition_create_by_affine_image(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_logical_region_t handle_,
+    legion_logical_partition_t projection_,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  legion_index_partition_t ip =
+    legion_index_partition_create_by_affine_image(
+        runtime_, ctx_, handle_.index_space, projection_.index_partition,
+        descriptor, part_kind, color);
+  return legion_logical_partition_create(runtime_, ctx_, handle_, ip);
 }
