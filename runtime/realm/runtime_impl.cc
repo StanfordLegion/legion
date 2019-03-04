@@ -1396,12 +1396,17 @@ namespace Realm {
       signal(SIGTERM, deadlock_catch);
       signal(SIGINT, deadlock_catch);
 #endif
-      if ((getenv("LEGION_FREEZE_ON_ERROR") != NULL) ||
-          (getenv("REALM_FREEZE_ON_ERROR") != NULL)) {
+      const char *realm_freeze_env = getenv("REALM_FREEZE_ON_ERROR");
+      const char *legion_freeze_env = getenv("LEGION_FREEZE_ON_ERROR"); 
+      if (((legion_freeze_env != NULL) && (atoi(legion_freeze_env) != 0)) ||
+          ((realm_freeze_env != NULL) && (atoi(realm_freeze_env) != 0))) {
 	register_error_signal_handler(realm_freeze);
-      } else if ((getenv("REALM_BACKTRACE") != NULL) ||
-                 (getenv("LEGION_BACKTRACE") != NULL)) {
-	register_error_signal_handler(realm_backtrace);
+      } else {
+        const char *realm_backtrace_env = getenv("REALM_BACKTRACE");
+        const char *legion_backtrace_env = getenv("LEGION_BACKTRACE"); 
+        if (((realm_backtrace_env != NULL) && (atoi(realm_backtrace_env) != 0)) ||
+            ((legion_backtrace_env != NULL) && (atoi(legion_backtrace_env) != 0)))
+          register_error_signal_handler(realm_backtrace);
       }
 
       // debugging tool to dump realm event graphs after a fixed delay
