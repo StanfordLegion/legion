@@ -6545,6 +6545,34 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
+                                                   ReductionOp *redop,
+                                                   SerdezInitFnptr init_fnptr,
+                                                   SerdezFoldFnptr fold_fnptr)
+    //--------------------------------------------------------------------------
+    {
+      if (redop_id == 0)
+        REPORT_LEGION_ERROR(ERROR_RESERVED_REDOP_ID, 
+                            "ERROR: ReductionOpID zero is reserved.")
+      ReductionOpTable &red_table = Runtime::get_reduction_table(); 
+      // Check to make sure we're not overwriting a prior reduction op 
+      if (red_table.find(redop_id) != red_table.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_REDOP_ID, "ERROR: ReductionOpID "
+            "%d has already been used in the reduction table\n",redop_id)
+      red_table[redop_id] = redop;
+      if ((init_fnptr != NULL) || (fold_fnptr != NULL))
+      {
+#ifdef DEBUG_LEGION
+        assert((init_fnptr != NULL) && (fold_fnptr != NULL));
+#endif
+        SerdezRedopTable &serdez_red_table = Runtime::get_serdez_redop_table();
+        SerdezRedopFns &fns = serdez_red_table[redop_id];
+        fns.init_fn = init_fnptr;
+        fns.fold_fn = fold_fnptr;
+      }
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ const ReductionOp* Runtime::get_reduction_op(
                                                         ReductionOpID redop_id)
     //--------------------------------------------------------------------------
