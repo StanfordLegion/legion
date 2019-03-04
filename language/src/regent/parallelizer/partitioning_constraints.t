@@ -75,7 +75,7 @@ function constraint_info:clone(mapping)
     local region_symbol, field_path = unpack(info)
     info = data.newtuple(mapping(region_symbol), field_path)
   elseif self:is_affine() then
-    local info = data.newtuple(unpack(info))
+    info = data.newtuple(unpack(info))
     if std.is_symbol(info[#info]) then
       info[#info] = mapping(info[#info])
     end
@@ -115,10 +115,7 @@ local function render_analytic_constraint(src, offset, dst)
   if std.is_symbol(offset[#offset]) then
     local symbol = offset[#offset]
     local o = offset:slice(1, #offset - 1)
-    local divider =
-      (std.is_region(symbol:gettype()) and tostring(symbol) .. ".ispace.bounds") or
-      (std.is_ispace(symbol:gettype()) and tostring(symbol) .. ".bounds") or
-      assert(false)
+    local divider = tostring(symbol)
     return "(" ..tostring(src) .. " + {" ..
       o:mkstring("",",","") .. "}) % " ..
       divider .. " <= " .. tostring(dst)
