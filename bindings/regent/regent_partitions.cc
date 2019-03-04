@@ -20,6 +20,8 @@
 #include "legion/legion_c_util.h"
 #include "legion/legion_utilities.h"
 
+#include <cmath>
+
 // Disable deprecated warnings in this file since we are also
 // trying to maintain backwards compatibility support for older
 // interfaces here in the C API
@@ -914,10 +916,12 @@ template<int DIM, typename COORD_T>
 class AffineTransformRects : public TaskLauncher {
 public:
   AffineTransformRects(
-      IndexPartitionT<DIM,COORD_T> source_ranges,
-      Point<DIM,COORD_T> offset,
-      LogicalRegion target_ranges,
-      LogicalPartition target_ranges_part,
+      const IndexPartitionT<DIM,COORD_T> &source_ranges,
+      const Point<DIM,COORD_T> &offset,
+      const Rect<DIM,COORD_T> &modulo,
+      bool is_modulo,
+      const LogicalRegion &target_ranges,
+      const LogicalPartition &target_ranges_part,
       FieldID ranges_fid);
 protected:
   Serializer rez;
@@ -934,10 +938,12 @@ template<int DIM, typename COORD_T>
 
 template<int DIM, typename COORD_T>
 AffineTransformRects<DIM,COORD_T>::AffineTransformRects(
-      IndexPartitionT<DIM,COORD_T> source_ranges,
-      Point<DIM,COORD_T> offset,
-      LogicalRegion target_ranges,
-      LogicalPartition target_ranges_part,
+      const IndexPartitionT<DIM,COORD_T> &source_ranges,
+      const Point<DIM,COORD_T> &offset,
+      const Rect<DIM,COORD_T> &modulo,
+      bool is_modulo,
+      const LogicalRegion &target_ranges,
+      const LogicalPartition &target_ranges_part,
       FieldID ranges_fid)
   : TaskLauncher(TASK_ID, TaskArgument(), Predicate::TRUE_PRED, 0)
 {
@@ -946,6 +952,8 @@ AffineTransformRects<DIM,COORD_T>::AffineTransformRects(
   add_field(0, ranges_fid);
   rez.serialize<IndexPartitionT<DIM,COORD_T> >(source_ranges);
   rez.serialize<Point<DIM,COORD_T> >(offset);
+  rez.serialize<Rect<DIM,COORD_T> >(modulo);
+  rez.serialize<bool>(is_modulo);
   rez.serialize<LogicalPartition>(target_ranges_part);
   argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
 }
@@ -977,6 +985,84 @@ operator+(const Rect<DIM,COORD_T> &lhs, const Point<DIM,COORD_T> &rhs)
   return result;
 }
 
+template<typename COORD_T>
+struct Interval
+{
+  COORD_T lo;
+  COORD_T hi;
+  Interval(COORD_T l, COORD_T h)
+    : lo(l), hi(h)
+  {}
+  Interval(const Interval<COORD_T> &other)
+    : lo(other.lo), hi(other.hi)
+  {}
+};
+
+template<int DIM, typename COORD_T>
+static void
+rect_from_intervals(
+    unsigned dim, unsigned idx,
+    const std::vector<std::vector<Interval<COORD_T> > > &intervals,
+    Rect<DIM,COORD_T> &rect)
+{
+  if (dim-- == 0) return;
+  const Interval<COORD_T> &interval =
+    intervals[dim][idx % intervals[dim].size()];
+  idx /= intervals[dim].size();
+  rect.lo[dim] = interval.lo;
+  rect.hi[dim] = interval.hi;
+  rect_from_intervals(dim, idx, intervals, rect);
+}
+
+template<int DIM, typename COORD_T>
+static void
+compute_modulo(std::vector<Rect<DIM,COORD_T> > &results,
+               const Rect<DIM,COORD_T> &rect,
+               const Rect<DIM,COORD_T> &modulo)
+{
+  std::vector<std::vector<Interval<COORD_T> > > intervals;
+  intervals.resize(DIM);
+
+  for (unsigned dim = 0; dim < DIM; ++dim)
+  {
+    COORD_T lo = rect.lo[dim];
+    COORD_T hi = rect.hi[dim];
+    COORD_T mod_lo = modulo.lo[dim];
+    COORD_T mod_hi = modulo.hi[dim];
+    if (mod_hi < hi)
+    {
+      COORD_T new_hi = (hi - mod_hi) + mod_lo;
+      if (new_hi < lo)
+      {
+        intervals[dim].push_back(Interval<COORD_T>(lo, mod_hi));
+        intervals[dim].push_back(Interval<COORD_T>(mod_lo, new_hi - 1));
+        continue;
+      }
+    }
+    else if (lo < mod_lo)
+    {
+      COORD_T new_lo = mod_hi - (mod_lo - lo);
+      if (hi < new_lo)
+      {
+        intervals[dim].push_back(Interval<COORD_T>(mod_lo, hi));
+        intervals[dim].push_back(Interval<COORD_T>(new_lo + 1, mod_hi));
+        continue;
+      }
+    }
+    intervals[dim].push_back(Interval<COORD_T>(mod_lo, mod_hi));
+  }
+
+  unsigned num_rectangles = 1;
+  for (unsigned dim = 0; dim < DIM; ++dim)
+    num_rectangles *= intervals[dim].size();
+
+  for (unsigned idx = 0; idx < num_rectangles; ++idx)
+  {
+    results.push_back(Rect<DIM,COORD_T>());
+    Rect<DIM,COORD_T> &rect = results.back();
+    rect_from_intervals(DIM, idx, intervals, rect);
+  }
+}
 
 template<int DIM, typename COORD_T>
 /*static*/ void
@@ -990,6 +1076,10 @@ AffineTransformRects<DIM,COORD_T>::cpu_variant(
   derez.deserialize(source_ranges);
   Point<DIM,COORD_T> offset;
   derez.deserialize(offset);
+  Rect<DIM,COORD_T> modulo;
+  derez.deserialize(modulo);
+  bool is_modulo;
+  derez.deserialize(is_modulo);
   LogicalPartition target_ranges_part;
   derez.deserialize(target_ranges_part);
 
@@ -1017,13 +1107,27 @@ AffineTransformRects<DIM,COORD_T>::cpu_variant(
     PointInDomainIterator<1,COORD_T> target_it(
         runtime->get_index_space_domain(ctx, target.get_index_space()));
 
-    while (it.valid())
-    {
-      Rect<DIM,COORD_T> rect = (*it) + offset;
-      fa_range.write(*target_it, rect);
-      it.step();
-      target_it.step();
-    }
+    if (!is_modulo)
+      while (it.valid())
+      {
+        Rect<DIM,COORD_T> rect = (*it) + offset;
+        fa_range.write(*target_it, rect);
+        it.step();
+        target_it.step();
+      }
+    else
+      while (it.valid())
+      {
+        Rect<DIM,COORD_T> rect = (*it) + offset;
+        std::vector<Rect<DIM,COORD_T> > rects;
+        compute_modulo(rects, rect, modulo);
+        for (unsigned idx = 0; idx < rects.size(); ++idx)
+        {
+          fa_range.write(*target_it, rects[idx]);
+          target_it.step();
+        }
+        it.step();
+      }
 
     while (target_it.valid())
     {
@@ -1058,8 +1162,11 @@ legion_index_partition_create_by_affine_image(
   IndexPartition projection = CObjectWrapper::unwrap(projection_);
   // TODO: Need to handle modulo operator
   DomainPoint offset = CObjectWrapper::unwrap(descriptor.offset);
+  Domain modulo = CObjectWrapper::unwrap(descriptor.modulo);
+  bool is_modulo = descriptor.is_modulo;
   assert(handle.get_dim() == projection.get_dim());
   assert(projection.get_dim() == offset.get_dim());
+  assert(!is_modulo || projection.get_dim() == modulo.get_dim());
 
   // We compute an affine image using partition by image range in these steps:
   // 1) Find the maximum M of the number of dense rectangles in each subregion
@@ -1102,6 +1209,8 @@ legion_index_partition_create_by_affine_image(
     }
 #undef GENERATE_CASE
   }
+  if (is_modulo)
+    max_num_rectangles *= std::pow(2, modulo.get_dim());
 
   // Step 2
   size_t size_temp_region = num_colors * max_num_rectangles;
@@ -1143,15 +1252,17 @@ legion_index_partition_create_by_affine_image(
     runtime->get_logical_partition(ctx, temp_lr, temp_ip);
 
   // Step 4
-#define GENERATE_CASE(DIM)                             \
-  case DIM:                                            \
-    {                                                  \
-      Point<DIM,coord_t> o = offset;                   \
-      IndexPartitionT<DIM,coord_t> p(projection);      \
-      AffineTransformRects<DIM,coord_t>                \
-        launcher(p, o, temp_lr, temp_lp, temp_fid);    \
-      Future f = runtime->execute_task(ctx, launcher); \
-      break;                                           \
+#define GENERATE_CASE(DIM)                                        \
+  case DIM:                                                       \
+    {                                                             \
+      Point<DIM,coord_t> o = offset;                              \
+      Rect<DIM,coord_t> m;                                        \
+      if (is_modulo) m = modulo;                                  \
+      IndexPartitionT<DIM,coord_t> p(projection);                 \
+      AffineTransformRects<DIM,coord_t>                           \
+        launcher(p, o, m, is_modulo, temp_lr, temp_lp, temp_fid); \
+      Future f = runtime->execute_task(ctx, launcher);            \
+      break;                                                      \
     }
   switch (projection.get_dim())
   {

@@ -154,6 +154,8 @@ legion_terra_task_launcher_has_field(
 
 typedef struct regent_affine_descriptor_t {
   legion_domain_point_t offset;
+  legion_domain_t modulo;
+  bool is_modulo;
 } regent_affine_descriptor_t;
 
 void
