@@ -106,19 +106,22 @@ local function add_task(cx, call)
     return
   end
   local params = task:get_param_symbols()
-  local region_params = data.filter(
-    function(param) return std.is_region(param:gettype()) end,
+  local function is_mappable_type(t)
+    return std.is_region(t) or std.is_rect_type(t)
+  end
+  local mappable_params = data.filter(
+    function(param) return is_mappable_type(param:gettype()) end,
     params)
-  local region_args = data.filter(
-    function(arg) return std.is_region(std.as_read(arg.expr_type)) end,
+  local mappable_args = data.filter(
+    function(arg) return is_mappable_type(std.as_read(arg.expr_type)) end,
     call.args)
-  local region_arg_symbols = region_args:map(function(arg)
+  local mappable_arg_symbols = mappable_args:map(function(arg)
     assert(arg:is(ast.typed.expr.ID))
     return arg.value
   end)
-  assert(#region_params == #region_arg_symbols)
+  assert(#mappable_params == #mappable_arg_symbols)
   local mapping = data.newmap()
-  data.zip(region_params, region_arg_symbols):map(function(pair)
+  data.zip(mappable_params, mappable_arg_symbols):map(function(pair)
     local param, arg = unpack(pair)
     mapping[param] = arg
   end)
@@ -516,16 +519,25 @@ local function create_image_partition(variable, region_symbol, src_partition, in
       span = ast.trivial_span(),
       annotations = ast.default_annotations(),
     })
-    local offset = terralib.newlist({unpack(info.info)})
+    local offset = nil
+    local modulo = false
+    if std.is_symbol(info.info[#info.info]) then
+      offset = terralib.newlist({unpack(info.info:slice(1, #info.info - 1))})
+      modulo = info.info[#info.info]
+    else
+      offset = terralib.newlist({unpack(info.info)})
+    end
     local index_type = std["int" .. #offset .. "d"]
+    local rect_type = std["rect" .. #offset .. "d"]
+    local desc = ast.typed.expr.ID {
+      value = arg_symbols[5],
+      expr_type = std.rawref(&arg_symbols[5]:gettype()),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    }
     stats:insert(ast.typed.stat.Assignment {
       lhs = ast.typed.expr.FieldAccess {
-        value = ast.typed.expr.ID {
-          value = arg_symbols[5],
-          expr_type = std.rawref(&arg_symbols[5]:gettype()),
-          span = ast.trivial_span(),
-          annotations = ast.default_annotations(),
-        },
+        value = desc,
         field_name = "offset",
         expr_type = std.rawref(&c.legion_domain_point_t),
         span = ast.trivial_span(),
@@ -558,6 +570,44 @@ local function create_image_partition(variable, region_symbol, src_partition, in
           annotations = ast.default_annotations(),
         },
         expr_type = index_type,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      metadata = false,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    if modulo then
+      stats:insert(ast.typed.stat.Assignment {
+        lhs = ast.typed.expr.FieldAccess {
+          value = desc,
+          field_name = "modulo",
+          expr_type = std.rawref(&c.legion_domain_t),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        rhs = ast.typed.expr.ID {
+          value = modulo,
+          expr_type = rect_type,
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        metadata = false,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      })
+    end
+    stats:insert(ast.typed.stat.Assignment {
+      lhs = ast.typed.expr.FieldAccess {
+        value = desc,
+        field_name = "is_modulo",
+        expr_type = std.rawref(&bool),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      rhs = ast.typed.expr.Constant {
+        value = modulo and true,
+        expr_type = bool,
         span = ast.trivial_span(),
         annotations = ast.default_annotations(),
       },
@@ -1138,8 +1188,6 @@ function solver_context:synthesize_partitions(color_space_symbol)
             find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
           end
 
-          assert(not (info:is_affine() and std.is_symbol(info.info[#info.info])),
-                 "not supported yet")
           local dst_partition = self.constraints:get_partition(dst_range)
           local partition_stats =
             create_image_partition(dst_range, dst_partition.region, src_range, info)

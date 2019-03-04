@@ -50,6 +50,8 @@ function parallel_task_context.new(task)
 
     loop_ranges              = data.newmap(),
 
+    params                   = hash_set.from_list(task.prototype:get_param_symbols()),
+
     -- Complexity of the system of constraints is a pair of
     --  # of subset/image/analytic constraints,
     --  # of distinct field accesses
@@ -205,6 +207,10 @@ function parallel_task_context:add_loop_range(loop_var, range)
   self.loop_ranges[loop_var] = range
 end
 
+function parallel_task_context:is_param(symbol)
+  return self.params:has(symbol)
+end
+
 local function unreachable(cx, node) assert(false) end
 
 local infer_constraints = {}
@@ -265,25 +271,19 @@ end
 
 local function extract_offset(cx, expr, positive)
   if expr:is(ast.typed.expr.Binary) then
-    local lhs_range, lhs_offset = extract_offset(cx, expr.lhs, positive)
-    if expr.op == "-" then positive = not positive end
-    local rhs_range, rhs_offset = extract_offset(cx, expr.rhs, positive)
-    if (expr.op == "%" or expr.op == "+" or expr.op == "-") and rhs_range == nil then
-      return lhs_range, lhs_offset == nil and rhs_offset or lhs_offset .. rhs_offset
-    end
-  elseif expr:is(ast.typed.expr.FieldAccess) then
-    if std.is_rect_type(expr.expr_type) and expr.field_name == "bounds" and
-       std.is_ispace(std.as_read(expr.value.expr_type))
-    then
-      local base = expr.value
-      if base:is(ast.typed.expr.ID) then
-        return nil, data.newtuple(base.value)
-      elseif base:is(ast.typed.expr.FieldAccess) and
-             base.field_name == "ispace" and
-             base.value:is(ast.typed.expr.ID)
+    if expr.op == "%" then
+      local lhs_range, lhs_offset = extract_offset(cx, expr.lhs, positive)
+      if expr.rhs:is(ast.typed.expr.ID) and cx:is_param(expr.rhs.value) and
+         std.is_rect_type(std.as_read(expr.rhs.expr_type))
       then
-        assert(std.is_region(std.as_read(base.value.expr_type)))
-        return nil, data.newtuple(base.value.value)
+        return lhs_range, lhs_offset .. data.newtuple(expr.rhs.value)
+      end
+    elseif expr.op == "+" or expr.op == "-" then
+      local lhs_range, lhs_offset = extract_offset(cx, expr.lhs, positive)
+      if expr.op == "-" then positive = not positive end
+      local rhs_range, rhs_offset = extract_offset(cx, expr.rhs, positive)
+      if lhs_range ~= ranges.range_complex and rhs_offset ~= nil then
+        return lhs_range, rhs_offset
       end
     end
   elseif expr:is(ast.typed.expr.ID) then
