@@ -1407,18 +1407,41 @@ function ref:reduce(cx, value, op, expr_type, atomic)
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
-         elseif cx.variant:is_openmp() and atomic then
-           return quote
-             [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
-           end
-         elseif cx.variant:is_cuda() and atomic then
-           return quote
-             [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+         -- TODO: Users should be able to override atomic reduction operator for non-primitive types
+         elseif expr_type:isarray() then
+           local N = expr_type.N
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               for i = 0, N do
+                 [openmphelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+               end
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               for i = 0, N do
+                 [cudahelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+               end
+             end
+           else
+             return quote
+               for i = 0, N do
+                 [field_value][i] = [std.quote_binary_op(fold_op, `(field_value[i]), `(result[i]))]
+               end
+             end
            end
          else
-           return quote
-             [field_value] = [std.quote_binary_op(
-                                fold_op, field_value, result)]
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           else
+             return quote
+               [field_value] = [std.quote_binary_op(fold_op, field_value, result)]
+             end
            end
          end
       end)]

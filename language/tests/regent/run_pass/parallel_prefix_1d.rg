@@ -15,7 +15,7 @@
 -- runs-with:
 -- [
 --   ["-fbounds-checks", "0"],
---   ["-fbounds-checks", "1"]
+--   ["-fbounds-checks", "1", "-fcuda", "0"]
 -- ]
 
 import "regent"

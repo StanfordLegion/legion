@@ -2957,6 +2957,21 @@ local function binary_op_type(op)
     local valid, result_type = pcall(test)
 
     if not valid then
+      if lhs_type:isarray() and lhs_type == rhs_type then
+        local function test()
+          local terra query(lhs : lhs_type, rhs : rhs_type)
+            var result : lhs_type
+            for i = 0, lhs_type.N do
+              result[i] = [ std.quote_binary_op(op, `(lhs[i]), `(rhs[i])) ]
+            end
+            return result
+          end
+          return query:gettype().returntype
+        end
+        valid, result_type = pcall(test)
+      end
+    end
+    if not valid then
       report.error(node, "type mismatch between " .. tostring(lhs_type) ..
                   " and " .. tostring(rhs_type))
     end
@@ -4062,10 +4077,18 @@ function type_check.top_task(cx, node)
     for _, privilege in ipairs(privilege_list) do
       local privilege_type = privilege.privilege
       local region = privilege.region
+      local region_type = region:gettype()
       local field_path = privilege.field_path
-      assert(std.type_supports_privileges(region:gettype()))
-      std.add_privilege(cx, privilege_type, region:gettype(), field_path)
-      cx:intern_region(region:gettype())
+      assert(std.type_supports_privileges(region_type))
+      if std.is_reduce(privilege_type) then
+        local _, field_types =
+          std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
+        field_types:map(function(field_type)
+          std.update_reduction_op(privilege_type.op, field_type)
+        end)
+      end
+      std.add_privilege(cx, privilege_type, region_type, field_path)
+      cx:intern_region(region_type)
     end
   end
   prototype:set_privileges(privileges)
