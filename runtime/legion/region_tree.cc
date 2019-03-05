@@ -1202,8 +1202,7 @@ namespace Legion {
     {
       PartitionNode *parent_node = get_node(parent);
       IndexSpaceNode *color_space = parent_node->row_source->color_space;
-      LegionColor color = color_space->linearize_color(realm_color, type_tag);
-      return parent_node->has_color(color);
+      return color_space->contains_point(realm_color, type_tag);
     }
 
     //--------------------------------------------------------------------------
