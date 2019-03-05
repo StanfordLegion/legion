@@ -260,45 +260,58 @@ local function max_value(value_type)
     return terralib.cast(value_type, math.huge)
   end
 end
-
-base.reduction_ops = terralib.newlist({
-    {op = "+", name = "plus", init = zero},
-    {op = "-", name = "minus", init = zero},
-    {op = "*", name = "times", init = one},
-    {op = "/", name = "divide", init = one},
-    {op = "max", name = "max", init = min_value},
-    {op = "min", name = "min", init = max_value},
-})
-
-base.reduction_types = terralib.newlist({
-    float,
-    double,
-    int32,
-    int64,
-    uint32,
-    uint64,
-})
-
-base.reduction_op_init = {}
-for _, op in ipairs(base.reduction_ops) do
-  base.reduction_op_init[op.op] = {}
-  for _, op_type in ipairs(base.reduction_types) do
-    base.reduction_op_init[op.op][op_type] = op.init(op_type)
+local function lift(fn)
+  return function(value_type)
+    if value_type:isarray() then
+      return `(array([data.range(value_type.N):map(function(_)
+        return lift(fn)(value_type.type)
+      end)]))
+    else
+      return fn(value_type)
+    end
   end
 end
 
--- Prefill the table of reduction op IDs.
+base.reduction_ops = data.map_from_table({
+    ["+"] =   { name = "plus",   init = lift(zero)      },
+    ["-"] =   { name = "minus",  init = lift(zero)      },
+    ["*"] =   { name = "times",  init = lift(one)       },
+    ["/"] =   { name = "divide", init = lift(one)       },
+    ["max"] = { name = "max",    init = lift(min_value) },
+    ["min"] = { name = "min",    init = lift(max_value) },
+})
 base.reduction_op_ids = {}
+base.reduction_op_init = {}
+base.registered_reduction_ops = terralib.newlist()
 do
   local base_op_id = 101
-  for _, op in ipairs(base.reduction_ops) do
-    for _, op_type in ipairs(base.reduction_types) do
-      local op_id = base_op_id
-      base_op_id = base_op_id + 1
-      if not base.reduction_op_ids[op.op] then
-        base.reduction_op_ids[op.op] = {}
-      end
-      base.reduction_op_ids[op.op][op_type] = op_id
+  function base.update_reduction_op(op, op_type, init)
+    if base.reduction_op_ids[op] ~= nil and
+       base.reduction_op_ids[op][op_type] ~= nil
+    then
+      return
+    end
+    local op_id = base_op_id
+    base_op_id = base_op_id + 1
+    if not base.reduction_op_ids[op] then
+      base.reduction_op_ids[op] = {}
+    end
+    if not base.reduction_op_init[op] then
+      base.reduction_op_init[op] = {}
+    end
+    base.reduction_op_ids[op][op_type] = op_id
+    base.reduction_op_init[op][op_type] = init or base.reduction_ops[op].init(op_type)
+    base.registered_reduction_ops:insert({op, op_type})
+  end
+
+  -- Prefill the table of reduction op IDs for primitive types.
+  local reduction_ops =
+    terralib.newlist({ "+", "-", "*", "/", "max", "min" })
+  local primitive_reduction_types =
+    terralib.newlist({ float, double, int32, int64, uint32, uint64 })
+  for _, op in ipairs(reduction_ops) do
+    for _, op_type in ipairs(primitive_reduction_types) do
+      base.update_reduction_op(op, op_type)
     end
   end
 end

@@ -470,8 +470,10 @@ end
 
 std.reduction_op_init = base.reduction_op_init
 std.reduction_op_ids = base.reduction_op_ids
+std.update_reduction_op = base.update_reduction_op
 std.is_reduction_op = base.is_reduction_op
 std.get_reduction_op = base.get_reduction_op
+std.get_reduction_op_name = base.get_reduction_op_name
 std.meet_privilege = base.meet_privilege
 std.meet_coherence = base.meet_coherence
 std.meet_flag = base.meet_flag
@@ -3666,14 +3668,22 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
   end
 
   local reduction_registrations = terralib.newlist()
-  for _, op in ipairs(base.reduction_ops) do
-    for _, op_type in ipairs(base.reduction_types) do
-      local register = c["register_reduction_" .. op.name .. "_" .. tostring(op_type)]
-      local op_id = std.reduction_op_ids[op.op][op_type]
-      reduction_registrations:insert(
-        quote
-          [register](op_id)
-        end)
+  for _, pair in ipairs(base.registered_reduction_ops) do
+    local op, op_type = unpack(pair)
+    local op_name = base.reduction_ops[op].name
+    local register = nil
+    if op_type:isprimitive() then
+      register = c["register_reduction_" .. op_name .. "_" .. tostring(op_type)]
+      reduction_registrations:insert(quote
+        [register]([ base.reduction_op_ids[op][op_type] ])
+      end)
+    elseif op_type:isarray() then
+      register = c["register_array_reduction_" .. op_name .. "_" .. tostring(op_type.type)]
+      reduction_registrations:insert(quote
+        [register]([ base.reduction_op_ids[op][op_type] ], [op_type.N])
+      end)
+    else
+      assert(false)
     end
   end
 
@@ -3703,13 +3713,12 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
   local layout_reduction = data.new_recursive_map(2)
   for dim = 1, max_dim do
-    for _, op in ipairs(base.reduction_ops) do
-      for _, op_type in ipairs(base.reduction_types) do
-        local op_id = std.reduction_op_ids[op.op][op_type]
-        local layout_id, layout_actions = make_reduction_layout(dim, op_id)
-        layout_registrations:insert(layout_actions)
-        layout_reduction[dim][op.op][op_type] = layout_id
-      end
+    for _, pair in ipairs(base.registered_reduction_ops) do
+      local op, op_type = unpack(pair)
+      local op_id = std.reduction_op_ids[op][op_type]
+      local layout_id, layout_actions = make_reduction_layout(dim, op_id)
+      layout_registrations:insert(layout_actions)
+      layout_reduction[dim][op][op_type] = layout_id
     end
   end
 

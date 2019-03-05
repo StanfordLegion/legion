@@ -69,13 +69,7 @@ local FAST_ATOMICS = {
 omp.generate_atomic_update = terralib.memoize(function(op, typ)
   -- Build a C wrapper to use atomic intrinsics in LLVM
   local atomic_update = nil
-  local op_name = nil
-  for idx = 1, #base.reduction_ops do
-    if base.reduction_ops[idx].op == op then
-      op_name = base.reduction_ops[idx].name
-      break
-    end
-  end
+  local op_name = base.reduction_ops[op].name
   assert(op_name ~= nil)
   -- Integer types
   if typ:isintegral() then
