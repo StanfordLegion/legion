@@ -290,6 +290,8 @@ namespace Realm {
 
   template <int M, int N, typename T, typename T2> __CUDA_HD__
   Point<M, T> operator*(const Matrix<M, N, T>& m, const Point<N, T2>& p);
+  template <int M, int P, int N, typename T, typename T2> __CUDA_HD__
+  Matrix<M, N, T> operator*(const Matrix<M, P, T>& m, const Matrix<P, N, T2>& n);
 
   template <int N, typename T>
   class PointInRectIterator {
