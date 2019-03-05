@@ -411,8 +411,7 @@ end
 
 cudahelper.generate_buffer_init_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
-  local op_name = data.filter(function(tuple) return tuple.op == op end,
-    base.reduction_ops)[1].name
+  local op_name = base.reduction_ops[op].name
   local kernel_id = internal_kernel_id
   internal_kernel_id = internal_kernel_id - 1
   local kernel_name =
@@ -432,8 +431,7 @@ end)
 
 cudahelper.generate_buffer_reduction_kernel = terralib.memoize(function(type, op)
   local value = base.reduction_op_init[op][type]
-  local op_name = data.filter(function(tuple) return tuple.op == op end,
-    base.reduction_ops)[1].name
+  local op_name = base.reduction_ops[op].name
   local kernel_id = internal_kernel_id
   internal_kernel_id = internal_kernel_id - 1
   local kernel_name =

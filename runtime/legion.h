@@ -6813,17 +6813,38 @@ namespace Legion {
                                                  int legion_participants = 1);
 
       /**
-       * Register a reduction operation with the runtime.  Note that the
+       * Register a reduction operation with the runtime. Note that the
        * reduction operation template type must conform to the specification
-       * for a reduction operation outlined in the low-level runtime 
+       * for a reduction operation outlined in the Realm runtime 
        * interface.  Reduction operations can be used either for reduction
        * privileges on a region or for performing reduction of values across
-       * index space task launches.  The reduction operation ID zero is
+       * index space task launches. The reduction operation ID zero is
        * reserved for runtime use.
        * @param redop_id ID at which to register the reduction operation
        */
       template<typename REDOP>
       static void register_reduction_op(ReductionOpID redop_id);
+
+      /**
+       * Register an untyped reduction operation with the runtime. Note 
+       * that the reduction operation template type must conform to the 
+       * specification for a reduction operation outlined in the Realm runtime 
+       * interface. Reduction operations can be used either for reduction
+       * privileges on a region or for performing reduction of values across
+       * index space task launches. The reduction operation ID zero is
+       * reserved for runtime use. The runtime will take ownership of this
+       * operation and delete it at the end of the program.
+       * @param redop_id ID at which to register the reduction opeation
+       * @param op the untyped reduction operator (legion claims ownership)
+       * @param init_fnptr optional function for initializing the reduction
+       *        type of this reduction operator if they also support compression
+       * @pram fold_fnptr optional function for folding reduction types of this
+       *        reduction operator if they also support compression 
+       */
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        ReductionOp *op,
+                                        SerdezInitFnptr init_fnptr = NULL,
+                                        SerdezFoldFnptr fold_fnptr = NULL);
 
       /**
        * Return a pointer to a given reduction operation object.

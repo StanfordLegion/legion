@@ -1407,18 +1407,41 @@ function ref:reduce(cx, value, op, expr_type, atomic)
                [quote_vector_binary_op(fold_op, sym, result, expr_type)],
                {align = [align]})
            end
-         elseif cx.variant:is_openmp() and atomic then
-           return quote
-             [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
-           end
-         elseif cx.variant:is_cuda() and atomic then
-           return quote
-             [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+         -- TODO: Users should be able to override atomic reduction operator for non-primitive types
+         elseif expr_type:isarray() then
+           local N = expr_type.N
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               for i = 0, N do
+                 [openmphelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+               end
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               for i = 0, N do
+                 [cudahelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+               end
+             end
+           else
+             return quote
+               for i = 0, N do
+                 [field_value][i] = [std.quote_binary_op(fold_op, `(field_value[i]), `(result[i]))]
+               end
+             end
            end
          else
-           return quote
-             [field_value] = [std.quote_binary_op(
-                                fold_op, field_value, result)]
+           if cx.variant:is_openmp() and atomic then
+             return quote
+               [openmphelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           elseif cx.variant:is_cuda() and atomic then
+             return quote
+               [cudahelper.generate_atomic_update(fold_op, value_type)](&[field_value], result)
+             end
+           else
+             return quote
+               [field_value] = [std.quote_binary_op(fold_op, field_value, result)]
+             end
            end
          end
       end)]
@@ -9605,23 +9628,33 @@ local function generate_parallel_prefix_bounds_checks(cx, node, lhs_region, rhs_
   if not bounds_checks then
     return quote end
   else
-    local lhs_ispace = cx:ispace(lhs_region:ispace())
-    local rhs_ispace = cx:ispace(rhs_region:ispace())
-    local ispaces = terralib.newlist({lhs_ispace, rhs_ispace})
-    local dense_checks = ispaces:map(function(is)
-      return quote
-        do
-          var domain = c.legion_index_space_get_domain([cx.runtime], [is.index_space])
-          std.assert_error(c.legion_domain_is_dense(domain),
-              [get_source_location(node) .. ": parallel prefix operator supports only dense regions"])
-        end
+    local lhs_r = cx:region(lhs_region)
+    local rhs_r = cx:region(rhs_region)
+    local lhs_is = terralib.newsymbol(c.legion_index_space_t, "lhs_is")
+    local rhs_is = terralib.newsymbol(c.legion_index_space_t, "rhs_is")
+    local region_types = terralib.newlist({lhs_region, rhs_region})
+    local regions = terralib.newlist({lhs_r, rhs_r})
+    local ispaces = terralib.newlist({lhs_is, rhs_is})
+    local dense_checks = quote end
+    local bounds = data.zip(region_types, regions, ispaces):map(function(tuple)
+      local region, r, is = unpack(tuple)
+      local bounds_actions, domain, bounds = index_space_bounds(cx, is, region:ispace())
+      dense_checks = quote
+        [dense_checks];
+        var [is] = [r.logical_region].impl.index_space
+        [bounds_actions];
+        std.assert_error(c.legion_domain_is_dense([domain]),
+            [get_source_location(node) .. ": parallel prefix operator supports only dense regions"])
       end
+      return bounds
     end)
     return quote
-      [dense_checks];
-      std.assert_error([lhs_ispace.bounds] == [rhs_ispace.bounds],
-          [get_source_location(node) ..
-          ": the source and the target of a parallel prefix operator must have the same size"])
+      do
+        [dense_checks];
+        std.assert_error([bounds[1]] == [bounds[2]],
+            [get_source_location(node) ..
+            ": the source and the target of a parallel prefix operator must have the same size"])
+      end
     end
   end
 end

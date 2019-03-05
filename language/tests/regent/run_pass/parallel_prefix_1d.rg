@@ -12,6 +12,12 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [
+--   ["-fbounds-checks", "0"],
+--   ["-fbounds-checks", "1", "-fcuda", "0"]
+-- ]
+
 import "regent"
 
 local DEBUG = false
