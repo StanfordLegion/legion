@@ -5314,6 +5314,12 @@ legion_runtime_set_top_level_task_id(legion_task_id_t top_id)
   Runtime::set_top_level_task_id(top_id);
 }
 
+size_t
+legion_runtime_get_maximum_dimension(void)
+{
+  return Runtime::get_maximum_dimension();
+}
+
 const legion_input_args_t
 legion_runtime_get_input_args(void)
 {

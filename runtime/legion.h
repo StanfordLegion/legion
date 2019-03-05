@@ -6782,6 +6782,13 @@ namespace Legion {
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
 
       /**
+       * Return the maximum number of dimensions that Legion was
+       * configured to support in this build.
+       * @return the maximum number of dimensions that Legion supports
+       */
+      static size_t get_maximum_dimension(void);
+
+      /**
        * Configre the runtime for interoperability with MPI. This call
        * should be made once in each MPI process before invoking the 
        * 'start' function when running Legion within the same process 
