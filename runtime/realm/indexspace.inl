@@ -580,6 +580,19 @@ namespace Realm {
     return out;
   }
 
+  template <int M, int P, int N, typename T, typename T2> __CUDA_HD__
+  inline Matrix<M, N, T> operator*(const Matrix<M, P, T>& m, const Matrix<P, N, T2>& n)
+  {
+    Matrix<M,N,T> out;
+    for(int i = 0; i < M; i++)
+      for(int j = 0; j < N; j++) {
+        out[i][j] = m[i][0] * n[0][j];
+        for(int k = 1; k < P; k++)
+          out[i][j] += m[i][k] * n[k][j];
+      }
+    return out;
+  }
+
   template <int M, int N, typename T> __CUDA_HD__
   inline Point<N, T>& Matrix<M,N,T>::operator[](int index)
   {
