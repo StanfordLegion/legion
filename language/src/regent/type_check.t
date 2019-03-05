@@ -2918,7 +2918,22 @@ local function unary_op_type(op)
     local valid, result_type = pcall(test)
 
     if not valid then
-      report.error(node, "invalid argument to unary operator " .. tostring(rhs_type))
+      if not rhs_type:isarray() then
+        report.error(node, "invalid argument to unary operator " .. tostring(rhs_type))
+      end
+
+      local function test()
+        local terra query(rhs : rhs_type.type)
+          return [ std.quote_unary_op(op, rhs) ]
+        end
+        return query:gettype().returntype
+      end
+
+      local valid, result_type = pcall(test)
+      if not valid then
+        report.error(node, "invalid argument to unary operator " .. tostring(rhs_type))
+      end
+      return result_type[rhs_type.N]
     end
 
     return result_type
@@ -2957,23 +2972,24 @@ local function binary_op_type(op)
     local valid, result_type = pcall(test)
 
     if not valid then
-      if lhs_type:isarray() and lhs_type == rhs_type then
-        local function test()
-          local terra query(lhs : lhs_type, rhs : rhs_type)
-            var result : lhs_type
-            for i = 0, lhs_type.N do
-              result[i] = [ std.quote_binary_op(op, `(lhs[i]), `(rhs[i])) ]
-            end
-            return result
-          end
-          return query:gettype().returntype
-        end
-        valid, result_type = pcall(test)
+      if not (lhs_type:isarray() and std.type_eq(lhs_type, rhs_type)) then
+        report.error(node, "type mismatch between " .. tostring(lhs_type) ..
+                    " and " .. tostring(rhs_type))
       end
-    end
-    if not valid then
-      report.error(node, "type mismatch between " .. tostring(lhs_type) ..
-                  " and " .. tostring(rhs_type))
+
+      local function test()
+        local terra query(lhs : lhs_type.type, rhs : rhs_type.type)
+          return [ std.quote_binary_op(op, lhs, rhs) ]
+        end
+        return query:gettype().returntype
+      end
+
+      local valid, result_type = pcall(test)
+      if not valid then
+        report.error(node, "type mismatch between " .. tostring(lhs_type) ..
+                    " and " .. tostring(rhs_type))
+      end
+      return result_type[lhs_type.N]
     end
 
     return result_type

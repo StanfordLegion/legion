@@ -7136,10 +7136,25 @@ function codegen.expr_unary(cx, node)
       [rhs.actions];
       [emit_debuginfo(node)]
     end
-    return values.value(
-      node,
-      expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
-      expr_type)
+    if std.as_read(node.rhs.expr_type):isarray() then
+      local result = terralib.newsymbol(expr_type, "result")
+      actions = quote
+        [actions];
+        var [result]
+        for i = 0, [expr_type.N] do
+          [result][i] = [std.quote_unary_op(node.op, `([rhs.value][i]))]
+        end
+      end
+      return values.value(
+        node,
+        expr.just(actions, result),
+        expr_type)
+    else
+      return values.value(
+        node,
+        expr.once_only(actions, std.quote_unary_op(node.op, rhs.value), expr_type),
+        expr_type)
+    end
   end
 end
 
@@ -7308,10 +7323,29 @@ function codegen.expr_binary(cx, node)
         expr_type)
     else
     end
-    return values.value(
-      node,
-      expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value), expr_type),
-      expr_type)
+    if std.as_read(lhs_type):isarray() and
+       std.as_read(rhs_type):isarray() and
+       node.op ~= "-"
+    then
+      assert(expr_type:isarray())
+      local result = terralib.newsymbol(expr_type, "result")
+      actions = quote
+        [actions];
+        var [result]
+        for i = 0, [expr_type.N] do
+          [result][i] = [std.quote_binary_op(node.op, `([lhs.value][i]), `([rhs.value][i]))]
+        end
+      end
+      return values.value(
+        node,
+        expr.just(actions, result),
+        expr_type)
+    else
+      return values.value(
+        node,
+        expr.once_only(actions, std.quote_binary_op(node.op, lhs.value, rhs.value), expr_type),
+        expr_type)
+    end
   end
 end
 

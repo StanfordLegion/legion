@@ -4002,6 +4002,12 @@ extern "C" {
   legion_runtime_set_top_level_task_id(legion_task_id_t top_id);
 
   /**
+   * @see Legion::Runtime::get_maximum_dimension()
+   */
+  size_t
+  legion_runtime_get_maximum_dimension(void);
+
+  /**
    * @see Legion::Runtime::get_input_args()
    */
   const legion_input_args_t
