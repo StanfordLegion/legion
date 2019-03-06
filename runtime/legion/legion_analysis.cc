@@ -5195,90 +5195,97 @@ namespace Legion {
     {
       if (!is_logical_owner())
         return;
-      // Check for any disjoint pieces
-      if (!disjoint_partition_refinements.empty())
+      bool first_pass = true;
+      do 
       {
-        FieldMask disjoint_overlap = 
-          disjoint_partition_refinements.get_valid_mask() & mask;
-        if (!!disjoint_overlap)
+        // If this isn't the first pass then we need to wait
+        if (!first_pass)
         {
-          std::vector<DisjointPartitionRefinement*> to_delete;
-          for (FieldMaskSet<DisjointPartitionRefinement>::iterator it = 
-                disjoint_partition_refinements.begin(); it !=
-                disjoint_partition_refinements.end(); it++)
+#ifdef DEBUG_LEGION
+          assert(refinement_event.exists());
+#endif
+          const RtEvent wait_on = refinement_event;
+          eq.release();
+          if (!wait_on.has_triggered())
+            wait_on.wait();
+          eq.reacquire();
+          // When we wake up we have to do all the checks again
+          // in case there were fields that weren't refined before
+          // but are (partially or being) refined now
+        }
+        else
+          first_pass = false;
+        // Check for any disjoint pieces
+        if (!disjoint_partition_refinements.empty())
+        {
+          FieldMask disjoint_overlap = 
+            disjoint_partition_refinements.get_valid_mask() & mask;
+          if (!!disjoint_overlap)
           {
-            const FieldMask overlap = it->second & disjoint_overlap;
-            if (!overlap)
-              continue;
-            finalize_disjoint_refinement(it->first, overlap);
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-            disjoint_overlap -= overlap;
-            if (!disjoint_overlap)
-              break;
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<DisjointPartitionRefinement*>::const_iterator it =
-                  to_delete.begin(); it != to_delete.end(); it++)
+            std::vector<DisjointPartitionRefinement*> to_delete;
+            for (FieldMaskSet<DisjointPartitionRefinement>::iterator it = 
+                  disjoint_partition_refinements.begin(); it !=
+                  disjoint_partition_refinements.end(); it++)
             {
-              disjoint_partition_refinements.erase(*it);
-              delete (*it);
+              const FieldMask overlap = it->second & disjoint_overlap;
+              if (!overlap)
+                continue;
+              finalize_disjoint_refinement(it->first, overlap);
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+              disjoint_overlap -= overlap;
+              if (!disjoint_overlap)
+                break;
             }
-            disjoint_partition_refinements.tighten_valid_mask();
+            if (!to_delete.empty())
+            {
+              for (std::vector<DisjointPartitionRefinement*>::const_iterator 
+                    it = to_delete.begin(); it != to_delete.end(); it++)
+              {
+                disjoint_partition_refinements.erase(*it);
+                delete (*it);
+              }
+              disjoint_partition_refinements.tighten_valid_mask();
+            }
           }
         }
-      }
-      // Check for unrefined remainder pieces too
-      if (!unrefined_remainders.empty())
-      {
-        FieldMask unrefined_overlap = 
-          unrefined_remainders.get_valid_mask() & mask;
-        if (!!unrefined_overlap)
+        // Check for unrefined remainder pieces too
+        if (!unrefined_remainders.empty())
         {
-          std::vector<IndexSpaceExpression*> to_delete;
-          for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
-                unrefined_remainders.begin(); it != 
-                unrefined_remainders.end(); it++)
+          FieldMask unrefined_overlap = 
+            unrefined_remainders.get_valid_mask() & mask;
+          if (!!unrefined_overlap)
           {
-            const FieldMask overlap = it->second & unrefined_overlap;
-            if (!overlap)
-              continue;
-            add_pending_refinement(it->first, overlap, NULL/*node*/, source); 
-            it.filter(overlap);
-            if (!it->second)
-              to_delete.push_back(it->first);
-            unrefined_overlap -= overlap;
-            if (!unrefined_overlap)
-              break;
-          }
-          if (!to_delete.empty())
-          {
-            for (std::vector<IndexSpaceExpression*>::const_iterator it = 
-                  to_delete.begin(); it != to_delete.end(); it++)
-              unrefined_remainders.erase(*it);
-            unrefined_remainders.tighten_valid_mask();
+            std::vector<IndexSpaceExpression*> to_delete;
+            for (FieldMaskSet<IndexSpaceExpression>::iterator it = 
+                  unrefined_remainders.begin(); it != 
+                  unrefined_remainders.end(); it++)
+            {
+              const FieldMask overlap = it->second & unrefined_overlap;
+              if (!overlap)
+                continue;
+              add_pending_refinement(it->first, overlap, NULL/*node*/, source); 
+              it.filter(overlap);
+              if (!it->second)
+                to_delete.push_back(it->first);
+              unrefined_overlap -= overlap;
+              if (!unrefined_overlap)
+                break;
+            }
+            if (!to_delete.empty())
+            {
+              for (std::vector<IndexSpaceExpression*>::const_iterator it = 
+                    to_delete.begin(); it != to_delete.end(); it++)
+                unrefined_remainders.erase(*it);
+              unrefined_remainders.tighten_valid_mask();
+            }
           }
         }
-      }
+      } 
       // See if we need to wait for any refinements to finish
-      if (!(mask * pending_refinements.get_valid_mask()) ||
-              !(mask * refining_fields))
-      {
-#ifdef DEBUG_LEGION
-        assert(refinement_event.exists());
-#endif
-        const RtEvent wait_on = refinement_event;
-        eq.release();
-        if (!wait_on.has_triggered())
-          wait_on.wait();
-        eq.reacquire();
-      }
-#ifdef DEBUG_LEGION
-      assert(mask * refining_fields);
-      assert(mask * pending_refinements.get_valid_mask());
-#endif
+      while (!(mask * pending_refinements.get_valid_mask()) ||
+              !(mask * refining_fields));
     }
 
     //--------------------------------------------------------------------------
