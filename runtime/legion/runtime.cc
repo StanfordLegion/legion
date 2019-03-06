@@ -679,12 +679,8 @@ namespace Legion {
 #endif
       registered_with_runtime = true;
       if (!is_owner())
-      {
         // Send the remote registration notice
         send_remote_registration(creator);
-        // Then send the subscription for this future
-        register_waiter(runtime->address_space);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -16981,9 +16977,12 @@ namespace Legion {
 #endif
           return result;
         }
+        result->record_future_registered(mutator);
         dist_collectables[did] = result;
       }
-      result->record_future_registered(mutator);
+      // If we're not the owner send the subscription message
+      if (!result->is_owner())
+        result->register_waiter(address_space);
       return result;
     }
 
@@ -17030,9 +17029,9 @@ namespace Legion {
 #endif
           return result;
         }
+        result->record_future_map_registered(mutator);
         dist_collectables[did] = result;
       }
-      result->record_future_map_registered(mutator);
       return result;
     }
 
