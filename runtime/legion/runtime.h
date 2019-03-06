@@ -242,10 +242,10 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
+      void register_waiter(AddressSpaceID sid);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
-      void register_waiter(AddressSpaceID sid);
     public:
       void record_future_registered(ReferenceMutator *creator);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
