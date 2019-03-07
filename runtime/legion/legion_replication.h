@@ -1048,6 +1048,7 @@ namespace Legion {
       void set_execution_barrier(RtBarrier execution_barrier);
     protected:
       RtBarrier execution_barrier;
+      bool is_top_level_deletion;
     };
 
     /**

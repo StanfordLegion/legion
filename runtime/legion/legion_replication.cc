@@ -1776,6 +1776,7 @@ namespace Legion {
     {
       activate_deletion();
       execution_barrier = RtBarrier::NO_RT_BARRIER;
+      is_top_level_deletion = false;
     }
 
     //--------------------------------------------------------------------------
@@ -1799,6 +1800,16 @@ namespace Legion {
 #endif
       // We can complete our mapping now and defer our execution as necessary
       complete_mapping();
+      // See if we need to do any tests before actually performing the deletion
+      // since they can race between shards, by doing them here we get them
+      // done before the execution barrier to ensure that everyone is done
+      // performing the tests before any deletion is performed
+      if (kind == INDEX_SPACE_DELETION)
+        is_top_level_deletion = 
+          runtime->forest->is_top_level_index_space(index_space);
+      else if (kind == LOGICAL_REGION_DELETION)
+        is_top_level_deletion = 
+          runtime->forest->is_top_level_region(logical_region);
       // Everyone arrives on our phase barrier with our completion precondition
       Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/,  
                   Runtime::protect_event(completion_precondition));
@@ -1819,60 +1830,52 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Shard 0 will handle all the deletions
-      if (repl_ctx->owner_shard->shard_id > 0)
+      // Shard 0 will handle the actual deletions
+      // The other shards still have to tell the parent context that it
+      // has actually been deleted
+      const bool finalize = (repl_ctx->owner_shard->shard_id == 0);
+      switch (kind)
       {
-        // The other shards still have to tell the parent context that it
-        // has actually been deleted
-        switch (kind)
-        {
-          case INDEX_SPACE_DELETION:
-            {
-              // Only need to tell our parent if it is a top-level index space
-              if (runtime->forest->is_top_level_index_space(index_space))
-                parent_ctx->register_index_space_deletion(index_space,
-                                                          false/*finalize*/);
-              break;
-            }
-          case INDEX_PARTITION_DELETION:
-            {
-              parent_ctx->register_index_partition_deletion(index_part,
-                                                            false/*finalize*/);
-              break;
-            }
-          case FIELD_SPACE_DELETION:
-            {
-              parent_ctx->register_field_space_deletion(field_space,
-                                                        false/*finalize*/);
-              break;
-            }
-          case FIELD_DELETION:
-            {
-              parent_ctx->register_field_deletions(field_space, free_fields,
-                                                   false/*finalize*/);
-              break;
-            }
-          case LOGICAL_REGION_DELETION:
-            {
-              // Only need to tell our parent if it is a top-level region
-              if (runtime->forest->is_top_level_region(logical_region))
-                parent_ctx->register_region_deletion(logical_region,
-                                                    false/*finalize*/);
-              break;
-            }
-          case LOGICAL_PARTITION_DELETION:
-            {
-              // We don't need to register partition deletions explicitly
-              break;
-            }
-          default:
-            assert(false); // should never get here
-        }
-        // We still need to 
-        complete_operation();
+        case INDEX_SPACE_DELETION:
+          {
+            // Only need to tell our parent if it is a top-level index space
+            if (is_top_level_deletion)
+              parent_ctx->register_index_space_deletion(index_space, finalize);
+            break;
+          }
+        case INDEX_PARTITION_DELETION:
+          {
+            parent_ctx->register_index_partition_deletion(index_part, finalize);
+            break;
+          }
+        case FIELD_SPACE_DELETION:
+          {
+            parent_ctx->register_field_space_deletion(field_space, finalize);
+            break;
+          }
+        case FIELD_DELETION:
+          {
+            parent_ctx->register_field_deletions(field_space, free_fields, 
+                                                 finalize);
+            break;
+          }
+        case LOGICAL_REGION_DELETION:
+          {
+            // Only need to tell our parent if it is a top-level region
+            if (is_top_level_deletion)
+              parent_ctx->register_region_deletion(logical_region, finalize);
+            break;
+          }
+        case LOGICAL_PARTITION_DELETION:
+          {
+            // We don't need to register partition deletions explicitly
+            break;
+          }
+        default:
+          assert(false); // should never get here
       }
-      else // Shard 0 does the actual deletion
-        DeletionOp::trigger_complete();
+      // We still need to 
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------
