@@ -1793,10 +1793,6 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(execution_barrier.exists());
-      ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
-      assert(repl_ctx != NULL);
-#else
-      ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // We can complete our mapping now and defer our execution as necessary
       complete_mapping();
@@ -1813,11 +1809,10 @@ namespace Legion {
       // Everyone arrives on our phase barrier with our completion precondition
       Runtime::phase_barrier_arrive(execution_barrier, 1/*count*/,  
                   Runtime::protect_event(completion_precondition));
-      // Shard 0 will defer doing the deletion until it's ready for everyone
-      if (repl_ctx->owner_shard->shard_id == 0)
-        complete_execution(execution_barrier);
-      else
-        complete_execution();
+      // Everyone needs to be ready to delete this before we
+      // actually do the deletion since everyone needs to 
+      // perform their tests before anyone does anything
+      complete_execution(execution_barrier);
     }
 
     //--------------------------------------------------------------------------
@@ -1874,7 +1869,6 @@ namespace Legion {
         default:
           assert(false); // should never get here
       }
-      // We still need to 
       complete_operation();
     }
 
