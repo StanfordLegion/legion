@@ -774,27 +774,15 @@ namespace Legion {
         const ApUserEvent summary;
       };
     public:
-      struct RemoteSet {
-      public:
-        RemoteSet(void)
-          : set(NULL), source(0) { }
-        RemoteSet(EquivalenceSet *s, AddressSpaceID src, const FieldMask &m)
-          : mask(m), set(s), source(src) { }
-      public:
-        FieldMask mask;
-        EquivalenceSet *set;
-        AddressSpaceID source;
-      };
-    public:
       RemoteEqTracker(Runtime *rt);
       RemoteEqTracker(AddressSpaceID prev, AddressSpaceID original, Runtime *rt)
         : previous(prev), original_source(original), runtime(rt) { }
     public:
-      inline void record_remote(EquivalenceSet *set, const FieldMask &mask,
-                                AddressSpaceID owner, AddressSpaceID src)
-        { remote_sets[owner].push_back(RemoteSet(set, src, mask)); }
       inline bool has_remote_sets(void) const
         { return !remote_sets.empty(); }
+      inline void record_remote(EquivalenceSet *set, const FieldMask &mask,
+                                const AddressSpaceID owner)
+        { remote_sets[owner].insert(set, mask); }
     public:
       bool request_remote_instances(FieldMaskSet<LogicalView> &insts,
                                     std::set<RtEvent> &ready_events,
@@ -891,7 +879,8 @@ namespace Legion {
       const AddressSpaceID original_source;
       Runtime *const runtime;
     protected:
-      std::map<AddressSpaceID,LegionVector<RemoteSet>::aligned> remote_sets;
+      LegionMap<AddressSpaceID,
+                FieldMaskSet<EquivalenceSet> >::aligned remote_sets;
     protected:
       LocalLock *remote_lock;
       std::set<RtEvent> *sync_events;
