@@ -6683,7 +6683,6 @@ namespace Legion {
         for (FieldMaskSet<CopyFillAggregator>::const_iterator it =
               update_guards.begin(); it != update_guards.end(); it++)
           rez.serialize(it->first->effects_applied);
-        update_guards.clear();
       }
       // Pack subsets
       rez.serialize<size_t>(subsets.size());
@@ -8736,7 +8735,10 @@ namespace Legion {
       {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
-          const FieldMask &mask = target_instances[idx].get_valid_fields();
+          const FieldMask dst_mask = update_mask &
+            target_instances[idx].get_valid_fields();
+          if (!dst_mask)
+            continue;
           if (aggregator == NULL)
             aggregator = (dst_index >= 0) ?
               new CopyFillAggregator(runtime->forest, op, index, dst_index,
@@ -8744,16 +8746,17 @@ namespace Legion {
               new CopyFillAggregator(runtime->forest, op, index,
                                      guard_event, track_events);
           aggregator->record_updates(target_views[idx], valid_views,
-                                     mask, update_expr);
+                                     dst_mask, update_expr);
         }
       }
       else
       {
         for (unsigned idx = 0; idx < target_views.size(); idx++)
         {
-          const FieldMask &dst_mask = target_instances[idx].get_valid_fields();
+          const FieldMask dst_mask = update_mask & 
+            target_instances[idx].get_valid_fields();
           // Can happen in cases with uninitialized data
-          if (dst_mask * update_mask)
+          if (!dst_mask)
             continue;
           FieldMaskSet<LogicalView> src_views;
           for (FieldMaskSet<LogicalView>::const_iterator it = 
