@@ -14628,11 +14628,11 @@ namespace Legion {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
-      // This also goes ont the update virtual channel so that it is
+      // This also goes on the subset virtual channel so that it is
       // ordered (always before) any update messages
       find_messenger(target)->send_message(rez, 
           SEND_EQUIVALENCE_SET_SUBSET_RESPONSE, 
-          UPDATE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+          SUBSET_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
@@ -14642,7 +14642,7 @@ namespace Legion {
     {
       find_messenger(target)->send_message(rez, 
           SEND_EQUIVALENCE_SET_SUBSET_UPDATE, 
-          UPDATE_VIRTUAL_CHANNEL, true/*flush*/);
+          SUBSET_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
