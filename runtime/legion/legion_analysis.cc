@@ -5510,14 +5510,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (update_guards.empty())
-        return;
       FieldMaskSet<CopyFillAggregator>::iterator finder = 
         update_guards.find(aggregator);
-      if (finder == update_guards.end())
-        return;
+#ifdef DEBUG_LEGION
+      assert(finder != update_guards.end());
+#endif
+      const bool should_tighten = !!finder->second;
       update_guards.erase(finder);
-      if (update_guards.size() > 1)
+      if (should_tighten)
         update_guards.tighten_valid_mask();
       if ((eq_state == REFINING_STATE) && 
           transition_event.exists() && (update_guards.empty() ||
@@ -7351,7 +7351,6 @@ namespace Legion {
         // aggregators for each of the different fields of prior updates
         FieldMask remainder_mask = user_mask;
         LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::aligned to_add;
-        std::vector<CopyFillAggregator*> to_delete;
         for (FieldMaskSet<CopyFillAggregator>::iterator it = 
               update_guards.begin(); it != update_guards.end(); it++)
         {
@@ -7404,25 +7403,22 @@ namespace Legion {
             input_aggregator->record_guard_set(this);
             // Remove the current guard since it doesn't matter anymore
             it.filter(update_mask);
-            if (!it->second)
-              to_delete.push_back(it->first);
           }
           remainder_mask -= guard_mask;
           if (!remainder_mask)
             break;
-        }
-        if (!to_delete.empty())
-        {
-          for (std::vector<CopyFillAggregator*>::const_iterator it = 
-                to_delete.begin(); it != to_delete.end(); it++)
-            update_guards.erase(*it);
         }
         if (!to_add.empty())
         {
           for (LegionVector<std::pair<CopyFillAggregator*,FieldMask> >::
                 aligned::const_iterator it = to_add.begin(); 
                 it != to_add.end(); it++)
+          {
+#ifdef DEBUG_LEGION
+            assert(it->second * refining_fields);
+#endif
             update_guards.insert(it->first, it->second);
+          }
         }
         // If we have unguarded fields we can easily do thos
         if (!!remainder_mask)
@@ -7446,6 +7442,9 @@ namespace Legion {
                input_aggregator->has_update_fields()))
           {
             input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+#ifdef DEBUG_LEGION
+            assert(input_aggregator->get_update_fields() * refining_fields);
+#endif
             // Record this as a guard for later operations
             update_guards.insert(input_aggregator, 
                 input_aggregator->get_update_fields());
@@ -7484,6 +7483,9 @@ namespace Legion {
              input_aggregator->has_update_fields()))
         {
           input_aggregators[RtEvent::NO_RT_EVENT] = input_aggregator;
+#ifdef DEBUG_LEGION
+          assert(input_aggregator->get_update_fields() * refining_fields);
+#endif
           // Record this as a guard for later operations
           update_guards.insert(input_aggregator, 
               input_aggregator->get_update_fields());
@@ -7493,11 +7495,11 @@ namespace Legion {
       if ((output_aggregator != NULL) && 
           output_aggregator->has_update_fields())
       {
-        // No need to store this with any fields since it is an output
-        // aggregator. We're just recording it to prevent refinements
-        // until it is done with its updates.
-        const FieldMask empty_mask;
-        update_guards.insert(output_aggregator, empty_mask);
+#ifdef DEBUG_LEGION
+        assert(output_aggregator->get_update_fields() * refining_fields);
+#endif
+        update_guards.insert(output_aggregator, 
+            output_aggregator->get_update_fields());
         output_aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, applied_events);
@@ -7961,11 +7963,11 @@ namespace Legion {
       if ((release_aggregator != NULL) && 
           release_aggregator->has_update_fields())
       {
-        // No need to store this with any fields since it is an output
-        // aggregator. We're just recording it to prevent refinements
-        // until it is done with its updates.
-        const FieldMask empty_mask;
-        update_guards.insert(release_aggregator, empty_mask);
+#ifdef DEBUG_LEGION
+        assert(release_aggregator->get_update_fields() * refining_fields);
+#endif
+        update_guards.insert(release_aggregator, 
+            release_aggregator->get_update_fields());
         release_aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, ready_events);
@@ -8253,11 +8255,10 @@ namespace Legion {
       if ((aggregator != NULL) &&
           aggregator->has_update_fields())
       {
-        // No need to store this with any fields since it is an output
-        // aggregator. We're just recording it to prevent refinements
-        // until it is done with its updates.
-        const FieldMask empty_mask;
-        update_guards.insert(aggregator, empty_mask);
+#ifdef DEBUG_LEGION
+        assert(aggregator->get_update_fields() * refining_fields);
+#endif
+        update_guards.insert(aggregator, aggregator->get_update_fields());
         aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, applied_events);
@@ -8452,11 +8453,11 @@ namespace Legion {
       if ((output_aggregator != NULL) &&
           output_aggregator->has_update_fields())
       {
-        // No need to store this with any fields since it is an output
-        // aggregator. We're just recording it to prevent refinements
-        // until it is done with its updates.
-        const FieldMask empty_mask;
-        update_guards.insert(output_aggregator, empty_mask);
+#ifdef DEBUG_LEGION
+        assert(output_aggregator->get_update_fields() * refining_fields);
+#endif
+        update_guards.insert(output_aggregator, 
+            output_aggregator->get_update_fields());
         output_aggregator->record_guard_set(this);
       }
       check_for_migration(remote_tracker, source, ready_events);
@@ -9615,7 +9616,12 @@ namespace Legion {
         // that the refinement task will not start before it's ready
         if (!update_guards.empty() && !(pending_refinements.get_valid_mask() 
                                             * update_guards.get_valid_mask()))
+        {
+#ifdef DEBUG_LEGION
+          assert(!transition_event.exists());
+#endif
           transition_event = Runtime::create_rt_user_event();
+        }
         runtime->issue_runtime_meta_task(args, 
             LG_THROUGHPUT_DEFERRED_PRIORITY, transition_event);
       }

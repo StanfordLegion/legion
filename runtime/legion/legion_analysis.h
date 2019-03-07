@@ -1322,7 +1322,7 @@ namespace Legion {
       EqState eq_state;
       // Fields that are being refined
       FieldMask refining_fields;
-      // Track any pending update operations that have yet to be done
+      // This tracks the most recent copy-fill aggregator for each field
       FieldMaskSet<CopyFillAggregator> update_guards;
       // Keep track of the refinements that need to be done
       FieldMaskSet<EquivalenceSet> pending_refinements;
