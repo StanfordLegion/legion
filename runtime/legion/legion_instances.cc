@@ -515,6 +515,9 @@ namespace Legion {
                             FieldSpaceNode *field_space_node, size_t total_dims)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(constraints != NULL);
+#endif
       FieldMask instance_mask;
       const std::vector<FieldID> &field_set = 
         constraints->field_constraint.get_field_set(); 
@@ -1346,6 +1349,16 @@ namespace Legion {
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
         }
+        // If we fall through we need to refetch things that we didn't get
+        if (domain_ready.exists())
+          inst_domain = domain_is ? 
+            runtime->forest->get_node(domain_handle) :
+            runtime->forest->find_remote_expression(domain_expr_id);
+        if (fs_ready.exists())
+          space_node = runtime->forest->get_node(handle);
+        if (layout_ready.exists())
+          constraints = 
+            runtime->find_layout_constraints(layout_id, false/*can fail*/);
       }
       // If we fall through here we can create the manager now
       create_remote_manager(runtime, did, owner_space, mem, inst,inst_footprint,
@@ -1532,6 +1545,16 @@ namespace Legion {
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
         }
+        // If we fall through we need to refetch things that we didn't get
+        if (domain_ready.exists())
+          inst_domain = domain_is ? 
+            runtime->forest->get_node(domain_handle) :
+            runtime->forest->find_remote_expression(domain_expr_id);
+        if (fs_ready.exists())
+          field_node = runtime->forest->get_node(handle);
+        if (layout_ready.exists())
+          constraints = 
+            runtime->find_layout_constraints(layout_id, false/*can fail*/);
       }
       // If we fall through here we can create the manager now
       create_remote_manager(runtime, did, owner_space, mem, inst, 
