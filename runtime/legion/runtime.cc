@@ -14359,8 +14359,11 @@ namespace Legion {
     void Runtime::send_future_result(AddressSpaceID target, Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This has to go on the same channel as the reference updates
+      // so that we can make sure it's handled before any references
+      // are removed on the destination node
       find_messenger(target)->send_message(rez, SEND_FUTURE_RESULT,
-            DEFAULT_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
+            REFERENCE_VIRTUAL_CHANNEL, true/*flush*/, true/*response*/);
     }
 
     //--------------------------------------------------------------------------
