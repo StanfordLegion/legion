@@ -1137,17 +1137,6 @@ function base.task:get_field_id_param_labels()
   return self.field_id_param_labels
 end
 
-function base.task:set_field_id_param_symbols(t)
-  assert(not self.field_id_param_symbols)
-  assert(t)
-  self.field_id_param_symbols = t
-end
-
-function base.task:get_field_id_param_symbols()
-  assert(self.field_id_param_symbols)
-  return self.field_id_param_symbols
-end
-
 function base.task:set_type(t, force)
   assert(force or not self.type)
   assert(terralib.types.istype(t))
