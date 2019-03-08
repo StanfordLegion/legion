@@ -9544,15 +9544,25 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void EquivalenceSet::handle_ray_trace(const void *args)
+    /*static*/ void EquivalenceSet::handle_ray_trace(const void *args,
+                                                     Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
-      // If we don't defer this again, then we can trigger our deferral event
-      // Otherwise it is up to the next iteration to do the deferral
-      dargs->set->ray_trace_equivalence_sets(dargs->target, dargs->expr,
-                          *(dargs->ray_mask), dargs->handle, dargs->origin,
-                          dargs->done, dargs->deferral);
+      // See if we need to load the expression or not
+      if (dargs->expr == NULL)
+      {
+        IndexSpaceExpression *expr = (dargs->is_expr_space) ?
+          runtime->forest->get_node(dargs->expr_handle) :
+          runtime->forest->find_remote_expression(dargs->expr_id);
+        dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
+                            *(dargs->ray_mask), dargs->handle, dargs->origin,
+                            dargs->done, dargs->deferral);
+      }
+      else
+        dargs->set->ray_trace_equivalence_sets(dargs->target, dargs->expr,
+                            *(dargs->ray_mask), dargs->handle, dargs->origin,
+                            dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
     }
@@ -9738,8 +9748,13 @@ namespace Legion {
 
       VersionManager *target;
       derez.deserialize(target);
+      bool is_expr_space;
+      IndexSpace expr_handle;
+      IndexSpaceExprID expr_id;
+      RtEvent expr_ready;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
+                              is_expr_space, expr_handle, expr_id, expr_ready);
       FieldMask ray_mask;
       derez.deserialize(ray_mask);
       IndexSpace handle;
@@ -9748,6 +9763,26 @@ namespace Legion {
       derez.deserialize(origin);
       RtUserEvent done_event;
       derez.deserialize(done_event);
+      if (ready.exists() || expr_ready.exists())
+      {
+        const RtEvent defer = Runtime::merge_events(ready, expr_ready);
+        if (defer.exists() && !defer.has_triggered())
+        {
+          // We need to defer this until things are ready
+          DeferRayTraceArgs args(set, target, expr, 
+                                 handle, origin, done_event,
+                                 RtUserEvent::NO_RT_USER_EVENT,
+                                 ray_mask, is_expr_space, 
+                                 expr_handle, expr_id);
+          runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 
+          return;
+        }
+        if (expr_ready.exists())
+          expr = (is_expr_space) ? runtime->forest->get_node(expr_handle) :
+            runtime->forest->find_remote_expression(expr_id);
+        // Fall through and actually do the operation now
+      }
       set->ray_trace_equivalence_sets(target, expr, ray_mask, handle, 
                                       origin, done_event);
     }

@@ -934,10 +934,17 @@ namespace Legion {
         DeferRayTraceArgs(EquivalenceSet *s, VersionManager *t,
                           IndexSpaceExpression *e, IndexSpace h,
                           AddressSpaceID o, RtUserEvent d,
-                          RtUserEvent def, const FieldMask &m)
+                          RtUserEvent def, const FieldMask &m,
+                          // These are just for the case where the
+                          // request comes from a remote node and
+                          // we're waiting for the expression to load
+                          bool is_expr_s = false, 
+                          IndexSpace expr_h = IndexSpace::NO_SPACE,
+                          IndexSpaceExprID expr_i = 0)
           : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
             set(s), target(t), expr(e), handle(h), origin(o), 
-            done(d), deferral(def), ray_mask(new FieldMask(m)) { }
+            done(d), deferral(def), ray_mask(new FieldMask(m)),
+            expr_handle(expr_h), expr_id(expr_i), is_expr_space(is_expr_s) { }
       public:
         EquivalenceSet *const set;
         VersionManager *const target;
@@ -947,6 +954,9 @@ namespace Legion {
         const RtUserEvent done;
         const RtUserEvent deferral;
         FieldMask *const ray_mask;
+        const IndexSpace expr_handle;
+        const IndexSpaceExprID expr_id;
+        const bool is_expr_space;
       };
       struct DeferRayTraceFinishArgs : 
         public LgTaskArgs<DeferRayTraceFinishArgs> {
@@ -1239,7 +1249,7 @@ namespace Legion {
     public:
       static void handle_refinement(const void *args);
       static void handle_remote_references(const void *args);
-      static void handle_ray_trace(const void *args);
+      static void handle_ray_trace(const void *args, Runtime *runtime);
       static void handle_ray_trace_finish(const void *args);
       static void handle_subset_request(const void *args);
       static void handle_make_owner(const void *args);
