@@ -2568,8 +2568,10 @@ local function expr_call_setup_task_args(
       local param_type = param_types[i] -- arg has already been cast to param_type
       local size_actions, size_value = std.compute_serialized_size(
         param_type, arg)
-      task_args_setup:insert(size_actions)
-      task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      if size_actions then
+        task_args_setup:insert(size_actions)
+        task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      end
    end
   end
 
@@ -7387,6 +7389,10 @@ function codegen.expr_future(cx, node)
 
     local size_actions, size_value = std.compute_serialized_size(
       content_type, content_value)
+    if not size_actions then
+      size_actions = quote end
+      size_value = 0
+    end
     local ser_actions = std.serialize(
       content_type, content_value, buffer, `(&[data_ptr]))
     local actions = quote

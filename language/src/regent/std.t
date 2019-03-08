@@ -1272,6 +1272,10 @@ local function compute_serialized_size_inner(value_type, value)
 
     local size_actions, size_value = compute_serialized_size_inner(
       element_type, `(@element))
+    if not size_actions then
+      size_actions = quote end
+      size_value = 0
+    end
     local actions = quote
       var [result] = 0
       for i = 0, [value].__size do
@@ -1284,28 +1288,32 @@ local function compute_serialized_size_inner(value_type, value)
   elseif std.is_string(value_type) then
     return quote end, `(c.strlen([rawstring](value)) + 1)
   else
-    return quote end, 0
+    return -- Nothing to do since no dynamic serialization is being used
   end
 end
 
 local compute_serialized_size_helper = terralib.memoize(function(value_type)
   local value = terralib.newsymbol(value_type, "value")
   local actions, result = compute_serialized_size_inner(value_type, value)
-  local terra compute_serialized_size([value]) : c.size_t
-    [actions];
-    return [result]
+  if actions then
+    local terra compute_serialized_size([value]) : c.size_t
+      [actions];
+      return [result]
+    end
+    compute_serialized_size:setinlined(false)
+    return compute_serialized_size
   end
-  compute_serialized_size:setinlined(false)
-  return compute_serialized_size
 end)
 
 function std.compute_serialized_size(value_type, value)
   local helper = compute_serialized_size_helper(value_type)
-  local result = terralib.newsymbol(c.size_t, "result")
-  local actions = quote
-    var [result] = helper([value])
+  if helper then
+    local result = terralib.newsymbol(c.size_t, "result")
+    local actions = quote
+      var [result] = helper([value])
+    end
+    return actions, result
   end
-  return actions, result
 end
 
 local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
