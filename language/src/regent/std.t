@@ -1264,6 +1264,10 @@ end
 -- ## Serialization Helpers
 -- #################
 
+local function need_dynamic_serialization(value_type)
+  return std.is_list(value_type) or std.is_string(value_type)
+end
+
 local function compute_serialized_size_inner(value_type, value)
   if std.is_list(value_type) then
     local result = terralib.newsymbol(c.size_t, "result")
@@ -1272,10 +1276,6 @@ local function compute_serialized_size_inner(value_type, value)
 
     local size_actions, size_value = compute_serialized_size_inner(
       element_type, `(@element))
-    if not size_actions then
-      size_actions = quote end
-      size_value = 0
-    end
     local actions = quote
       var [result] = 0
       for i = 0, [value].__size do
@@ -1288,7 +1288,7 @@ local function compute_serialized_size_inner(value_type, value)
   elseif std.is_string(value_type) then
     return quote end, `(c.strlen([rawstring](value)) + 1)
   else
-    return -- Nothing to do since no dynamic serialization is being used
+    return quote end, 0
   end
 end
 
@@ -1306,14 +1306,16 @@ local compute_serialized_size_helper = terralib.memoize(function(value_type)
 end)
 
 function std.compute_serialized_size(value_type, value)
-  local helper = compute_serialized_size_helper(value_type)
-  if helper then
-    local result = terralib.newsymbol(c.size_t, "result")
-    local actions = quote
-      var [result] = helper([value])
-    end
-    return actions, result
+  if not need_dynamic_serialization(value_type) then
+    return
   end
+
+  local helper = compute_serialized_size_helper(value_type)
+  local result = terralib.newsymbol(c.size_t, "result")
+  local actions = quote
+    var [result] = helper([value])
+  end
+  return actions, result
 end
 
 local function serialize_inner(value_type, value, fixed_ptr, data_ptr)
@@ -1366,6 +1368,10 @@ local serialize_helper = terralib.memoize(function(value_type)
 end)
 
 function std.serialize(value_type, value, fixed_ptr, data_ptr)
+  if not need_dynamic_serialization(value_type) then
+    return serialize_inner(value_type, value, fixed_ptr, data_ptr)
+  end
+
   local helper = serialize_helper(value_type)
   local actions = quote
     helper([value], [fixed_ptr], [data_ptr])
@@ -1373,15 +1379,19 @@ function std.serialize(value_type, value, fixed_ptr, data_ptr)
   return actions
 end
 
-local function deserialize_inner(value_type, fixed_ptr, data_ptr)
+local function deserialize_simple(value_type, fixed_ptr, data_ptr)
   -- Force unaligned access because malloc does not provide
   -- blocks aligned for all purposes (e.g. SSE vectors).
   local value_type_alignment = 1 -- data.min(terralib.sizeof(value_type), 8)
+  return `terralib.attrload(
+    [&value_type]([fixed_ptr]),
+    { align = [value_type_alignment] })
+end
+
+local function deserialize_inner(value_type, fixed_ptr, data_ptr)
   local result = terralib.newsymbol(value_type, "result")
   local actions = quote
-    var [result] = terralib.attrload(
-      [&value_type]([fixed_ptr]),
-      { align = [value_type_alignment] })
+    var [result] = [deserialize_simple(value_type, fixed_ptr, data_ptr)]
   end
 
   if std.is_list(value_type) then
@@ -1434,6 +1444,10 @@ local deserialize_helper = terralib.memoize(function(value_type)
 end)
 
 function std.deserialize(value_type, fixed_ptr, data_ptr)
+  if not need_dynamic_serialization(value_type) then
+    return quote end, deserialize_simple(value_type, fixed_ptr, data_ptr)
+  end
+
   local helper = deserialize_helper(value_type)
   local result = terralib.newsymbol(value_type, "result")
   -- Force unaligned access because malloc does not provide
