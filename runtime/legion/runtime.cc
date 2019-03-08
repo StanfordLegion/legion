@@ -22478,7 +22478,7 @@ namespace Legion {
           }
         case LG_DEFER_RAY_TRACE_TASK_ID:
           {
-            EquivalenceSet::handle_ray_trace(args);
+            EquivalenceSet::handle_ray_trace(args, runtime);
             break;
           }
         case LG_DEFER_RAY_TRACE_FINISH_TASK_ID:

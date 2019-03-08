@@ -10223,7 +10223,6 @@ local function setup_regent_calling_convention_metadata(node, task)
   local fn_type = task:get_type()
   local param_types = task:get_type().parameters
   local param_field_id_labels = data.newmap()
-  local param_field_id_symbols = data.newmap()
   for _, region_i in pairs(std.fn_params_with_privileges_by_index(fn_type)) do
     local region = param_types[region_i]
     local field_paths, field_types =
@@ -10232,12 +10231,7 @@ local function setup_regent_calling_convention_metadata(node, task)
       function(field_path)
         return terralib.newlabel("field_" .. field_path:hash())
       end)
-    local field_id_symbols = field_paths:map(
-      function(field_path)
-        return terralib.newsymbol(c.legion_field_id_t, "field_" .. field_path:hash())
-      end)
     param_field_id_labels[region_i] = field_id_labels
-    param_field_id_symbols[region_i] = field_id_symbols
     params_struct_type.entries:insertall(
       data.zip(field_id_labels, field_types):map(
         function(field)
@@ -10246,7 +10240,6 @@ local function setup_regent_calling_convention_metadata(node, task)
         end))
   end
   task:set_field_id_param_labels(param_field_id_labels)
-  task:set_field_id_param_symbols(param_field_id_symbols)
 end
 
 function codegen.top_task(cx, node)
@@ -10424,15 +10417,6 @@ function codegen.top_task(cx, node)
 
   -- Unpack field IDs passed by-value to the task.
   local param_field_id_labels = task:get_field_id_param_labels()
-  local param_field_id_symbols = task:get_field_id_param_symbols()
-  for region, param_fields in param_field_id_labels:items() do
-    for i, param_field in ipairs(param_fields) do
-      local param_symbol = param_field_id_symbols[region][i]
-      task_setup:insert(quote
-        var [param_symbol] = args.[param_field]
-      end)
-    end
-  end
 
   -- Unpack the region requirements.
   local physical_region_i = 0
@@ -10456,7 +10440,7 @@ function codegen.top_task(cx, node)
     local field_paths, field_types =
       std.flatten_struct_fields(region_type:fspace())
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_symbols[region_i]))
+      data.zip(field_paths:map(data.hash), param_field_id_labels[region_i]:map(function(label) return `args.[label] end)))
 
     local physical_regions = terralib.newlist()
     local physical_regions_by_field_path = {}
@@ -10603,7 +10587,7 @@ function codegen.top_task(cx, node)
     local field_paths, field_types =
       std.flatten_struct_fields(list_type:fspace())
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_symbols[list_i]))
+      data.zip(field_paths:map(data.hash), param_field_id_labels[list_i]:map(function(label) return `args.[label] end)))
 
     -- We never actually access physical instances for lists, so don't
     -- build any accessors here.
