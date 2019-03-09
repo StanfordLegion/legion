@@ -2855,17 +2855,51 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   return std.register_projection_functor(false, true, 0, nil, partition_functor)
 end
 
+local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+  local add_field = c.legion_task_launcher_add_field
+  if index then
+    add_field = c.legion_index_launcher_add_field
+  end
+
+  local field_id_index = data.newmap()
+  for i, f in ipairs(cx:region(arg_type).field_paths) do
+    field_id_index[f] = i - 1
+  end
+
+  -- TODO: Would be good to take field_id_array by pointer, but that
+  -- would require that the field ID array always be stored in memory
+  -- (i.e. not a constant or r-value expression).
+  local terra add_fields([launcher], requirement : uint, field_id_array : c.legion_field_id_t[#cx:region(arg_type).field_paths])
+    [data.zip(field_paths, field_types):map(
+       function(field)
+         local field_path, field_type = unpack(field)
+         local field_id = `field_id_array[ [field_id_index[field_path:hash()] ] ]
+         if std.is_regent_array(field_type) then
+           return quote
+             for idx = 0, [field_type.N] do
+               add_field(
+                 [launcher], requirement, [field_id] + idx, true)
+             end
+           end
+         else
+           return quote
+             add_field(
+               [launcher], requirement, [field_id], true)
+           end
+         end
+       end)]
+  end
+  add_fields:setinlined(false)
+
+  return add_fields
+end
+
 local function expr_call_setup_region_arg(
     cx, task, arg_value, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
-
-  local add_field = c.legion_task_launcher_add_field
-  if index then
-    add_field = c.legion_index_launcher_add_field
-  end
 
   local add_flags = c.legion_task_launcher_add_flags
   if index then
@@ -2926,27 +2960,12 @@ local function expr_call_setup_region_arg(
     requirement_args:insertall(
       {coherence_mode, parent_region, 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
+        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
         [add_flags]([launcher], [requirement], [flag])
       end)
   end
@@ -3162,29 +3181,13 @@ local function expr_call_setup_partition_arg(
     requirement_args:insertall(
       {coherence_mode, `([parent_region].impl), 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, true)
+
     args_setup:insert(
       quote
-      var [requirement] =
-        [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   c.legion_index_launcher_add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 c.legion_index_launcher_add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
-      c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
+        var [requirement] = [add_requirement]([requirement_args])
+        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
+        c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
       end)
   end
 end
