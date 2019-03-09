@@ -256,7 +256,7 @@ end
 
 function context:add_region_root(region_type, logical_region, field_paths,
                                  privilege_field_paths, field_privileges, field_types,
-                                 field_ids, fields_are_scratch, physical_regions,
+                                 field_ids, field_id_array, fields_are_scratch, physical_regions,
                                  base_pointers, strides)
   if not self.regions then
     error("not in task context", 2)
@@ -278,6 +278,7 @@ function context:add_region_root(region_type, logical_region, field_paths,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        field_id_array = field_id_array,
         fields_are_scratch = fields_are_scratch,
         physical_regions = physical_regions,
         base_pointers = base_pointers,
@@ -311,6 +312,7 @@ function context:add_region_subregion(region_type, logical_region,
         field_privileges = self:region(parent_region_type).field_privileges,
         field_types = self:region(parent_region_type).field_types,
         field_ids = self:region(parent_region_type).field_ids,
+        field_id_array = self:region(parent_region_type).field_id_array,
         fields_are_scratch = self:region(parent_region_type).fields_are_scratch,
         physical_regions = self:region(parent_region_type).physical_regions,
         base_pointers = self:region(parent_region_type).base_pointers,
@@ -374,7 +376,8 @@ end
 
 function context:add_list_of_regions(list_type, list_of_logical_regions,
                                      field_paths, privilege_field_paths,
-                                     field_privileges, field_types, field_ids, fields_are_scratch)
+                                     field_privileges, field_types,
+                                     field_ids, field_id_array, fields_are_scratch)
   if not self.lists_of_regions then
     error("not in task context", 2)
   end
@@ -383,7 +386,7 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
   end
   assert(list_of_logical_regions and
            field_paths and privilege_field_paths and
-           field_privileges and field_types and field_ids)
+           field_privileges and field_types and field_ids and field_id_array)
   self.lists_of_regions:insert(
     nil,
     list_type,
@@ -395,6 +398,7 @@ function context:add_list_of_regions(list_type, list_of_logical_regions,
         field_privileges = field_privileges,
         field_types = field_types,
         field_ids = field_ids,
+        field_id_array = field_id_array,
         fields_are_scratch = fields_are_scratch,
       }, list_of_regions))
 end
@@ -2431,6 +2435,7 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
             cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).field_id_array,
             cx:list_of_regions(value_type).fields_are_scratch,
             false,
             false,
@@ -2443,6 +2448,7 @@ function codegen.expr_index_access(cx, node)
             cx:list_of_regions(value_type).field_privileges,
             cx:list_of_regions(value_type).field_types,
             cx:list_of_regions(value_type).field_ids,
+            cx:list_of_regions(value_type).field_id_array,
             cx:list_of_regions(value_type).fields_are_scratch)
         else
           assert(false)
@@ -2485,6 +2491,7 @@ function codegen.expr_index_access(cx, node)
           cx:list_of_regions(value_type).field_privileges,
           cx:list_of_regions(value_type).field_types,
           cx:list_of_regions(value_type).field_ids,
+          cx:list_of_regions(value_type).field_id_array,
           cx:list_of_regions(value_type).fields_are_scratch)
       end
       return values.value(node, expr.just(actions, list), list_type)
@@ -2568,8 +2575,10 @@ local function expr_call_setup_task_args(
       local param_type = param_types[i] -- arg has already been cast to param_type
       local size_actions, size_value = std.compute_serialized_size(
         param_type, arg)
-      task_args_setup:insert(size_actions)
-      task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      if size_actions then
+        task_args_setup:insert(size_actions)
+        task_args_setup:insert(quote [size] = [size] + [size_value] end)
+      end
    end
   end
 
@@ -2634,13 +2643,10 @@ local function expr_call_setup_task_args(
     local arg_type = arg_types[i]
     local param_type = param_types[i]
 
-    local field_paths, _ = std.flatten_struct_fields(param_type:fspace())
-    for j, field_path in pairs(field_paths) do
-      local arg_field_id = cx:region_or_list(arg_type):field_id(field_path)
-      local param_field_id = param_field_ids[i][j]
-      task_args_setup:insert(
-        quote [fixed_ptr].[param_field_id] = [arg_field_id] end)
-    end
+    local arg_field_id_array = cx:region_or_list(arg_type).field_id_array
+    local param_field_id_array = param_field_ids[i]
+    task_args_setup:insert(
+      quote [fixed_ptr].[param_field_id_array] = [arg_field_id_array] end)
   end
 
   -- Check that the final sizes line up.
@@ -2849,17 +2855,51 @@ local function make_partition_projection_functor(cx, expr, loop_index, color_spa
   return std.register_projection_functor(false, true, 0, nil, partition_functor)
 end
 
+local function add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+  local add_field = c.legion_task_launcher_add_field
+  if index then
+    add_field = c.legion_index_launcher_add_field
+  end
+
+  local field_id_index = data.newmap()
+  for i, f in ipairs(cx:region(arg_type).field_paths) do
+    field_id_index[f] = i - 1
+  end
+
+  -- TODO: Would be good to take field_id_array by pointer, but that
+  -- would require that the field ID array always be stored in memory
+  -- (i.e. not a constant or r-value expression).
+  local terra add_fields([launcher], requirement : uint, field_id_array : c.legion_field_id_t[#cx:region(arg_type).field_paths])
+    [data.zip(field_paths, field_types):map(
+       function(field)
+         local field_path, field_type = unpack(field)
+         local field_id = `field_id_array[ [field_id_index[field_path:hash()] ] ]
+         if std.is_regent_array(field_type) then
+           return quote
+             for idx = 0, [field_type.N] do
+               add_field(
+                 [launcher], requirement, [field_id] + idx, true)
+             end
+           end
+         else
+           return quote
+             add_field(
+               [launcher], requirement, [field_id], true)
+           end
+         end
+       end)]
+  end
+  add_fields:setinlined(false)
+
+  return add_fields
+end
+
 local function expr_call_setup_region_arg(
     cx, task, arg_value, arg_type, param_type, launcher, index, args_setup)
   local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
     std.find_task_privileges(param_type, task)
   local privilege_modes = privileges:map(std.privilege_mode)
   local coherence_modes = coherences:map(std.coherence_mode)
-
-  local add_field = c.legion_task_launcher_add_field
-  if index then
-    add_field = c.legion_index_launcher_add_field
-  end
 
   local add_flags = c.legion_task_launcher_add_flags
   if index then
@@ -2920,27 +2960,12 @@ local function expr_call_setup_region_arg(
     requirement_args:insertall(
       {coherence_mode, parent_region, 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, index)
+
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
+        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
         [add_flags]([launcher], [requirement], [flag])
       end)
   end
@@ -3156,29 +3181,13 @@ local function expr_call_setup_partition_arg(
     requirement_args:insertall(
       {coherence_mode, `([parent_region].impl), 0, false})
 
+    local add_fields = add_region_fields(cx, arg_type, field_paths, field_types, launcher, true)
+
     args_setup:insert(
       quote
-      var [requirement] =
-        [add_requirement]([requirement_args])
-        [data.zip(field_paths, field_types):map(
-           function(field)
-             local field_path, field_type = unpack(field)
-             local field_id = cx:region(arg_type):field_id(field_path)
-             if std.is_regent_array(field_type) then
-               return quote
-                 for idx = 0, [field_type.N] do
-                   c.legion_index_launcher_add_field(
-                     [launcher], [requirement], [field_id] + idx, true)
-                 end
-               end
-             else
-               return quote
-                 c.legion_index_launcher_add_field(
-                   [launcher], [requirement], [field_id], true)
-               end
-             end
-           end)]
-      c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
+        var [requirement] = [add_requirement]([requirement_args])
+        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
+        c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
       end)
   end
 end
@@ -4104,6 +4113,7 @@ function codegen.expr_region(cx, node)
       end
       return my_field_id
     end)
+  local field_id_array = terralib.constant(`arrayof(c.legion_field_id_t, [field_ids]))
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
@@ -4124,6 +4134,7 @@ function codegen.expr_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
                      data.dict(data.zip(field_paths:map(data.hash), field_types)),
                      data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     field_id_array,
                      data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
                      data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
@@ -4778,6 +4789,7 @@ function codegen.expr_list_slice_partition(cx, node)
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
     cx:region(parent_region).field_ids,
+    cx:region(parent_region).field_id_array,
     cx:region(parent_region).fields_are_scratch)
 
   actions = quote
@@ -4827,6 +4839,7 @@ function codegen.expr_list_duplicate_partition(cx, node)
     cx:region(parent_region).field_privileges,
     cx:region(parent_region).field_types,
     cx:region(parent_region).field_ids,
+    cx:region(parent_region).field_id_array,
     cx:region(parent_region).fields_are_scratch)
 
   actions = quote
@@ -4940,6 +4953,7 @@ function codegen.expr_list_cross_product(cx, node)
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
     cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).field_id_array,
     cx:list_of_regions(lhs_type).fields_are_scratch)
 
   local cross_product_create = c.legion_terra_index_cross_product_create_list
@@ -5008,6 +5022,7 @@ function codegen.expr_list_cross_product_complete(cx, node)
     cx:list_of_regions(lhs_type).field_privileges,
     cx:list_of_regions(lhs_type).field_types,
     cx:list_of_regions(lhs_type).field_ids,
+    cx:list_of_regions(lhs_type).field_id_array,
     cx:list_of_regions(lhs_type).fields_are_scratch)
 
   actions = quote
@@ -6893,6 +6908,10 @@ function codegen.expr_with_scratch_fields(cx, node)
     new_field_ids[field_path:hash()] = `([field_ids.value][ [i-1] ])
   end
 
+  local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
+
+  local new_field_id_array = `arrayof(c.legion_field_id_t, [field_paths:map(function(field_path) return new_field_ids[field_path:hash()] end)])
+
   local old_fields_are_scratch = cx:region_or_list(region_type).fields_are_scratch
   local new_fields_are_scratch = {}
   for k, v in pairs(old_fields_are_scratch) do
@@ -6910,6 +6929,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:region(region_type).field_privileges,
       cx:region(region_type).field_types,
       new_field_ids,
+      new_field_id_array,
       new_fields_are_scratch,
       false,
       false,
@@ -6922,6 +6942,7 @@ function codegen.expr_with_scratch_fields(cx, node)
       cx:list_of_regions(region_type).field_privileges,
       cx:list_of_regions(region_type).field_types,
       new_field_ids,
+      new_field_id_array,
       new_fields_are_scratch)
   else
     assert(false)
@@ -7387,6 +7408,10 @@ function codegen.expr_future(cx, node)
 
     local size_actions, size_value = std.compute_serialized_size(
       content_type, content_value)
+    if not size_actions then
+      size_actions = quote end
+      size_value = 0
+    end
     local ser_actions = std.serialize(
       content_type, content_value, buffer, `(&[data_ptr]))
     local actions = quote
@@ -7533,6 +7558,7 @@ function codegen.expr_import_region(cx, node)
     field_id_offset = field_id_offset + 1
     return field_id
   end)
+  local field_id_array = `arrayof(c.legion_field_id_t, [field_ids])
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
   local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
@@ -7552,6 +7578,7 @@ function codegen.expr_import_region(cx, node)
                      data.dict(data.zip(field_paths:map(data.hash), field_privileges)),
                      data.dict(data.zip(field_paths:map(data.hash), field_types)),
                      data.dict(data.zip(field_paths:map(data.hash), field_ids)),
+                     field_id_array,
                      data.dict(data.zip(field_paths:map(data.hash), fields_are_scratch)),
                      data.dict(data.zip(field_paths:map(data.hash), physical_regions)),
                      data.dict(data.zip(field_paths:map(data.hash), base_pointers)),
@@ -10227,17 +10254,12 @@ local function setup_regent_calling_convention_metadata(node, task)
     local region = param_types[region_i]
     local field_paths, field_types =
       std.flatten_struct_fields(region:fspace())
-    local field_id_labels = field_paths:map(
-      function(field_path)
-        return terralib.newlabel("field_" .. field_path:hash())
-      end)
-    param_field_id_labels[region_i] = field_id_labels
-    params_struct_type.entries:insertall(
-      data.zip(field_id_labels, field_types):map(
-        function(field)
-          local field_id, field_type = unpack(field)
-          return { field = field_id, type = c.legion_field_id_t }
-        end))
+    local field_label = terralib.newlabel(tostring(region) .. "_fields")
+    param_field_id_labels[region_i] = field_label
+    params_struct_type.entries:insert({
+      field = field_label,
+      type = c.legion_field_id_t[#field_types]
+    })
   end
   task:set_field_id_param_labels(param_field_id_labels)
 end
@@ -10439,8 +10461,9 @@ function codegen.top_task(cx, node)
 
     local field_paths, field_types =
       std.flatten_struct_fields(region_type:fspace())
+    local field_id_array = `(args.[param_field_id_labels[region_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_labels[region_i]:map(function(label) return `args.[label] end)))
+      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     local physical_regions = terralib.newlist()
     local physical_regions_by_field_path = {}
@@ -10567,6 +10590,7 @@ function codegen.top_task(cx, node)
                          privileges_by_field_path,
                          data.dict(data.zip(field_paths:map(data.hash), field_types)),
                          field_ids_by_field_path,
+                         field_id_array,
                          data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))),
                          physical_regions_by_field_path,
                          base_pointers_by_field_path,
@@ -10586,8 +10610,9 @@ function codegen.top_task(cx, node)
 
     local field_paths, field_types =
       std.flatten_struct_fields(list_type:fspace())
+    local field_id_array = `(args.[param_field_id_labels[list_i]])
     local field_ids_by_field_path = data.dict(
-      data.zip(field_paths:map(data.hash), param_field_id_labels[list_i]:map(function(label) return `args.[label] end)))
+      data.zip(field_paths:map(data.hash), data.mapi(function(field_i, _) return `([field_id_array][field_i - 1]) end, field_paths)))
 
     -- We never actually access physical instances for lists, so don't
     -- build any accessors here.
@@ -10598,6 +10623,7 @@ function codegen.top_task(cx, node)
                            privileges_by_field_path,
                            data.dict(data.zip(field_paths:map(data.hash), field_types)),
                            field_ids_by_field_path,
+                           field_id_array,
                            data.dict(data.zip(field_paths:map(data.hash), field_types:map(function(_) return false end))))
   end
 
