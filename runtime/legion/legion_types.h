@@ -339,6 +339,14 @@ namespace Legion {
       LG_FINALIZE_EQ_SETS_TASK_ID,
       LG_DEFERRED_COPY_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OP_DELETION_TASK_ID,
+      LG_DEFER_REMOTE_INSTANCE_TASK_ID,
+      LG_DEFER_REMOTE_REDUCTION_TASK_ID,
+      LG_DEFER_REMOTE_UPDATE_TASK_ID,
+      LG_DEFER_REMOTE_ACQUIRE_TASK_ID,
+      LG_DEFER_REMOTE_RELEASE_TASK_ID,
+      LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID,
+      LG_DEFER_REMOTE_OVERWRITE_TASK_ID,
+      LG_DEFER_REMOTE_FILTER_TASK_ID,
       LG_DEFER_REMOTE_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
@@ -429,6 +437,14 @@ namespace Legion {
         "Finalize Equivalence Sets",                              \
         "Deferred Copy Across",                                   \
         "Defer Remote Op Deletion",                               \
+        "Defer Remote Instance Request",                          \
+        "Defer Remote Reduction Request",                         \
+        "Defer Remote Update Equivalence Set",                    \
+        "Defer Remote Acquire",                                   \
+        "Defer Remote Release",                                   \
+        "Defer Remote Copy Across",                               \
+        "Defer Remote Overwrite Equivalence Set",                 \
+        "Defer Remote Filter Equivalence Set",                    \
         "Defer Remote Output",                                    \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
