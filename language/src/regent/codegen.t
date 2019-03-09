@@ -4113,7 +4113,13 @@ function codegen.expr_region(cx, node)
       end
       return my_field_id
     end)
-  local field_id_array = terralib.global(`arrayof(c.legion_field_id_t, [field_ids]), "field_ids")
+
+  -- Hack: allocate a buffer here, because we don't want these to live
+  -- on the stack and we can't take an address to constant memory.
+  local field_id_array_buffer = terralib.newsymbol(&c.legion_field_id_t[#field_ids], "field_ids")
+  local field_id_array = `(@[field_id_array_buffer])
+  local field_id_array_initializer = terralib.constant(`arrayof(c.legion_field_id_t, [field_ids]))
+
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
@@ -4180,6 +4186,9 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
     var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
+    var [field_id_array_buffer] = [&c.legion_field_id_t[#field_ids]](c.malloc([#field_ids] * [terralib.sizeof(c.legion_field_id_t)]))
+    regentlib.assert([#field_ids] == 0 or [field_id_array_buffer] ~= nil, "failed allocation in field ID array buffer")
+    [field_id_array] = [field_id_array_initializer]
     [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
