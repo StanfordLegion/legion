@@ -4181,9 +4181,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4216,11 +4218,15 @@ namespace Legion {
         ready_events.clear();
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_INSTANCE_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_LATENCY_MESSAGE_PRIORITY, wait_on);
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
@@ -4266,9 +4272,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4303,11 +4311,15 @@ namespace Legion {
         ready_events.clear();
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_REDUCTION_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_LATENCY_MESSAGE_PRIORITY, wait_on);
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
@@ -4353,9 +4365,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4436,13 +4450,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_UPDATE_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       if (!IS_DISCARD(usage) && !IS_SIMULT(usage) && check_initialized)
@@ -4562,9 +4580,11 @@ namespace Legion {
                                       Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4606,13 +4626,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_ACQUIRE_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
@@ -4663,9 +4687,11 @@ namespace Legion {
                                       Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4713,13 +4739,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_RELEASE_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
@@ -4795,9 +4825,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -4891,13 +4923,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait();
+#endif
         }
       }
       if (perfect)
@@ -5065,9 +5101,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -5131,13 +5169,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_OVERWRITE_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait(); 
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
@@ -5213,9 +5255,11 @@ namespace Legion {
                  Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
     //--------------------------------------------------------------------------
     {
+#ifdef DEFER_REMOTE_EQ
       // Grab these now in case we need to defer them for later
       const void *buffer = derez.get_current_pointer();
       const size_t buffer_size = derez.get_remaining_bytes();
+#endif
       DerezCheck z(derez);
       AddressSpaceID original_source;
       derez.deserialize(original_source);
@@ -5271,13 +5315,17 @@ namespace Legion {
         const RtEvent wait_on = Runtime::merge_events(ready_events);
         if (wait_on.exists() && !wait_on.has_triggered())
         {
+#ifdef DEFER_REMOTE_EQ
           DeferRemoteArgs<LG_DEFER_REMOTE_FILTER_TASK_ID> 
             args(buffer, buffer_size, previous);
           runtime->issue_runtime_meta_task(args, 
-              LG_LATENCY_DEFERRED_PRIORITY, wait_on);
+              LG_THROUGHPUT_MESSAGE_PRIORITY, wait_on);
           // Don't leak the operation
           delete op;
           return;
+#else
+          wait_on.wait(); 
+#endif
         }
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
