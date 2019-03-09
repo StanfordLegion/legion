@@ -788,6 +788,19 @@ namespace Legion {
      */
     class RemoteEqTracker {
     public:
+      template<LgTaskID TID>
+      struct DeferRemoteArgs : public LgTaskArgs<DeferRemoteArgs<TID> > {
+      public:
+        static const LgTaskID TASK_ID = TID;
+      public:
+        DeferRemoteArgs(const void *b, size_t s, AddressSpaceID p)
+          : LgTaskArgs<DeferRemoteArgs<TID> >(implicit_provenance),
+            buffer(malloc(s)), size(s), previous(p) { memcpy(buffer, b, size); }
+      public:
+        void *const buffer;
+        const size_t size;
+        const AddressSpaceID previous;
+      };
       struct DeferRemoteOutputArgs : public LgTaskArgs<DeferRemoteOutputArgs> {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_REMOTE_OUTPUT_TASK_ID;
@@ -904,6 +917,8 @@ namespace Legion {
       static void handle_remote_filters(Deserializer &derez, Runtime *rt,
                                         AddressSpaceID previous);
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
+      static void handle_deferred_remote(LgTaskID tid, 
+                                         const void *args, Runtime *rt);
       static void handle_deferred_output(const void *args);
     public:
       const AddressSpaceID previous;

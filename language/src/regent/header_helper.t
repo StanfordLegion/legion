@@ -387,7 +387,7 @@ end
 local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
                                  param_i, param_list, task_param_symbol,
-                                 param_field_id)
+                                 param_field_id_array)
   local param_name = header_helper.normalize_name(param_list[1][4])
 
   local param_symbol = param_list:map(
@@ -437,14 +437,12 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
       quote
           base.assert([field_count] == [#field_paths],
             ["wrong number of fields for region " .. tostring(arg_value) .. " (argument " .. param_i .. ")"])
+        [launcher_state].task_args.[param_field_id_array] = @[&c.legion_field_id_t[#field_paths]]([field_ids])
       end)
     local field_id_by_path = data.newmap()
     for j, field_path in pairs(field_paths) do
       local arg_field_id = `([field_ids][ [j-1] ])
-      local param_field_id = param_field_id[j]
       field_id_by_path[field_path] = arg_field_id
-      arg_setup:insert(
-        quote [launcher_state].task_args.[param_field_id] = [arg_field_id] end)
     end
 
     -- Add region requirements
@@ -558,12 +556,12 @@ function header_helper.generate_task_implementation(task)
   local param_field_ids = task:get_field_id_param_labels()
   for i, param_list in ipairs(params) do
     local task_param_symbol = task_param_symbols[i]
-    local param_field_id = param_field_ids[i]
+    local param_field_id_array = param_field_ids[i]
     result:insert(
       make_add_argument(
         launcher_name, wrapper_type, state_type,
         task, params_struct_type,
-        i, param_list, task_param_symbol, param_field_id))
+        i, param_list, task_param_symbol, param_field_id_array))
   end
 
   return result

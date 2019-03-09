@@ -22531,6 +22531,19 @@ namespace Legion {
             RemoteOp::handle_deferred_deletion(args);
             break;
           }
+        case LG_DEFER_REMOTE_INSTANCE_TASK_ID:
+        case LG_DEFER_REMOTE_REDUCTION_TASK_ID:
+        case LG_DEFER_REMOTE_UPDATE_TASK_ID:
+        case LG_DEFER_REMOTE_ACQUIRE_TASK_ID:
+        case LG_DEFER_REMOTE_RELEASE_TASK_ID:
+        case LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID:
+        case LG_DEFER_REMOTE_OVERWRITE_TASK_ID:
+        case LG_DEFER_REMOTE_FILTER_TASK_ID:
+          {
+            // These all go through the same path
+            RemoteEqTracker::handle_deferred_remote(tid, args, runtime);
+            break;
+          }
         case LG_DEFER_REMOTE_OUTPUT_TASK_ID:
           {
             RemoteEqTracker::handle_deferred_output(args);
