@@ -37,6 +37,8 @@ namespace Realm {
       int prev_num_threads;
       WorkItem *parent_work_item;
       int remaining_workers;
+      int single_winner;  // worker currently assigned as the "single" one
+      int barrier_count;
     };
 
     struct WorkerInfo {
