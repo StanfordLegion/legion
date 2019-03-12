@@ -5850,6 +5850,8 @@ namespace Legion {
       packaged_messages = 0;
       sending_index += sizeof(packaged_messages);
       last_message_event = RtEvent::NO_RT_EVENT;
+      partial_message_id = 0;
+      partial_assembly = NULL;
       partial = false;
       // Set up the receiving buffer
       received_messages = 0;
@@ -5875,6 +5877,8 @@ namespace Legion {
       free(receiving_buffer);
       receiving_buffer = NULL;
       receiving_buffer_size = 0;
+      if (partial_assembly != NULL)
+        delete partial_assembly;
     }
 
     //--------------------------------------------------------------------------
@@ -5890,7 +5894,7 @@ namespace Legion {
       const size_t header_size = 
         sizeof(k) + sizeof(implicit_provenance) + sizeof(buffer_size);
       // Need to hold the lock when manipulating the buffer
-      AutoLock s_lock(send_lock);
+      AutoLock c_lock(channel_lock);
       if ((sending_index+header_size+buffer_size) > sending_buffer_size)
       {
         // Make sure we can at least get the meta-data into the buffer
@@ -5949,14 +5953,31 @@ namespace Legion {
     {
       // See if we need to switch the header file
       // and update the state of partial
+      bool first_partial = false;
       if (!complete)
       {
         header = PARTIAL_MESSAGE;
-        partial = true;
+        // If this is an unordered virtual channel, then embed our partial
+        // message id in the high-order bits
+        if (!ordered_channel)
+          header = (MessageHeader)
+            (((unsigned)header) | (partial_message_id << 2));
+        if (!partial)
+        {
+          partial = true;
+          first_partial = true;
+        }
       }
       else if (partial)
       {
         header = FINAL_MESSAGE;
+        // If this is an unordered virtual channel, then embed our partial
+        // message id in the high-order bits
+        if (!ordered_channel)
+          // Also increment the partial message id for the next message
+          // This can overflow safely since it's an unsigned integer
+          header = (MessageHeader)
+            (((unsigned)header) | (partial_message_id++ << 2));
         partial = false;
       }
       // Save the header and the number of messages into the buffer
@@ -5978,9 +5999,11 @@ namespace Legion {
         LegionProfiler::add_message_request(requests, target);
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, 
               sending_buffer, sending_index, requests, 
-              ordered_channel ? last_message_event : RtEvent::NO_RT_EVENT, 
+              (ordered_channel || 
+               ((header != FULL_MESSAGE) && !first_partial)) ?
+               last_message_event : RtEvent::NO_RT_EVENT, 
               response ? response_priority : request_priority));
-        if (!ordered_channel)
+        if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
           unordered_events.insert(last_message_event);
           if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
@@ -5991,9 +6014,11 @@ namespace Legion {
       {
         last_message_event = RtEvent(target.spawn(LG_TASK_ID, 
                 sending_buffer, sending_index, 
-                ordered_channel ? last_message_event : RtEvent::NO_RT_EVENT, 
+                (ordered_channel || 
+                 ((header != FULL_MESSAGE) && !first_partial)) ?
+                  last_message_event : RtEvent::NO_RT_EVENT, 
                 response ? response_priority : request_priority));
-        if (!ordered_channel)
+        if (!ordered_channel && (header != PARTIAL_MESSAGE))
         {
           unordered_events.insert(last_message_event);
           if (unordered_events.size() >= MAX_UNORDERED_EVENTS)
@@ -6044,7 +6069,7 @@ namespace Legion {
                                           bool phase_one)
     //--------------------------------------------------------------------------
     {
-      AutoLock s_lock(send_lock);
+      AutoLock c_lock(channel_lock);
       if (phase_one)
       {
         if (packaged_messages > 0)
@@ -6156,6 +6181,12 @@ namespace Legion {
       unsigned num_messages = *((const unsigned*)buffer);
       buffer += sizeof(num_messages);
       arglen -= sizeof(num_messages);
+      unsigned incoming_message_id = 0;
+      if (!ordered_channel)
+      {
+        incoming_message_id = ((unsigned)header) >> 2; 
+        header = (MessageHeader)(((unsigned)header) & 0x3);
+      }
       switch (head)
       {
         case FULL_MESSAGE:
@@ -6169,19 +6200,75 @@ namespace Legion {
           {
             // Save these messages onto the receiving buffer
             // but do not handle them
-            buffer_messages(num_messages, buffer, arglen);
+            if (!ordered_channel)
+            {
+              AutoLock c_lock(channel_lock);
+              if (partial_assembly == NULL)
+                partial_assembly = new std::map<unsigned,PartialMessage>();
+              PartialMessage &message = 
+                (*partial_assembly)[incoming_message_id];
+              // Allocate the buffer on the first pass
+              if (message.buffer == NULL)
+              {
+                // Same as max message size
+                message.size = sending_buffer_size;
+                message.buffer = 
+                  (char*)legion_malloc(MESSAGE_BUFFER_ALLOC, message.size);
+              }
+              buffer_messages(num_messages, buffer, arglen,
+                              message.buffer, message.size,
+                              message.index, message.messages);
+            }
+            else
+              // Ordered channels don't need the lock
+              buffer_messages(num_messages, buffer, arglen,
+                              receiving_buffer, receiving_buffer_size,
+                              receiving_index, received_messages);
             break;
           }
         case FINAL_MESSAGE:
           {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
-            buffer_messages(num_messages, buffer, arglen);
-            handle_messages(received_messages, runtime,
-                            remote_address_space,
-                            receiving_buffer, receiving_index);
-            receiving_index = 0;
-            received_messages = 0;
+            char *final_buffer = NULL;
+            unsigned final_messages = 0, final_index = 0;
+            bool free_buffer = false;
+            if (!ordered_channel)
+            {
+              AutoLock c_lock(channel_lock);
+#ifdef DEBUG_LEGION
+              assert(partial_assembly != NULL);
+#endif
+              std::map<unsigned,PartialMessage>::iterator finder = 
+                partial_assembly->find(incoming_message_id);
+#ifdef DEBUG_LEGION
+              assert(finder != partial_assembly->end());
+              assert(finder->second.buffer != NULL);
+#endif
+              buffer_messages(num_messages, buffer, arglen,
+                              finder->second.buffer, finder->second.size,
+                              finder->second.index, finder->second.messages);
+              final_index = finder->second.index;
+              final_buffer = finder->second.buffer;
+              final_messages = finder->second.messages;
+              free_buffer = true;
+              partial_assembly->erase(finder);
+            }
+            else
+            {
+              buffer_messages(num_messages, buffer, arglen,
+                              receiving_buffer, receiving_buffer_size,
+                              receiving_index, received_messages);
+              final_index = receiving_index;
+              final_buffer = receiving_buffer;
+              final_messages = received_messages;
+              receiving_index = 0;
+              received_messages = 0;
+            }
+            handle_messages(final_messages, runtime, remote_address_space,
+                            final_buffer, final_index);
+            if (free_buffer)
+              free(final_buffer);
             break;
           }
         default:
@@ -6193,7 +6280,7 @@ namespace Legion {
     void VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
-                                         const char *args, size_t arglen)
+                                         const char *args, size_t arglen) const
     //--------------------------------------------------------------------------
     {
       // For profiling if we are doing it
@@ -7116,8 +7203,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::buffer_messages(unsigned num_messages,
-                                         const void *args, size_t arglen)
+    /*static*/ void VirtualChannel::buffer_messages(unsigned num_messages,
+                                         const void *args, size_t arglen,
+                                         char *&receiving_buffer,
+                                         size_t &receiving_buffer_size,
+                                         unsigned &receiving_index,
+                                         unsigned &received_messages)
     //--------------------------------------------------------------------------
     {
       received_messages += num_messages;

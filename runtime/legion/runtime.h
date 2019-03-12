@@ -933,9 +933,19 @@ namespace Legion {
       // or chains of partial messages followed by a final
       // message.
       enum MessageHeader {
-        FULL_MESSAGE,
-        PARTIAL_MESSAGE,
-        FINAL_MESSAGE,
+        FULL_MESSAGE = 0x1,
+        PARTIAL_MESSAGE = 0x2,
+        FINAL_MESSAGE = 0x3,
+      };
+      struct PartialMessage {
+      public:
+        PartialMessage(void)
+          : buffer(NULL), size(0), index(0), messages(0) { }
+      public:
+        char *buffer;
+        size_t size;
+        unsigned index;
+        unsigned messages;
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
@@ -956,18 +966,25 @@ namespace Legion {
                         Processor target, bool response, bool shutdown);
       void handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
-                           const char *args, size_t arglen);
-      void buffer_messages(unsigned num_messages,
-                           const void *args, size_t arglen);
+                           const char *args, size_t arglen) const;
+      static void buffer_messages(unsigned num_messages,
+                                  const void *args, size_t arglen,
+                                  char *&receiving_buffer,
+                                  size_t &receiving_buffer_size,
+                                  unsigned &receiving_index,
+                                  unsigned &received_messages);
       void filter_unordered_events(void);
     private:
-      mutable LocalLock send_lock;
+      mutable LocalLock channel_lock;
       char *const sending_buffer;
       unsigned sending_index;
       const size_t sending_buffer_size;
       RtEvent last_message_event;
       MessageHeader header;
       unsigned packaged_messages;
+      // For unordered channels so we can group partial
+      // messages from remote nodes
+      unsigned partial_message_id;
       bool partial;
     private:
       const bool ordered_channel;
@@ -978,12 +995,15 @@ namespace Legion {
     private:
       // State for receiving messages
       // No lock for receiving messages since we know
-      // that they are ordered
+      // that they are ordered for ordered virtual
+      // channels, for un-ordered virtual channels then
+      // we know that we do need the lock
       char *receiving_buffer;
       unsigned receiving_index;
       size_t receiving_buffer_size;
       unsigned received_messages;
-      bool observed_recent;
+      std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
+      mutable bool observed_recent;
     private:
       LegionProfiler *const profiler;
     }; 
