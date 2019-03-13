@@ -427,7 +427,25 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   else
     index = find_index(lhs)
   end
+  local centered =
+    std.is_bounded_type(index.expr_type) and
+    #index.expr_type.bounds_symbols == 1 and
+    index.expr_type.bounds_symbols[1] == region_symbol
   index = rewrite_accesses.expr(cx, index)
+
+  if centered then
+    local region_param = index.expr_type.bounds_symbols[1]
+    local local_mapping = { [region_symbol] = region_param }
+    if reads then
+      rhs = rewrite_region_access(cx, local_mapping, rhs)
+    else
+      lhs = rewrite_region_access(cx, local_mapping, lhs)
+    end
+    return template {
+      lhs = lhs,
+      rhs = rhs,
+    }
+  end
 
   local cases = region_params:map(function(region_param)
     local case_lhs = lhs
