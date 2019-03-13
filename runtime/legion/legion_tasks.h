@@ -454,7 +454,6 @@ namespace Legion {
       // the task has had its variant selected
       bool is_leaf(void) const;
       bool is_inner(void) const;
-      bool has_virtual_instances(void) const;
       bool is_created_region(unsigned index) const;
       void update_no_access_regions(void);
     public:
@@ -552,13 +551,12 @@ namespace Legion {
       bool                                  perform_postmap;
     protected:
       // Events that must be triggered before we are done mapping
-      std::set<RtEvent> map_applied_conditions;
+      std::set<RtEvent>                     map_applied_conditions;
     protected:
       TaskContext*                          execution_context;
     protected:
       mutable bool leaf_cached, is_leaf_result;
       mutable bool inner_cached, is_inner_result;
-      mutable bool has_virtual_instances_cached, has_virtual_instances_result;
     protected:
       // Profiling information
       std::vector<ProfilingMeasurementID> task_profiling_requests;
