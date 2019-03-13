@@ -1141,15 +1141,19 @@ namespace Legion {
        * the value of the future as the specified 
        * template type.
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with the warning
        * @return the value of the future cast as the template type
        */
       template<typename T> 
-        inline T get_result(bool silence_warnings = false) const;
+        inline T get_result(bool silence_warnings = false,
+                            const char *warning_string = NULL) const;
       /**
        * Block until the future completes.
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with the warning
        */
-      void get_void_result(bool silence_warnings = false) const;
+      void get_void_result(bool silence_warnings = false,
+                           const char *warning_string = NULL) const;
       /**
        * Check to see if the future is empty.  The
        * user can specify whether to block and wait
@@ -1159,8 +1163,10 @@ namespace Legion {
        * the future actually completes.
        * @param block indicate whether to block for the result
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with the warning
        */
-      bool is_empty(bool block = false, bool silence_warnings = false) const;
+      bool is_empty(bool block = false, bool silence_warnings = false,
+                    const char *warning_string = NULL) const;
       /**
        * Check to see if the future is ready. This will return
        * true if the future can be used without blocking to wait
@@ -1180,9 +1186,11 @@ namespace Legion {
        * properly deserialize buffers that were serialized
        * with a 'legion_serialize' method.
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with the warning
        */
       template<typename T> 
-        inline const T& get_reference(bool silence_warnings = false);
+        inline const T& get_reference(bool silence_warnings = false,
+                                      const char *warning_string = NULL);
       /**
        * Return an untyped pointer to the 
        * future result.  WARNING: this
@@ -1191,8 +1199,10 @@ namespace Legion {
        * deserialize anything serialized with a 
        * legion_serialize method.
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with the warning
        */
-      inline const void* get_untyped_pointer(bool silence_warnings = false);
+      inline const void* get_untyped_pointer(bool silence_warnings = false,
+                                             const char *warning_string = NULL);
       /**
        * Return the number of bytes contained in the future.
        */
@@ -1222,7 +1232,8 @@ namespace Legion {
 						const void *buffer,
 						size_t bytes);
     private:
-      void* get_untyped_result(bool silence_warnings) const; 
+      void* get_untyped_result(bool silence_warnings,
+                               const char *warning_string) const; 
     };
 
     /**
@@ -1264,11 +1275,13 @@ namespace Legion {
        * task executing for the given domain point.
        * @param point the point task to wait for
        * @param silence_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
        * @return the return value of the task
        */
       template<typename T>
         inline T get_result(const DomainPoint &point,
-                            bool silence_warnings = false);
+                            bool silence_warnings = false,
+                            const char *warning_string = NULL);
       /**
        * Non-blocking call that will return a future that
        * will contain the value from the given index task
@@ -1282,9 +1295,11 @@ namespace Legion {
        * in the index space task has executed.
        * @param point the point task to wait for
        * @param silience_warnings silence any warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
        */
       void get_void_result(const DomainPoint &point,
-                           bool silence_warnings = false);
+                           bool silence_warnings = false,
+                           const char *warning_string = NULL);
     public:
       /**
        * An older method for getting the result of
@@ -1317,8 +1332,10 @@ namespace Legion {
        * Wait for all the tasks in the index space launch of
        * tasks to complete before returning.
        * @param silence_warnings silience warnings for this blocking call
+       * @param warning_string a string to be reported with any warnings
        */
-      void wait_all_results(bool silence_warnings = false); 
+      void wait_all_results(bool silence_warnings = false,
+                            const char *warning_string = NULL); 
     }; 
 
 
@@ -2070,7 +2087,8 @@ namespace Legion {
        * warnings about this blocking call with the 
        * 'silence_warnings' parameter.
        */
-      void wait_until_valid(bool silence_warnings = false);
+      void wait_until_valid(bool silence_warnings = false,
+                            const char *warning_string = NULL);
       /**
        * For physical regions returned from inline mappings,
        * this call will query if the instance contains valid
@@ -2140,6 +2158,7 @@ namespace Legion {
       Realm::RegionInstance get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size,
                                               void *realm_is, TypeTag type_tag,
+                                              const char *warning_string,
                                               bool silence_warnings,
                                               bool generic_accessor,
                                               bool check_field_size,
@@ -2204,7 +2223,8 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false) { }
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2219,7 +2239,8 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false) { }
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL) { }
       // Specify a specific Affine transform to use for interpreting points
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2232,7 +2253,8 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false) { }
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL) { }
       // Specify both a transform and a bounds to use
       template<int M>
       FieldAccessor(const PhysicalRegion &region, FieldID fid,
@@ -2246,7 +2268,8 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false) { }
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL) { }
     };
 
     /**
@@ -2272,7 +2295,8 @@ namespace Legion {
     public:
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false) { }
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL) { }
       // For Realm::AffineAccessor specializations there are additional
       // methods for creating accessors with limited bounding boxes and
       // affine transformations for using alternative coordinates spaces
@@ -2280,20 +2304,23 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<N,COORD_T> bounds,
-                        bool silence_warnings = false) { }
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) { }
       // Specify a specific Affine transform to use for interpreting points
       template<int M>
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop,
                         const AffineTransform<M,N,COORD_T> transform,
-                        bool silence_warnings = false) { }
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) { }
       // Specify both a transform and a bounds to use
       template<int M>
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop,
                         const AffineTransform<M,N,COORD_T> transform,
                         const Rect<N,COORD_T> bounds,
-                        bool silence_warnings = false) { }
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL) { }
     };
 
     /**
@@ -6534,10 +6561,12 @@ namespace Legion {
        * @param pid the projection ID to use for the registration
        * @param functor the object to register for handling projections
        * @param silence_warnings disable warnings about dynamic registration
+       * @param warning_string a string to be reported with any warnings
        */
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *functor,
-                                       bool silence_warnings = false);
+                                       bool silence_warnings = false,
+                                       const char *warning_string = NULL);
 
       /**
        * Register a projection functor before the runtime has started only.
@@ -6585,7 +6614,8 @@ namespace Legion {
        */
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *functor,
-                                     bool silence_warnings = false);
+                                     bool silence_warnings = false,
+                                     const char *warning_string = NULL);
 
       /**
        * Register a sharding functor before the runtime has 
