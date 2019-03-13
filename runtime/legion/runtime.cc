@@ -6184,8 +6184,8 @@ namespace Legion {
       unsigned incoming_message_id = 0;
       if (!ordered_channel)
       {
-        incoming_message_id = ((unsigned)header) >> 2; 
-        header = (MessageHeader)(((unsigned)header) & 0x3);
+        incoming_message_id = ((unsigned)head) >> 2; 
+        head = (MessageHeader)(((unsigned)head) & 0x3);
       }
       switch (head)
       {

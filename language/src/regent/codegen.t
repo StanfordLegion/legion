@@ -2869,11 +2869,11 @@ local function add_region_fields(cx, arg_type, field_paths, field_types, launche
   -- TODO: Would be good to take field_id_array by pointer, but that
   -- would require that the field ID array always be stored in memory
   -- (i.e. not a constant or r-value expression).
-  local terra add_fields([launcher], requirement : uint, field_id_array : c.legion_field_id_t[#cx:region(arg_type).field_paths])
+  local terra add_fields([launcher], requirement : uint, field_id_array : &c.legion_field_id_t[#cx:region(arg_type).field_paths])
     [data.zip(field_paths, field_types):map(
        function(field)
          local field_path, field_type = unpack(field)
-         local field_id = `field_id_array[ [field_id_index[field_path:hash()] ] ]
+         local field_id = `(@field_id_array)[ [field_id_index[field_path:hash()] ] ]
          if std.is_regent_array(field_type) then
            return quote
              for idx = 0, [field_type.N] do
@@ -2965,7 +2965,7 @@ local function expr_call_setup_region_arg(
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
+        [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         [add_flags]([launcher], [requirement], [flag])
       end)
   end
@@ -3186,7 +3186,7 @@ local function expr_call_setup_partition_arg(
     args_setup:insert(
       quote
         var [requirement] = [add_requirement]([requirement_args])
-        [add_fields]([launcher], [requirement], [cx:region(arg_type).field_id_array])
+        [add_fields]([launcher], [requirement], &[cx:region(arg_type).field_id_array])
         c.legion_index_launcher_add_flags([launcher], [requirement], [flag])
       end)
   end
@@ -4113,7 +4113,13 @@ function codegen.expr_region(cx, node)
       end
       return my_field_id
     end)
-  local field_id_array = terralib.constant(`arrayof(c.legion_field_id_t, [field_ids]))
+
+  -- Hack: allocate a buffer here, because we don't want these to live
+  -- on the stack and we can't take an address to constant memory.
+  local field_id_array_buffer = terralib.newsymbol(&c.legion_field_id_t[#field_ids], "field_ids")
+  local field_id_array = `(@[field_id_array_buffer])
+  local field_id_array_initializer = terralib.constant(`arrayof(c.legion_field_id_t, [field_ids]))
+
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
 
@@ -4180,6 +4186,9 @@ function codegen.expr_region(cx, node)
     var [is] = [ispace.value].impl
     var [fs] = c.legion_field_space_create([cx.runtime], [cx.context])
     var fsa = c.legion_field_allocator_create([cx.runtime], [cx.context],  [fs]);
+    var [field_id_array_buffer] = [&c.legion_field_id_t[#field_ids]](c.malloc([#field_ids] * [terralib.sizeof(c.legion_field_id_t)]))
+    regentlib.assert([#field_ids] == 0 or [field_id_array_buffer] ~= nil, "failed allocation in field ID array buffer")
+    [field_id_array] = [field_id_array_initializer]
     [data.flatmap(
        function(field)
          local field_type, field_id = unpack(field)
@@ -6891,12 +6900,6 @@ function codegen.expr_with_scratch_fields(cx, node)
     [field_ids.actions]
     [emit_debuginfo(node)]
   end
-
-  local value = expr.once_only(
-    actions,
-    std.implicit_cast(region_type, expr_type, region.value),
-    expr_type)
-
   assert(cx:has_region_or_list(region_type))
 
   local old_field_ids = cx:region_or_list(region_type).field_ids
@@ -6910,7 +6913,13 @@ function codegen.expr_with_scratch_fields(cx, node)
 
   local field_paths, field_types = std.flatten_struct_fields(region_type:fspace())
 
-  local new_field_id_array = `arrayof(c.legion_field_id_t, [field_paths:map(function(field_path) return new_field_ids[field_path:hash()] end)])
+  local new_field_id_array = terralib.newsymbol(c.legion_field_id_t[#field_paths], "new_field_ids")
+  actions = quote
+    [actions]
+    var [new_field_id_array] = arrayof(
+      c.legion_field_id_t,
+      [field_paths:map(function(field_path) return new_field_ids[field_path:hash()] end)])
+  end
 
   local old_fields_are_scratch = cx:region_or_list(region_type).fields_are_scratch
   local new_fields_are_scratch = {}
@@ -6920,6 +6929,11 @@ function codegen.expr_with_scratch_fields(cx, node)
   for i, field_path in pairs(node.region.fields) do
     new_fields_are_scratch[field_path:hash()] = true
   end
+
+  local value = expr.once_only(
+    actions,
+    std.implicit_cast(region_type, expr_type, region.value),
+    expr_type)
 
   if std.is_region(region_type) then
     cx:add_region_root(
@@ -7541,12 +7555,13 @@ function codegen.expr_import_region(cx, node)
 
   local field_ids_type = std.as_read(node.field_ids.expr_type)
   assert(field_ids_type:isarray())
-  local field_ids_symbol = terralib.newsymbol(field_ids_type, "fids")
+
+  local field_id_array = terralib.newsymbol(c.legion_field_id_t[field_ids_type.N], "field_ids")
   actions = quote
     [actions];
-    var [field_ids_symbol]
+    var [field_id_array]
     for i = 0, [field_ids_type.N] do
-      [field_ids_symbol][i] = [src_field_ids.value][i]
+      [field_id_array][i] = [src_field_ids.value][i]
     end
   end
 
@@ -7554,11 +7569,10 @@ function codegen.expr_import_region(cx, node)
   local field_privileges = field_paths:map(function(_) return "reads_writes" end)
   local field_id_offset = 0
   local field_ids = field_paths:map(function(_)
-    local field_id = `([field_ids_symbol][ [field_id_offset] ])
+    local field_id = `([field_id_array][ [field_id_offset] ])
     field_id_offset = field_id_offset + 1
     return field_id
   end)
-  local field_id_array = `arrayof(c.legion_field_id_t, [field_ids])
   local fields_are_scratch = field_paths:map(function(_) return false end)
   local physical_regions = field_paths:map(function(_) return pr end)
   local pr_actions, base_pointers, strides = unpack(data.zip(unpack(
@@ -7595,7 +7609,7 @@ function codegen.expr_import_region(cx, node)
       [get_source_location(node) .. ": cannot import a subregion"])
     std.assert_error(
       std.c.legion_field_space_has_fields([cx.runtime], [cx.context], [lr].field_space,
-        [field_ids_symbol], [field_ids_type.N]),
+        [field_id_array], [field_ids_type.N]),
       [get_source_location(node) .. ": found an invalid field id"])
     [data.zip(field_ids, field_types):map(
       function(pair)

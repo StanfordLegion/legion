@@ -1136,6 +1136,10 @@ static IncomingMessageManager *incoming_message_manager = 0;
 
 extern void enqueue_incoming(NodeID sender, IncomingMessage *msg)
 {
+#ifdef ACTIVE_MESSAGE_TRACE
+  log_amsg_trace.info("Active Message Received: %d %d %ld",
+                      msg->get_msgid(), msg->get_peer(), msg->get_msgsize());
+#endif
 #ifdef DEBUG_AMREQUESTS
   printf("%d: incoming(%d, %p)\n", gasnet_mynode(), sender, msg);
 #endif
