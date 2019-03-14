@@ -561,12 +561,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -606,14 +607,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -660,12 +662,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -698,14 +701,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>()) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -743,12 +747,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -793,14 +798,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -854,12 +860,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -896,14 +903,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>())
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -948,12 +956,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -998,14 +1007,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -1058,12 +1068,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -1099,14 +1110,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>())
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -1150,12 +1162,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -1196,14 +1209,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<N,T>())
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -1250,12 +1264,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -1287,14 +1302,15 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region), 
           bounds(region.template get_bounds<1,T>())
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, true/*generic accessor*/, check_field_size);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -1554,12 +1570,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -1572,12 +1589,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
@@ -1591,12 +1609,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -1612,12 +1631,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -1693,13 +1713,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
@@ -1713,13 +1734,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
@@ -1734,12 +1756,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -1756,12 +1779,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -1871,12 +1895,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -1889,12 +1914,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
@@ -1908,12 +1934,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -1929,12 +1956,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2000,13 +2028,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
@@ -2020,13 +2049,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region) 
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
@@ -2041,13 +2071,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2064,13 +2095,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region) 
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_ONLY, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2169,12 +2201,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -2187,12 +2220,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
@@ -2206,12 +2240,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2227,12 +2262,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2319,13 +2355,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
@@ -2339,13 +2376,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
@@ -2360,13 +2398,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2383,13 +2422,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2522,12 +2562,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -2540,12 +2581,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
@@ -2559,12 +2601,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2580,12 +2623,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2662,13 +2706,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
@@ -2682,13 +2727,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
@@ -2703,13 +2749,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2726,13 +2773,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(READ_WRITE, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2854,12 +2902,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -2872,12 +2921,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
@@ -2891,12 +2941,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -2912,12 +2963,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -2998,13 +3050,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
@@ -3018,13 +3071,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
@@ -3039,13 +3093,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3062,13 +3117,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3189,12 +3245,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -3207,12 +3264,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
@@ -3226,12 +3284,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3247,12 +3306,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3323,13 +3383,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
@@ -3343,13 +3404,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
@@ -3364,13 +3426,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3387,13 +3450,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3503,12 +3567,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -3521,12 +3586,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
@@ -3540,12 +3606,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3561,12 +3628,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3642,13 +3710,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<N,T>(is);
@@ -3662,13 +3731,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<N,T>(is, source_bounds);
@@ -3683,13 +3753,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3706,13 +3777,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3822,12 +3894,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -3840,12 +3913,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
@@ -3859,12 +3933,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -3880,12 +3955,13 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -3951,13 +4027,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
         bounds = AffineBounds::Tester<1,T>(is);
@@ -3971,13 +4048,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), warning_string, 
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
         bounds = AffineBounds::Tester<1,T>(is, source_bounds);
@@ -3992,13 +4070,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -4015,13 +4094,14 @@ namespace Legion {
 #else
                     bool check_field_size = false,
 #endif
-                    bool silence_warnings = false)
+                    bool silence_warnings = false,
+                    const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(WRITE_DISCARD, fid, actual_field_size, &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), warning_string,
               silence_warnings, false/*generic accessor*/, check_field_size);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -4114,13 +4194,14 @@ namespace Legion {
       __CUDA_HD__
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false)
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, is.bounds);
@@ -4129,13 +4210,14 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<N,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, source_bounds);
@@ -4145,13 +4227,14 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
             transform.transform, transform.offset, fid);
@@ -4162,13 +4245,14 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
                         const Rect<N,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
@@ -4246,14 +4330,15 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false)
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, is.bounds);
@@ -4263,14 +4348,15 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<N,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS), 
               &is, Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, fid, source_bounds);
@@ -4281,14 +4367,15 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,N,T>(
             instance, transform.transform,
@@ -4301,14 +4388,15 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,N,T> transform,
                         const Rect<N,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = 
           Realm::AffineAccessor<typename REDOP::RHS,N,T>(instance, 
@@ -4416,13 +4504,14 @@ namespace Legion {
       __CUDA_HD__
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false)
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, is.bounds);
@@ -4431,13 +4520,14 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<1,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, source_bounds);
@@ -4447,13 +4537,14 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, transform.transform, transform.offset, fid);
@@ -4464,13 +4555,14 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
                         const Rect<1,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
@@ -4537,14 +4629,15 @@ namespace Legion {
       // No CUDA support due to PhysicalRegion constructor
       ReductionAccessor(void) { }
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
-                        ReductionOpID redop, bool silence_warnings = false)
+                        ReductionOpID redop, bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(
             instance, fid, is.bounds);
@@ -4554,14 +4647,15 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const Rect<1,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = 
           Realm::AffineAccessor<typename REDOP::RHS,1,T>(
@@ -4573,14 +4667,15 @@ namespace Legion {
       ReductionAccessor(const PhysicalRegion &region, FieldID fid,
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance,
             transform.transform, transform.offset, fid);
@@ -4592,14 +4687,15 @@ namespace Legion {
                         ReductionOpID redop, 
                         const AffineTransform<M,1,T> transform,
                         const Rect<1,T> source_bounds,
-                        bool silence_warnings = false)
+                        bool silence_warnings = false,
+                        const char *warning_string = NULL)
         : field(fid), field_region(region)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(REDUCE, fid, sizeof(typename REDOP::RHS),
               &is, Internal::NT_TemplateHelper::encode_tag<M,T>(), 
-              silence_warnings, false/*generic accessor*/, 
+              warning_string, silence_warnings, false/*generic accessor*/, 
               false/*check field size*/, redop);
         accessor = Realm::AffineAccessor<typename REDOP::RHS,1,T>(instance, 
             transform.transform, transform.offset, fid, source_bounds);
@@ -4699,13 +4795,14 @@ namespace Legion {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<N,T>(), 
-              silence_warnings, true/*generic accessor*/,
+              warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
         accessor = Realm::GenericAccessor<FT,N,T>(instance, fid, is.bounds);
       }
@@ -4740,13 +4837,14 @@ namespace Legion {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
               Internal::NT_TemplateHelper::encode_tag<1,T>(), 
-              silence_warnings, true/*generic accessor*/,
+              warning_string, silence_warnings, true/*generic accessor*/,
               false/*check field size*/);
         accessor = Realm::GenericAccessor<FT,1,T>(instance, fid, is.bounds);
       }
@@ -4773,24 +4871,28 @@ namespace Legion {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const Rect<N,T> source_bounds,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<N,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<N,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<N,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, fid, source_bounds);
       }
@@ -4798,12 +4900,14 @@ namespace Legion {
       template<int M>
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,N,T> transform,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid);
@@ -4813,12 +4917,14 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,N,T> transform,
                           const Rect<N,T> source_bounds,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,N,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -4889,24 +4995,28 @@ namespace Legion {
     public:
       UnsafeFieldAccessor(void) { }
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, is.bounds);
       }
       // With explicit bounds
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const Rect<1,T> source_bounds,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<1,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<1,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<1,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, fid, source_bounds);
       }
@@ -4914,12 +5024,14 @@ namespace Legion {
       template<int M>
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,1,T> transform,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid);
@@ -4929,12 +5041,14 @@ namespace Legion {
       UnsafeFieldAccessor(const PhysicalRegion &region, FieldID fid,
                           const AffineTransform<M,1,T> transform,
                           const Rect<1,T> source_bounds,
-                          bool silence_warnings = false)
+                          bool silence_warnings = false,
+                          const char *warning_string = NULL)
       {
         DomainT<M,T> is;
         const Realm::RegionInstance instance = 
           region.get_instance_info(NO_ACCESS, fid, sizeof(FT), &is,
-              Internal::NT_TemplateHelper::encode_tag<M,T>(), silence_warnings,
+              Internal::NT_TemplateHelper::encode_tag<M,T>(), 
+              warning_string, silence_warnings,
               false/*generic accessor*/, false/*check field size*/);
         accessor = Realm::AffineAccessor<FT,1,T>(instance, transform.transform,
             transform.offset, fid, source_bounds);
@@ -7555,28 +7669,32 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T Future::get_result(bool silence_warnings) const
+    inline T Future::get_result(bool silence_warnings,
+                                const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       // Unpack the value using LegionSerialization in case
       // the type has an alternative method of unpacking
       return 
-        LegionSerialization::unpack<T>(get_untyped_result(silence_warnings));
+        LegionSerialization::unpack<T>(
+            get_untyped_result(silence_warnings, warning_string));
     }
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline const T& Future::get_reference(bool silence_warnings)
+    inline const T& Future::get_reference(bool silence_warnings,
+                                          const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      return *((const T*)get_untyped_result(silence_warnings));
+      return *((const T*)get_untyped_result(silence_warnings, warning_string));
     }
 
     //--------------------------------------------------------------------------
-    inline const void* Future::get_untyped_pointer(bool silence_warnings)
+    inline const void* Future::get_untyped_pointer(bool silence_warnings,
+                                                   const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      return get_untyped_result(silence_warnings);
+      return get_untyped_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -7621,11 +7739,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename T>
-    inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings)
+    inline T FutureMap::get_result(const DomainPoint &dp, bool silence_warnings,
+                                   const char *warning_string)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(dp);
-      return f.get_result<T>(silence_warnings);
+      return f.get_result<T>(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------

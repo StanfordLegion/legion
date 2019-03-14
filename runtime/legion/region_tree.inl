@@ -578,7 +578,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     IndexSpaceNode* IndexSpaceOperationT<DIM,T>::find_or_create_node(
-                                    InnerContext *ctx, const bool notify_remote)
+                                     TaskContext *ctx, const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (node != NULL)

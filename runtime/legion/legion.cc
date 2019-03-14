@@ -2321,7 +2321,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Future::get_void_result(bool silence_warnings) const
+    void Future::get_void_result(bool silence_warnings,
+                                 const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
@@ -2330,11 +2331,12 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool Future::is_empty(bool block /*= true*/, 
-                          bool silence_warnings/*=false*/) const
+                          bool silence_warnings/*=false*/,
+                          const char *warning_string /*=NULL*/) const
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        return impl->is_empty(block, silence_warnings);
+        return impl->is_empty(block, silence_warnings, warning_string);
       return true;
     }
 
@@ -2348,13 +2350,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* Future::get_untyped_result(bool silence_warnings) const
+    void* Future::get_untyped_result(bool silence_warnings,
+                                     const char *warning_string) const
     //--------------------------------------------------------------------------
     {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_REQUEST_FOR_EMPTY_FUTURE, 
                           "Illegal request for future value from empty future")
-      return impl->get_untyped_result(silence_warnings);
+      return impl->get_untyped_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2435,19 +2438,21 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMap::get_void_result(const DomainPoint &point, 
-                                    bool silence_warnings)
+                                    bool silence_warnings,
+                                    const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->get_void_result(point, silence_warnings);
+        impl->get_void_result(point, silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMap::wait_all_results(bool silence_warnings)
+    void FutureMap::wait_all_results(bool silence_warnings,
+                                     const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (impl != NULL)
-        impl->wait_all_results(silence_warnings);
+        impl->wait_all_results(silence_warnings, warning_string);
     }
 
     /////////////////////////////////////////////////////////////
@@ -2516,13 +2521,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PhysicalRegion::wait_until_valid(bool silence_warnings)
+    void PhysicalRegion::wait_until_valid(bool silence_warnings,
+                                          const char *warning_string)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(impl != NULL);
 #endif
-      impl->wait_until_valid(silence_warnings);
+      impl->wait_until_valid(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -2594,13 +2600,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Realm::RegionInstance PhysicalRegion::get_instance_info(PrivilegeMode mode,
                               FieldID fid, size_t field_size, void *realm_is, 
-                              TypeTag type_tag, bool silence_warnings, 
-                              bool generic_accessor, bool check_field_size,
-                              ReductionOpID redop) const
+                              TypeTag type_tag, const char *warning_string,
+                              bool silence_warnings, bool generic_accessor, 
+                              bool check_field_size, ReductionOpID redop) const
     //--------------------------------------------------------------------------
     {
       return impl->get_instance_info(mode, fid, field_size, realm_is, type_tag, 
-                   silence_warnings, generic_accessor, check_field_size, redop);
+                                     warning_string, silence_warnings, 
+                                     generic_accessor, check_field_size, redop);
     }
 
     //--------------------------------------------------------------------------
@@ -6128,11 +6135,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *func,
-                                              bool silence_warnings)
+                                              bool silence_warnings,
+                                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
       runtime->register_projection_functor(pid, func, true/*need zero check*/,
-                                           silence_warnings);
+                                           silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
@@ -6166,13 +6174,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::register_sharding_functor(ShardingID sid, 
-                                            ShardingFunctor *func,
-                                            bool silence_warnings)
+    void Runtime::register_sharding_functor(ShardingID sid,
+                                            ShardingFunctor *functor,
+                                            bool silence_warnings,
+                                            const char *warning_string)
     //--------------------------------------------------------------------------
     {
-      runtime->register_sharding_functor(sid, func, true/*need zero check*/,
-                                         silence_warnings);
+      runtime->register_sharding_functor(sid, functor, true/*need zero check*/,
+                                         silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------

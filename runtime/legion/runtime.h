@@ -214,9 +214,12 @@ namespace Legion {
     public:
       FutureImpl& operator=(const FutureImpl &rhs);
     public:
-      void get_void_result(bool silence_warnings = true);
-      void* get_untyped_result(bool silence_warnings = true);
-      bool is_empty(bool block, bool silence_warnings = true);
+      void get_void_result(bool silence_warnings = true,
+                           const char *warning_string = NULL);
+      void* get_untyped_result(bool silence_warnings = true,
+                               const char *warning_string = NULL);
+      bool is_empty(bool block, bool silence_warnings = true,
+                    const char *warning_string = NULL);
       bool is_ready(void);
       size_t get_untyped_size(void);
       ApEvent get_ready_event(void) const { return ready_event; }
@@ -304,8 +307,10 @@ namespace Legion {
       void set_future(const DomainPoint &point, FutureImpl *impl,
                       ReferenceMutator *mutator);
       void get_void_result(const DomainPoint &point, 
-                            bool silence_warnings = true);
-      virtual void wait_all_results(bool silence_warnings = true);
+                            bool silence_warnings = true,
+                            const char *warning_string = NULL);
+      virtual void wait_all_results(bool silence_warnings = true,
+                                    const char *warning_string = NULL);
       void complete_all_futures(void);
       bool reset_all_futures(void);
     public:
@@ -360,7 +365,8 @@ namespace Legion {
       virtual Future get_future(const DomainPoint &point,
                                 bool allow_empty = false);
       virtual void get_all_futures(std::map<DomainPoint,Future> &futures);
-      virtual void wait_all_results(bool silence_warnings = true);
+      virtual void wait_all_results(bool silence_warnings = true,
+                                    const char *warning_string = NULL);
     public:
       void set_sharding_function(ShardingFunction *function);
       void handle_future_map_request(Deserializer &derez);
@@ -409,7 +415,7 @@ namespace Legion {
       void set_sharded_view(ShardedView *view);
       inline ShardedView* get_sharded_view(void) const { return sharded_view; }
     public:
-      void wait_until_valid(bool silence_warnings, 
+      void wait_until_valid(bool silence_warnings, const char *warning_string, 
                             bool warn = false, const char *src = NULL);
       bool is_valid(void) const;
       bool is_mapped(void) const;
@@ -447,6 +453,7 @@ namespace Legion {
       PhysicalInstance get_instance_info(PrivilegeMode mode, 
                                          FieldID fid, size_t field_size, 
                                          void *realm_is, TypeTag type_tag,
+                                         const char *warning_string,
                                          bool silence_warnings, 
                                          bool generic_accessor,
                                          bool check_field_size,
@@ -2251,7 +2258,8 @@ namespace Legion {
       void register_projection_functor(ProjectionID pid, 
                                        ProjectionFunctor *func,
                                        bool need_zero_check = true,
-                                       bool silence_warnings = false);
+                                       bool silence_warnings = false,
+                                       const char *warning_string = NULL);
       static void preregister_projection_functor(ProjectionID pid,
                                        ProjectionFunctor *func);
       ProjectionFunction* find_projection_function(ProjectionID pid);
@@ -2263,7 +2271,8 @@ namespace Legion {
       void register_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func,
                                      bool need_zero_check = true,
-                                     bool silence_warnings= false);
+                                     bool silence_warnings= false,
+                                     const char *warning_string = NULL);
       static void preregister_sharding_functor(ShardingID sid,
                                      ShardingFunctor *func);
       ShardingFunctor* find_sharding_functor(ShardingID sid);

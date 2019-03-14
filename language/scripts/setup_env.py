@@ -148,6 +148,7 @@ def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
     flags = [
         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
+        'MACOSX_DEPLOYMENT_TARGET=10.6', # https://github.com/LuaJIT/LuaJIT/issues/484
     ]
     if platform.system() != 'Darwin':
         flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')

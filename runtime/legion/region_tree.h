@@ -157,16 +157,16 @@ namespace Legion {
                               DistributedID did, 
                               const bool notify_remote = true,
                               IndexSpaceExprID expr_id = 0);
-      IndexSpace find_or_create_union_space(InnerContext *ctx,
+      IndexSpace find_or_create_union_space(TaskContext *ctx,
                               const std::vector<IndexSpace> &sources,
                               const bool notify_remote = true);
-      IndexSpace find_or_create_intersection_space(InnerContext *ctx,
+      IndexSpace find_or_create_intersection_space(TaskContext *ctx,
                               const std::vector<IndexSpace> &sources,
                               const bool notify_remote = true);
-      IndexSpace find_or_create_difference_space(InnerContext *ctx,
+      IndexSpace find_or_create_difference_space(TaskContext *ctx,
                               IndexSpace left, IndexSpace right,
                               const bool notify_remote = true);
-      void find_or_create_sharded_index_space(InnerContext *ctx,
+      void find_or_create_sharded_index_space(TaskContext *ctx,
                               IndexSpace handle, IndexSpace local,
                               DistributedID did);
       RtEvent create_pending_partition(IndexPartition pid,
@@ -946,7 +946,7 @@ namespace Legion {
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool test_intersection_nonblocking(IndexSpaceExpression *expr,
          RegionTreeForest *context, ApEvent &precondition, bool second = false);
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
+      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
                                            const bool notify_remote = true) = 0;
     public:
       virtual ApEvent issue_fill(const PhysicalTraceInfo &trace_info,
@@ -1099,7 +1099,7 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
+      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
                                           const bool notify_remote = true) = 0;
     protected:
       void record_remote_expression(AddressSpaceID target);
@@ -1144,7 +1144,7 @@ namespace Legion {
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
       virtual bool remove_expression_reference(void);
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
+      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
                                           const bool notify_remote = true) = 0;
       virtual IndexSpaceExpression* find_congruence(void) = 0;
       virtual void activate_remote(void) = 0;
@@ -1191,7 +1191,7 @@ namespace Legion {
                                              AddressSpaceID target,
                                              const bool top) = 0;
       virtual bool remove_operation(RegionTreeForest *forest) = 0;
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
+      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
                                           const bool notify_remote = true);
       virtual IndexSpaceExpression* find_congruence(void) = 0;
     public:
@@ -1740,7 +1740,7 @@ namespace Legion {
       virtual void add_expression_reference(void);
       virtual bool remove_expression_reference(void);
       virtual bool remove_operation(RegionTreeForest *forest);
-      virtual IndexSpaceNode* find_or_create_node(InnerContext *ctx,
+      virtual IndexSpaceNode* find_or_create_node(TaskContext *ctx,
                                                 const bool notify_remote = true)
         { return this; }
       virtual void create_sharded_alias(IndexSpace alias,DistributedID did) = 0;

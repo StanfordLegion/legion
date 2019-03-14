@@ -171,7 +171,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_or_create_union_space(InnerContext *ctx,
+    IndexSpace RegionTreeForest::find_or_create_union_space(TaskContext *ctx,
                                          const std::vector<IndexSpace> &sources,
                                          const bool notify_remote)
     //--------------------------------------------------------------------------
@@ -199,8 +199,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_intersection_space(
-                      InnerContext *ctx, const std::vector<IndexSpace> &sources,
-                      const bool notify_remote)
+                       TaskContext *ctx, const std::vector<IndexSpace> &sources,
+                       const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -226,8 +226,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_difference_space(
-                           InnerContext *ctx, IndexSpace left, IndexSpace right,
-                           const bool notify_remote)
+                            TaskContext *ctx, IndexSpace left, IndexSpace right,
+                            const bool notify_remote)
     //--------------------------------------------------------------------------
     {
       if (!left.exists())
@@ -242,7 +242,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RegionTreeForest::find_or_create_sharded_index_space(InnerContext *ctx,
+    void RegionTreeForest::find_or_create_sharded_index_space(TaskContext *ctx,
                                        IndexSpace handle, IndexSpace local,
                                        DistributedID did)
     //--------------------------------------------------------------------------

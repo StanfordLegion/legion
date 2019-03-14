@@ -324,7 +324,8 @@ namespace Legion {
     }
     
     //--------------------------------------------------------------------------
-    void FutureImpl::get_void_result(bool silence_warnings)
+    void FutureImpl::get_void_result(bool silence_warnings,
+                                     const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
@@ -335,9 +336,11 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF,
              "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation.",
+             "best practices. You may notice a severe performance degradation. "
+             "Warning string: %s",
              implicit_context->get_task_name(), 
-             implicit_context->get_unique_id());
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
         }
       }
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
@@ -357,7 +360,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void* FutureImpl::get_untyped_result(bool silence_warnings)
+    void* FutureImpl::get_untyped_result(bool silence_warnings,
+                                         const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
@@ -367,9 +371,11 @@ namespace Legion {
           REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_FUTURE_NONLEAF, 
              "Waiting on a future in non-leaf task %s "
              "(UID %lld) is a violation of Legion's deferred execution model "
-             "best practices. You may notice a severe performance degradation.",
+             "best practices. You may notice a severe performance degradation. "
+             "Warning string: %s",
              implicit_context->get_task_name(), 
-             implicit_context->get_unique_id())
+             implicit_context->get_unique_id(),
+             (warning_string == NULL) ? "" : warning_string)
       }
       if ((implicit_context != NULL) && !runtime->separate_runtime_instances)
         implicit_context->record_blocking_call();
@@ -404,7 +410,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FutureImpl::is_empty(bool block, bool silence_warnings)
+    bool FutureImpl::is_empty(bool block, bool silence_warnings,
+                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
@@ -416,8 +423,10 @@ namespace Legion {
               "Performing a blocking is_empty test on a "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
-              "severe performance degradation.", context->get_task_name(), 
-              context->get_unique_id())
+              "severe performance degradation. Warning string: %s", 
+              context->get_task_name(), 
+              context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
       }
       if (block && producer_op != NULL && Internal::implicit_context != NULL)
         Internal::implicit_context->record_blocking_call();
@@ -961,15 +970,17 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void FutureMapImpl::get_void_result(const DomainPoint &point,
-                                        bool silence_warnings)
+                                        bool silence_warnings,
+                                        const char *warning_string)
     //--------------------------------------------------------------------------
     {
       Future f = get_future(point);
-      f.get_void_result(silence_warnings);
+      f.get_void_result(silence_warnings, warning_string);
     }
 
     //--------------------------------------------------------------------------
-    void FutureMapImpl::wait_all_results(bool silence_warnings)
+    void FutureMapImpl::wait_all_results(bool silence_warnings,
+                                         const char *warning_string)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -981,8 +992,10 @@ namespace Legion {
             "Waiting for all futures in a future map in "
             "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
             "execution model best practices. You may notice a severe "
-            "performance degredation.", context->get_task_name(),
-            context->get_unique_id())
+            "performance degredation. Warning string: %s", 
+            context->get_task_name(),
+            context->get_unique_id(),
+            (warning_string == NULL) ? "" : warning_string)
       if (op != NULL && Internal::implicit_context != NULL)
         Internal::implicit_context->record_blocking_call();
       // Wait on the event that indicates the entire task has finished
@@ -1313,7 +1326,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplFutureMapImpl::wait_all_results(bool silence_warnings)
+    void ReplFutureMapImpl::wait_all_results(bool silence_warnings,
+                                             const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (runtime->runtime_warnings && !silence_warnings && 
@@ -1322,8 +1336,9 @@ namespace Legion {
             "Waiting for all futures in a future map in "
             "non-leaf task %s (UID %lld) is a violation of Legion's deferred "
             "execution model best practices. You may notice a severe "
-            "performance degredation.", context->get_task_name(),
-            context->get_unique_id())
+            "performance degredation. Warning string: %s", 
+            context->get_task_name(), context->get_unique_id(),
+            (warning_string == NULL) ? "" : warning_string)
       // As a proxy for this, we will get the names of all the futures
       // needed for this future map in case we need them in the future
       // The process of doing this will wait on both our ready event
@@ -1495,6 +1510,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalRegionImpl::wait_until_valid(bool silence_warnings, 
+                                              const char *warning_string,
                                               bool warn, const char *source)
     //--------------------------------------------------------------------------
     {
@@ -1508,15 +1524,17 @@ namespace Legion {
               "Waiting for a physical region to be valid "
               "for call %s in non-leaf task %s (UID %lld) is a violation of "
               "Legion's deferred execution model best practices. You may "
-              "notice a severe performance degradation.", source,
-              context->get_task_name(), context->get_unique_id())
+              "notice a severe performance degradation. Warning string: %s", 
+              source, context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
         else
           REPORT_LEGION_WARNING(LEGION_WARNING_WAITING_REGION, 
               "Waiting for a physical region to be valid "
               "in non-leaf task %s (UID %lld) is a violation of Legion's "
               "deferred execution model best practices. You may notice a "
-              "severe performance degradation.", context->get_task_name(), 
-              context->get_unique_id())
+              "severe performance degradation. Warning string: %s", 
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
       }
 #ifdef DEBUG_LEGION
       assert(mapped); // should only be waiting on mapped regions
@@ -1531,8 +1549,9 @@ namespace Legion {
               "Request for %s was performed on a "
               "physical region in task %s (ID %lld) without first waiting "
               "for the physical region to be valid. Legion is performing "
-              "the wait for you.", source, context->get_task_name(), 
-              context->get_unique_id())
+              "the wait for you. Warning string: %s", source, 
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
         if (context != NULL)
           context->begin_task_wait(false/*from runtime*/);
         ready_event.wait();
@@ -1646,7 +1665,7 @@ namespace Legion {
 #endif
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, NULL, 
                        runtime->runtime_warnings, "get_accessor");
       // You can only legally invoke this method when you have one instance
       if (references.size() > 1)
@@ -1720,7 +1739,7 @@ namespace Legion {
 #endif 
       }
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, NULL, 
                        runtime->runtime_warnings, "get_field_acessor");
 #ifdef DEBUG_LEGION
       if (req.privilege_fields.find(fid) == req.privilege_fields.end())
@@ -1749,7 +1768,7 @@ namespace Legion {
     {
       if (!mapped)
         return;
-      wait_until_valid(true/*silence warnings*/);
+      wait_until_valid(true/*silence warnings*/, NULL);
       if (trigger_on_unmap)
       {
         trigger_on_unmap = false;
@@ -1911,6 +1930,7 @@ namespace Legion {
     PhysicalInstance PhysicalRegionImpl::get_instance_info(PrivilegeMode mode, 
                                               FieldID fid, size_t field_size, 
                                               void *realm_is, TypeTag type_tag,
+                                              const char *warning_string,
                                               bool silence_warnings, 
                                               bool generic_accessor,
                                               bool check_field_size,
@@ -1938,8 +1958,10 @@ namespace Legion {
                                 "creating read-write accessor for "
                                 "field %d in task %s which only has "
                                 "WRITE_DISCARD privileges. You may be "
-                                "accessing uninitialized data.",
-                                fid, context->get_task_name())
+                                "accessing uninitialized data. "
+                                "Warning string: %s",
+                                fid, context->get_task_name(),
+                                (warning_string == NULL) ? "" : warning_string)
             }
             else if (req.privilege != READ_WRITE)
               REPORT_LEGION_ERROR(ERROR_ACCESSOR_PRIVILEGE_CHECK, 
@@ -1999,8 +2021,9 @@ namespace Legion {
               "Accessor construction in non-leaf "
               "task %s (UID %lld) is a blocking operation in violation of "
               "Legion's deferred execution model best practices. You may "
-              "notice a severe performance degradation.", 
-              context->get_task_name(), context->get_unique_id())
+              "notice a severe performance degradation. Warning string: %s",
+              context->get_task_name(), context->get_unique_id(),
+              (warning_string == NULL) ? "" : warning_string)
       }
       // If this physical region isn't mapped, then we have to
       // map it before we can return an accessor
@@ -2016,8 +2039,9 @@ namespace Legion {
                           "Accessor construction was "
                           "performed on an unmapped region in task %s "
                           "(UID %lld). Legion is mapping it for you. "
-                          "Please try to be more careful.",
-                          context->get_task_name(), context->get_unique_id())
+                          "Please try to be more careful. Warning string: %s",
+                          context->get_task_name(), context->get_unique_id(),
+                          (warning_string == NULL) ? "" : warning_string)
         runtime->remap_region(context, PhysicalRegion(this));
         // At this point we should have a new ready event
         // and be mapped
@@ -2035,13 +2059,15 @@ namespace Legion {
                               "physical instance of task %s (UID %lld). "
                               "Generic accessors are very slow and are "
                               "strongly discouraged for use in high "
-                              "performance code.", context->get_task_name(),
-                              context->get_unique_id())
+                              "performance code. Warning string: %s", 
+                              context->get_task_name(),
+                              context->get_unique_id(),
+                              (warning_string == NULL) ? "" : warning_string)
       // Get the index space to use for the accessor
       runtime->get_index_space_domain(req.region.get_index_space(),
                                       realm_is, type_tag);
       // Wait until we are valid before returning the accessor
-      wait_until_valid(silence_warnings, 
+      wait_until_valid(silence_warnings, warning_string,
                        runtime->runtime_warnings, "Accessor Construction");
       made_accessor = true;
       for (unsigned idx = 0; idx < references.size(); idx++)
@@ -13779,7 +13805,8 @@ namespace Legion {
     void Runtime::register_projection_functor(ProjectionID pid,
                                               ProjectionFunctor *functor,
                                               bool need_zero_check,
-                                              bool silence_warnings)
+                                              bool silence_warnings,
+                                              const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (need_zero_check && (pid == 0))
@@ -13791,8 +13818,9 @@ namespace Legion {
                         "registered for a multi-node run with %d nodes. It is "
                         "currently the responsibility of the application to "
                         "ensure that this projection functor is registered on "
-                        "all nodes where it will be required.",
-                        pid, total_address_spaces)
+                        "all nodes where it will be required. "
+                        "Warning string: %s", pid, total_address_spaces,
+                        (warning_string == NULL) ? "" : warning_string)
       ProjectionFunction *function = new ProjectionFunction(pid, functor);
       AutoLock p_lock(projection_lock);
       std::map<ProjectionID,ProjectionFunction*>::
@@ -13991,7 +14019,8 @@ namespace Legion {
     void Runtime::register_sharding_functor(ShardingID sid,
                                             ShardingFunctor *functor,
                                             bool need_zero_check,
-                                            bool silence_warnings)
+                                            bool silence_warnings,
+                                            const char *warning_string)
     //--------------------------------------------------------------------------
     {
       if (sid == UINT_MAX)
@@ -14006,8 +14035,9 @@ namespace Legion {
                         "registered for a multi-node run with %d nodes. It is "
                         "currently the responsibility of the application to "
                         "ensure that this sharding functor is registered on "
-                        "all nodes where it will be required.",
-                        sid, total_address_spaces)
+                        "all nodes where it will be required. "
+                        "Warning string: %s", sid, total_address_spaces,
+                        (warning_string == NULL) ? "" : warning_string)
       AutoLock s_lock(sharding_lock);
       std::map<ShardingID,ShardingFunctor*>::const_iterator finder = 
         sharding_functors.find(sid);

@@ -2298,8 +2298,6 @@ namespace Legion {
       shard_manager = NULL;
       leaf_cached = false;
       inner_cached = false;
-      has_virtual_instances_result = false;
-      has_virtual_instances_cached = false;
     }
 
     //--------------------------------------------------------------------------
@@ -2350,25 +2348,6 @@ namespace Legion {
         inner_cached = true;
       }
       return is_inner_result;
-    }
-
-    //--------------------------------------------------------------------------
-    bool SingleTask::has_virtual_instances(void) const
-    //--------------------------------------------------------------------------
-    {
-      if (!has_virtual_instances_cached)
-      {
-        for (unsigned idx = 0; idx < regions.size(); idx++)
-        {
-          if (virtual_mapped[idx])
-          {
-            has_virtual_instances_result = true;
-            break;
-          }
-        }
-        has_virtual_instances_cached = true;
-      }
-      return has_virtual_instances_result;
     }
 
     //--------------------------------------------------------------------------
@@ -4141,11 +4120,8 @@ namespace Legion {
       }
 
       // STEP 2: Set up the task's context
-      // If we're a leaf task and we have virtual mappings
-      // then it's possible for the application to do inline
-      // mappings which require a physical context
       {
-        if (!variant->is_leaf() || has_virtual_instances())
+        if (!variant->is_leaf())
           execution_context = initialize_inner_execution_context(variant);
         else
           execution_context = new LeafContext(runtime, this);
@@ -4242,8 +4218,7 @@ namespace Legion {
       // avoid the race.
       bool perform_chaining_optimization = false; 
       ApUserEvent chain_complete_event;
-      if (variant->is_leaf() && !has_virtual_instances() &&
-          can_early_complete(chain_complete_event))
+      if (variant->is_leaf() && can_early_complete(chain_complete_event))
         perform_chaining_optimization = true;
       // Note there is a potential scary race condition to be aware of here: 
       // once we launch this task it's possible for this task to run and 
@@ -4365,7 +4340,7 @@ namespace Legion {
           Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
       }
 #ifdef DEBUG_LEGION
-      assert(is_leaf() && !has_virtual_instances());
+      assert(is_leaf());
 #endif
       for (std::deque<InstanceSet>::iterator it = physical_instances.begin();
            it != physical_instances.end(); ++it)
@@ -5392,13 +5367,13 @@ namespace Legion {
               arrive_barriers.begin(); it != arrive_barriers.end(); it++)
           Runtime::phase_barrier_arrive(*it, 1/*count*/, done_event);
       }
-      // If we succeeded in mapping and everything was mapped
+      // If we succeeded in mapping and it's a leaf task
       // then we get to mark that we are done mapping
       RtEvent applied_condition;
       if (!is_replicated())
       { 
         // The common path
-        if (is_leaf() && !has_virtual_instances())
+        if (is_leaf())
         {
           if (!map_applied_conditions.empty())
           {
@@ -6221,9 +6196,8 @@ namespace Legion {
         return deferred;
       RtEvent applied_condition;
       ApEvent effects_condition;
-      // If we succeeded in mapping and had no virtual mappings
-      // then we are done mapping
-      if (is_leaf() && !has_virtual_instances() && !is_replicated())
+      // If we succeeded in mapping and we're a leaf so we are done mapping
+      if (is_leaf() && !is_replicated())
       {
         if (!map_applied_conditions.empty())
         {
@@ -6364,7 +6338,7 @@ namespace Legion {
         // this if we're a leaf task with no virtual mappings
         // because we would have performed the leaf task
         // early complete chaining operation.
-        if (!is_leaf() || has_virtual_instances())
+        if (!is_leaf())
           Runtime::trigger_event(point_termination);
       }
       else
