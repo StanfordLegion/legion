@@ -2243,7 +2243,7 @@ public:
   {
 #ifdef TRACE_MESSAGES
     report_activemsg_status(msgtrace_file);
-    fclose(f);
+    fclose(msgtrace_file);
 #endif
 
     delete[] todo_list;
