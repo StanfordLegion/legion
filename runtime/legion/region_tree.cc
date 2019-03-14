@@ -3359,7 +3359,7 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       const FieldMask coloc_mask = node->get_field_mask(fields);
-      LegionMap<PhysicalManager*,FieldMask>::aligned colocate_instances;
+      FieldMaskSet<PhysicalManager> colocate_instances;
       // Figure out the first set
       InstanceSet &first_set = *(instances[0]);
       for (unsigned idx = 0; idx < first_set.size(); idx++)
@@ -3375,7 +3375,7 @@ namespace Legion {
           bad2 = 0;
           return false;
         }
-        colocate_instances[manager] = overlap;
+        colocate_instances.insert(manager, overlap);
       }
       // Now we've got the first set, check all the rest
       for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
@@ -3393,8 +3393,8 @@ namespace Legion {
             bad2 = idx2;
             return false;
           }
-          LegionMap<PhysicalManager*,FieldMask>::aligned::const_iterator 
-            finder = colocate_instances.find(manager);
+          FieldMaskSet<PhysicalManager>::const_iterator finder = 
+            colocate_instances.find(manager);
           if ((finder == colocate_instances.end()) ||
               (!!(overlap - finder->second)))
           {
