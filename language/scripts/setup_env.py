@@ -138,17 +138,22 @@ def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
         return
 
-    env = None
+    env = {
+        # https://github.com/LuaJIT/LuaJIT/issues/484
+
+        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally, because it will break Terra build outright. It must be set for LuaJIT and *only* LuaJIT, so to do that we use the PR branch directly.
+        'LUAJIT_URL': 'https://github.com/elliottslaughter/LuaJIT.git',
+        'LUAJIT_BRANCH': 'patch-1',
+    }
     if is_cray:
-        env = dict(list(os.environ.items()) + [
+        env.update(dict(list(os.environ.items()) + [
             ('CC', os.environ['HOST_CC']),
             ('CXX', os.environ['HOST_CXX']),
-        ])
+        ]))
 
     flags = [
         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-        'MACOSX_DEPLOYMENT_TARGET=10.6', # https://github.com/LuaJIT/LuaJIT/issues/484
     ]
     if platform.system() != 'Darwin':
         flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')

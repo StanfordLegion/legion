@@ -113,7 +113,13 @@ def build_terra(terra_dir, thread_count, llvm):
     subprocess.check_call(
         ['make', 'all', '-j', str(thread_count)] +
         (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []) +
-        ['MACOSX_DEPLOYMENT_TARGET=10.6'], # https://github.com/LuaJIT/LuaJIT/issues/484
+
+        # https://github.com/LuaJIT/LuaJIT/issues/484
+
+        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally, because it will break Terra build outright. It must be set for LuaJIT and *only* LuaJIT, so to do that we use the PR branch directly.
+        ['LUAJIT_URL=https://github.com/elliottslaughter/LuaJIT.git',
+         'LUAJIT_BRANCH=patch-1'],
+
         cwd=terra_dir)
 
 def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
