@@ -192,6 +192,7 @@ ast:inner("layout")
 ast.layout:leaf("Dim", {"index"}):set_memoize()
 ast.layout:leaf("Field", {"region_name", "field_paths"})
 ast.layout:leaf("Ordering", {"dimensions"})
+ast.layout:leaf("Colocation", {"fields"})
 
 -- Node Types (Unspecialized)
 
