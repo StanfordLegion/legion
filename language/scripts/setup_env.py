@@ -133,18 +133,21 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
+def build_terra(terra_dir, terra_branch, llvm_dir, cache, is_cray, thread_count):
     if cache:
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
         return
 
-    env = {
+    env = {}
+    if terra_branch.startswith('luajit2.1'):
         # https://github.com/LuaJIT/LuaJIT/issues/484
 
-        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally, because it will break Terra build outright. It must be set for LuaJIT and *only* LuaJIT, so to do that we use the PR branch directly.
-        'LUAJIT_URL': 'https://github.com/elliottslaughter/LuaJIT.git',
-        'LUAJIT_BRANCH': 'patch-1',
-    }
+        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally,
+        # because it will break Terra build outright. It must be set
+        # for LuaJIT and *only* LuaJIT, so to do that we use the PR
+        # branch directly.
+        env['LUAJIT_URL'] = 'https://github.com/elliottslaughter/LuaJIT.git'
+        env['LUAJIT_BRANCH'] = 'patch-1'
     if is_cray:
         env.update(dict(list(os.environ.items()) + [
             ('CC', os.environ['HOST_CC']),
@@ -428,7 +431,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         git_clone(terra_dir, terra_url, terra_branch)
     if not os.path.exists(terra_build_dir):
         try:
-            build_terra(terra_dir, llvm_install_dir, cache, is_cray, thread_count)
+            build_terra(terra_dir, terra_branch, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
             report_build_failure('terra', terra_dir, e)
     else:
