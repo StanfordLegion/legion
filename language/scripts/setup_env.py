@@ -396,17 +396,25 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
     if cache or ((legion_use_cmake or llvm_use_cmake) and cmake_exe is None):
+        cmake_stem = 'cmake-3.7.2-%s-x86_64' % platform.system()
+        cmake_basename = '%s.tar.gz' % cmake_stem
+        cmake_url = 'https://cmake.org/files/v3.7/%s' % cmake_basename
+        if cmake_stem == 'cmake-3.7.2-Linux-x86_64':
+            cmake_shasum = '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406'
+        elif cmake_stem == 'cmake-3.7.2-Darwin-x86_64':
+            cmake_shasum = '0175e97748052dfc15ebd3c0aa65286e5ec20ca22ed606ce88940e699496b03c'
+
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
-        cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
+        cmake_install_dir = os.path.join(cmake_dir, cmake_stem)
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
 
             proc_type = subprocess.check_output(['uname', '-p']).strip()
-            if proc_type != 'x86_64':
+            if proc_type != 'x86_64' and proc_type != 'i386':
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 
-            cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406', insecure=insecure)
+            cmake_tarball = os.path.join(cmake_dir, cmake_basename)
+            download(cmake_tarball, cmake_url, cmake_shasum, insecure=insecure)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
