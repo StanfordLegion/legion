@@ -1013,6 +1013,22 @@ function base.variant:get_layout_constraints()
   return self.layout_constraints
 end
 
+function base.variant:add_execution_constraint(constraint)
+  if not self.execution_constraints then
+    self.execution_constraints = terralib.newlist()
+  end
+  self.execution_constraints:insert(constraint)
+end
+
+function base.variant:has_execution_constraints()
+  return self.execution_constraints
+end
+
+function base.variant:get_execution_constraints()
+  assert(self.execution_constraints)
+  return self.execution_constraints
+end
+
 do
   function base.new_variant(task, name)
     assert(base.is_task(task))
@@ -1031,6 +1047,7 @@ do
       cudakernels = false,
       config_options = false,
       layout_constraints = false,
+      execution_constraints = false,
     }, base.variant)
 
     task.variants:insert(variant)

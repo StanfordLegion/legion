@@ -5085,7 +5085,7 @@ legion_execution_constraint_set_add_launch_constraint_multi_dim(
 }
 
 void
-legion_execution_constraint_set_add_colocation_constraints(
+legion_execution_constraint_set_add_colocation_constraint(
   legion_execution_constraint_set_t handle_,
   const unsigned *indexes,
   size_t num_indexes,

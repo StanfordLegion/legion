@@ -3359,7 +3359,7 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       const FieldMask coloc_mask = node->get_field_mask(fields);
-      std::map<PhysicalManager*,FieldMask> colocate_instances;
+      LegionMap<PhysicalManager*,FieldMask>::aligned colocate_instances;
       // Figure out the first set
       InstanceSet &first_set = *(instances[0]);
       for (unsigned idx = 0; idx < first_set.size(); idx++)
@@ -3393,8 +3393,8 @@ namespace Legion {
             bad2 = idx2;
             return false;
           }
-          std::map<PhysicalManager*,FieldMask>::const_iterator finder = 
-            colocate_instances.find(manager);
+          LegionMap<PhysicalManager*,FieldMask>::aligned::const_iterator 
+            finder = colocate_instances.find(manager);
           if ((finder == colocate_instances.end()) ||
               (!!(overlap - finder->second)))
           {
