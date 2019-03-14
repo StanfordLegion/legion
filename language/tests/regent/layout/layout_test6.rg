@@ -162,10 +162,8 @@ task toplevel()
   for p in p_r_interior.colors do
     colocate(p_r_interior[p], p_donut[p])
   end
-  -- FIXME: the test should be passing even without this mapping fence.
-  __fence(__mapping)
   for p in p_r_interior.colors do
-    donut(p_r_interior[p], p_donut[p])
+    donut(p_r_interior[p], p_halo[p])
   end
   for p in p_r_interior.colors do
     check(p_r_interior[p])
