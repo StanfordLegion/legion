@@ -167,7 +167,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace RegionTreeForest::find_or_create_union_space(InnerContext *ctx,
+    IndexSpace RegionTreeForest::find_or_create_union_space(TaskContext *ctx,
                                          const std::vector<IndexSpace> &sources)
     //--------------------------------------------------------------------------
     {
@@ -194,7 +194,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_intersection_space(
-                      InnerContext *ctx, const std::vector<IndexSpace> &sources)
+                       TaskContext *ctx, const std::vector<IndexSpace> &sources)
     //--------------------------------------------------------------------------
     {
       // Construct the set of index space expressions
@@ -220,7 +220,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     IndexSpace RegionTreeForest::find_or_create_difference_space(
-                           InnerContext *ctx, IndexSpace left, IndexSpace right)
+                            TaskContext *ctx, IndexSpace left, IndexSpace right)
     //--------------------------------------------------------------------------
     {
       if (!left.exists())
