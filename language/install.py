@@ -114,7 +114,7 @@ def build_terra(terra_dir, terra_branch, thread_count, llvm):
     if llvm:
         flags.extend(['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'])
 
-    if terra_branch.startswith('luajit2.1'):
+    if terra_branch is not None and terra_branch.startswith('luajit2.1'):
         # https://github.com/LuaJIT/LuaJIT/issues/484
 
         # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally,
