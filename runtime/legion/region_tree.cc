@@ -5695,20 +5695,36 @@ namespace Legion {
             // Sort the expressions so they're in the same order
             // as if they had come from the local node
             if (num_sub_expressions > 0)
+            {
               std::sort(expressions.begin(), expressions.end(), 
                         std::less<IndexSpaceExpression*>());
-            RemoteUnionOpCreator creator(this, derez, expressions);
-            return union_index_spaces(expressions, &creator);  
+              RemoteUnionOpCreator creator(this, derez, expressions);
+              return union_index_spaces(expressions, &creator);  
+            }
+            else
+            {
+              // This is an empty expression so just make it and return
+              RemoteUnionOpCreator creator(this, derez, expressions);
+              return creator.consume();
+            }
           }
         case IndexSpaceOperation::INTERSECT_OP_KIND:
           {
             // Sort the expressions so they're in the same order
             // as if they had come from the local node
             if (num_sub_expressions > 0)
+            {
               std::sort(expressions.begin(), expressions.end(), 
                         std::less<IndexSpaceExpression*>());
-            RemoteIntersectionOpCreator creator(this, derez, expressions);
-            return intersect_index_spaces(expressions, &creator);
+              RemoteIntersectionOpCreator creator(this, derez, expressions);
+              return intersect_index_spaces(expressions, &creator);
+            }
+            else
+            {
+              // This is an empty expression so just make it and return
+              RemoteIntersectionOpCreator creator(this, derez, expressions);
+              return creator.consume();
+            }
           }
         case IndexSpaceOperation::DIFFERENCE_OP_KIND:
           {
