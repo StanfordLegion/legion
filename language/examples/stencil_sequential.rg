@@ -45,12 +45,12 @@ end
 do
   local root_dir = arg[0]:match(".*/") or "./"
   local runtime_dir = os.getenv('LG_RT_DIR') .. "/"
-  local mapper_cc = root_dir .. "stencil_mapper.cc"
+  local mapper_cc = root_dir .. "stencil_sequential_mapper.cc"
   if os.getenv('OBJNAME') then
     local out_dir = os.getenv('OBJNAME'):match('.*/') or './'
-    mapper_so = out_dir .. "libstencil_mapper.so"
+    mapper_so = out_dir .. "libstencil_sequential_mapper.so"
   elseif os.getenv('SAVEOBJ') == '1' then
-    mapper_so = root_dir .. "libstencil_mapper.so"
+    mapper_so = root_dir .. "libstencil_sequential_mapper.so"
   else
     mapper_so = os.tmpname() .. ".so" -- root_dir .. "stencil_mapper.so"
   end
@@ -110,8 +110,7 @@ where
   interior <= points
 do
   for i in interior do
-    var j = [int2d](i)
-    points[i].output = points[j].output +
+    points[i].output = points[i].output +
       [make_stencil_pattern(points, i,  0, -1, RADIUS)] +
       [make_stencil_pattern(points, i, -1,  0, RADIUS)] +
       [make_stencil_pattern(points, i,  1,  0, RADIUS)] +
@@ -152,6 +151,7 @@ task make_interior_partition(points : region(ispace(int2d), point),
   return image(points, p, r)
 end
 
+__demand(__inner)
 task main()
   var conf = common.read_config()
 
@@ -178,7 +178,7 @@ task main()
   --__demand(__spmd)
   __parallelize_with tiles
   do
-    __demand(__trace)
+    __demand(__spmd)
     for t = 0, tsteps do
       stencil(points, interior)
       increment(points)
@@ -190,7 +190,7 @@ end
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
   local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
-  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_mapper"})
+  local link_flags = terralib.newlist({"-L" .. out_dir, "-lstencil_sequential_mapper"})
 
   if os.getenv('STANDALONE') == '1' then
     os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
