@@ -1008,6 +1008,10 @@ function base.variant:get_name()
   return self.name
 end
 
+function base.variant:set_name(name)
+  self.name = name
+end
+
 function base.variant:get_definition()
   self.task:complete()
   assert(self.definition)
@@ -1366,6 +1370,10 @@ function base.task:set_task_id(task_id)
     error("task ID can only be set when task has zero variants")
   end
   self.taskid = terralib.constant(c.legion_task_id_t, task_id)
+end
+
+function base.task:set_task_id_unsafe(task_id)
+  self.taskid = task_id
 end
 
 function base.task:get_task_id()

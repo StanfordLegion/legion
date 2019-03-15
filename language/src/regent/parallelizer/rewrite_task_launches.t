@@ -58,7 +58,8 @@ local function create_index_launch(cx, task, call, stat)
   local generator = task:get_parallel_task_generator()
   local pair_of_mappings = cx.mappings[task]
   assert(pair_of_mappings ~= nil)
-  local parallel_task, params_to_partitions, metadata = generator(pair_of_mappings, cx)
+  local parallel_task_variants, params_to_partitions, metadata = generator(pair_of_mappings, cx)
+  local parallel_task = parallel_task_variants["primary"]
 
   -- Create an index space launch
   local loop_var_type = cx.color_space_symbol:gettype().index_type(cx.color_space_symbol)
