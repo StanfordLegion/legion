@@ -3636,7 +3636,7 @@ namespace Legion {
     {
       FieldSpaceNode *node = get_node(handle);
       const FieldMask coloc_mask = node->get_field_mask(fields);
-      std::map<PhysicalManager*,FieldMask> colocate_instances;
+      FieldMaskSet<PhysicalManager> colocate_instances;
       // Figure out the first set
       InstanceSet &first_set = *(instances[0]);
       for (unsigned idx = 0; idx < first_set.size(); idx++)
@@ -3652,7 +3652,7 @@ namespace Legion {
           bad2 = 0;
           return false;
         }
-        colocate_instances[manager] = overlap;
+        colocate_instances.insert(manager, overlap);
       }
       // Now we've got the first set, check all the rest
       for (unsigned idx1 = 0; idx1 < instances.size(); idx1++)
@@ -3670,7 +3670,7 @@ namespace Legion {
             bad2 = idx2;
             return false;
           }
-          std::map<PhysicalManager*,FieldMask>::const_iterator finder = 
+          FieldMaskSet<PhysicalManager>::const_iterator finder = 
             colocate_instances.find(manager);
           if ((finder == colocate_instances.end()) ||
               (!!(overlap - finder->second)))
@@ -5992,20 +5992,36 @@ namespace Legion {
             // Sort the expressions so they're in the same order
             // as if they had come from the local node
             if (num_sub_expressions > 0)
+            {
               std::sort(expressions.begin(), expressions.end(), 
                         std::less<IndexSpaceExpression*>());
-            RemoteUnionOpCreator creator(this, derez, expressions);
-            return union_index_spaces(expressions, &creator);  
+              RemoteUnionOpCreator creator(this, derez, expressions);
+              return union_index_spaces(expressions, &creator);  
+            }
+            else
+            {
+              // This is an empty expression so just make it and return
+              RemoteUnionOpCreator creator(this, derez, expressions);
+              return creator.consume();
+            }
           }
         case IndexSpaceOperation::INTERSECT_OP_KIND:
           {
             // Sort the expressions so they're in the same order
             // as if they had come from the local node
             if (num_sub_expressions > 0)
+            {
               std::sort(expressions.begin(), expressions.end(), 
                         std::less<IndexSpaceExpression*>());
-            RemoteIntersectionOpCreator creator(this, derez, expressions);
-            return intersect_index_spaces(expressions, &creator);
+              RemoteIntersectionOpCreator creator(this, derez, expressions);
+              return intersect_index_spaces(expressions, &creator);
+            }
+            else
+            {
+              // This is an empty expression so just make it and return
+              RemoteIntersectionOpCreator creator(this, derez, expressions);
+              return creator.consume();
+            }
           }
         case IndexSpaceOperation::DIFFERENCE_OP_KIND:
           {

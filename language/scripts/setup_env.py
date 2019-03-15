@@ -133,22 +133,30 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, llvm_dir, cache, is_cray, thread_count):
+def build_terra(terra_dir, terra_branch, llvm_dir, cache, is_cray, thread_count):
     if cache:
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
         return
 
-    env = None
+    env = {}
+    if terra_branch.startswith('luajit2.1'):
+        # https://github.com/LuaJIT/LuaJIT/issues/484
+
+        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally,
+        # because it will break Terra build outright. It must be set
+        # for LuaJIT and *only* LuaJIT, so to do that we use the PR
+        # branch directly.
+        env['LUAJIT_URL'] = 'https://github.com/elliottslaughter/LuaJIT.git'
+        env['LUAJIT_BRANCH'] = 'patch-1'
     if is_cray:
-        env = dict(list(os.environ.items()) + [
+        env.update(dict(list(os.environ.items()) + [
             ('CC', os.environ['HOST_CC']),
             ('CXX', os.environ['HOST_CXX']),
-        ])
+        ]))
 
     flags = [
         'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
         'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-        'MACOSX_DEPLOYMENT_TARGET=10.6', # https://github.com/LuaJIT/LuaJIT/issues/484
     ]
     if platform.system() != 'Darwin':
         flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')
@@ -388,17 +396,25 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
     if cache or ((legion_use_cmake or llvm_use_cmake) and cmake_exe is None):
+        cmake_stem = 'cmake-3.7.2-%s-x86_64' % platform.system()
+        cmake_basename = '%s.tar.gz' % cmake_stem
+        cmake_url = 'https://cmake.org/files/v3.7/%s' % cmake_basename
+        if cmake_stem == 'cmake-3.7.2-Linux-x86_64':
+            cmake_shasum = '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406'
+        elif cmake_stem == 'cmake-3.7.2-Darwin-x86_64':
+            cmake_shasum = '0175e97748052dfc15ebd3c0aa65286e5ec20ca22ed606ce88940e699496b03c'
+
         cmake_dir = os.path.realpath(os.path.join(prefix_dir, 'cmake'))
-        cmake_install_dir = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64')
+        cmake_install_dir = os.path.join(cmake_dir, cmake_stem)
         if not os.path.exists(cmake_dir):
             os.mkdir(cmake_dir)
 
             proc_type = subprocess.check_output(['uname', '-p']).strip()
-            if proc_type != 'x86_64':
+            if proc_type != 'x86_64' and proc_type != 'i386':
                 raise Exception("Don't know how to download CMake binary for %s" % proc_type)
 
-            cmake_tarball = os.path.join(cmake_dir, 'cmake-3.7.2-Linux-x86_64.tar.gz')
-            download(cmake_tarball, 'https://cmake.org/files/v3.7/cmake-3.7.2-Linux-x86_64.tar.gz', '0e6ec35d4fa9bf79800118916b51928b6471d5725ff36f1d0de5ebb34dcd5406', insecure=insecure)
+            cmake_tarball = os.path.join(cmake_dir, cmake_basename)
+            download(cmake_tarball, cmake_url, cmake_shasum, insecure=insecure)
             extract(cmake_dir, cmake_tarball, 'gz')
         assert os.path.exists(cmake_install_dir)
         cmake_exe = os.path.join(cmake_install_dir, 'bin', 'cmake')
@@ -423,7 +439,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         git_clone(terra_dir, terra_url, terra_branch)
     if not os.path.exists(terra_build_dir):
         try:
-            build_terra(terra_dir, llvm_install_dir, cache, is_cray, thread_count)
+            build_terra(terra_dir, terra_branch, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
             report_build_failure('terra', terra_dir, e)
     else:

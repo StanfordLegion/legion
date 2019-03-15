@@ -109,11 +109,25 @@ def install_rdir(rdir, legion_dir, regent_dir):
     if rdir != 'skip':
         dump_json_config(config_filename, rdir)
 
-def build_terra(terra_dir, thread_count, llvm):
+def build_terra(terra_dir, terra_branch, thread_count, llvm):
+    flags = []
+    if llvm:
+        flags.extend(['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'])
+
+    if terra_branch is not None and terra_branch.startswith('luajit2.1'):
+        # https://github.com/LuaJIT/LuaJIT/issues/484
+
+        # Note: you *can't* set MACOSX_DEPLOYMENT_TARGET globally,
+        # because it will break Terra build outright. It must be set
+        # for LuaJIT and *only* LuaJIT, so to do that we use the PR
+        # branch directly.
+        flags.extend([
+            'LUAJIT_URL=https://github.com/elliottslaughter/LuaJIT.git',
+            'LUAJIT_BRANCH=patch-1',
+        ])
+
     subprocess.check_call(
-        ['make', 'all', '-j', str(thread_count)] +
-        (['REEXPORT_LLVM_COMPONENTS=irreader mcjit x86'] if llvm else []) +
-        ['MACOSX_DEPLOYMENT_TARGET=10.6'], # https://github.com/LuaJIT/LuaJIT/issues/484
+        ['make', 'all', '-j', str(thread_count)] + flags,
         cwd=terra_dir)
 
 def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
@@ -160,7 +174,7 @@ def install_terra(terra_dir, terra_url, terra_branch, external_terra_dir,
         if terra_url is not None or terra_branch is not None:
             raise Exception('Terra URL/branch must be set on first install, please delete the terra directory and try again')
         git_update(terra_dir)
-    build_terra(terra_dir, thread_count, llvm)
+    build_terra(terra_dir, terra_branch, thread_count, llvm)
 
 def symlink(from_path, to_path):
     if not os.path.lexists(to_path):

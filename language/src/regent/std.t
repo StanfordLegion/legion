@@ -3682,6 +3682,77 @@ local function make_layout_constraints_from_annotations(variant)
   return layouts, layout_registrations
 end
 
+local function make_execution_constraints_from_annotations(variant, execution_constraints)
+  local actions = quote end
+  if variant:has_execution_constraints() then
+    local task = variant.task
+    local all_region_types = data.newmap()
+    local all_req_indices = data.new_recursive_map(1)
+    local fn_type = task:get_type()
+    local param_types = fn_type.parameters
+    local param_symbols = task:get_param_symbols()
+    local region_i = 0
+    for _, param_i in ipairs(std.fn_param_regions_by_index(fn_type)) do
+      local param_type = param_types[param_i]
+      local param_symbol = param_symbols[param_i]
+      all_region_types[param_symbol:getname()] = param_type
+      local privileges, privilege_field_paths, privilege_field_types, coherences, flags =
+        std.find_task_privileges(param_type, task)
+      for i, privilege in ipairs(privileges) do
+        privilege_field_paths[i]:map(function(field_path)
+          all_req_indices[param_symbol:getname()][field_path] = region_i
+        end)
+        region_i = region_i + 1
+      end
+    end
+
+    local colocations = data.filter(function(constraint)
+        return constraint:is(ast.layout.Colocation)
+      end, variant:get_execution_constraints())
+    colocations:map(function(colocation)
+      local req_indices = data.newmap()
+      local field_ids = data.newmap()
+      colocation.fields:map(function(field)
+        field.field_paths:map(function(field_path)
+          local req_idx = all_req_indices[field.region_name][field_path]
+          local all_field_ids =
+            generate_static_field_ids(all_region_types[field.region_name])
+          assert(req_idx ~= nil)
+          assert(all_field_ids ~= nil)
+          req_indices[req_idx] = true
+          field_ids[all_field_ids[field_path]] = true
+        end)
+      end)
+      local req_index_list = terralib.newlist()
+      for index, _ in req_indices:items() do req_index_list:insert(index) end
+      local field_id_list = terralib.newlist()
+      for id, _ in field_ids:items() do field_id_list:insert(id) end
+
+      local indices = terralib.newsymbol(uint[#req_index_list], "indices")
+      local fields = terralib.newsymbol(c.legion_field_id_t[#field_id_list], "fields")
+      actions = quote
+        [actions]
+        do
+          var [indices], [fields]
+          [data.zip(data.range(0, #req_index_list), req_index_list):map(function(pair)
+              local i, req_index = unpack(pair)
+              return quote [indices][ [i] ] = [req_index] end
+            end)];
+          [data.zip(data.range(0, #field_id_list), field_id_list):map(function(pair)
+              local i, field_id = unpack(pair)
+              return quote [fields][ [i] ] = [field_id] end
+            end)];
+          c.legion_execution_constraint_set_add_colocation_constraint(
+            [execution_constraints],
+            [&uint]([indices]), [#req_index_list],
+            [&c.legion_field_id_t]([fields]), [#field_id_list])
+        end
+      end
+    end)
+  end
+  return actions
+end
+
 function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_name)
   assert(not main_task or std.is_task(main_task))
 
@@ -3834,11 +3905,16 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
         end
       end
 
+      local execution_constraints = terralib.newsymbol(
+        c.legion_execution_constraint_set_t, "execution_constraints")
+      local execution_constraint_actions =
+        make_execution_constraints_from_annotations(variant, execution_constraints)
       local registration_actions = terralib.newlist()
       for _, proc_type in ipairs(proc_types) do
         registration_actions:insert(quote
-          var execution_constraints = c.legion_execution_constraint_set_create()
+          var [execution_constraints] = c.legion_execution_constraint_set_create()
           c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+          [execution_constraint_actions]
           var [layout_constraints] = c.legion_task_layout_constraint_set_create()
           [layout_constraint_actions]
           var options = c.legion_task_config_options_t {
@@ -4530,5 +4606,9 @@ std.layout.default_layout = terralib.memoize(function(index_type)
   dimensions:insert(std.layout.dimf)
   return std.layout.ordering_constraint(dimensions)
 end)
+
+function std.layout.colocation_constraint(fields)
+  return ast.layout.Colocation { fields = fields }
+end
 
 return std
