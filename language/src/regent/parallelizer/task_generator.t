@@ -20,6 +20,8 @@ local std = require("regent/std")
 
 local hash_set = require("regent/parallelizer/hash_set")
 
+local function clone_list(l) return l:map(function(x) return x end) end
+
 local function unreachable(cx, node) assert(false) end
 
 local function find_or_create(map, key, init)
@@ -39,12 +41,14 @@ rewriter_context.__index = rewriter_context
 function rewriter_context.new(accesses_to_region_params,
                               loop_var_to_regions,
                               param_mapping,
-                              demand_cuda)
+                              demand_cuda,
+                              options)
   local cx = {
     accesses_to_region_params = accesses_to_region_params,
     loop_var_to_regions       = loop_var_to_regions,
     symbol_mapping            = param_mapping:copy(),
     demand_cuda               = demand_cuda,
+    colocation                = options.colocation or false,
   }
   return setmetatable(cx, rewriter_context)
 end
@@ -462,7 +466,7 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     }
   end)
 
-  if #cases == 1 then
+  if #cases == 1 or (cx.colocation and reads) then
     return cases[1]
   else
     local else_block = false
@@ -674,11 +678,13 @@ function task_generator.new(node)
     local loop_var_to_regions = data.newmap()
     local region_params_to_partitions = data.newmap()
     local param_index = 1
+    local colocation_constraints_map = data.newmap()
 
     for my_region_symbol, accesses_summary in cx.field_accesses_summary:items() do
       for field_path, summary in accesses_summary:items() do
         local my_ranges_set, my_privilege = unpack(summary)
         local all_region_params = hash_set.new()
+        local has_reduction = false
         my_ranges_set:foreach(function(my_range)
           local caller_region = my_regions_to_caller_regions[my_region_symbol]
           local key = data.newtuple(caller_region, field_path)
@@ -732,6 +738,7 @@ function task_generator.new(node)
               field_privileges:insert(std.writes)
             else
               field_privileges:insert(privilege)
+              has_reduction = has_reduction or std.is_reduce(privilege)
             end
           end)
 
@@ -742,6 +749,22 @@ function task_generator.new(node)
 
         local key = data.newtuple(my_region_symbol, field_path)
         my_accesses_to_region_params[key] = all_region_params
+
+        -- Collect accesses that are mapped to multiple regions in order to
+        -- generate colocation constraints later
+        if all_region_params:size() > 1 then
+          if has_reduction then
+            local reduction_params = data.filter(function(param)
+                local privileges = privileges_by_region_params[param][field_path]:to_list()
+                return #privileges == 1 and std.is_reduce(privileges[1])
+              end, all_region_params:to_list())
+            if #reduction_params > 1 then
+              colocation_constraints_map[key] = reduction_params
+            end
+          else
+            colocation_constraints_map[key] = all_region_params:to_list()
+          end
+        end
       end
     end
 
@@ -771,11 +794,23 @@ function task_generator.new(node)
 
     local serial_task_ast = node
     local parallel_task_name = serial_task_ast.name .. data.newtuple("parallel")
-    local parallel_task = std.new_task(parallel_task_name)
 
+    -- TODO: We want to create task variants from different ASTs, which are not
+    --       supported by the compiler at the moment. So, we use a hack that
+    --       creates a complete task for each unique AST and later forces
+    --       the tasks to have the same task id.
+    local parallel_task_variants = data.newmap()
+    parallel_task_variants["colocation"] = std.new_task(parallel_task_name)
+    parallel_task_variants["primary"] = std.new_task(parallel_task_name)
+    for _, parallel_task in parallel_task_variants:items() do
+      parallel_task:set_task_id_unsafe(parallel_task_variants["primary"]:get_task_id())
+    end
+
+    -- We prepare the metadata that is shared by all task variants
     local params = terralib.newlist()
     local privileges = terralib.newlist()
     local region_universe = data.newmap()
+
     -- TODO: Inherit coherence modes from the serial task
     local coherence_modes = data.new_recursive_map(1)
     local region_params_with_accesses = hash_set.new()
@@ -830,53 +865,85 @@ function task_generator.new(node)
       end
     end)
 
-    parallel_task:set_type(terralib.types.functype(
-      params:map(function(param) return param.param_type end),
-      serial_task_ast.return_type, false))
-    parallel_task:set_param_symbols(params:map(function(param) return param.symbol end))
+    for variant_type, parallel_task in parallel_task_variants:items() do
+      -- Make a copy from the shared metadata
+      local params = clone_list(params)
+      local privileges = clone_list(privileges)
+      local region_universe = region_universe:copy()
+      local coherence_modes = coherence_modes:copy()
+      local options = { [variant_type] = true }
 
-    parallel_task:set_primary_variant(parallel_task:make_variant("primary"))
-    parallel_task:set_privileges(privileges)
-    parallel_task:set_region_universe(region_universe)
-    parallel_task:set_coherence_modes(coherence_modes)
+      parallel_task:set_type(terralib.types.functype(
+        params:map(function(param) return param.param_type end),
+        serial_task_ast.return_type, false))
+      parallel_task:set_param_symbols(params:map(function(param) return param.symbol end))
 
-    -- TODO: These should be inherited from the original task
-    local flags = data.new_recursive_map(2)
-    local param_constraints = terralib.newlist()
-    local constraints = data.new_recursive_map(2)
-    parallel_task:set_flags(flags)
-    parallel_task:set_conditions({})
-    parallel_task:set_param_constraints(param_constraints)
-    parallel_task:set_constraints(constraints)
-    local rewriter_cx =
-      rewriter_context.new(my_accesses_to_region_params,
-                           loop_var_to_regions,
-                           param_mapping,
-                           serial_task_ast.annotations.cuda:is(ast.annotation.Demand))
-    local parallel_task_ast = ast.typed.top.Task {
-      name = parallel_task_name,
-      params = params,
-      return_type = serial_task_ast.return_type,
-      privileges = privileges,
-      coherence_modes = coherence_modes,
-      body = rewrite_accesses.block(rewriter_cx, serial_task_ast.body),
+      parallel_task:set_primary_variant(parallel_task:make_variant("primary"))
+      parallel_task:set_privileges(privileges)
+      parallel_task:set_region_universe(region_universe)
+      parallel_task:set_coherence_modes(coherence_modes)
 
       -- TODO: These should be inherited from the original task
-      flags = flags,
-      conditions = {},
-      constraints = param_constraints,
+      local flags = data.new_recursive_map(2)
+      local param_constraints = terralib.newlist()
+      local constraints = data.new_recursive_map(2)
+      parallel_task:set_flags(flags)
+      parallel_task:set_conditions({})
+      parallel_task:set_param_constraints(param_constraints)
+      parallel_task:set_constraints(constraints)
+      local rewriter_cx =
+        rewriter_context.new(my_accesses_to_region_params,
+                             loop_var_to_regions,
+                             param_mapping,
+                             serial_task_ast.annotations.cuda:is(ast.annotation.Demand),
+                             options)
+      local parallel_task_ast = ast.typed.top.Task {
+        name = parallel_task_name,
+        params = params,
+        return_type = serial_task_ast.return_type,
+        privileges = privileges,
+        coherence_modes = coherence_modes,
+        body = rewrite_accesses.block(rewriter_cx, serial_task_ast.body),
 
-      config_options = serial_task_ast.config_options,
-      region_divergence = false,
-      metadata = false,
-      prototype = parallel_task,
-      annotations = serial_task_ast.annotations {
-        parallel = ast.annotation.Forbid { value = false },
-      },
-      span = serial_task_ast.span,
-    }
-    passes.codegen(passes.optimize(parallel_task_ast), true)
-    return parallel_task, region_params_to_partitions, serial_task_ast.metadata
+        -- TODO: These should be inherited from the original task
+        flags = flags,
+        conditions = {},
+        constraints = param_constraints,
+
+        config_options = serial_task_ast.config_options,
+        region_divergence = false,
+        metadata = false,
+        prototype = parallel_task,
+        annotations = serial_task_ast.annotations {
+          parallel = ast.annotation.Forbid { value = false },
+        },
+        span = serial_task_ast.span,
+      }
+      passes.codegen(passes.optimize(parallel_task_ast), true)
+
+      if variant_type == "colocation" then
+        local colocation_constraints = terralib.newlist()
+        for key, region_params in colocation_constraints_map:items() do
+          assert(#region_params > 1)
+          local _, field_path = unpack(key)
+          colocation_constraints:insert(
+            std.layout.colocation_constraint(
+              region_params:map(function(region_param)
+                return std.layout.field_constraint(region_param:getname(),
+                  terralib.newlist({field_path}))
+              end)))
+        end
+
+        parallel_task:get_variants():map(function(variant)
+          colocation_constraints:map(function(colocation_constraint)
+            variant:set_name("colocation")
+            variant:add_execution_constraint(colocation_constraint)
+          end)
+        end)
+      end
+    end
+
+    return parallel_task_variants, region_params_to_partitions, serial_task_ast.metadata
   end
 end
 
