@@ -665,6 +665,9 @@ namespace Legion {
           strides[idx] = 0;
         }
       }
+      // Need a memory fence here to make sure that writes propagate on 
+      // non-total-store-ordered memory consistency machines like PowerPC
+      __sync_synchronize();
       linearization_ready = true;
     }
 
