@@ -6660,12 +6660,6 @@ namespace Legion {
                                                         remote_address_space);
               break;
             }
-          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS:
-            {
-              runtime->handle_equivalence_set_remote_request_reductions(derez,
-                                                        remote_address_space);
-              break;
-            }
           case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
             {
               runtime->handle_equivalence_set_remote_updates(derez,
@@ -14825,16 +14819,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_remote_request_reductions(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_updates(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -16026,15 +16010,7 @@ namespace Legion {
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_request_instances(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_request_reductions(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RemoteEqTracker::handle_remote_request_reductions(derez, this, source);
+      ValidInstAnalysis::handle_remote_request_instances(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16042,7 +16018,7 @@ namespace Legion {
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_updates(derez, this, source);
+      UpdateAnalysis::handle_remote_updates(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16050,7 +16026,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_acquires(derez, this, source);
+      AcquireAnalysis::handle_remote_acquires(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16058,7 +16034,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_releases(derez, this, source);
+      ReleaseAnalysis::handle_remote_releases(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16066,7 +16042,7 @@ namespace Legion {
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_copies_across(derez, this, source);
+      CopyAcrossAnalysis::handle_remote_copies_across(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16074,7 +16050,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_overwrites(derez, this, source);
+      OverwriteAnalysis::handle_remote_overwrites(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16082,14 +16058,14 @@ namespace Legion {
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_filters(derez, this, source);
+      FilterAnalysis::handle_remote_filters(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_instances(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_instances(derez, this);
+      PhysicalAnalysis::handle_remote_instances(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -20884,22 +20860,19 @@ namespace Legion {
             RemoteOp::handle_deferred_deletion(args);
             break;
           }
-        case LG_DEFER_REMOTE_INSTANCE_TASK_ID:
-        case LG_DEFER_REMOTE_REDUCTION_TASK_ID:
-        case LG_DEFER_REMOTE_UPDATE_TASK_ID:
-        case LG_DEFER_REMOTE_ACQUIRE_TASK_ID:
-        case LG_DEFER_REMOTE_RELEASE_TASK_ID:
-        case LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID:
-        case LG_DEFER_REMOTE_OVERWRITE_TASK_ID:
-        case LG_DEFER_REMOTE_FILTER_TASK_ID:
+        case LG_DEFER_PERFORM_REMOTE_TASK_ID:
           {
-            // These all go through the same path
-            RemoteEqTracker::handle_deferred_remote(tid, args, runtime);
+            PhysicalAnalysis::handle_deferred_remote(args);
             break;
           }
-        case LG_DEFER_REMOTE_OUTPUT_TASK_ID:
+        case LG_DEFER_PERFORM_UPDATE_TASK_ID:
           {
-            RemoteEqTracker::handle_deferred_output(args);
+            PhysicalAnalysis::handle_deferred_update(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_OUTPUT_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_output(args);
             break;
           }
         case LG_DEFER_INSTANCE_MANAGER_TASK_ID:

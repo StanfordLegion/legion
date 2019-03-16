@@ -2951,7 +2951,7 @@ namespace Legion {
       {
         InstanceSet valid_instances;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                                              version_info, valid_instances);
+                      version_info, valid_instances, map_applied_conditions);
         if (!requirement.is_no_access())
         {
           std::set<Memory> visible_memories;
@@ -4154,7 +4154,8 @@ namespace Legion {
           runtime->forest->physical_premap_region(this, idx, 
                                                   src_requirements[idx],
                                                   src_versions[idx],
-                                                  valid_instances);
+                                                  valid_instances,
+                                                  map_applied_conditions);
           // Convert these to the valid set of mapping instances
           // No need to filter for copies
           prepare_for_mapping(valid_instances, input.src_instances[idx]);
@@ -4172,7 +4173,8 @@ namespace Legion {
                                                   idx+src_requirements.size(),
                                                   dst_requirements[idx],
                                                   dst_versions[idx],
-                                                  valid_instances);
+                                                  valid_instances,
+                                                  map_applied_conditions);
           // No need to filter for copies
           prepare_for_mapping(valid_instances, input.dst_instances[idx]);
           // Switch the privileges back when we are done
@@ -4189,7 +4191,8 @@ namespace Legion {
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 src_indirect_requirements[idx],
                                                 gather_versions[idx],
-                                                valid_instances);
+                                                valid_instances,
+                                                map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
             prepare_for_mapping(valid_instances, 
@@ -4206,7 +4209,8 @@ namespace Legion {
             runtime->forest->physical_premap_region(this, offset+idx, 
                                                 dst_indirect_requirements[idx],
                                                 scatter_versions[idx],
-                                                valid_instances);
+                                                valid_instances,
+                                                map_applied_conditions);
             // Convert these to the valid set of mapping instances
             // No need to filter for copies
             prepare_for_mapping(valid_instances, 
@@ -12436,7 +12440,7 @@ namespace Legion {
       {
         InstanceSet valid_instances;
         runtime->forest->physical_premap_region(this, 0/*idx*/, requirement,
-                                                version_info, valid_instances);
+                      version_info, valid_instances, map_applied_conditions);
         prepare_for_mapping(valid_instances, input.valid_instances);
       }
       mapper->invoke_map_partition(this, &input, &output);
