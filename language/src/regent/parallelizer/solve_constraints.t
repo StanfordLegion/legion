@@ -703,8 +703,14 @@ local function create_partition_by_binary_op(lhs, rhs, op)
   local partition_type = std.partition(
       (op == "-" and lhs_type.disjointness) or std.aliased,
       lhs_type.parent_region_symbol, lhs_type.colors_symbol)
-  local variable = std.newsymbol(partition_type,
-      "(".. lhs:getname() .. op_name[op] .. rhs:getname() .. ")")
+  local variable = nil
+  if std.config["parallelize-debug"] then
+    variable = std.newsymbol(partition_type,
+        "(".. lhs:getname() .. op_name[op] .. rhs:getname() .. ")")
+  else
+    variable = new_range()
+    variable:settype(partition_type)
+  end
   return variable, ast.typed.stat.Var {
     symbol = variable,
     type = partition_type,
@@ -857,9 +863,22 @@ local function create_pvs_partition(private, shared, ghost)
     span = ast.trivial_span(),
     annotations = ast.default_annotations(),
   })
-  local suffix = private:getname() .. "_vs_" .. shared:getname()
+
+  local parent_region_symbol = private:gettype().parent_region_symbol
+  local pvs_color_space_symbol = std.newsymbol(std.ispace(std.int1d), "pvs_colors")
+  local pvs_partition_type =
+    std.partition(std.disjoint, parent_region_symbol, pvs_color_space_symbol)
+  local pvs_partition = nil
+  if std.config["parallelize-debug"] then
+    pvs_partition = std.newsymbol(pvs_partition_type,
+        private:getname() .. "_vs_" .. shared:getname())
+  else
+    pvs_partition = new_range()
+    pvs_partition:settype(pvs_partition_type)
+  end
   local raw_pvs_partition =
-    std.newsymbol(c.legion_logical_partition_t, "raw_" .. suffix)
+    std.newsymbol(c.legion_logical_partition_t, "raw_" .. pvs_partition:getname())
+
   args:insert(ast.typed.expr.Constant {
     value = std.config["parallelize-debug"],
     expr_type = bool,
@@ -887,14 +906,6 @@ local function create_pvs_partition(private, shared, ghost)
     annotations = ast.default_annotations(),
   })
 
-  local pvs_color_space_symbol =
-    std.newsymbol(std.ispace(std.int1d), "pvs_colors")
-  local pvs_color_space = ast.typed.expr.ID {
-    value = pvs_color_space_symbol,
-    expr_type = std.rawref(&pvs_color_space_symbol:gettype()),
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
   stats:insert(ast.typed.stat.Var {
     symbol = pvs_color_space_symbol,
     type = pvs_color_space_symbol:gettype(),
@@ -939,12 +950,6 @@ local function create_pvs_partition(private, shared, ghost)
     annotations = ast.default_annotations(),
   })
 
-  local parent_region_symbol = private:gettype().parent_region_symbol
-  local pvs_partition_type =
-    std.partition(std.disjoint, parent_region_symbol, pvs_color_space_symbol)
-  local pvs_partition =
-    std.newsymbol(pvs_partition_type, suffix)
-
   stats:insert(ast.typed.stat.Var {
     symbol = pvs_partition,
     type = pvs_partition:gettype(),
@@ -955,7 +960,12 @@ local function create_pvs_partition(private, shared, ghost)
         span = ast.trivial_span(),
         annotations = ast.default_annotations(),
       },
-      colors = pvs_color_space,
+      colors = ast.typed.expr.ID {
+        value = pvs_color_space_symbol,
+        expr_type = std.rawref(&pvs_color_space_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
       value = ast.typed.expr.ID {
         value = raw_pvs_partition,
         expr_type = std.rawref(&raw_pvs_partition:gettype()),
@@ -1024,8 +1034,13 @@ local function create_intersection_partition_subregion(lhs, rhs, result_symbol)
   if result_symbol ~= nil then
     result_symbol:settype(result_type)
   else
-    result_symbol =
-      std.newsymbol(result_type, "(" .. lhs:getname() .. "&" .. rhs:getname() .. ")")
+    if std.config["parallelize-debug"] then
+      result_symbol = std.newsymbol(result_type,
+          "(" .. lhs:getname() .. "&" .. rhs:getname() .. ")")
+    else
+      result_symbol = new_range()
+      result_symbol:settype(result_type)
+    end
   end
 
   return result_symbol, ast.typed.stat.Var {
