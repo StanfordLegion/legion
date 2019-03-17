@@ -62,6 +62,21 @@ where reduces +(r), reduces *(s) do
   return 5
 end
 
+task return_2468() return 2468 end
+
+task return_partition(r : region(int),
+                      p : partition(disjoint, r, ispace(int1d)))
+  return p
+end
+
+task check(r : region(int), v : int)
+where reads(r)
+do
+  for e in r do
+    regentlib.assert(@e == v, "test failed")
+  end
+end
+
 -- FIXME: Dataflow analysis currently can't handle aliased regions
 -- with no common ancestor.
 
@@ -229,6 +244,42 @@ task main()
     y += f(p_disjoint[i])
   end
   regentlib.assert(y == 25, "test failed")
+
+  -- optimized: loop-variant argument is non-interfering
+  __demand(__parallel)
+  for i = 0, n do
+    fill((p_disjoint[i]), 12345)
+  end
+  __demand(__parallel)
+  for i = 0, n do
+    check(p_disjoint[i], 12345)
+  end
+
+  var v = return_2468()
+  var p_disjoint_copy = return_partition(r, p_disjoint)
+
+  __demand(__parallel)
+  for i = 0, n do
+    fill((p_disjoint_copy[i]), 12345)
+  end
+  __demand(__parallel)
+  for i = 0, n do
+    check(p_disjoint[i], 12345)
+  end
+
+  __demand(__parallel)
+  for i = 0, n do
+    fill((p0_disjoint[i]), v)
+  end
+  __demand(__parallel)
+  for i = 0, n do
+    check(p0_disjoint[i], 2468)
+  end
+  __demand(__parallel)
+  for i = 0, n do
+    check(p1_disjoint[i], 12345)
+  end
+
 
   -- with_partitions(r0, p0_disjoint, r1, p1_disjoint, n)
 end

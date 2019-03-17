@@ -9240,6 +9240,42 @@ local function stat_index_launch_setup(cx, node, domain, actions)
   return actions
 end
 
+local function stat_index_fill_setup(cx, node, domain, actions)
+  local fill = node.call
+  local value = codegen.expr(cx, fill.value):read(cx)
+  local value_type = std.as_read(fill.value.expr_type)
+  local region = fill.dst.region
+  local region_type = std.as_read(region.expr_type)
+  local partition = region.value
+  local partition_value = codegen.expr(cx, partition):read(cx)
+  local partition_type = std.as_read(partition.expr_type)
+  -- We need a complete codegen for the destination so we can access the metadata
+  local _ = codegen.expr(cx, region)
+  local parent_region =
+    cx:region(cx:region(region_type).root_region_type).logical_region
+  local projection_functor =
+    make_partition_projection_functor(cx, region, node.symbol)
+
+  local launcher_actions = fill.dst.fields:map(function(field_path)
+    local field_id = cx:region(region_type):field_id(field_path)
+    return quote
+      do
+        var value : value_type = [value.value]
+        c.legion_runtime_index_fill_field_with_domain([cx.runtime], [cx.context], [domain],
+          [partition_value.value].impl, [parent_region].impl, [field_id], [&opaque](&value), [sizeof(value_type)],
+          [projection_functor], c.legion_predicate_true(), 0, 0)
+      end
+    end
+  end)
+
+  return quote
+    [actions]
+    [value.actions]
+    [partition_value.actions]
+    [launcher_actions]
+  end
+end
+
 function codegen.stat_index_launch_num(cx, node)
   local values = codegen.expr_list(cx, node.values):map(function(value) return value:read(cx) end)
 
@@ -9253,7 +9289,13 @@ function codegen.stat_index_launch_num(cx, node)
       })
   end
 
-  return stat_index_launch_setup(cx, node, domain, actions)
+  if node.call:is(ast.typed.expr.Call) then
+    return stat_index_launch_setup(cx, node, domain, actions)
+  elseif node.call:is(ast.typed.expr.Fill) then
+    return stat_index_fill_setup(cx, node, domain, actions)
+  else
+    assert(false)
+  end
 end
 
 function codegen.stat_index_launch_list(cx, node)
@@ -9278,7 +9320,13 @@ function codegen.stat_index_launch_list(cx, node)
     assert(false)
   end
 
-  return stat_index_launch_setup(cx, node, domain, actions)
+  if node.call:is(ast.typed.expr.Call) then
+    return stat_index_launch_setup(cx, node, domain, actions)
+  elseif node.call:is(ast.typed.expr.Fill) then
+    return stat_index_fill_setup(cx, node, domain, actions)
+  else
+    assert(false)
+  end
 end
 
 function codegen.stat_var(cx, node)
