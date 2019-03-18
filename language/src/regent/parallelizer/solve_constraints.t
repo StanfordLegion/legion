@@ -1393,6 +1393,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
       local all_ranges = hash_set.new()
       local has_reduce = false
 
+      -- TODO: We can remove any range R from all_ranges if it is subsumed by
+      --       another range R' (i.e., R <=^+ R')
       for privilege, range_set in summary:items() do
         all_ranges:insert_all(range_set)
         has_reduce = has_reduce or std.is_reduce(privilege)
