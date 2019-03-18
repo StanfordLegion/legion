@@ -1324,8 +1324,8 @@ namespace Legion {
     public:
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static LayoutConstraintID process_response(Runtime *runtime, 
-                          Deserializer &derez, AddressSpaceID source);
+      static void process_response(Runtime *runtime, Deserializer &derez, 
+                                   AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
@@ -3122,7 +3122,8 @@ namespace Legion {
           LayoutConstraintID id, DistributedID did = 0);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
-      bool register_layout(LayoutConstraints *new_constraints);
+      bool register_layout(LayoutConstraints *new_constraints,
+                           ReferenceMutator *mutator);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(

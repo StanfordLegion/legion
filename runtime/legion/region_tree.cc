@@ -3107,8 +3107,8 @@ namespace Legion {
           PhysicalManager *manager = next_set[idx2].get_manager();
           if (manager->is_virtual_manager())
           {
-            bad1 = idx2;
-            bad2 = idx2;
+            bad1 = idx1;
+            bad2 = idx1;
             return false;
           }
           FieldMaskSet<PhysicalManager>::const_iterator finder = 
@@ -3117,7 +3117,7 @@ namespace Legion {
               (!!(overlap - finder->second)))
           {
             bad1 = 0;
-            bad2 = idx2;
+            bad2 = idx1;
             return false;
           }
         }

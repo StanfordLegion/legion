@@ -1252,23 +1252,42 @@ function optimize_futures.stat_index_launch_num(cx, node)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
 
-  local args = terralib.newlist()
-  for i, arg in ipairs(call.args) do
-    if std.is_future(std.as_read(arg.expr_type)) and
-      not node.args_provably.invariant[i]
-    then
-      arg = concretize(arg)
+  if call:is(ast.typed.expr.Call) then
+    local args = terralib.newlist()
+    for i, arg in ipairs(call.args) do
+      if std.is_future(std.as_read(arg.expr_type)) and
+        not node.args_provably.invariant[i]
+      then
+        arg = concretize(arg)
+      end
+      args:insert(arg)
     end
-    args:insert(arg)
-  end
-  call.args = args
+    call.args = args
 
-  if reduce_lhs then
-    local call_type = std.as_read(call.expr_type)
-    local reduce_type = std.as_read(reduce_lhs.expr_type)
-    if std.is_future(call_type) and not std.is_future(reduce_type) then
-      call.expr_type = call_type.result_type
+    if reduce_lhs then
+      local call_type = std.as_read(call.expr_type)
+      local reduce_type = std.as_read(reduce_lhs.expr_type)
+      if std.is_future(call_type) and not std.is_future(reduce_type) then
+        call.expr_type = call_type.result_type
+      end
     end
+
+  elseif call:is(ast.typed.expr.Fill) then
+    local region = call.dst.region
+    local value = call.value
+    if std.is_future(std.as_read(value.expr_type)) then
+      value = concretize(value)
+    end
+    if std.is_future(std.as_read(region.expr_type)) then
+      region = concretize(region)
+    end
+    call = call {
+      dst = call.dst { region = region },
+      value = value,
+    }
+
+  else
+    assert(false)
   end
 
   return terralib.newlist({
@@ -1291,23 +1310,42 @@ function optimize_futures.stat_index_launch_list(cx, node)
   local reduce_lhs = node.reduce_lhs and
     optimize_futures.expr(cx, node.reduce_lhs)
 
-  local args = terralib.newlist()
-  for i, arg in ipairs(call.args) do
-    if std.is_future(std.as_read(arg.expr_type)) and
-      not node.args_provably.invariant[i]
-    then
-      arg = concretize(arg)
+  if call:is(ast.typed.expr.Call) then
+    local args = terralib.newlist()
+    for i, arg in ipairs(call.args) do
+      if std.is_future(std.as_read(arg.expr_type)) and
+        not node.args_provably.invariant[i]
+      then
+        arg = concretize(arg)
+      end
+      args:insert(arg)
     end
-    args:insert(arg)
-  end
-  call.args = args
+    call.args = args
 
-  if reduce_lhs then
-    local call_type = std.as_read(call.expr_type)
-    local reduce_type = std.as_read(reduce_lhs.expr_type)
-    if std.is_future(call_type) and not std.is_future(reduce_type) then
-      call.expr_type = call_type.result_type
+    if reduce_lhs then
+      local call_type = std.as_read(call.expr_type)
+      local reduce_type = std.as_read(reduce_lhs.expr_type)
+      if std.is_future(call_type) and not std.is_future(reduce_type) then
+        call.expr_type = call_type.result_type
+      end
     end
+
+  elseif call:is(ast.typed.expr.Fill) then
+    local region = call.dst.region
+    local value = call.value
+    if std.is_future(std.as_read(value.expr_type)) then
+      value = concretize(value)
+    end
+    if std.is_future(std.as_read(region.expr_type)) then
+      region = concretize(region)
+    end
+    call = call {
+      dst = call.dst { region = region },
+      value = value,
+    }
+
+  else
+    assert(false)
   end
 
   return terralib.newlist({

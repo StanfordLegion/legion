@@ -3267,6 +3267,64 @@ legion_runtime_index_fill_field(
 }
 
 void
+legion_runtime_index_fill_field_with_space(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t space_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      space, handle, parent, TaskArgument(value, value_size), proj,
+      *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_with_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_domain_t domain_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  const void *value,
+  size_t value_size,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      domain, handle, parent, TaskArgument(value, value_size), proj,
+      *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
 legion_runtime_index_fill_field_future(
   legion_runtime_t runtime_,
   legion_context_t ctx_,
@@ -3289,6 +3347,62 @@ legion_runtime_index_fill_field_future(
   IndexFillLauncher launcher(
       runtime->get_index_partition_color_space_name(handle.get_index_partition()),
       handle, parent, *f, proj, *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_future_with_space(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_index_space_t space_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace space = CObjectWrapper::unwrap(space_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      space, handle, parent, *f, proj, *pred, id, launcher_tag);
+  launcher.add_field(fid);
+  runtime->fill_fields(ctx, launcher);
+}
+
+void
+legion_runtime_index_fill_field_future_with_domain(
+  legion_runtime_t runtime_,
+  legion_context_t ctx_,
+  legion_domain_t domain_,
+  legion_logical_partition_t handle_,
+  legion_logical_region_t parent_,
+  legion_field_id_t fid,
+  legion_future_t f_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_predicate_t pred_ /* = legion_predicate_true() */,
+  legion_mapper_id_t id /* = 0 */,
+  legion_mapping_tag_id_t launcher_tag /* = 0 */)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  Domain domain = CObjectWrapper::unwrap(domain_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+  Future *f = CObjectWrapper::unwrap(f_);
+  Predicate *pred = CObjectWrapper::unwrap(pred_);
+
+  IndexFillLauncher launcher(
+      domain, handle, parent, *f, proj, *pred, id, launcher_tag);
   launcher.add_field(fid);
   runtime->fill_fields(ctx, launcher);
 }
