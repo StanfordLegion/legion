@@ -25,14 +25,16 @@ rewriter_context.__index = rewriter_context
 function rewriter_context.new(mappings,
                               mappings_by_access_paths,
                               loop_range_partitions,
+                              incl_check_caches,
                               color_space_symbol,
                               constraints)
   local cx = {
-    mappings = mappings,
+    mappings                 = mappings,
     mappings_by_access_paths = mappings_by_access_paths,
-    loop_range_partitions = loop_range_partitions,
-    color_space_symbol = color_space_symbol,
-    constraints = constraints,
+    loop_range_partitions    = loop_range_partitions,
+    incl_check_caches        = incl_check_caches,
+    color_space_symbol       = color_space_symbol,
+    constraints              = constraints,
   }
 
   return setmetatable(cx, rewriter_context)
@@ -285,6 +287,7 @@ function rewrite_task_launches.rewrite(solution, caller_constraints, stat)
       solution.all_mappings,
       solution.mappings_by_access_paths,
       solution.loop_range_partitions,
+      solution.incl_check_caches,
       solution.color_space_symbol,
       caller_constraints)
   local block = rewrite_task_launches.block(cx, stat.block)

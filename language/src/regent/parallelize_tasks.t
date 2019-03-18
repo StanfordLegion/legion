@@ -77,7 +77,11 @@ function parallelize_tasks.block(cx, block)
 end
 
 function parallelize_tasks.top_task(node)
-  local cx = { constraints = node.prototype:get_constraints() }
+  local cx = {
+    privileges = node.prototype:get_privileges(),
+    constraints = node.prototype:get_constraints(),
+    region_universe = node.prototype:get_region_universe(),
+  }
   local body = parallelize_tasks.block(cx, node.body)
   return node { body = body }
 end
