@@ -6516,10 +6516,10 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
-      Internal::Runtime::wait_for_shutdown();
+      return Internal::Runtime::wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
