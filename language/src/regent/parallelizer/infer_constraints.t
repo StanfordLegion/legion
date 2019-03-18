@@ -46,6 +46,8 @@ function parallel_task_context.new(task)
     field_accesses           = data.newmap(),
     field_accesses_summary   = data.newmap(),
 
+    ranges_to_indices        = data.newmap(),
+
     constraints              = partitioning_constraints.new(),
 
     loop_ranges              = data.newmap(),
@@ -149,6 +151,8 @@ function parallel_task_context:summarize_accesses()
         ranges_set:insert(new_range)
         join = std.meet_privilege(join, privilege)
       end
+      -- Force canonicalization
+      ranges_set:hash()
       accesses_summary[field_path] = { ranges_set, join }
     end
   end
@@ -211,6 +215,17 @@ function parallel_task_context:is_param(symbol)
   return self.params:has(symbol)
 end
 
+function parallel_task_context:record_index_of_range(range, index)
+  if self.ranges_to_indices[range] == nil then
+    self.ranges_to_indices[range] = terralib.newlist()
+  end
+  self.ranges_to_indices[range]:insert(index)
+end
+
+function parallel_task_context:find_indices_of_range(range)
+  return self.ranges_to_indices[range]
+end
+
 local function unreachable(cx, node) assert(false) end
 
 local infer_constraints = {}
@@ -260,6 +275,7 @@ function infer_constraints.expr_index_access(cx, expr, privilege, field_path)
     local field_path = field_path .. suffix
     cx:add_field_access(region_symbol, index_range, field_path, privilege)
   end)
+  cx:record_index_of_range(index_range, expr.index)
 
   local field_type = std.get_field_path(std.as_read(expr.expr_type), field_path)
   if std.is_index_type(field_type) or std.is_bounded_type(field_type) then

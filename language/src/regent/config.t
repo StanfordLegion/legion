@@ -80,6 +80,7 @@ local default_options = {
   ["parallelize-dop"] = "4",
   ["parallelize-global"] = true,
   ["parallelize-debug"] = false,
+  ["parallelize-cache-incl-check"] = true,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,

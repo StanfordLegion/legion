@@ -41,13 +41,17 @@ rewriter_context.__index = rewriter_context
 function rewriter_context.new(accesses_to_region_params,
                               loop_var_to_regions,
                               param_mapping,
+                              incl_check_caches,
                               demand_cuda,
                               options)
   local cx = {
     accesses_to_region_params = accesses_to_region_params,
     loop_var_to_regions       = loop_var_to_regions,
     symbol_mapping            = param_mapping:copy(),
+    incl_check_caches         = incl_check_caches,
     demand_cuda               = demand_cuda,
+    loop_range                = false,
+    loop_var                  = false,
     colocation                = options.colocation or false,
   }
   return setmetatable(cx, rewriter_context)
@@ -67,6 +71,23 @@ end
 
 function rewriter_context:rewrite_type(type)
   return std.type_sub(type, self.symbol_mapping)
+end
+
+function rewriter_context:set_loop_context(loop_range, loop_var)
+  self.loop_range = loop_range
+  self.loop_var = loop_var
+end
+
+function rewriter_context:get_loop_var()
+  return self.loop_var
+end
+
+function rewriter_context:get_incl_cache(index)
+  -- TODO: We use AST nodes of index expressions as keys of a map,
+  --       which are brittle as any AST transformation can break this.
+  --       Until we find a better way, we keep this scheme.
+  return (self.incl_check_caches[index] and
+          self.incl_check_caches[index][self.loop_range]) or false
 end
 
 local rewrite_accesses = {}
@@ -253,6 +274,7 @@ function rewrite_accesses.stat_for_list(cx, stat)
       }
       local new_symbol = std.newsymbol(cx:rewrite_type(symbol_type), symbol:getname())
       cx:update_mapping(symbol, new_symbol)
+      cx:set_loop_context(region_param, new_symbol)
       return stat {
         symbol = new_symbol,
         value = value,
@@ -431,6 +453,8 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   else
     index = find_index(lhs)
   end
+  local cache = cx:get_incl_cache(index)
+
   local centered =
     std.is_bounded_type(index.expr_type) and
     #index.expr_type.bounds_symbols == 1 and
@@ -469,6 +493,69 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   if #cases == 1 or (cx.colocation and reads) then
     return cases[1]
   else
+    local conds = nil
+    if std.config["parallelize-cache-incl-check"] then
+      local loop_var = cx:get_loop_var()
+      assert(cache)
+      local cache_region, cases, num_cases = unpack(cache)
+      conds = region_params:map(function(region_param)
+        local case_id = cases[region_param]
+        if case_id == nil then case_id = num_cases end
+        return ast.typed.expr.Binary {
+          op = "==",
+          lhs = ast.typed.expr.IndexAccess {
+            value = ast.typed.expr.ID {
+              value = cache_region,
+              expr_type = std.rawref(&cache_region:gettype()),
+              span = template.span,
+              annotations = ast.default_annotations(),
+            },
+            index = ast.typed.expr.ID {
+              value = loop_var,
+              expr_type = std.rawref(&loop_var:gettype()),
+              span = template.span,
+              annotations = ast.default_annotations(),
+            },
+            expr_type = std.ref(cache_region:gettype():ispace().index_type(
+                  uint8, cache_region)),
+            span = template.span,
+            annotations = ast.default_annotations(),
+          },
+          rhs = ast.typed.expr.Constant {
+            value = case_id,
+            expr_type = uint8,
+            span = template.span,
+            annotations = ast.default_annotations(),
+          },
+          expr_type = bool,
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+      end)
+    else
+      conds = region_params:map(function(region_param)
+        return ast.typed.expr.Binary {
+          op = "<=",
+          lhs = index,
+          rhs = ast.typed.expr.FieldAccess {
+            field_name = "ispace",
+            value = ast.typed.expr.ID {
+              value = region_param,
+              expr_type = std.rawref(&region_param:gettype()),
+              span = template.span,
+              annotations = ast.default_annotations(),
+            },
+            expr_type = region_param:gettype():ispace(),
+            span = template.span,
+            annotations = ast.default_annotations(),
+          },
+          expr_type = bool,
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+      end)
+    end
+
     local else_block = false
     if not cx.demand_cuda then
       local guard = ast_util.mk_expr_call(
@@ -498,27 +585,8 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     end
     local stat = nil
     for idx = #region_params, 1, -1 do
-      local region_param = region_params[idx]
       local case = cases[idx]
-      local cond = ast.typed.expr.Binary {
-        op = "<=",
-        lhs = index,
-        rhs = ast.typed.expr.FieldAccess {
-          field_name = "ispace",
-          value = ast.typed.expr.ID {
-            value = region_param,
-            expr_type = std.rawref(&region_param:gettype()),
-            span = template.span,
-            annotations = ast.default_annotations(),
-          },
-          expr_type = region_param:gettype():ispace(),
-          span = template.span,
-          annotations = ast.default_annotations(),
-        },
-        expr_type = bool,
-        span = template.span,
-        annotations = ast.default_annotations(),
-      }
+      local cond = conds[idx]
       stat = ast.typed.stat.If {
         cond = cond,
         then_block = ast.typed.Block {
@@ -670,8 +738,10 @@ function task_generator.new(node)
   return function(pair_of_mappings, caller_cx)
     local mappings_by_access_paths = caller_cx.mappings_by_access_paths
     local loop_range_partitions = caller_cx.loop_range_partitions
+    local incl_check_caches = caller_cx.incl_check_caches
     local my_ranges_to_caller_ranges, my_regions_to_caller_regions =
       unpack(pair_of_mappings)
+
     local partitions_to_region_params = data.newmap()
     local privileges_by_region_params = data.newmap()
     local my_accesses_to_region_params = data.newmap()
@@ -748,6 +818,8 @@ function task_generator.new(node)
         end)
 
         local key = data.newtuple(my_region_symbol, field_path)
+        -- Force canonicalization
+        all_region_params:hash()
         my_accesses_to_region_params[key] = all_region_params
 
         -- Collect accesses that are mapped to multiple regions in order to
@@ -768,6 +840,8 @@ function task_generator.new(node)
       end
     end
 
+    -- Add region parameters for ranges that are not found in any region accesses
+    -- but are used in loops
     for loop_var, my_range in cx.loop_ranges:items() do
       local range = my_ranges_to_caller_ranges[my_range]
       local partitions = loop_range_partitions[range]
@@ -790,6 +864,50 @@ function task_generator.new(node)
       end)
       assert(loop_var_to_regions[loop_var] == nil)
       loop_var_to_regions[loop_var] = hash_set.from_list(region_params)
+    end
+
+    local cache_params = terralib.newlist()
+    local my_incl_check_caches = {}
+
+    -- Add region parameters for inclusion check caches
+    if std.config["parallelize-cache-incl-check"] then
+      local cache_params_map = data.newmap()
+      for my_range, _ in cx.constraints.ranges:items() do
+        local range = my_ranges_to_caller_ranges[my_range]
+        if incl_check_caches[range] ~= nil then
+          local my_incl_check_cache = data.newmap()
+          for loop_range_partition, tuple in incl_check_caches[range]:items() do
+            local cache_partition, cases, num_cases = unpack(tuple)
+            local my_cache_param = find_or_create(cache_params_map, range,
+              function()
+                local region_symbol = cache_partition:gettype().parent_region_symbol
+                local region = region_symbol:gettype()
+                local ispace = std.newsymbol(std.ispace(region:ispace().index_type))
+                local new_region = std.region(ispace, region:fspace())
+                local new_region_name =
+                  region_symbol:getname() .. "_" .. tostring(param_index)
+                param_index = param_index + 1
+                local region_param = std.newsymbol(new_region, new_region_name)
+                assert(region_params_to_partitions[region_param] == nil)
+                region_params_to_partitions[region_param] = cache_partition
+                cache_params:insert(region_param)
+                return region_param
+              end)
+            local loop_range_region_param =
+              partitions_to_region_params[loop_range_partition]
+            local my_cases = data.newmap()
+            cases:map(function(partition, case_id)
+              my_cases[partitions_to_region_params[partition]] = case_id
+            end)
+            my_incl_check_cache[loop_range_region_param] =
+              { my_cache_param, my_cases, num_cases }
+          end
+          local indices = cx:find_indices_of_range(my_range)
+          for _, index in ipairs(indices) do
+            my_incl_check_caches[index] = my_incl_check_cache
+          end
+        end
+      end
     end
 
     local serial_task_ast = node
@@ -850,6 +968,20 @@ function task_generator.new(node)
       end)
     end
 
+    cache_params:map(function(region_param)
+      local region = region_param:gettype()
+      params:insert(ast.typed.top.TaskParam {
+        symbol = region_param,
+        param_type = region_param:gettype(),
+        future = false,
+        span = serial_task_ast.span,
+        annotations = ast.default_annotations(),
+      })
+      privileges:insert(terralib.newlist({
+        std.privilege(std.reads, region_param, data.newtuple())}))
+      region_universe[region] = true
+    end)
+
     local param_mapping = data.newmap()
     serial_task_ast.params:map(function(param)
       if not std.is_region(param.param_type) then
@@ -898,6 +1030,7 @@ function task_generator.new(node)
         rewriter_context.new(my_accesses_to_region_params,
                              loop_var_to_regions,
                              param_mapping,
+                             my_incl_check_caches,
                              serial_task_ast.annotations.cuda:is(ast.annotation.Demand),
                              options)
       local parallel_task_ast = ast.typed.top.Task {
