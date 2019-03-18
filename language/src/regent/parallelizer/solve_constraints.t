@@ -192,7 +192,8 @@ function solver_context.new(task_constraints)
     mappings_by_access_paths = data.newmap(),
     loop_ranges              = hash_set.new(),
     loop_range_partitions    = data.newmap(),
-    task_constraints         = { constraints = task_constraints },
+    incl_check_caches        = data.newmap(),
+    task_constraints         = task_constraints,
   }
   return setmetatable(cx, solver_context)
 end
@@ -697,11 +698,10 @@ local op_name = {
   ["-"] = "-",
 }
 
-local function create_partition_by_binary_op(lhs, rhs, op)
+local function create_partition_by_binary_op(disjointness, lhs, rhs, op)
   if rhs == nil then return lhs, nil end
   local lhs_type = lhs:gettype()
-  local partition_type = std.partition(
-      (op == "-" and lhs_type.disjointness) or std.aliased,
+  local partition_type = std.partition(disjointness,
       lhs_type.parent_region_symbol, lhs_type.colors_symbol)
   local variable = nil
   if std.config["parallelize-debug"] then
@@ -738,11 +738,19 @@ local function create_partition_by_binary_op(lhs, rhs, op)
 end
 
 local function create_union_partition(lhs, rhs)
-  return create_partition_by_binary_op(lhs, rhs, "|")
+  return create_partition_by_binary_op(std.aliased, lhs, rhs, "|")
 end
 
 local function create_difference_partition(lhs, rhs)
-  return create_partition_by_binary_op(lhs, rhs, "-")
+  return create_partition_by_binary_op(lhs:gettype().disjointness, lhs, rhs, "-")
+end
+
+local function create_intersection_partition(lhs, rhs)
+  local disjointness = std.aliased
+  if lhs:gettype():is_disjoint() or rhs:gettype():is_disjoint() then
+    disjointness = std.disjoint
+  end
+  return create_partition_by_binary_op(disjointness, lhs, rhs, "&")
 end
 
 local terra _create_pvs_partition(runtime : c.legion_runtime_t,
@@ -1027,7 +1035,7 @@ local function retrieve_private_shared_subregions(cx, pvs)
   return private_subregion, shared_subregion, stats
 end
 
-local function create_intersection_partition_subregion(lhs, rhs, result_symbol)
+local function create_intersection_partition_region(lhs, rhs, result_symbol)
   local rhs_type = rhs:gettype()
   local result_type =
     std.partition(rhs_type.disjointness, lhs, rhs_type.colors_symbol)
@@ -1119,6 +1127,118 @@ local function create_union_partitions(partitions, cached_unions)
   return to_join[1][2], stats
 end
 
+local function create_isomorphic_region(name, orig_region, elem_type)
+  local stats = terralib.newlist()
+  local ispace_symbol = std.newsymbol(orig_region:gettype():ispace())
+  local region_type = std.region(ispace_symbol, elem_type)
+  local region_symbol = std.newsymbol(region_type, name)
+
+  stats:insert(ast.typed.stat.Var {
+    symbol = ispace_symbol,
+    type = ispace_symbol:gettype(),
+    value = ast.typed.expr.FieldAccess {
+      value = ast.typed.expr.ID {
+        value = orig_region,
+        expr_type = std.rawref(&orig_region:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      field_name = "ispace",
+      expr_type = orig_region:gettype():ispace(),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  })
+  stats:insert(ast.typed.stat.Var {
+    symbol = region_symbol,
+    type = region_symbol:gettype(),
+    value = ast.typed.expr.Region {
+      ispace = ast.typed.expr.ID {
+        value = ispace_symbol,
+        expr_type = std.rawref(&ispace_symbol:gettype()),
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      fspace_type = elem_type,
+      expr_type = region_symbol:gettype(),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  })
+  return region_symbol, stats
+end
+
+local function create_index_fill(cx, partition, color_space_symbol, value, elem_type)
+  local stats = terralib.newlist()
+  local partition_type = partition:gettype()
+  local parent_type = partition_type:parent_region()
+  local color_symbol = std.newsymbol(color_space_symbol:gettype().index_type, "color")
+  local color = ast.typed.expr.ID {
+    value = color_symbol,
+    expr_type = std.rawref(&color_symbol:gettype()),
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+  local subregion_type = partition_type:subregion_constant(color)
+  std.add_constraint(cx, partition_type, parent_type, std.subregion, false)
+  std.add_constraint(cx, subregion_type, partition_type, std.subregion, false)
+  return ast.typed.stat.ForList {
+    symbol = color_symbol,
+    value = ast.typed.expr.ID {
+      value = color_space_symbol,
+      expr_type = std.rawref(&color_space_symbol:gettype()),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    block = ast.typed.Block {
+      stats = terralib.newlist({
+        ast.typed.stat.Expr {
+          expr = ast.typed.expr.Fill {
+            dst = ast.typed.expr.RegionRoot {
+              region = ast.typed.expr.IndexAccess {
+                value = ast.typed.expr.ID {
+                  value = partition,
+                  expr_type = std.rawref(&partition:gettype()),
+                  span = ast.trivial_span(),
+                  annotations = ast.default_annotations(),
+                },
+                index = color,
+                expr_type = subregion_type,
+                span = ast.trivial_span(),
+                annotations = ast.default_annotations(),
+              },
+              fields = terralib.newlist({data.newtuple()}),
+              expr_type = subregion_type,
+              span = ast.trivial_span(),
+              annotations = ast.default_annotations(),
+            },
+            value = ast.typed.expr.Constant {
+              value = value,
+              expr_type = elem_type,
+              span = ast.trivial_span(),
+              annotations = ast.default_annotations(),
+            },
+            expr_type = terralib.types.unit,
+            conditions = terralib.newlist(),
+            span = ast.trivial_span(),
+            annotations = ast.default_annotations(),
+          },
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        }
+      }),
+      span = ast.trivial_span(),
+    },
+    metadata = false,
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
 function solver_context:synthesize_partitions(color_space_symbol)
   local stats = terralib.newlist()
 
@@ -1128,6 +1248,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
   local union_partitions = data.newmap()
   local diff_partitions = data.newmap()
   local mappings_by_range_sets = data.newmap()
+  local ghost_to_primary = data.newmap()
 
   -- Synthesize preimage partitions for children that cannot be partitioned
   -- otherwise. We first find non-trivial paths to disjoint partitions.
@@ -1158,7 +1279,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
             create_preimage_partition(range, partition.region, parent, info))
         elseif info:is_subset() then
           local range, partition_stat =
-            create_intersection_partition_subregion(partition.region, parent, range)
+            create_intersection_partition_region(partition.region, parent, range)
           stats:insert(partition_stat)
         else
           assert(false)
@@ -1370,13 +1491,13 @@ function solver_context:synthesize_partitions(color_space_symbol)
       retrieve_private_shared_subregions(self, pvs_partition)
     stats:insertall(subregion_stats)
     local private_range, partition_stat =
-      create_intersection_partition_subregion(private_subregion, private_range)
+      create_intersection_partition_region(private_subregion, private_range)
     stats:insert(partition_stat)
     local shared_range, partition_stat =
-      create_intersection_partition_subregion(shared_subregion, shared_range)
+      create_intersection_partition_region(shared_subregion, shared_range)
     stats:insert(partition_stat)
     local ghost_range, partition_stat =
-      create_intersection_partition_subregion(shared_subregion, ghost_range)
+      create_intersection_partition_region(shared_subregion, ghost_range)
     stats:insert(partition_stat)
 
     local disjoint_ranges =
@@ -1465,6 +1586,12 @@ function solver_context:synthesize_partitions(color_space_symbol)
           ghost_ranges:insert(ghost_range)
           secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
           mappings_by_range_sets[all_ranges] = mapping
+
+          secondary_ranges:map(function(range)
+            assert(ghost_to_primary[range] == nil or
+                   ghost_to_primary[range] == primary_range)
+            ghost_to_primary[range] = primary_range
+          end)
         end
       end
 
@@ -1481,6 +1608,67 @@ function solver_context:synthesize_partitions(color_space_symbol)
       self.loop_range_partitions[range] = terralib.newlist({range})
     end
   end)
+
+  if std.config["parallelize-cache-incl-check"] then
+    for ghost_range, primary_range in ghost_to_primary:items() do
+      local primary_partitions = disjoint_partitions[primary_range]:to_list() or
+                                 terralib.newlist({primary_range})
+      local num_cases = #primary_partitions + 1
+
+      local loop_range = ghost_range
+      local paths = terralib.newlist()
+      while image_partitions[loop_range] do
+        local info, src_range = unpack(image_partitions[loop_range])
+        paths:insert({info, src_range})
+        loop_range = src_range
+      end
+      -- TODO: Handle cases when one ghost range corresponds to a non-source loop range
+      assert(self.loop_ranges:has(loop_range))
+
+      local loop_range_partitions = self.loop_range_partitions[loop_range]
+      assert(#loop_range_partitions > 0)
+      local orig_region = loop_range_partitions[1]:gettype().parent_region_symbol
+      local cache_region, cache_stats =
+        create_isomorphic_region("cache_" .. tostring(ghost_range), orig_region, uint8)
+      stats:insertall(cache_stats)
+      self.task_constraints.region_universe[cache_region:gettype()] = true
+      std.add_privilege(self.task_constraints, std.reads, cache_region:gettype(), data.newtuple())
+      std.add_privilege(self.task_constraints, std.writes, cache_region:gettype(), data.newtuple())
+
+      for _, loop_range_partition in ipairs(loop_range_partitions) do
+        -- We mark all the entries as potentially pointing to ghost elements
+        local cache_partition, partition_stat =
+          create_intersection_partition_region(cache_region, loop_range_partition)
+        stats:insert(partition_stat)
+        local fill_loop = create_index_fill(self.task_constraints, cache_partition,
+            color_space_symbol, num_cases, uint8)
+        stats:insert(fill_loop)
+
+        local cases = data.newmap()
+        find_or_create(self.incl_check_caches, ghost_range)[loop_range_partition] =
+          { cache_partition, cases, num_cases }
+
+        for case_id, primary_partition in ipairs(primary_partitions) do
+          local preimage_partition = primary_partition
+          for i = 1, #paths do
+            local info, range = unpack(paths[i])
+            local region = self.constraints:get_partition(range).region
+            local next_preimage_partition = new_range()
+            stats:insert(
+              create_preimage_partition(next_preimage_partition, region, preimage_partition, info))
+            preimage_partition = next_preimage_partition
+          end
+          local cache_subpartition, partition_stat =
+            create_intersection_partition(cache_partition, preimage_partition)
+          stats:insert(partition_stat)
+          local fill_loop = create_index_fill(self.task_constraints, cache_subpartition,
+              color_space_symbol, case_id, uint8)
+          stats:insert(fill_loop)
+          cases[primary_partition] = case_id
+        end
+      end
+    end
+  end
 
   return stats
 end
@@ -1546,15 +1734,13 @@ function solve_constraints.solve(cx, stat)
   end
   assert(color_space_symbol ~= nil)
 
-  local solver_cx = solver_context.new(cx.constraints)
+  local solver_cx = solver_context.new(cx)
   local mappings = all_tasks:map(function(task)
     local constraints = task:get_partitioning_constraints()
     local region_mapping = collector_cx:get_mapping(task)
     local range_mapping = solver_cx:unify(task.name, constraints, region_mapping)
     return {range_mapping, region_mapping}
   end)
-
-  solver_cx:print_all_constraints()
 
   local partition_stats =
     solver_cx:synthesize_partitions(color_space_symbol)
@@ -1565,12 +1751,13 @@ function solve_constraints.solve(cx, stat)
   end
 
   return {
-    all_tasks = all_tasks,
-    all_mappings = all_mappings,
+    all_tasks                = all_tasks,
+    all_mappings             = all_mappings,
     mappings_by_access_paths = solver_cx.mappings_by_access_paths,
-    loop_range_partitions = solver_cx.loop_range_partitions,
-    color_space_symbol = color_space_symbol,
-    partition_stats = partition_stats,
+    loop_range_partitions    = solver_cx.loop_range_partitions,
+    incl_check_caches        = solver_cx.incl_check_caches,
+    color_space_symbol       = color_space_symbol,
+    partition_stats          = partition_stats,
   }
 end
 
