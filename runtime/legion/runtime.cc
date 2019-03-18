@@ -8292,21 +8292,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutConstraints::record_layout_registered(ReferenceMutator *mutator)
-    //--------------------------------------------------------------------------
-    {
-      // Similar to DistributedCollectable::register_with_runtime but
-      // we don't actually need to do the registration since we know
-      // it has already been done
-#ifdef DEBUG_LEGION
-      assert(!registered_with_runtime);
-#endif
-      registered_with_runtime = true;
-      if (!is_owner() && (mutator != NULL))
-        send_remote_registration(mutator);
-    }
-
-    //--------------------------------------------------------------------------
     void LayoutConstraints::send_constraint_response(AddressSpaceID target,
                                                      RtUserEvent done_event)
     //--------------------------------------------------------------------------
@@ -18804,11 +18789,10 @@ namespace Legion {
       if (finder != layout_constraints_table.end())
         return false;
       layout_constraints_table[new_constraints->layout_id] = new_constraints;
-      new_constraints->record_layout_registered(mutator);
-      dist_collectables[new_constraints->did & LEGION_DISTRIBUTED_ID_MASK] = 
-        new_constraints;
       // Remove any pending requests
       pending_constraint_requests.erase(new_constraints->layout_id);
+      // Now we can do the registration with the runtime
+      new_constraints->register_with_runtime(mutator);
       return true;
     }
 

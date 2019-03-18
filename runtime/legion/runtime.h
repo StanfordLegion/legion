@@ -1309,7 +1309,6 @@ namespace Legion {
       inline FieldSpace get_field_space(void) const { return handle; }
       inline const char* get_name(void) const { return constraints_name; }
     public:
-      void record_layout_registered(ReferenceMutator *mutator);
       void send_constraint_response(AddressSpaceID source,
                                     RtUserEvent done_event);
       void update_constraints(Deserializer &derez);
