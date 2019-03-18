@@ -8176,7 +8176,7 @@ namespace Legion {
                                      Runtime *rt, bool inter, DistributedID did)
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
-          (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
+          false/*register*/), layout_id(lay_id), handle(h), internal(inter), 
         constraints_name(NULL), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
@@ -8191,7 +8191,8 @@ namespace Legion {
       const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+            rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+            false/*register with runtime*/),
         layout_id(lay_id), handle(registrar.handle), internal(inter), 
         layout_lock(gc_lock)
     //--------------------------------------------------------------------------
@@ -8214,7 +8215,8 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+          false/*register with runtime*/), 
         layout_id(lay_id), handle(h), internal(inter), layout_lock(gc_lock)
     //--------------------------------------------------------------------------
     {
@@ -8287,6 +8289,21 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutConstraints::record_layout_registered(ReferenceMutator *mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Similar to DistributedCollectable::register_with_runtime but
+      // we don't actually need to do the registration since we know
+      // it has already been done
+#ifdef DEBUG_LEGION
+      assert(!registered_with_runtime);
+#endif
+      registered_with_runtime = true;
+      if (!is_owner() && (mutator != NULL))
+        send_remote_registration(mutator);
     }
 
     //--------------------------------------------------------------------------
@@ -8602,7 +8619,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ LayoutConstraintID LayoutConstraints::process_response(
+    /*static*/ void LayoutConstraints::process_response(
                    Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -8620,14 +8637,10 @@ namespace Legion {
         new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
       std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       // Now try to register this with the runtime
-      if (!runtime->register_layout(new_constraints))
+      if (!runtime->register_layout(new_constraints, &mutator))
         delete new_constraints;
-      else
-      {
-        WrapperReferenceMutator mutator(preconditions);
-        new_constraints->register_with_runtime(&mutator);
-      }
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -8635,7 +8648,6 @@ namespace Legion {
         Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(done_event);
-      return lay_id;
     }
 
     /////////////////////////////////////////////////////////////
@@ -15909,11 +15921,7 @@ namespace Legion {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraintID to_remove = 
-        LayoutConstraints::process_response(this, derez, source);
-      // Remove the done event from our set of pending events
-      AutoLock l_lock(layout_constraints_lock);
-      pending_constraint_requests.erase(to_remove);
+      LayoutConstraints::process_response(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -18763,7 +18771,9 @@ namespace Legion {
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
-      register_layout(constraints);
+      // If someone else already registered this ID then we delete our object
+      if (!register_layout(constraints, NULL/*mutator*/))
+        delete constraints;
       return layout_id;
     }
 
@@ -18774,12 +18784,13 @@ namespace Legion {
     {
       LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle, internal);
-      register_layout(constraints);
+      register_layout(constraints, NULL/*mutator*/);
       return constraints;
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::register_layout(LayoutConstraints *new_constraints)
+    bool Runtime::register_layout(LayoutConstraints *new_constraints,
+                                  ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       new_constraints->add_base_resource_ref(RUNTIME_REF);
@@ -18793,6 +18804,11 @@ namespace Legion {
       if (finder != layout_constraints_table.end())
         return false;
       layout_constraints_table[new_constraints->layout_id] = new_constraints;
+      new_constraints->record_layout_registered(mutator);
+      dist_collectables[new_constraints->did & LEGION_DISTRIBUTED_ID_MASK] = 
+        new_constraints;
+      // Remove any pending requests
+      pending_constraint_requests.erase(new_constraints->layout_id);
       return true;
     }
 
