@@ -1150,8 +1150,7 @@ namespace Legion {
                                public LegionHeapify<CopyAcrossAnalysis> {
     public:
       CopyAcrossAnalysis(Runtime *rt, Operation *op, unsigned src_index,
-                         unsigned dst_index, const FieldMask &dst_mask, 
-                         VersionInfo *info,
+                         unsigned dst_index, VersionInfo *info,
                          const RegionRequirement &src_req,
                          const RegionRequirement &dst_req,
                          const InstanceSet &target_instances,
@@ -1160,10 +1159,9 @@ namespace Legion {
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
-                         const std::vector<CopyAcrossHelper*> &across);
+                         const bool perfect);
       CopyAcrossAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                          Operation *op, unsigned src_index, unsigned dst_index,
-                         const FieldMask &dst_mask,
                          const RegionUsage &src_usage, 
                          const RegionUsage &dst_usage,
                          const LogicalRegion src_region,
@@ -1174,7 +1172,7 @@ namespace Legion {
                          const PredEvent pred_guard, const ReductionOpID redop,
                          const std::vector<unsigned> &src_indexes,
                          const std::vector<unsigned> &dst_indexes,
-                         const std::vector<CopyAcrossHelper*> &across);
+                         const bool perfect);
       CopyAcrossAnalysis(const CopyAcrossAnalysis &rhs);
       virtual ~CopyAcrossAnalysis(void);
     public:
@@ -1182,6 +1180,7 @@ namespace Legion {
     public:
       bool has_across_updates(void) const 
         { return (across_aggregator != NULL); }
+      CopyFillAggregator* get_across_aggregator(void);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1192,9 +1191,23 @@ namespace Legion {
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
     public:
+      static inline FieldMask initialize_mask(const std::vector<unsigned> &idxs)
+      {
+        FieldMask result;
+        for (unsigned idx = 0; idx < idxs.size(); idx++)
+          result.set_bit(idxs[idx]);
+        return result;
+      }
       static void handle_remote_copies_across(Deserializer &derez, Runtime *rt,
                                               AddressSpaceID previous); 
+      static std::vector<CopyAcrossHelper*> create_across_helpers(
+                            const FieldMask &src_mask,
+                            const FieldMask &dst_mask,
+                            const InstanceSet &dst_instances,
+                            const std::vector<unsigned> &src_indexes,
+                            const std::vector<unsigned> &dst_indexes);
     public:
+      const FieldMask src_mask;
       const FieldMask dst_mask;
       const unsigned src_index;
       const unsigned dst_index;
@@ -1213,10 +1226,13 @@ namespace Legion {
       const bool perfect;
     public:
       // Can only safely be accessed when analysis is locked
-      CopyFillAggregator *across_aggregator;
       FieldMask uninitialized;
       FieldMaskSet<IndexSpaceExpression> local_exprs;
       std::set<ApEvent> copy_events;
+      std::set<RtEvent> guard_events;
+    protected:
+      CopyFillAggregator *across_aggregator;
+      RtUserEvent aggregator_guard; // Guard event for the aggregator
     };
 
     /**

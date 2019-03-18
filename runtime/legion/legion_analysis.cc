@@ -3993,20 +3993,31 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->update_set(*analysis, eq_masks[idx], deferral_events,
-                                 applied_events);
+                                 applied_events, NULL, false/*orignal set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      std::set<RtEvent> update_events;
       // If we have remote messages to send do that now
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
+      {
+        const RtEvent remote_ready = 
           analysis->perform_remote(traversal_done, applied_events);
+        if (remote_ready.exists())
+          update_events.insert(remote_ready);
+      }
       // Then perform the updates
+      // Note that we need to capture all the effects of these updates
+      // before we can consider them applied, so we can't use the 
+      // applied_events data structure here
       const RtEvent updates_ready = 
-        analysis->perform_updates(traversal_done, applied_events);
+        analysis->perform_updates(traversal_done, update_events);
+      if (updates_ready.exists())
+        update_events.insert(updates_ready);
       // We can trigger our updated event done when all the guards are done 
-      Runtime::trigger_event(updated, 
-          Runtime::merge_events(remote_ready, updates_ready));
+      if (!update_events.empty())
+        Runtime::trigger_event(updated, Runtime::merge_events(update_events));
+      else
+        Runtime::trigger_event(updated);
       // If we have outputs we need for the user to be registered
       // before we can apply the output copies
       const ApEvent result = 
@@ -4212,7 +4223,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->acquire_restrictions(*analysis, eq_masks[idx],
-                                           deferral_events, applied_events);
+            deferral_events, applied_events, NULL, false/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -4453,7 +4464,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->release_restrictions(*analysis, eq_masks[idx],
-                                           deferral_events, applied_events);
+            deferral_events, applied_events, NULL, false/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -4490,21 +4501,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     CopyAcrossAnalysis::CopyAcrossAnalysis(Runtime *rt, Operation *o, 
-        unsigned src_idx, unsigned dst_idx, const FieldMask &dst_m, 
-        VersionInfo *info, const RegionRequirement &src_req,
+        unsigned src_idx, unsigned dst_idx, VersionInfo *info, 
+        const RegionRequirement &src_req,
         const RegionRequirement &dst_req, const InstanceSet &target_insts,
         const std::vector<InstanceView*> &target_vws, const ApEvent pre,
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
-        const std::vector<unsigned> &dst_idxes,
-        const std::vector<CopyAcrossHelper*> &across)
-      : PhysicalAnalysis(rt, o, dst_idx, info), dst_mask(dst_m), 
+        const std::vector<unsigned> &dst_idxes, const bool perf)
+      : PhysicalAnalysis(rt, o, dst_idx, info), 
+        src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
+        dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), src_usage(src_req), 
         dst_usage(dst_req), src_region(src_req.region), 
         dst_region(dst_req.region), target_instances(target_insts),
         target_views(target_vws), precondition(pre),pred_guard(pred),redop(red),
-        src_indexes(src_idxes), dst_indexes(dst_idxes), across_helpers(across),
-        perfect(across.empty()), across_aggregator(NULL)
+        src_indexes(src_idxes), dst_indexes(dst_idxes), 
+        across_helpers(perf ? std::vector<CopyAcrossHelper*>() :
+              create_across_helpers(src_mask, dst_mask, target_instances,
+                                    src_indexes, dst_indexes)),
+        perfect(perf), across_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4512,21 +4527,25 @@ namespace Legion {
     //--------------------------------------------------------------------------
     CopyAcrossAnalysis::CopyAcrossAnalysis(Runtime *rt, AddressSpaceID src, 
         AddressSpaceID prev, Operation *o, unsigned src_idx, unsigned dst_idx,
-        const FieldMask &dst_m, const RegionUsage &src_use, 
-        const RegionUsage &dst_use, const LogicalRegion src_reg,
-        const LogicalRegion dst_reg, const InstanceSet &target_insts,
+        const RegionUsage &src_use, const RegionUsage &dst_use, 
+        const LogicalRegion src_reg, const LogicalRegion dst_reg, 
+        const InstanceSet &target_insts,
         const std::vector<InstanceView*> &target_vws, const ApEvent pre,
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
-        const std::vector<unsigned> &dst_idxes,
-        const std::vector<CopyAcrossHelper*> &across)
-      : PhysicalAnalysis(rt, src, prev, o, dst_idx), dst_mask(dst_m),
-        src_index(src_idx), dst_index(dst_idx), src_usage(src_use), 
-        dst_usage(dst_use), src_region(src_reg), dst_region(dst_reg),
-        target_instances(target_insts), target_views(target_vws), 
-        precondition(pre), pred_guard(pred), redop(red), 
-        src_indexes(src_idxes), dst_indexes(dst_idxes), across_helpers(across),
-        perfect(across.empty()), across_aggregator(NULL)
+        const std::vector<unsigned> &dst_idxes, const bool perf)
+      : PhysicalAnalysis(rt, src, prev, o, dst_idx), 
+        src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
+        dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
+        src_index(src_idx), dst_index(dst_idx), 
+        src_usage(src_use), dst_usage(dst_use), src_region(src_reg), 
+        dst_region(dst_reg), target_instances(target_insts), 
+        target_views(target_vws), precondition(pre),pred_guard(pred),redop(red),
+        src_indexes(src_idxes), dst_indexes(dst_idxes), 
+        across_helpers(perf ? std::vector<CopyAcrossHelper*>() :
+              create_across_helpers(src_mask, dst_mask, target_instances,
+                                    src_indexes, dst_indexes)),
+        perfect(perf), across_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4551,6 +4570,9 @@ namespace Legion {
     CopyAcrossAnalysis::~CopyAcrossAnalysis(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(!aggregator_guard.exists() || aggregator_guard.has_triggered());
+#endif
       if (!!uninitialized)
       {
         RegionNode *src_node = runtime->forest->get_node(src_region);
@@ -4570,6 +4592,22 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    CopyFillAggregator* CopyAcrossAnalysis::get_across_aggregator(void)
+    //--------------------------------------------------------------------------
+    {
+      if (across_aggregator == NULL)
+      {
+#ifdef DEBUG_LEGION
+        assert(!aggregator_guard.exists());
+#endif
+        aggregator_guard = Runtime::create_rt_user_event();
+        across_aggregator = new CopyFillAggregator(runtime->forest, op, 
+            src_index, dst_index, aggregator_guard, true/*track*/, pred_guard);
+      }
+      return across_aggregator;
     }
 
     //--------------------------------------------------------------------------
@@ -4619,7 +4657,6 @@ namespace Legion {
           rez.serialize(dst_index);
           rez.serialize(src_usage);
           rez.serialize(dst_usage);
-          rez.serialize(dst_mask);
           rez.serialize<size_t>(target_instances.size());
           for (unsigned idx = 0; idx < target_instances.size(); idx++)
           {
@@ -4648,6 +4685,8 @@ namespace Legion {
         applied_events.insert(applied);
         copy_events.insert(copy);
       }
+      // Filter all the remote expressions from the local ones here
+      filter_remote_expressions(local_exprs);
       return RtEvent::NO_RT_EVENT;
     }
 
@@ -4669,6 +4708,21 @@ namespace Legion {
       }
       if (across_aggregator != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(aggregator_guard.exists());
+#endif
+        // Trigger the guard event for the aggregator once all the 
+        // actual guard events are done. Note that this is safe for
+        // copy across aggregators because unlike other aggregators
+        // they are moving data from one field to another so it is
+        // safe to create entanglements between fields since they are
+        // all going to be subsumed by the same completion event for
+        // the copy-across operation anyway
+        if (!guard_events.empty())
+          Runtime::trigger_event(aggregator_guard, 
+              Runtime::merge_events(guard_events));
+        else
+          Runtime::trigger_event(aggregator_guard);
         // Record the event field preconditions for each view
         // Use the destination expr since we know we we're only actually
         // issuing copies for that particular expression
@@ -4806,8 +4860,6 @@ namespace Legion {
       RegionUsage src_usage, dst_usage;
       derez.deserialize(src_usage);
       derez.deserialize(dst_usage);
-      FieldMask dst_mask;
-      derez.deserialize(dst_mask);
       size_t num_dsts;
       derez.deserialize(num_dsts);
       InstanceSet dst_instances(num_dsts);
@@ -4855,30 +4907,9 @@ namespace Legion {
       derez.deserialize(copy);
 
       std::vector<CopyAcrossHelper*> across_helpers;
-      if (!perfect)
-      {
-        for (unsigned idx = 0; idx < dst_instances.size(); idx++)
-        {
-          across_helpers.push_back(
-              new CopyAcrossHelper(src_mask, src_indexes, dst_indexes));
-          InstanceManager *manager = 
-            dst_instances[idx].get_manager()->as_instance_manager();
-          manager->initialize_across_helper(across_helpers.back(), 
-                                dst_mask, src_indexes, dst_indexes);
-        }
-      }
-      // This takes ownership of the op and the across helpers
-      CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, 
-          original_source, previous, op, src_index, dst_index, dst_mask,
-          src_usage, dst_usage, src_handle, dst_handle, dst_instances,
-          dst_views, precondition, pred_guard, redop, src_indexes,
-          dst_indexes, across_helpers);
-      analysis->add_reference();
+      std::set<RtEvent> deferral_events, applied_events;
       RegionNode *dst_node = runtime->forest->get_node(dst_handle);
       IndexSpaceExpression *dst_expr = dst_node->get_index_space_expression();
-      FieldMaskSet<IndexSpaceExpression> local_exprs;
-      std::set<RtEvent> deferral_events, applied_events;
-      std::set<ApEvent> copy_events;
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
       {
@@ -4886,7 +4917,13 @@ namespace Legion {
         if (wait_on.exists() && !wait_on.has_triggered())
           wait_on.wait();
       }
-
+      // This takes ownership of the op and the across helpers
+      CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, 
+          original_source, previous, op, src_index, dst_index,
+          src_usage, dst_usage, src_handle, dst_handle, 
+          dst_instances, dst_views, precondition, pred_guard, redop, 
+          src_indexes, dst_indexes, perfect);
+      analysis->add_reference();
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
       {
         EquivalenceSet *set = eq_sets[idx];
@@ -4896,7 +4933,7 @@ namespace Legion {
         if (overlap->is_empty())
           continue;
         set->issue_across_copies(*analysis, eq_masks[idx], overlap,
-                                 deferral_events, applied_events);
+            deferral_events, applied_events, NULL, false/*original set*/);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
@@ -4905,9 +4942,9 @@ namespace Legion {
       analysis->local_exprs.insert(dst_expr, src_mask);
       RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, applied_events);
+        remote_ready = analysis->perform_remote(traversal_done, applied_events);
       RtEvent updates_ready;
+      // Chain these so we get the local_exprs set correct
       if (remote_ready.exists() || analysis->has_across_updates())
         updates_ready = 
           analysis->perform_updates(remote_ready, applied_events); 
@@ -4922,6 +4959,31 @@ namespace Legion {
       // Clean up our analysis
       if (analysis->remove_reference())
         delete analysis;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ std::vector<CopyAcrossHelper*> 
+                          CopyAcrossAnalysis::create_across_helpers(
+                                       const FieldMask &src_mask,
+                                       const FieldMask &dst_mask,
+                                       const InstanceSet &dst_instances,
+                                       const std::vector<unsigned> &src_indexes,
+                                       const std::vector<unsigned> &dst_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!dst_instances.empty());
+#endif
+      std::vector<CopyAcrossHelper*> result(dst_instances.size());
+      for (unsigned idx = 0; idx < dst_instances.size(); idx++)
+      {
+        result[idx] = new CopyAcrossHelper(src_mask, src_indexes, dst_indexes);
+        InstanceManager *manager = 
+          dst_instances[idx].get_manager()->as_instance_manager();
+        manager->initialize_across_helper(result[idx],
+                              dst_mask, src_indexes, dst_indexes);
+      }
+      return result;
     }
 
     /////////////////////////////////////////////////////////////
@@ -5181,7 +5243,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->overwrite_set(*analysis, eq_masks[idx],
-                                    deferral_events, applied_events);
+            deferral_events, applied_events, NULL, false/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -5386,7 +5448,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
         eq_sets[idx]->filter_set(*analysis, eq_masks[idx],
-                                 deferral_events, applied_events);
+            deferral_events, applied_events, NULL, false/*original set*/);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -7328,7 +7390,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (!original_set && 
+      if (original_set && 
           analysis.update_alt_sets(this, user_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -7846,7 +7908,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (!original_set && 
+      if (original_set && 
           analysis.update_alt_sets(this, acquire_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -7939,7 +8001,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (!original_set && 
+      if (original_set && 
           analysis.update_alt_sets(this, release_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -8066,7 +8128,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock,1,false/*exclusive*/);
-      if (!original_set && 
+      if (original_set && 
           analysis.update_alt_sets(this, src_mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -8135,14 +8197,41 @@ namespace Legion {
             return false;
         }
       }
+#ifdef DEBUG_LEGION
+      assert(IS_READ_ONLY(analysis.src_usage));
+#endif
       // We need to lock the analysis at this point
       AutoLock a_lock(analysis);
       // Check for any uninitialized fields
       analysis.uninitialized |= (src_mask - valid_instances.get_valid_mask());
-      if (analysis.across_aggregator != NULL)
-        analysis.across_aggregator->clear_update_fields();
+      // TODO: Handle the case where we are predicated
       if (analysis.pred_guard.exists())
         assert(false);
+      // See if there are any other predicate guard fields that we need
+      // to have as preconditions before applying our owner updates
+      if (!update_guards.empty() && 
+          !(src_mask * update_guards.get_valid_mask()))
+      {
+        for (FieldMaskSet<CopyFillAggregator>::iterator it = 
+              update_guards.begin(); it != update_guards.end(); it++)
+        {
+          if (src_mask * it->second)
+            continue;
+          // No matter what record our dependences on the prior guards
+#ifdef NON_AGGRESSIVE_AGGREGATORS
+          const RtEvent guard_event = it->first->effects_applied;
+#else
+          const RtEvent guard_event = 
+            (analysis.original_source == local_space) ?
+            it->first->guard_postcondition :
+            it->first->effects_applied;
+#endif
+          analysis.guard_events.insert(guard_event);
+        }
+      }
+      // At this point we know we're going to need an aggregator since
+      // this is an across copy and we have to be doing updates
+      CopyFillAggregator *across_aggregator = analysis.get_across_aggregator();
       if (!analysis.perfect)
       {
         // The general case where fields don't align regardless of
@@ -8163,10 +8252,10 @@ namespace Legion {
         // Iterate over the target instances
         for (unsigned idx = 0; idx < analysis.target_views.size(); idx++)
         {
-          const FieldMask dst_mask = 
+          const FieldMask &dst_mask = 
             analysis.target_instances[idx].get_valid_fields();
-          // Compute a src_mask based on the dst mask
-          FieldMask src_mask;
+          // Compute a tmp mask based on the dst mask
+          FieldMask source_mask;
           int fidx = dst_mask.find_first_set();
           while (fidx >= 0)
           {
@@ -8175,7 +8264,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
             assert(finder != dst_to_src.end());
 #endif
-            src_mask.set_bit(finder->second);
+            source_mask.set_bit(finder->second);
             fidx = dst_mask.find_next_set(fidx+1);
           }
           // Now find all the source instances for this destination
@@ -8183,18 +8272,13 @@ namespace Legion {
           for (FieldMaskSet<LogicalView>::const_iterator it =
                 valid_instances.begin(); it != valid_instances.end(); it++)
           {
-            const FieldMask field_overlap = it->second & src_mask;
+            const FieldMask field_overlap = it->second & source_mask;
             if (!field_overlap)
               continue;
             src_views.insert(it->first, field_overlap);
           }
-          if (analysis.across_aggregator == NULL)
-            analysis.across_aggregator = new CopyFillAggregator(runtime->forest,
-                            analysis.op, analysis.src_index, analysis.dst_index,
-                            RtEvent::NO_RT_EVENT, true/*track*/, 
-                            analysis.pred_guard);
-          analysis.across_aggregator->record_updates(analysis.target_views[idx],
-                            src_views, src_mask, overlap, analysis.redop, 
+          across_aggregator->record_updates(analysis.target_views[idx],
+                            src_views, source_mask, overlap, analysis.redop, 
                             analysis.across_helpers[idx]);
         }
         // Now check for any reductions that need to be applied
@@ -8224,15 +8308,9 @@ namespace Legion {
                 analysis.target_instances[idx].get_valid_fields();
               if (!target_mask.is_set(dst_fidx))
                 continue;
-              if (analysis.across_aggregator == NULL)
-                analysis.across_aggregator = new CopyFillAggregator(
-                              runtime->forest, analysis.op, analysis.src_index, 
-                              analysis.dst_index, RtEvent::NO_RT_EVENT, 
-                              true/*track*/, analysis.pred_guard);
-              analysis.across_aggregator->record_reductions(
-                              analysis.target_views[idx], finder->second, 
-                              src_fidx, dst_fidx, overlap,
-                              analysis.across_helpers[idx]);
+              across_aggregator->record_reductions(analysis.target_views[idx],
+                                         finder->second, src_fidx, dst_fidx, 
+                                         overlap, analysis.across_helpers[idx]);
             }
             src_fidx = reduce_mask.find_next_set(src_fidx+1);
           }
@@ -8242,8 +8320,7 @@ namespace Legion {
       {
         // Fields align and we're not doing a reduction so we can just 
         // do a normal update copy analysis to figure out what to do
-        issue_update_copies_and_fills(analysis.across_aggregator, 
-                                      RtEvent::NO_RT_EVENT,
+        issue_update_copies_and_fills(across_aggregator, RtEvent::NO_RT_EVENT,
                                       analysis.op, analysis.src_index, 
                                       true/*track effects*/, src_mask, 
                                       analysis.target_instances,
@@ -8268,14 +8345,8 @@ namespace Legion {
                 analysis.target_instances[idx].get_valid_fields();
               if (!target_mask.is_set(fidx))
                 continue;
-              if (analysis.across_aggregator == NULL)
-                analysis.across_aggregator = new CopyFillAggregator(
-                              runtime->forest, analysis.op, analysis.src_index, 
-                              analysis.dst_index, RtEvent::NO_RT_EVENT, 
-                              true/*track*/, analysis.pred_guard);
-              analysis.across_aggregator->record_reductions(
-                              analysis.target_views[idx],
-                              finder->second, fidx, fidx, overlap);
+              across_aggregator->record_reductions(analysis.target_views[idx],
+                                           finder->second, fidx, fidx, overlap);
             }
             fidx = reduce_mask.find_next_set(fidx+1);
           }
@@ -8298,30 +8369,14 @@ namespace Legion {
         {
           const FieldMask &mask = 
             analysis.target_instances[idx].get_valid_fields(); 
-          if (analysis.across_aggregator == NULL)
-            analysis.across_aggregator = new CopyFillAggregator(runtime->forest,
-                          analysis.op, analysis.src_index, analysis.dst_index,
-                          RtEvent::NO_RT_EVENT, true/*track*/, 
-                          analysis.pred_guard);
-          analysis.across_aggregator->record_updates(analysis.target_views[idx],
-                      src_views, mask, overlap, analysis.redop, NULL/*across*/);
+          across_aggregator->record_updates(analysis.target_views[idx], 
+              src_views, mask, overlap, analysis.redop, NULL/*across*/);
         }
         // There shouldn't be any reduction instances to worry about here
 #ifdef DEBUG_LEGION
         assert(reduction_fields * src_mask);
 #endif
-      }
-      if ((analysis.across_aggregator != NULL) &&
-           analysis.across_aggregator->has_update_fields())
-      {
-#ifdef DEBUG_LEGION
-        assert(analysis.across_aggregator->get_update_fields() * 
-                refining_fields);
-#endif
-        update_guards.insert(analysis.across_aggregator, 
-            analysis.across_aggregator->get_update_fields());
-        analysis.across_aggregator->record_guard_set(this);
-      }
+      } 
       check_for_migration(analysis, applied_events);
       if (remove_mask != NULL)
         return !!(*remove_mask);
@@ -8338,7 +8393,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {
@@ -8511,7 +8566,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock eq(eq_lock);
-      if (!original_set && analysis.update_alt_sets(this, mask, applied_events))
+      if (original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
       {

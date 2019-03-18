@@ -2250,61 +2250,25 @@ namespace Legion {
         perfect = false;
         break;
       }
-      CopyAcrossAnalysis *analysis = NULL;
+      CopyAcrossAnalysis *analysis = new CopyAcrossAnalysis(runtime, op, 
+          src_index, dst_index, &src_version_info, src_req, dst_req, 
+          dst_targets, target_views, precondition, guard, dst_req.redop,
+          src_indexes, dst_indexes, perfect);
+      analysis->add_reference();
       std::set<RtEvent> deferral_events;
-      std::vector<CopyAcrossHelper*> across_helpers;
-      if (perfect)
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            src_eq_sets.begin(); it != src_eq_sets.end(); it++)
       {
-        analysis = new CopyAcrossAnalysis(runtime, op, src_index, dst_index,
-            dst_mask, &src_version_info, src_req, dst_req, dst_targets, 
-            target_views, precondition, guard, dst_req.redop,
-            src_indexes, dst_indexes, across_helpers);
-        analysis->add_reference();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              src_eq_sets.begin(); it != src_eq_sets.end(); it++)
-        {
-          // Check that the index spaces intersect
-          IndexSpaceExpression *overlap = 
-            intersect_index_spaces(it->first->set_expr, dst_expr);
-          if (overlap->is_empty())
-            continue;
-          FieldMask remove_mask;
-          if (it->first->issue_across_copies(*analysis, it->second, overlap,
-                deferral_events, map_applied_events, &remove_mask))
-            analysis->record_delete_set(it->first, remove_mask, 
-                                        map_applied_events);
-        }
-      }
-      else
-      {
-        for (unsigned idx = 0; idx < target_views.size(); idx++)
-        {
-          across_helpers.push_back(
-              new CopyAcrossHelper(src_mask, src_indexes, dst_indexes));
-          InstanceManager *manager = 
-            target_views[idx]->get_manager()->as_instance_manager();
-          manager->initialize_across_helper(across_helpers.back(), 
-                                dst_mask, src_indexes, dst_indexes);
-        }
-        analysis = new CopyAcrossAnalysis(runtime, op, src_index, dst_index,
-            dst_mask, &src_version_info, src_req, dst_req, dst_targets, 
-            target_views, precondition, guard, dst_req.redop, src_indexes, 
-            dst_indexes, across_helpers);
-        analysis->add_reference();
-        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
-              src_eq_sets.begin(); it != src_eq_sets.end(); it++)
-        {
-          // Check that the index spaces intersect
-          IndexSpaceExpression *overlap = 
-            intersect_index_spaces(it->first->set_expr, dst_expr);
-          if (overlap->is_empty())
-            continue;
-          FieldMask remove_mask;
-          if (it->first->issue_across_copies(*analysis, it->second, overlap,
-                deferral_events, map_applied_events, &remove_mask))
-            analysis->record_delete_set(it->first, remove_mask,
-                                        map_applied_events);
-        }
+        // Check that the index spaces intersect
+        IndexSpaceExpression *overlap = 
+          intersect_index_spaces(it->first->set_expr, dst_expr);
+        if (overlap->is_empty())
+          continue;
+        FieldMask remove_mask;
+        if (it->first->issue_across_copies(*analysis, it->second, overlap,
+              deferral_events, map_applied_events, &remove_mask))
+          analysis->record_delete_set(it->first, remove_mask, 
+                                      map_applied_events);
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
