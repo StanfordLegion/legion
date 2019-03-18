@@ -805,6 +805,7 @@ function task_generator.new(node)
     for _, parallel_task in parallel_task_variants:items() do
       parallel_task:set_task_id_unsafe(parallel_task_variants["primary"]:get_task_id())
     end
+    local parallel_task_variants_list = terralib.newlist({"colocation", "primary"})
 
     -- We prepare the metadata that is shared by all task variants
     local params = terralib.newlist()
@@ -865,7 +866,9 @@ function task_generator.new(node)
       end
     end)
 
-    for variant_type, parallel_task in parallel_task_variants:items() do
+    for i, variant_type in ipairs(parallel_task_variants_list) do
+      local parallel_task = parallel_task_variants[variant_type]
+
       -- Make a copy from the shared metadata
       local params = clone_list(params)
       local privileges = clone_list(privileges)
