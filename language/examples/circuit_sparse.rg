@@ -282,7 +282,7 @@ do
 
     for wire_id = 0, conf.wires_per_piece do
       var wire =
-        unsafe_cast(ptr(wire(rpn, rsn, all_shared), rw), [ptr](wire_id + offset))
+        unsafe_cast(ptr(wire(rpn, rsn, all_shared), rw), ptr(wire_id + offset))
       wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
       wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
       wire.resistance = drand48() * 10.0 + 1.0
@@ -298,7 +298,7 @@ do
         in_node += pn_ptr_offset - snpp
       end
 
-      wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), [ptr](in_node))
+      wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), ptr(in_node))
       regentlib.assert(not isnull(wire.in_ptr), "picked an invalid random pointer")
 
       var out_node = 0
@@ -326,7 +326,7 @@ do
         max_shared_node_id = max(max_shared_node_id, out_node)
         min_shared_node_id = min(min_shared_node_id, out_node)
       end
-      wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), [ptr](out_node))
+      wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), ptr(out_node))
     end
     offset += conf.wires_per_piece
   end
@@ -553,11 +553,11 @@ terra create_colorings(conf : Config)
     (num_circuit_nodes - num_shared_nodes) % conf.num_pieces == 0,
     "something went wrong in the arithmetic")
 
-  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](1),
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(1),
     c.legion_ptr_t { value = 0 },
     c.legion_ptr_t { value = num_shared_nodes - 1})
 
-  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](0),
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(0),
     c.legion_ptr_t { value = num_shared_nodes },
     c.legion_ptr_t { value = num_circuit_nodes - 1})
 
@@ -566,10 +566,10 @@ terra create_colorings(conf : Config)
   var snpp = conf.shared_nodes_per_piece
   var pnpp = conf.nodes_per_piece - snpp
   for spiece_id = 0, num_superpieces do
-    c.legion_point_coloring_add_range(coloring.shared_node_map, [ptr](spiece_id),
+    c.legion_point_coloring_add_range(coloring.shared_node_map, ptr(spiece_id),
       c.legion_ptr_t { value = spiece_id * snpp * pps },
       c.legion_ptr_t { value = (spiece_id + 1) * snpp * pps - 1})
-    c.legion_point_coloring_add_range(coloring.private_node_map, [ptr](spiece_id),
+    c.legion_point_coloring_add_range(coloring.private_node_map, ptr(spiece_id),
       c.legion_ptr_t { value = num_shared_nodes + spiece_id * pnpp * pps},
       c.legion_ptr_t { value = num_shared_nodes + (spiece_id + 1) * pnpp * pps - 1})
   end

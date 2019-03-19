@@ -18,11 +18,11 @@ task main()
   var r = region(ispace(ptr, 5), int)
 
   for i = 0, 5 do
-    regentlib.assert([ptr](i) <= r, "test failed")
+    regentlib.assert(ptr(i) <= r, "test failed")
   end
 
   for i = 5, 10 do
-    regentlib.assert(not ([ptr](i) <= r), "test failed")
+    regentlib.assert(not (ptr(i) <= r), "test failed")
   end
 end
 

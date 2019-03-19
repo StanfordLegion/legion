@@ -1569,7 +1569,7 @@ do
     var p_ = first_p
     for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
       for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
-        var p = dynamic_cast(ptr(point, rpp), [ptr](p_))
+        var p = dynamic_cast(ptr(point, rpp), ptr(p_))
         regentlib.assert(not isnull(p), "bad pointer")
 
         var px = { x = dx*x, y = dy*y }
@@ -1603,7 +1603,7 @@ do
     var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
 
     for p_ = right._0, right._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, first_zy + (p_ - right._0 + [int64](pcy > 0))
@@ -1625,7 +1625,7 @@ do
     end
 
     for p_ = bottom._0, bottom._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = first_zx + (p_ - bottom._0 + [int64](pcx > 0)), last_zy
@@ -1647,7 +1647,7 @@ do
     end
 
     for p_ = bottom_right._0, bottom_right._1 do
-      var p = dynamic_cast(ptr(point, rps), [ptr](p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, last_zy
@@ -1693,7 +1693,7 @@ do
                   (y == stride_zy - 1 and pcy < conf.numpcy - 1) or
                   (x == stride_zx - 1 and pcx < conf.numpcx - 1))
             then
-              var z = dynamic_cast(ptr(zone, rz), [ptr](z_))
+              var z = dynamic_cast(ptr(zone, rz), ptr(z_))
               regentlib.assert(not isnull(z), "bad pointer")
 
               var top_left = ghost_top_left_p(conf, pcx, pcy)
@@ -1720,7 +1720,7 @@ do
                 else -- private
                   p_ = first_p + inner_y * inner_stride_x + inner_x
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[0] = p
               end
@@ -1735,7 +1735,7 @@ do
                 else -- private
                   p_ = first_p + inner_y * inner_stride_x + (inner_x + 1)
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[1] = p
               end
@@ -1750,7 +1750,7 @@ do
                 else -- private
                   p_ = first_p + (inner_y + 1) * inner_stride_x + (inner_x + 1)
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[2] = p
               end
@@ -1765,7 +1765,7 @@ do
                 else -- private
                   p_ = first_p + (inner_y + 1) * inner_stride_x + inner_x
                 end
-                var p = dynamic_cast(ptr(point, rpp, rpg), [ptr](p_))
+                var p = dynamic_cast(ptr(point, rpp, rpg), ptr(p_))
                 regentlib.assert(not isnull(p), "bad pointer")
                 pp[3] = p
               end
@@ -1773,7 +1773,7 @@ do
               var ss : ptr(side(rz, rpp, rpg, rs), rs)[4]
               for i = 0, znump do
                 var s_ = z_ * znump + i
-                var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), [ptr](s_))
+                var s = dynamic_cast(ptr(side(rz, rpp, rpg, rs), rs), ptr(s_))
                 regentlib.assert(not isnull(s), "bad pointer")
                 ss[i] = s
               end

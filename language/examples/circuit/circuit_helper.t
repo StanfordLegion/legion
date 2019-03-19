@@ -43,7 +43,7 @@ do
 
   for p = 0, npieces do
     for i = 0, npp do
-      var node = dynamic_cast(ptr(Node, rn), [ptr](p * npp + i))
+      var node = dynamic_cast(ptr(Node, rn), ptr(p * npp + i))
       node.node_cap = drand48() + 1.0
       node.leakage = 0.1 * drand48()
       node.charge = 0.0
@@ -54,7 +54,7 @@ do
   for p = 0, npieces do
     var ptr_offset = p * npp
     for i = 0, wpp do
-      var wire = dynamic_cast(ptr(Wire(rn), rw), [ptr](p * wpp + i))
+      var wire = dynamic_cast(ptr(Wire(rn), rw), ptr(p * wpp + i))
       wire.current.{_0, _1, _2} = 0.0
       wire.voltage.{_0, _1} = 0.0
       wire.resistance = drand48() * 10.0 + 1.0
@@ -64,7 +64,7 @@ do
       wire.wire_cap = drand48() * 0.1
 
       var in_node = ptr_offset + [uint](drand48() * npp)
-      wire.in_ptr = dynamic_cast(ptr(Node, rn), [ptr](in_node))
+      wire.in_ptr = dynamic_cast(ptr(Node, rn), ptr(in_node))
       regentlib.assert(not isnull(wire.in_ptr),
         "picked an invalid random pointer")
 
@@ -85,7 +85,7 @@ do
         end
         out_node = pp * npp + idx
       end
-      wire.out_ptr = dynamic_cast(ptr(Node, rn), [ptr](out_node))
+      wire.out_ptr = dynamic_cast(ptr(Node, rn), ptr(out_node))
       regentlib.assert(not isnull(wire.out_ptr),
         "picked an invalid random pointer within a piece")
     end
