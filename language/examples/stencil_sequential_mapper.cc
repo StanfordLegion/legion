@@ -177,7 +177,7 @@ void StencilMapper::map_task(const MapperContext      ctx,
   }
 
   std::vector<VariantID> variants;
-  runtime->find_valid_variants(ctx, task.task_id, variants, Processor::LOC_PROC);
+  runtime->find_valid_variants(ctx, task.task_id, variants, task.target_proc.kind());
   VariantID chosen_variant = -1U;
   for (unsigned idx = 0; idx < variants.size(); ++idx)
   {
