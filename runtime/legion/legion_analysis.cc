@@ -3731,14 +3731,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
-    {
-      if (!!uninitialized)
-      {
-#ifdef DEBUG_LEGION
-        assert(check_initialized);
-#endif
-        node->report_uninitialized_usage(op, index, usage, uninitialized);
-      }
+    { 
     }
 
     //--------------------------------------------------------------------------
@@ -3747,6 +3740,22 @@ namespace Legion {
     {
       // should never be called
       assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void UpdateAnalysis::record_uninitialized(const FieldMask &uninit,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!uninitialized)
+      {
+#ifdef DEBUG_LEGION
+        assert(!uninitialized_reported.exists());
+#endif
+        uninitialized_reported = Runtime::create_rt_user_event();
+        applied_events.insert(uninitialized_reported);
+      }
+      uninitialized |= uninit;
     }
 
     //--------------------------------------------------------------------------
@@ -3848,6 +3857,16 @@ namespace Legion {
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
         return args.done_event;
+      }
+      // Report any uninitialized data now that we know the traversal is done
+      if (!!uninitialized)
+      {
+#ifdef DEBUG_LEGION
+        assert(check_initialized);
+        assert(uninitialized_reported.exists());
+#endif
+        node->report_uninitialized_usage(op, index, usage, uninitialized,
+                                         uninitialized_reported);
       }
       if (!input_aggregators.empty())
       {
@@ -4572,13 +4591,7 @@ namespace Legion {
     {
 #ifdef DEBUG_LEGION
       assert(!aggregator_guard.exists() || aggregator_guard.has_triggered());
-#endif
-      if (!!uninitialized)
-      {
-        RegionNode *src_node = runtime->forest->get_node(src_region);
-        src_node->report_uninitialized_usage(op, src_index, 
-                                             src_usage, uninitialized);
-      }
+#endif 
       for (std::vector<CopyAcrossHelper*>::const_iterator it = 
             across_helpers.begin(); it != across_helpers.end(); it++)
         delete (*it);
@@ -4592,6 +4605,22 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void CopyAcrossAnalysis::record_uninitialized(const FieldMask &uninit,
+                                              std::set<RtEvent> &applied_events)
+    //--------------------------------------------------------------------------
+    {
+      if (!uninitialized)
+      {
+#ifdef DEBUG_LEGION
+        assert(!uninitialized_reported.exists());
+#endif
+        uninitialized_reported = Runtime::create_rt_user_event();
+        applied_events.insert(uninitialized_reported);
+      }
+      uninitialized |= uninit;
     }
 
     //--------------------------------------------------------------------------
@@ -4705,6 +4734,16 @@ namespace Legion {
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
         applied_events.insert(args.applied_event);
         return args.done_event;
+      }
+      // Report any uninitialized data now that we know the traversal is done
+      if (!!uninitialized)
+      {
+#ifdef DEBUG_LEGION
+        assert(uninitialized_reported.exists());
+#endif
+        RegionNode *src_node = runtime->forest->get_node(src_region);
+        src_node->report_uninitialized_usage(op, src_index, src_usage, 
+                                uninitialized, uninitialized_reported);
       }
       if (across_aggregator != NULL)
       {
@@ -7460,8 +7499,11 @@ namespace Legion {
       // Check for any uninitialized data
       // Don't report uninitialized warnings for empty equivalence classes
       if (analysis.check_initialized && !set_expr->is_empty())
-        analysis.uninitialized |= 
-          (user_mask - valid_instances.get_valid_mask());
+      {
+        const FieldMask uninit = user_mask - valid_instances.get_valid_mask();
+        if (!!uninit)
+          analysis.record_uninitialized(uninit, applied_events);
+      }
       if (analysis.output_aggregator != NULL)
         analysis.output_aggregator->clear_update_fields();
       if (IS_REDUCE(analysis.usage))
@@ -8203,7 +8245,9 @@ namespace Legion {
       // We need to lock the analysis at this point
       AutoLock a_lock(analysis);
       // Check for any uninitialized fields
-      analysis.uninitialized |= (src_mask - valid_instances.get_valid_mask());
+      const FieldMask uninit = src_mask - valid_instances.get_valid_mask();
+      if (!!uninit)
+        analysis.record_uninitialized(uninit, applied_events);
       // TODO: Handle the case where we are predicated
       if (analysis.pred_guard.exists())
         assert(false);

@@ -2861,7 +2861,8 @@ namespace Legion {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
-                                      const FieldMask &uninitialized);
+                                      const FieldMask &uninitialized,
+                                      RtUserEvent reported);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
       void clear_logical_reduction_fields(LogicalState &state,

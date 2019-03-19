@@ -1046,6 +1046,8 @@ namespace Legion {
     public:
       bool has_output_updates(void) const 
         { return (output_aggregator != NULL); }
+      void record_uninitialized(const FieldMask &uninit,
+                                std::set<RtEvent> &applied_events);
       virtual RtEvent perform_remote(RtEvent precondition, 
                                      std::set<RtEvent> &applied_events,
                                      const bool already_deferred = false);
@@ -1072,7 +1074,9 @@ namespace Legion {
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
       CopyFillAggregator *output_aggregator;
       std::set<RtEvent> guard_events;
+      // For tracking uninitialized data
       FieldMask uninitialized;
+      RtUserEvent uninitialized_reported;
       // For remote tracking
       RtEvent remote_user_registered;
       RtUserEvent user_registered;
@@ -1180,6 +1184,8 @@ namespace Legion {
     public:
       bool has_across_updates(void) const 
         { return (across_aggregator != NULL); }
+      void record_uninitialized(const FieldMask &uninit,
+                                std::set<RtEvent> &applied_events);
       CopyFillAggregator* get_across_aggregator(void);
       virtual RtEvent perform_remote(RtEvent precondition,
                                      std::set<RtEvent> &applied_events,
@@ -1227,6 +1233,7 @@ namespace Legion {
     public:
       // Can only safely be accessed when analysis is locked
       FieldMask uninitialized;
+      RtUserEvent uninitialized_reported;
       FieldMaskSet<IndexSpaceExpression> local_exprs;
       std::set<ApEvent> copy_events;
       std::set<RtEvent> guard_events;

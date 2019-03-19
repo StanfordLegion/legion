@@ -484,9 +484,14 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void Operation::report_uninitialized_usage(const unsigned index,
-        LogicalRegion handle, const RegionUsage usage, const char *field_string)
+                                 LogicalRegion handle, const RegionUsage usage, 
+                                 const char *field_string, RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(reported.exists());
+      assert(!reported.has_triggered());
+#endif
       // Read-only or reduction usage of uninitialized data is always an error
       if (IS_READ_ONLY(usage))
         REPORT_LEGION_ERROR(ERROR_UNINITIALIZED_USE,
@@ -520,6 +525,7 @@ namespace Legion {
                       field_string, handle.get_index_space().get_id(),
                       handle.get_field_space().get_id(), 
                       handle.get_tree_id())
+      Runtime::trigger_event(reported);
     }
 
     //--------------------------------------------------------------------------
@@ -15570,22 +15576,23 @@ namespace Legion {
     void RemoteOp::report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
-                                              const char *field_string)
+                                              const char *field_string,
+                                              RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
       if (source == runtime->address_space)
       {
         // If we're on the owner node we can just do this
-        remote_ptr->report_uninitialized_usage(index,handle,usage,field_string);
+        remote_ptr->report_uninitialized_usage(index, handle, usage,
+                                               field_string, reported);
         return;
       }
       // Ship this back to the owner node to report it there 
       Serializer rez;
-      RtUserEvent done_event = Runtime::create_rt_user_event();
       {
         RezCheck z(rez);
         rez.serialize(remote_ptr);
-        rez.serialize(done_event);
+        rez.serialize(reported);
         rez.serialize(index);
         rez.serialize(handle);
         rez.serialize(usage);
@@ -15596,7 +15603,6 @@ namespace Legion {
       }
       // Send the message and wait for it to be received
       runtime->send_remote_op_report_uninitialized(source, rez);
-      done_event.wait();
     }
 
     //--------------------------------------------------------------------------
@@ -15715,8 +15721,8 @@ namespace Legion {
       DerezCheck z(derez);
       Operation *op;
       derez.deserialize(op);
-      RtUserEvent done_event;
-      derez.deserialize(done_event);
+      RtUserEvent reported;
+      derez.deserialize(reported);
       unsigned index;
       derez.deserialize(index);
       LogicalRegion handle;
@@ -15727,8 +15733,8 @@ namespace Legion {
       derez.deserialize(length);
       const char *field_string = (const char*)derez.get_current_pointer();
       derez.advance_pointer(length);
-      op->report_uninitialized_usage(index, handle, usage, field_string);
-      Runtime::trigger_event(done_event);
+      op->report_uninitialized_usage(index, handle, usage, 
+                                     field_string, reported);
     }
 
     //--------------------------------------------------------------------------

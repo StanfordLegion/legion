@@ -12733,15 +12733,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RegionTreeNode::report_uninitialized_usage(Operation *op, unsigned idx,
-                               const RegionUsage usage, const FieldMask &uninit)
+         const RegionUsage usage, const FieldMask &uninit, RtUserEvent reported)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_region());
+      assert(reported.exists());
 #endif
       LogicalRegion handle = as_region_node()->handle;
       char *field_string = column_source->to_string(uninit);
-      op->report_uninitialized_usage(idx, handle, usage, field_string);
+      op->report_uninitialized_usage(idx, handle, usage, field_string,reported);
       free(field_string);
     }
 

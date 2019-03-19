@@ -370,7 +370,8 @@ namespace Legion {
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
-                                              const char *field_string);
+                                              const char *field_string,
+                                              RtUserEvent reported);
       // Get a reference to our data structure for tracking acquired instances
       virtual std::map<PhysicalManager*,std::pair<unsigned,bool> >*
                                        get_acquired_instances_ref(void);
@@ -3074,7 +3075,8 @@ namespace Legion {
       virtual void report_uninitialized_usage(const unsigned index,
                                               LogicalRegion handle,
                                               const RegionUsage usage,
-                                              const char *field_string);
+                                              const char *field_string,
+                                              RtUserEvent reported);
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const = 0;
     public:
