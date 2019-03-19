@@ -8648,7 +8648,7 @@ function codegen.stat_for_list_vectorized(cx, node)
         symbol = node.symbol,
         value = node.value,
         block = node.orig_block,
-        metadata = false,
+        metadata = node.orig_metadata,
         span = node.span,
         annotations = node.annotations,
       })

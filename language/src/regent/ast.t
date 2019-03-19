@@ -530,10 +530,10 @@ ast.typed.stat:leaf("Elseif", {"cond", "block"})
 ast.typed.stat:leaf("While", {"cond", "block"})
 ast.typed.stat:leaf("ForNum", {"symbol", "values", "block", "metadata"})
 ast.typed.stat:leaf("ForNumVectorized", {"symbol", "values", "block",
-                                         "orig_block", "vector_width"})
+                                         "orig_block", "orig_metadata", "vector_width"})
 ast.typed.stat:leaf("ForList", {"symbol", "value", "block", "metadata"})
 ast.typed.stat:leaf("ForListVectorized", {"symbol", "value", "block",
-                                          "orig_block", "vector_width"})
+                                          "orig_block", "orig_metadata", "vector_width"})
 ast.typed.stat:leaf("Repeat", {"block", "until_cond"})
 ast.typed.stat:leaf("MustEpoch", {"block"})
 ast.typed.stat:leaf("Block", {"block"})
