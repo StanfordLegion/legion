@@ -23,6 +23,8 @@ local ast = require("regent/ast")
 local data = require("common/data")
 local std = require("regent/std")
 
+local function unreachable(cx, node) assert(false) end
+
 local context = {}
 
 function context:__index (field)
@@ -89,9 +91,83 @@ do
   strip_expr = ast.make_single_dispatch(strip_expr_table, {ast.typed.expr})()
 end
 
-local copy_propagate = {}
+-- We run a flow-insensitive analysis to collect all potential kills of definitions
 
-local function unreachable(cx, node) assert(false) end
+local collect_kills = {}
+
+function collect_kills.stat_if(cx, stat)
+  collect_kills.block(cx, stat.then_block)
+  collect_kills.block(cx, stat.else_block)
+end
+
+function collect_kills.stat_block(cx, stat)
+  collect_kills.block(cx, stat.block)
+end
+
+function collect_kills.stat_var(cx, stat)
+  local value = stat.value
+  if value and value:is(ast.typed.expr.Cast) and
+     value.fn.value:ispointer()
+  then
+    local symbol = strip_expr(value.arg)
+    if symbol then cx:update_kill(symbol) end
+  end
+end
+
+function collect_kills.stat_assignment_or_reduce(cx, stat)
+  cx:update_kill(strip_expr(stat.lhs))
+end
+
+function collect_kills.pass_through_stat(cx, stat) end
+
+local collect_kills_stat_table = {
+  [ast.typed.stat.If]              = collect_kills.stat_if,
+  [ast.typed.stat.While]           = collect_kills.stat_block,
+  [ast.typed.stat.ForNum]          = collect_kills.stat_block,
+  [ast.typed.stat.ForList]         = collect_kills.stat_block,
+  [ast.typed.stat.Repeat]          = collect_kills.stat_block,
+  [ast.typed.stat.Block]           = collect_kills.stat_block,
+
+  [ast.typed.stat.Var]             = collect_kills.stat_var,
+  [ast.typed.stat.Assignment]      = collect_kills.stat_assignment_or_reduce,
+  [ast.typed.stat.Reduce]          = collect_kills.stat_assignment_or_reduce,
+
+  [ast.typed.stat.Expr]            = collect_kills.pass_through_stat,
+  [ast.typed.stat.Return]          = collect_kills.pass_through_stat,
+  [ast.typed.stat.VarUnpack]       = collect_kills.pass_through_stat,
+  [ast.typed.stat.ParallelPrefix]  = collect_kills.pass_through_stat,
+  [ast.typed.stat.RawDelete]       = collect_kills.pass_through_stat,
+  [ast.typed.stat.Break]           = collect_kills.pass_through_stat,
+  [ast.typed.stat.Fence]           = collect_kills.pass_through_stat,
+
+  [ast.typed.stat.Elseif]          = unreachable,
+  [ast.typed.stat.Internal]        = unreachable,
+
+  [ast.typed.stat.MustEpoch]         = unreachable,
+  [ast.typed.stat.ParallelizeWith]   = unreachable,
+  [ast.typed.stat.ForNumVectorized]  = unreachable,
+  [ast.typed.stat.ForListVectorized] = unreachable,
+  [ast.typed.stat.IndexLaunchNum]    = unreachable,
+  [ast.typed.stat.IndexLaunchList]   = unreachable,
+  [ast.typed.stat.BeginTrace]        = unreachable,
+  [ast.typed.stat.EndTrace]          = unreachable,
+  [ast.typed.stat.MapRegions]        = unreachable,
+  [ast.typed.stat.UnmapRegions]      = unreachable,
+}
+
+local collect_kills_stat = ast.make_single_dispatch(
+  collect_kills_stat_table,
+  {ast.typed.stat})
+
+function collect_kills.stat(cx, stat)
+  collect_kills_stat(cx)(stat)
+end
+
+function collect_kills.block(cx, node)
+  node.stats:map(function(stat) collect_kills.stat(cx, stat) end)
+end
+
+local copy_propagate = {}
 
 function copy_propagate.pass_through_expr(cx, expr) return expr end
 
@@ -138,12 +214,7 @@ function copy_propagate.expr_binary(cx, expr)
 end
 
 function copy_propagate.expr_cast(cx, expr)
-  local arg = copy_propagate.expr(cx, expr.arg)
-  if expr.fn.value:ispointer() then
-    local symbol = strip_expr(arg)
-    if symbol then cx:update_kill(symbol) end
-  end
-  return expr { arg = arg }
+  return expr { arg = copy_propagate.expr(cx, expr.arg) }
 end
 
 function copy_propagate.expr_call(cx, expr)
@@ -335,9 +406,6 @@ function copy_propagate.stat_var_unpack(cx, stat)
 end
 
 function copy_propagate.stat_assignment_or_reduce(cx, stat)
-  local lhs_symbol = strip_expr(stat.lhs)
-  assert(lhs_symbol)
-  cx:update_kill(lhs_symbol)
   return stat {
     lhs = copy_propagate.expr(cx, stat.lhs),
     rhs = copy_propagate.expr(cx, stat.rhs),
@@ -427,7 +495,12 @@ end
 
 function copy_propagate.top_task(node)
   local cx = context.new_global_scope()
-  return node { body = node.body and copy_propagate.block(cx, node.body) }
+  if node.body then
+    collect_kills.block(cx, node.body)
+    return node { body = copy_propagate.block(cx, node.body) }
+  else
+    return node
+  end
 end
 
 function copy_propagate.entry(node)
