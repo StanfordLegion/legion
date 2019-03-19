@@ -3146,7 +3146,7 @@ namespace Legion {
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
-      static void wait_for_shutdown(void);
+      static int wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);

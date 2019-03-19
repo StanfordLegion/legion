@@ -19309,7 +19309,7 @@ namespace Legion {
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
-        realm.wait_for_shutdown();
+        return realm.wait_for_shutdown();
       return 0;
     }
 
@@ -19881,14 +19881,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
       if (!runtime_backgrounded)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
-      RealmRuntime::get_runtime().wait_for_shutdown();
+      return RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
