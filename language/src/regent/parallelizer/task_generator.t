@@ -1052,6 +1052,10 @@ function task_generator.new(node)
         prototype = parallel_task,
         annotations = serial_task_ast.annotations {
           parallel = ast.annotation.Forbid { value = false },
+          cuda = ((std.config["parallelize-cache-incl-check"] or
+                   variant_type == "colocation") and
+                  serial_task_ast.annotations.cuda) or
+                 ast.annotation.Forbid { value = false }
         },
         span = serial_task_ast.span,
       }
