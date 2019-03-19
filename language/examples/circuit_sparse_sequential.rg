@@ -126,8 +126,8 @@ struct ghost_range {
 }
 
 fspace wire {
-  inN : int1d,
-  outN : int1d,
+  inN : ptr,
+  outN : ptr,
   inductance : float,
   resistance : float,
   wire_cap : float,
@@ -177,7 +177,7 @@ terra parse_input_args(conf : Config)
   return conf
 end
 
-task init_nodes(rn : region(ispace(int1d), node))
+task init_nodes(rn : region(ispace(ptr), node))
 where
   reads writes(rn)
 do
@@ -191,7 +191,7 @@ end
 
 task init_wires(spiece_id  : int,
                 conf       : Config,
-                rw         : region(ispace(int1d), wire))
+                rw         : region(ispace(ptr), wire))
 where
   reads writes(rw)
 do
@@ -259,7 +259,7 @@ do
     end
 
     for wire_id = 0, conf.wires_per_piece do
-      var wire = unsafe_cast(int1d(wire, rw), [int1d](wire_id + offset))
+      var wire = unsafe_cast(ptr(wire, rw), [ptr](wire_id + offset))
       wire.current.{_0, _1, _2, _3, _4, _5, _6, _7, _8, _9} = 0.0
       wire.voltage.{_0, _1, _2, _3, _4, _5, _6, _7, _8} = 0.0
       wire.resistance = drand48() * 10.0 + 1.0
@@ -275,7 +275,7 @@ do
         in_node += pn_ptr_offset - snpp
       end
 
-      wire.inN = [int1d](in_node)
+      wire.inN = [ptr](in_node)
 
       var out_node = 0
       if (100 * drand48() < conf.pct_wire_in_piece) or (conf.num_pieces == 1) then
@@ -302,7 +302,7 @@ do
         max_shared_node_id = max(max_shared_node_id, out_node)
         min_shared_node_id = min(min_shared_node_id, out_node)
       end
-      wire.outN = [int1d](out_node)
+      wire.outN = [ptr](out_node)
     end
     offset += conf.wires_per_piece
   end
@@ -314,8 +314,8 @@ end
 
 task init_piece(spiece_id   : int,
                 conf        : Config,
-                rn          : region(ispace(int1d), node),
-                rw          : region(ispace(int1d), wire))
+                rn          : region(ispace(ptr), node),
+                rw          : region(ispace(ptr), wire))
 where
   reads writes(rn, rw)
 do
@@ -323,10 +323,10 @@ do
   init_wires(spiece_id, conf, rw)
 end
 
-__demand(__parallel)
+__demand(__cuda, __parallel)
 task calculate_new_currents(steps : uint,
-                            rn : region(ispace(int1d), node),
-                            rw : region(ispace(int1d), wire))
+                            rn : region(ispace(ptr), node),
+                            rw : region(ispace(ptr), wire))
 where
   reads(rn.node_voltage,
         rw.{inN, outN, inductance, resistance, wire_cap}),
@@ -443,9 +443,9 @@ do
   end
 end
 
-__demand(__parallel)
-task distribute_charge(rn : region(ispace(int1d), node),
-                       rw : region(ispace(int1d), wire))
+__demand(__cuda, __parallel)
+task distribute_charge(rn : region(ispace(ptr), node),
+                       rw : region(ispace(ptr), wire))
 where
   reads(rw.{inN, outN, current._0, current._9}),
   reduces +(rn.charge)
@@ -463,8 +463,8 @@ do
   end
 end
 
-__demand(__parallel)
-task update_voltages(rn : region(ispace(int1d), node))
+__demand(__cuda, __parallel)
+task update_voltages(rn : region(ispace(ptr), node))
 where
   reads(rn.{node_cap, leakage}),
   reads writes(rn.{node_voltage, charge})
@@ -514,8 +514,8 @@ task toplevel()
   var num_circuit_nodes : uint64 = num_pieces * conf.nodes_per_piece
   var num_circuit_wires : uint64 = num_pieces * conf.wires_per_piece
 
-  var rn = region(ispace(int1d, num_circuit_nodes), node)
-  var rw = region(ispace(int1d, num_circuit_wires), wire)
+  var rn = region(ispace(ptr, num_circuit_nodes), node)
+  var rw = region(ispace(ptr, num_circuit_wires), wire)
 
   -- report mesh size in bytes
   do
@@ -528,7 +528,7 @@ task toplevel()
     c.printf("  Total                             %12lld bytes\n", total)
   end
 
-  var color_space = ispace(int1d, num_superpieces)
+  var color_space = ispace(ptr, num_superpieces)
 
   var p_nodes = partition(equal, rn, color_space)
   var p_wires = partition(equal, rw, color_space)
@@ -544,9 +544,10 @@ task toplevel()
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
 
-  __fence(__execution, __block)
-  var ts_start = c.legion_get_current_time_in_micros()
+  var ts_start : int64
   __parallelize_with color_space do
+    __fence(__execution, __block)
+    ts_start = c.legion_get_current_time_in_micros()
     __demand(__spmd)
     for j = 0, num_loops do
       calculate_new_currents(steps, rn, rw)
