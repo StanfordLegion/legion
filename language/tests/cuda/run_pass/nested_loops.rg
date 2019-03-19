@@ -12,18 +12,35 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- runs-with:
+-- [["-fcuda", "1"]]
+
 import "regent"
 
+__demand(__cuda)
+task nested(r1 : region(ispace(int1d), int),
+            r2 : region(ispace(int1d), int))
+where
+  reads(r1, r2)
+do
+  var sum : int = 0
+  for i in r1.ispace do
+    for j in r2.ispace do
+      sum += r1[i] + r2[i]
+    end
+  end
+  return sum
+end
+
 task main()
-  var r = region(ispace(ptr, 5), int)
+  var r1 = region(ispace(int1d, 10), int)
+  var r2 = region(ispace(int1d, 10), int)
+  fill(r1, 1)
+  fill(r2, 2)
 
-  for i = 0, 5 do
-    regentlib.assert(ptr(i) <= r, "test failed")
-  end
-
-  for i = 5, 10 do
-    regentlib.assert(not (ptr(i) <= r), "test failed")
-  end
+  var sum = nested(r1, r2)
+  regentlib.assert(sum == 300, "test failed")
 end
 
 regentlib.start(main)
+
