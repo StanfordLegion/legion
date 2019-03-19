@@ -10487,6 +10487,8 @@ namespace Legion {
           }
         }
         // Get any fields that are already ready
+        // Have to do this after looking for pending equivalence sets
+        // to make sure we don't have pending outstanding requests
         if (!(remaining_mask * equivalence_sets.get_valid_mask()))
         {
           if (version_info != NULL)
@@ -10502,24 +10504,26 @@ namespace Legion {
             }
           }
           remaining_mask -= equivalence_sets.get_valid_mask();
-          if (!remaining_mask) // We're done if we got all our fields
+          // If we got all our fields here and we're not waiting 
+          // on any other computations then we're done
+          if (!remaining_mask && wait_on.empty())
             return RtEvent::NO_RT_EVENT;
         }
-        // If we have waiting fields then update them now
-        if (!!waiting_mask)
-          remaining_mask |= waiting_mask;
-#ifdef DEBUG_LEGION
-        assert(!!remaining_mask);
-#endif
-        // Record that our version info is waiting for these fields
-        if (version_info != NULL)
-          waiting_infos.insert(version_info, remaining_mask);
+        // If we still have remaining fields then we need to
+        // do this computation ourselves
         if (!!remaining_mask)
         {
           compute_event = Runtime::create_rt_user_event();
           equivalence_sets_ready[compute_event] = remaining_mask; 
           wait_on.insert(compute_event);
+          waiting_mask |= remaining_mask;
         }
+#ifdef DEBUG_LEGION
+        assert(!!waiting_mask);
+#endif
+        // Record that our version info is waiting for these fields
+        if (version_info != NULL)
+          waiting_infos.insert(version_info, waiting_mask);
       }
       if (compute_event.exists())
       {
