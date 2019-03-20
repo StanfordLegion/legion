@@ -263,7 +263,9 @@ end
 
 function infer_constraints.expr_index_access(cx, expr, privilege, field_path)
   local field_path = field_path or data.newtuple()
-  if not std.is_ref(expr.expr_type) then return ranges.range_complex end
+  if not std.is_ref(expr.expr_type) then
+    return infer_constraints.expr(cx, expr.value, privilege, nil)
+  end
   assert(expr.value:is(ast.typed.expr.ID) and
          std.is_region(std.as_read(expr.value.expr_type)))
   local index_range = infer_constraints.expr(cx, expr.index)
@@ -418,11 +420,9 @@ end
 function infer_constraints.stat_assignment_or_reduce(cx, stat)
   assert(not std.is_ref(stat.rhs.expr_type))
 
-  if std.is_ref(stat.lhs.expr_type) then
-    local privilege = (stat:is(ast.typed.stat.Assignment) and std.writes) or
-                      std.reduces(stat.op)
-    infer_constraints.expr(cx, stat.lhs, privilege)
-  end
+  local privilege = (stat:is(ast.typed.stat.Assignment) and std.writes) or
+                    std.reduces(stat.op)
+  infer_constraints.expr(cx, stat.lhs, privilege)
 end
 
 function infer_constraints.pass_through_stat(cx, stat) end
