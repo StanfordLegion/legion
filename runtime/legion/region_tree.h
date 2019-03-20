@@ -561,7 +561,6 @@ namespace Legion {
                                 const RegionRequirement &req,
                                 ShardedView *view, VersionInfo &version_info,
                                 const ApEvent precondition,
-                                const PhysicalTraceInfo &trace_info,
                                 std::set<RtEvent> &map_applied_events,
                                 const bool add_restriction);
       InstanceRef create_external_instance(AttachOp *attach_op,

@@ -3718,11 +3718,11 @@ namespace Legion {
         invoke_mapper(mapped_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
-      if (exchange != NULL)
       {
         InnerContext *context = find_physical_context(0/*index*/);
         context->convert_target_views(mapped_instances, mapped_views);
-        exchange->initiate_exchange(mapped_instances, mapped_views);
+        if (exchange != NULL)
+          exchange->initiate_exchange(mapped_instances, mapped_views);
       }
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx =dynamic_cast<ReplicateContext*>(parent_ctx);
@@ -3741,11 +3741,19 @@ namespace Legion {
         {
           InnerContext *context = find_physical_context(0/*index*/);
           context->convert_target_views(mapped_instances, mapped_views); 
-          effects_done = 
-            runtime->forest->physical_perform_registration(requirement, 
-                this, 0/*index*/, termination_event, mapped_instances, 
-                trace_info, NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
-                mapped_views, map_applied_conditions);
+          RegionNode *node = runtime->forest->get_node(requirement.region);
+          UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
+                                      0/*index*/, &version_info,
+                                      requirement, node, mapped_instances,
+                                      mapped_views, init_precondition,
+                                      termination_event, true/*track effects*/,
+                                      false/*check initialized*/);
+          analysis->add_reference();
+          // Note that this call will clean up the analysis allocation
+          effects_done = runtime->forest->physical_perform_registration(
+                                  requirement, this, 0/*index*/, 
+                                  termination_event, mapped_instances,
+                                  trace_info, analysis, map_applied_conditions);
         }
         else
           effects_done = 
@@ -3768,11 +3776,19 @@ namespace Legion {
         assert(exchange != NULL);
 #endif
         // All the users just need to do their registration
+        RegionNode *node = runtime->forest->get_node(requirement.region);
+        UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 
+                                      0/*index*/, &version_info,
+                                      requirement, node, mapped_instances,
+                                      mapped_views, init_precondition,
+                                      termination_event, true/*track effects*/,
+                                      false/*check initialized*/);
+        analysis->add_reference();
+        // Note that this call will clean up the analysis allocation
         effects_done = 
           runtime->forest->physical_perform_registration(requirement, 
               this, 0/*index*/, termination_event, mapped_instances, 
-              trace_info, NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
-              mapped_views, map_applied_conditions);
+              trace_info, analysis, map_applied_conditions); 
         // We need to fill in the sharded view before we do the next
         // call in case there are output effects due to restriction
         exchange->complete_exchange(this, sharded_view, 
@@ -3794,7 +3810,7 @@ namespace Legion {
           effects_done = 
               runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
                   sharded_view, version_info, init_precondition, 
-                  trace_info, map_applied_conditions, false/*restrict*/);
+                  map_applied_conditions, false/*restrict*/);
         }
         Runtime::advance_barrier(inline_barrier);
       }
@@ -3805,20 +3821,15 @@ namespace Legion {
         const bool is_write = IS_WRITE(requirement);
         if (is_write)
           requirement.privilege = READ_ONLY; // pretend read-only for now
-        // Perform the updates first as if we're read-only
-        CopyFillAggregator *output_aggregator = NULL;
-        RtUserEvent user_registered;
-        std::set<ApEvent> effects_events;
-        std::vector<InstanceView*> target_views;
+        UpdateAnalysis *analysis = NULL; 
         const RtEvent registration_precondition = 
           runtime->forest->physical_perform_updates(requirement, version_info,
               this, 0/*index*/, init_precondition, termination_event, 
-              mapped_instances, trace_info, output_aggregator, user_registered,
-              map_applied_conditions, effects_events, target_views,
+              mapped_instances, trace_info, map_applied_conditions, analysis,
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
-              false/*track events*/, false/*check init*/,false/*defer copies*/);
+              true/*track effects*/); 
         // If we're a write, then switch back privileges
         if (is_write)
         {
@@ -3855,8 +3866,7 @@ namespace Legion {
         // replicated context
         runtime->forest->physical_perform_registration(requirement,
             this, 0/*index*/, termination_event, mapped_instances, trace_info,
-            output_aggregator, user_registered, target_views,
-            map_applied_conditions);
+            analysis, map_applied_conditions);
         // If we have a write then we make a sharded view and 
         // then shard 0 will do the overwrite
         if (is_write)
@@ -3889,7 +3899,7 @@ namespace Legion {
             effects_done = 
               runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
                 sharded_view, version_info, init_precondition, 
-                trace_info, map_applied_conditions, false/*restrict*/);
+                map_applied_conditions, false/*restrict*/);
           }
           Runtime::advance_barrier(inline_barrier);
         }
@@ -4237,12 +4247,18 @@ namespace Legion {
           external_instance.get_manager()->as_instance_manager();
         MemoryManager *memory_manager = external_manager->memory_manager;
         memory_manager->attach_external_instance(external_manager);
+        RegionNode *node = runtime->forest->get_node(requirement.region);
+        UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
+            &version_info, requirement, node, attach_instances, attach_views,
+            ApEvent::NO_AP_EVENT, completion_event, false/*track effects*/,
+            false/*check initialized*/);
+        analysis->add_reference();
         const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration
+        // Note this will clean up the analysis allocation above
         runtime->forest->physical_perform_registration(requirement, 
             this, 0/*idx*/, completion_event, attach_instances, trace_info, 
-            NULL/*aggregator*/, RtUserEvent::NO_RT_USER_EVENT,
-            attach_views, map_applied_conditions);
+            analysis, map_applied_conditions);
         exchange->complete_exchange(this, sharded_view, 
                                     attach_instances, map_applied_conditions);
         // Make sure all these are done before we do the overwrite
@@ -4264,7 +4280,7 @@ namespace Legion {
           attach_event = 
             runtime->forest->overwrite_sharded(this, 0/*index*/, requirement,
                         sharded_view, version_info, ApEvent::NO_AP_EVENT,
-                        trace_info, map_applied_conditions, true/*restrict*/);
+                        map_applied_conditions, true/*restrict*/);
         }
         Runtime::advance_barrier(resource_barrier);
 #ifdef DEBUG_LEGION

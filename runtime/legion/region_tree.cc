@@ -2922,7 +2922,6 @@ namespace Legion {
                                           ShardedView *view, 
                                           VersionInfo &version_info,
                                           const ApEvent precondition,
-                                          const PhysicalTraceInfo &trace_info,
                                           std::set<RtEvent> &map_applied_events,
                                           const bool add_restriction)
     //--------------------------------------------------------------------------
@@ -2937,50 +2936,34 @@ namespace Legion {
         region_node->column_source->get_field_mask(req.privilege_fields);
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
-      CopyFillAggregator *output_aggregator = NULL;
-      FieldMaskSet<EquivalenceSet> alt_sets;
-      FieldMaskSet<EquivalenceSet> to_delete;
-      std::set<ApEvent> effects_events;
-      RemoteEqTracker remote_tracker(runtime);
-      const AddressSpaceID local_space = runtime->address_space;
+      OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
+          req, &version_info, view, precondition, RtEvent::NO_RT_EVENT,
+          PredEvent::NO_PRED_EVENT, true/*track effects*/, add_restriction);
+      analysis->add_reference();
+      std::set<RtEvent> deferral_events;
       for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
             eq_sets.begin(); it != eq_sets.end(); it++)
       {
         FieldMask remove_mask;
-        if (it->first->overwrite_set(remote_tracker, alt_sets, &remove_mask,
-              local_space, op, index, view, it->second, output_aggregator,
-              map_applied_events, PredEvent::NO_PRED_EVENT, add_restriction))
-          to_delete.insert(it->first, remove_mask);
+        if (it->first->overwrite_set(*analysis, it->second, deferral_events,
+                                     map_applied_events, &remove_mask))
+          analysis->record_delete_set(it->first,remove_mask,map_applied_events);
       }
-      if (remote_tracker.has_remote_sets())
-      {
-        remote_tracker.perform_remote_overwrite(op, index, NULL, 
-            view, PredEvent::NO_PRED_EVENT, precondition,
-            RtEvent::NO_RT_EVENT, add_restriction, true/*track effects*/, 
-            map_applied_events, effects_events);
-      }
-      if (!alt_sets.empty())
-        version_info.update_equivalence_sets(alt_sets, to_delete);
-      if (output_aggregator != NULL)
-      {
-        output_aggregator->issue_updates(trace_info, precondition);
-        // Need to wait before we can get the summary
-#ifdef NON_AGGRESSIVE_AGGREGATORS
-        if (!output_aggregator->effects_applied.has_triggered())
-          output_aggregator->effects_applied.wait();
-#else
-        if (!output_aggregator->guard_postcondition.has_triggered())
-          output_aggregator->guard_postcondition.wait();
-#endif
-        const ApEvent result = output_aggregator->summarize(trace_info); 
-        if (result.exists())
-          effects_events.insert(result);
-        if (output_aggregator->release_guards(map_applied_events))
-          delete output_aggregator;
-      }
-      if (!effects_events.empty())
-        return Runtime::merge_events(&trace_info, effects_events);
-      return ApEvent::NO_AP_EVENT;
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      RtEvent remote_ready;
+      if (traversal_done.exists() || analysis->has_remote_sets())
+        remote_ready = 
+          analysis->perform_remote(traversal_done, map_applied_events);
+      RtEvent output_ready;
+      if (traversal_done.exists() || analysis->has_output_updates())
+        output_ready = 
+          analysis->perform_updates(traversal_done, map_applied_events);
+      const ApEvent result = analysis->perform_output(
+         Runtime::merge_events(remote_ready, output_ready), map_applied_events);
+      if (analysis->remove_reference())
+        delete analysis;
+      return result;
     }
 
     //--------------------------------------------------------------------------
