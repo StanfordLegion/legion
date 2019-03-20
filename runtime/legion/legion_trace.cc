@@ -1815,7 +1815,7 @@ namespace Legion {
         {
           const RtEvent postcondition = 
             runtime->forest->defer_physical_perform_registration(reg_pre[idx],
-                                                 analyses[idx],
+                                                 analyses[idx], instances[idx],
                                                  map_applied_conditions,
                                                  effects[idx]);
           registration_postconditions.insert(postcondition);
@@ -1823,7 +1823,7 @@ namespace Legion {
         else
           effects[idx] = 
             runtime->forest->physical_perform_registration(
-                                                 analyses[idx],
+                                                 analyses[idx], instances[idx],
                                                  trace_info,
                                                  map_applied_conditions);
       }

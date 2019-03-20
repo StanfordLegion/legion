@@ -116,13 +116,14 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
         DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
-                                      RtUserEvent map_applied, ApEvent &res)
-          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
-            analysis(ana), map_applied_done(map_applied), result(res) 
+                  InstanceSet &t, RtUserEvent map_applied, ApEvent &res)
+          : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid), analysis(ana), 
+            map_applied_done(map_applied), targets(t), result(res) 
           { analysis->add_reference(); }
       public:
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
+        InstanceSet &targets;
         ApEvent &result;
       };
     public:
@@ -440,6 +441,7 @@ namespace Legion {
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,
+                                 InstanceSet &targets,
                                  const PhysicalTraceInfo &trace_info,
                                  std::set<RtEvent> &map_applied_events);
       // Same as the two above merged together
@@ -459,7 +461,7 @@ namespace Legion {
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
-                           UpdateAnalysis *analysis,
+                           UpdateAnalysis *analysis, InstanceSet &targets,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result);
       void handle_defer_registration(const void *args);

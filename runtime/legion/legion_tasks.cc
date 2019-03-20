@@ -3806,13 +3806,14 @@ namespace Legion {
               const RtEvent registration_post = 
                 runtime->forest->defer_physical_perform_registration(
                                           reg_pre[*it], analyses[*it],
+                                          physical_instances[*it],
                                           map_applied_conditions, effects[*it]);
               registration_postconditions.insert(registration_post);
             }
             else
               effects[*it] = runtime->forest->physical_perform_registration(
-                                          analyses[*it], trace_info, 
-                                          map_applied_conditions);
+                                          analyses[*it],physical_instances[*it],
+                                          trace_info, map_applied_conditions);
           }
           // Wait for all the registrations to be done
           if (!registration_postconditions.empty())
