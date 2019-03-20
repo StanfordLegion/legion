@@ -347,6 +347,7 @@ namespace Legion {
       LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OVERWRITE_TASK_ID,
       LG_DEFER_REMOTE_FILTER_TASK_ID,
+      LG_DEFER_PERFORM_TRAVERSAL_TASK_ID,
       LG_DEFER_PERFORM_REMOTE_TASK_ID,
       LG_DEFER_PERFORM_UPDATE_TASK_ID,
       LG_DEFER_PERFORM_OUTPUT_TASK_ID,
@@ -447,6 +448,7 @@ namespace Legion {
         "Defer Remote Copy Across",                               \
         "Defer Remote Overwrite Equivalence Set",                 \
         "Defer Remote Filter Equivalence Set",                    \
+        "Defer Physical Analysis Traversal Stage",                \
         "Defer Physical Analysis Remote Stage",                   \
         "Defer Physical Analysis Update Stage",                   \
         "Defer Physical Analysis Output Stage",                   \

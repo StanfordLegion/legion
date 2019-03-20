@@ -3062,19 +3062,19 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, Operation *o, 
-                                       unsigned idx, VersionInfo *info)
+                                       unsigned idx, VersionInfo *info, bool h)
       : previous(rt->address_space), original_source(rt->address_space),
         runtime(rt), op(o), index(idx), version_info(info), owns_op(false),
-        remote_instances(NULL), restricted(false)
+        on_heap(h), remote_instances(NULL), restricted(false)
     //--------------------------------------------------------------------------
     {
     }
 
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(Runtime *rt, AddressSpaceID source, 
-                                AddressSpaceID prev, Operation *o, unsigned idx)
+                        AddressSpaceID prev, Operation *o, unsigned idx, bool h)
       : previous(prev), original_source(source), runtime(rt), op(o), index(idx),
-        version_info(NULL), owns_op(true), remote_instances(NULL), 
+        version_info(NULL), owns_op(true), on_heap(h), remote_instances(NULL), 
         restricted(false)
     //--------------------------------------------------------------------------
     {
@@ -3083,7 +3083,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     PhysicalAnalysis::PhysicalAnalysis(const PhysicalAnalysis &rhs)
       : previous(0), original_source(0), runtime(NULL), op(NULL), index(0),
-        version_info(NULL), owns_op(false)
+        version_info(NULL), owns_op(false), on_heap(false)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -3107,6 +3107,61 @@ namespace Legion {
         delete remote_instances;
       if (owns_op && (op != NULL))
         delete op;
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::traverse(RtEvent precondition,
+                                    EquivalenceSet *set,
+                                    const FieldMask &mask,
+                                    std::set<RtEvent> &deferral_events,
+                                    std::set<RtEvent> &applied_events,
+                                    FieldMask *remove_mask,
+                                    const bool original_set)
+    //--------------------------------------------------------------------------
+    {
+      if (precondition.exists() && !precondition.has_triggered())
+      {
+        // This has to be the first time through and isn't really
+        // a deferral of an the traversal since we haven't even
+        // started the traversal yet
+        defer_traversal(precondition, set, mask, deferral_events,applied_events,
+            RtUserEvent::NO_RT_USER_EVENT, false/*already deferred*/); 
+      }
+      else
+        perform_traversal(set, mask, deferral_events, applied_events,
+                          remove_mask, original_set, false/*already deferred*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::defer_traversal(RtEvent precondition,
+                                           EquivalenceSet *set,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &deferral_events,
+                                           std::set<RtEvent> &applied_events,
+                                           RtUserEvent deferral_event,
+                                           const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      DeferPerformTraversalArgs args(this, set, mask, 
+                    deferral_event, already_deferred);
+      runtime->issue_runtime_meta_task(args, 
+          LG_THROUGHPUT_DEFERRED_PRIORITY, precondition);
+      deferral_events.insert(args.done_event);
+      applied_events.insert(args.applied_event);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::perform_traversal(EquivalenceSet *set,
+                                             const FieldMask &mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             FieldMask *remove_mask,
+                                             const bool original_set,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      // only called by derived classes
+      assert(false);
     }
 
     //--------------------------------------------------------------------------
@@ -3379,6 +3434,46 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    PhysicalAnalysis::DeferPerformTraversalArgs::DeferPerformTraversalArgs(
+        PhysicalAnalysis *ana, EquivalenceSet *s, const FieldMask &m, 
+        RtUserEvent done, bool def)
+      : LgTaskArgs<DeferPerformTraversalArgs>(ana->op->get_unique_op_id()),
+        analysis(ana), set(s), mask(new FieldMask(m)), 
+        applied_event(Runtime::create_rt_user_event()),
+        done_event(done.exists() ? done : Runtime::create_rt_user_event()), 
+        already_deferred(def)
+    //--------------------------------------------------------------------------
+    {
+      if (analysis->on_heap)
+        analysis->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/void PhysicalAnalysis::handle_deferred_traversal(const void *args)
+    //--------------------------------------------------------------------------
+    {
+      const DeferPerformTraversalArgs *dargs = 
+        (const DeferPerformTraversalArgs*)args;
+      std::set<RtEvent> deferral_events, applied_events;
+      dargs->analysis->perform_traversal(dargs->set, *(dargs->mask), 
+          deferral_events, applied_events, NULL/*remove mask*/,
+          false/*original set*/, dargs->already_deferred);
+      if (!deferral_events.empty())
+        Runtime::trigger_event(dargs->done_event,
+            Runtime::merge_events(deferral_events));
+      else
+        Runtime::trigger_event(dargs->done_event);
+      if (!applied_events.empty())
+        Runtime::trigger_event(dargs->applied_event,
+            Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(dargs->applied_event);
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
+        delete dargs->analysis;
+      delete dargs->mask;
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalAnalysis::DeferPerformRemoteArgs::DeferPerformRemoteArgs(
                                                           PhysicalAnalysis *ana)
       : LgTaskArgs<DeferPerformRemoteArgs>(ana->op->get_unique_op_id()), 
@@ -3386,8 +3481,9 @@ namespace Legion {
         done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
-      analysis->add_reference();
-    } 
+      if (analysis->on_heap)
+        analysis->add_reference();
+    }
 
     //--------------------------------------------------------------------------
     /*static*/ void PhysicalAnalysis::handle_deferred_remote(const void *args)
@@ -3403,7 +3499,8 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->remove_reference())
+      printf("Handle deferred remote %p\n", dargs->analysis);
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
@@ -3415,7 +3512,8 @@ namespace Legion {
         done_event(Runtime::create_rt_user_event())
     //--------------------------------------------------------------------------
     {
-      analysis->add_reference();
+      if (analysis->on_heap)
+        analysis->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -3432,7 +3530,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->remove_reference())
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
@@ -3444,7 +3542,8 @@ namespace Legion {
         effects_event(Runtime::create_ap_user_event())
     //--------------------------------------------------------------------------
     {
-      analysis->add_reference();
+      if (analysis->on_heap)
+        analysis->add_reference();
     }
 
     //--------------------------------------------------------------------------
@@ -3461,7 +3560,7 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      if (dargs->analysis->remove_reference())
+      if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
 
@@ -3472,7 +3571,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, Operation *o, 
                                          unsigned idx, ReductionOpID red)
-      : PhysicalAnalysis(rt, o, idx, NULL), redop(red), target(this)
+      : PhysicalAnalysis(rt, o, idx, NULL, false/*on heap*/), 
+        redop(red), target(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -3480,7 +3580,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, AddressSpaceID src, 
                    AddressSpaceID prev, ValidInstAnalysis *t, ReductionOpID red)
-      : PhysicalAnalysis(rt, src, prev, NULL, 0), redop(red), target(t)
+      : PhysicalAnalysis(rt, src, prev, NULL, 0, true/*on heap*/), 
+        redop(red), target(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -3507,6 +3608,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ValidInstAnalysis::perform_traversal(EquivalenceSet *set,
+                                             const FieldMask &mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             FieldMask *remove_mask,
+                                             const bool original_set,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->find_valid_instances(*this, mask, deferral_events, 
+                                applied_events, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -3642,16 +3757,12 @@ namespace Legion {
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Wait for the equivalence sets to be ready if necessary
+      RtEvent ready_event;
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->find_valid_instances(*analysis, eq_masks[idx],
-                                           deferral_events, applied_events);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -3689,13 +3800,14 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      const ApEvent pre, const ApEvent term,
                      const bool track, const bool check)
-      : PhysicalAnalysis(rt, o, idx, info), usage(req), node(rn),
-        target_instances(target_insts), target_views(target_vws), 
+      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
+        node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
+      printf("Make update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
@@ -3706,13 +3818,14 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool track, const bool check)
-      : PhysicalAnalysis(rt, src, prev, o, idx), usage(use), node(rn),
-        target_instances(target_insts), target_views(target_vws), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
+        node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
         check_initialized(check), output_aggregator(NULL),
         remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
+      printf("Make update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
@@ -3732,6 +3845,7 @@ namespace Legion {
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
+      printf("Delete update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
@@ -3756,6 +3870,20 @@ namespace Legion {
         applied_events.insert(uninitialized_reported);
       }
       uninitialized |= uninit;
+    }
+
+    //--------------------------------------------------------------------------
+    void UpdateAnalysis::perform_traversal(EquivalenceSet *set,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &deferral_events,
+                                           std::set<RtEvent> &applied_events,
+                                           FieldMask *remove_mask,
+                                           const bool original_set,
+                                           const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->update_set(*this, mask, deferral_events, applied_events, 
+                      remove_mask, original_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -4004,15 +4132,12 @@ namespace Legion {
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
+      RtEvent ready_event;
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->update_set(*analysis, eq_masks[idx], deferral_events,
-                                 applied_events, NULL, false/*orignal set*/);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       std::set<RtEvent> update_events;
@@ -4059,7 +4184,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, Operation *o, 
                                      unsigned idx, VersionInfo *info)
-      : PhysicalAnalysis(rt, o, idx, info), target(this)
+      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), target(this)
     //--------------------------------------------------------------------------
     {
     }
@@ -4067,7 +4192,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     AcquireAnalysis::AcquireAnalysis(Runtime *rt, AddressSpaceID src, 
             AddressSpaceID prev, Operation *o, unsigned idx, AcquireAnalysis *t)
-      : PhysicalAnalysis(rt, src, prev, o, idx), target(t)
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), target(t)
     //--------------------------------------------------------------------------
     {
     }
@@ -4094,6 +4219,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void AcquireAnalysis::perform_traversal(EquivalenceSet *set,
+                                            const FieldMask &mask,
+                                            std::set<RtEvent> &deferral_events,
+                                            std::set<RtEvent> &applied_events,
+                                            FieldMask *remove_mask,
+                                            const bool original_set,
+                                            const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->acquire_restrictions(*this, mask, deferral_events, applied_events,
+                                remove_mask, original_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -4233,16 +4372,12 @@ namespace Legion {
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
+      RtEvent ready_event;
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->acquire_restrictions(*analysis, eq_masks[idx],
-            deferral_events, applied_events, NULL, false/*original set*/);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -4276,8 +4411,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, Operation *o, unsigned idx, 
                                      ApEvent pre, VersionInfo *info)
-      : PhysicalAnalysis(rt, o, idx, info), precondition(pre), target(this), 
-        release_aggregator(NULL)
+      : PhysicalAnalysis(rt, o, idx, info, false/*on heap*/), 
+        precondition(pre), target(this), release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4286,8 +4421,8 @@ namespace Legion {
     ReleaseAnalysis::ReleaseAnalysis(Runtime *rt, AddressSpaceID src, 
             AddressSpaceID prev, Operation *o, unsigned idx, ApEvent pre,
             ReleaseAnalysis *t)
-      : PhysicalAnalysis(rt, src, prev, o, idx), precondition(pre), target(t),
-        release_aggregator(NULL)
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
+        precondition(pre), target(t), release_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4314,6 +4449,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void ReleaseAnalysis::perform_traversal(EquivalenceSet *set,
+                                            const FieldMask &mask,
+                                            std::set<RtEvent> &deferral_events,
+                                            std::set<RtEvent> &applied_events,
+                                            FieldMask *remove_mask,
+                                            const bool original_set,
+                                            const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->release_restrictions(*this, mask, deferral_events, applied_events,
+                                remove_mask, original_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -4473,17 +4622,13 @@ namespace Legion {
           previous, op, index, precondition, target);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
+      RtEvent ready_event;
       // Make sure that all our pointers are ready
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        ready_events.clear();
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait();
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->release_restrictions(*analysis, eq_masks[idx],
-            deferral_events, applied_events, NULL, false/*original set*/);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       if (traversal_done.exists() || analysis->has_remote_sets())
@@ -4527,7 +4672,7 @@ namespace Legion {
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
         const std::vector<unsigned> &dst_idxes, const bool perf)
-      : PhysicalAnalysis(rt, o, dst_idx, info), 
+      : PhysicalAnalysis(rt, o, dst_idx, info, true/*on heap*/), 
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), src_usage(src_req), 
@@ -4553,7 +4698,7 @@ namespace Legion {
         const PredEvent pred, const ReductionOpID red,
         const std::vector<unsigned> &src_idxes,
         const std::vector<unsigned> &dst_idxes, const bool perf)
-      : PhysicalAnalysis(rt, src, prev, o, dst_idx), 
+      : PhysicalAnalysis(rt, src, prev, o, dst_idx, true/*on heap*/), 
         src_mask(perf ? FieldMask() : initialize_mask(src_idxes)), 
         dst_mask(perf ? FieldMask() : initialize_mask(dst_idxes)),
         src_index(src_idx), dst_index(dst_idx), 
@@ -5035,8 +5180,8 @@ namespace Legion {
                         VersionInfo *info, LogicalView *v, const ApEvent pre,
                         const RtEvent guard, const PredEvent pred,
                         const bool track, const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, info), usage(req), view(v), 
-        precondition(pre), guard_event(guard), pred_guard(pred), 
+      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
+        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -5049,8 +5194,8 @@ namespace Legion {
                         const RegionUsage &use,LogicalView *v,const ApEvent pre,
                         const RtEvent guard, const PredEvent pred,
                         const bool track, const bool restriction)
-      : PhysicalAnalysis(rt, src, prev, o, idx), usage(use), view(v),
-        precondition(pre), guard_event(guard), pred_guard(pred), 
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
+        view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
@@ -5082,6 +5227,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void OverwriteAnalysis::perform_traversal(EquivalenceSet *set,
+                                             const FieldMask &mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             FieldMask *remove_mask,
+                                             const bool original_set,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->overwrite_set(*this, mask, deferral_events, applied_events,
+                         remove_mask, original_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -5274,15 +5433,12 @@ namespace Legion {
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
+      RtEvent ready_event;
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait(); 
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->overwrite_set(*analysis, eq_masks[idx],
-            deferral_events, applied_events, NULL, false/*original set*/);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -5314,7 +5470,7 @@ namespace Legion {
     FilterAnalysis::FilterAnalysis(Runtime *rt, Operation *o, unsigned idx,
                               VersionInfo *info, InstanceView *view,
                               LogicalView *reg_view, const bool remove_restrict)
-      : PhysicalAnalysis(rt, o, idx, info), inst_view(view), 
+      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), inst_view(view), 
         registration_view(reg_view), remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
@@ -5325,7 +5481,7 @@ namespace Legion {
                               AddressSpaceID prev, Operation *o, unsigned idx, 
                               InstanceView *view, LogicalView *reg_view,
                               const bool remove_restrict)
-      : PhysicalAnalysis(rt, src, prev, o, idx), inst_view(view), 
+      : PhysicalAnalysis(rt, src, prev, o, idx,true/*on heap*/),inst_view(view),
         registration_view(reg_view), remove_restriction(remove_restrict)
     //--------------------------------------------------------------------------
     {
@@ -5355,6 +5511,20 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void FilterAnalysis::perform_traversal(EquivalenceSet *set,
+                                           const FieldMask &mask,
+                                           std::set<RtEvent> &deferral_events,
+                                           std::set<RtEvent> &applied_events,
+                                           FieldMask *remove_mask,
+                                           const bool original_set,
+                                           const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->filter_set(*this, mask, deferral_events, applied_events,
+                      remove_mask, original_set, already_deferred);
     }
 
     //--------------------------------------------------------------------------
@@ -5479,15 +5649,12 @@ namespace Legion {
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Make sure that all our pointers are ready
+      RtEvent ready_event;
       if (!ready_events.empty())
-      {
-        const RtEvent wait_on = Runtime::merge_events(ready_events);
-        if (wait_on.exists() && !wait_on.has_triggered())
-          wait_on.wait(); 
-      }
+        ready_event = Runtime::merge_events(ready_events);
       for (unsigned idx = 0; idx < eq_sets.size(); idx++)
-        eq_sets[idx]->filter_set(*analysis, eq_masks[idx],
-            deferral_events, applied_events, NULL, false/*original set*/);
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],  
+                           deferral_events, applied_events);
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
       RtEvent remote_ready;
@@ -5925,13 +6092,8 @@ namespace Legion {
             // If we haven't already been deferred then we need to 
             // add ourselves to the back of the list of deferrals
             deferral_event = Runtime::create_rt_user_event();
-            volatile Realm::Event::id_t *ptr = 
-              (volatile Realm::Event::id_t*)&next_deferral_precondition.id;
-            RtEvent continuation_pre;
-            do {
-              continuation_pre.id = *ptr;
-            } while (!__sync_bool_compare_and_swap(ptr,
-                      continuation_pre.id, deferral_event.id));
+            const RtEvent continuation_pre = 
+              chain_deferral_events(deferral_event);
             DeferRayTraceArgs args(this, target, expr, handle, source, 
                                    trace_done, deferral_event, ray_mask);
             runtime->issue_runtime_meta_task(args, 
@@ -7321,10 +7483,17 @@ namespace Legion {
     void EquivalenceSet::find_valid_instances(ValidInstAnalysis &analysis,
                                               FieldMask user_mask,
                                              std::set<RtEvent> &deferral_events,
-                                              std::set<RtEvent> &applied_events)
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
       if (!is_logical_owner())
       {
         // First check to see if our subsets are up to date
@@ -7420,15 +7589,47 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool EquivalenceSet::defer_traversal(AutoTryLock &eq,
+                                         PhysicalAnalysis &analysis,
+                                         const FieldMask &mask,
+                                         std::set<RtEvent> &deferral_events,
+                                         std::set<RtEvent> &applied_events,
+                                         const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!eq.has_lock());
+#endif
+      // See if we've already deferred this or not
+      if (!already_deferred)
+      {
+        const RtUserEvent deferral_event = Runtime::create_rt_user_event();
+        const RtEvent precondition = chain_deferral_events(deferral_event);
+        analysis.defer_traversal(precondition, this, mask,
+              deferral_events, applied_events, deferral_event);
+      }
+      else
+        analysis.defer_traversal(eq.try_next(), this, mask,
+                                 deferral_events, applied_events);
+      // Have to exit early since we didn't get the lock
+      return false;
+    }
+
+    //--------------------------------------------------------------------------
     bool EquivalenceSet::update_set(UpdateAnalysis &analysis,
                                     FieldMask user_mask,
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     FieldMask *remove_mask, // can be NULL
-                                    const bool original_set/*=true*/)
+                                    const bool original_set/*=true*/,
+                                    const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      // Try to get the lock, if we don't defer the traversal
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, user_mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && 
           analysis.update_alt_sets(this, user_mask, applied_events))
         return false;
@@ -7942,14 +8143,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::acquire_restrictions(AcquireAnalysis &analysis,
-                                              FieldMask acquire_mask,
-                                             std::set<RtEvent> &deferral_events,
-                                              std::set<RtEvent> &applied_events,
-                                              FieldMask *remove_mask,
-                                              const bool original_set /*=true*/)
+                                          FieldMask acquire_mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          FieldMask *remove_mask,
+                                          const bool original_set /*=true*/,
+                                          const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, acquire_mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && 
           analysis.update_alt_sets(this, acquire_mask, applied_events))
         return false;
@@ -8035,14 +8240,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     bool EquivalenceSet::release_restrictions(ReleaseAnalysis &analysis,
-                                              FieldMask release_mask,
-                                             std::set<RtEvent> &deferral_events,
-                                              std::set<RtEvent> &applied_events,
-                                              FieldMask *remove_mask,
-                                              const bool original_set /*=true*/)
+                                          FieldMask release_mask,
+                                          std::set<RtEvent> &deferral_events,
+                                          std::set<RtEvent> &applied_events,
+                                          FieldMask *remove_mask,
+                                          const bool original_set /*=true*/,
+                                          const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, release_mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && 
           analysis.update_alt_sets(this, release_mask, applied_events))
         return false;
@@ -8166,10 +8375,14 @@ namespace Legion {
                                              std::set<RtEvent> &deferral_events,
                                              std::set<RtEvent> &applied_events,
                                              FieldMask *remove_mask,
-                                             const bool original_set)
+                                             const bool original_set,
+                                             const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock,1,false/*exclusive*/);
+      AutoTryLock eq(eq_lock,1,false/*exclusive*/);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, src_mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && 
           analysis.update_alt_sets(this, src_mask, applied_events))
         return false;
@@ -8433,10 +8646,14 @@ namespace Legion {
                                        std::set<RtEvent> &deferral_events,
                                        std::set<RtEvent> &applied_events,
                                        FieldMask *remove_mask,
-                                       const bool original_set)
+                                       const bool original_set,
+                                       const bool already_deferred)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())
@@ -8606,10 +8823,14 @@ namespace Legion {
                                     std::set<RtEvent> &deferral_events,
                                     std::set<RtEvent> &applied_events,
                                     FieldMask *remove_mask,
-                                    const bool original_set/*= true*/)
+                                    const bool original_set/*=true*/,
+                                    const bool already_deferred/*=false*/)
     //--------------------------------------------------------------------------
     {
-      AutoLock eq(eq_lock);
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+        return defer_traversal(eq, analysis, mask, deferral_events,
+                               applied_events, already_deferred);
       if (original_set && analysis.update_alt_sets(this, mask, applied_events))
         return false;
       if (!is_logical_owner())

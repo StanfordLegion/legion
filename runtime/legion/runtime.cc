@@ -20860,6 +20860,11 @@ namespace Legion {
             RemoteOp::handle_deferred_deletion(args);
             break;
           }
+        case LG_DEFER_PERFORM_TRAVERSAL_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_traversal(args);
+            break;
+          }
         case LG_DEFER_PERFORM_REMOTE_TASK_ID:
           {
             PhysicalAnalysis::handle_deferred_remote(args);
