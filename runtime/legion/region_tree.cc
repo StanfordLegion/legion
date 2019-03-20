@@ -1806,6 +1806,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ApEvent RegionTreeForest::physical_perform_registration(
                                          UpdateAnalysis *analysis,
+                                         InstanceSet &targets,
                                          const PhysicalTraceInfo &trace_info,
                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
@@ -1824,15 +1825,14 @@ namespace Legion {
         if (analysis->user_registered.exists())
         {
           std::set<RtEvent> user_applied;
-          for (unsigned idx = 0; idx < analysis->target_instances.size(); idx++)
+          for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const FieldMask &inst_mask = 
-              analysis->target_instances[idx].get_valid_fields();
+            const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index, 
                 analysis->term_event, user_applied, trace_info, local_space);
             // Record the event as the precondition for the task
-            analysis->target_instances[idx].set_ready_event(ready);
+            targets[idx].set_ready_event(ready);
           }
           if (!user_applied.empty())
           {
@@ -1845,16 +1845,15 @@ namespace Legion {
         }
         else
         {
-          for (unsigned idx = 0; idx < analysis->target_instances.size(); idx++)
+          for (unsigned idx = 0; idx < targets.size(); idx++)
           {
-            const FieldMask &inst_mask = 
-              analysis->target_instances[idx].get_valid_fields();
+            const FieldMask &inst_mask = targets[idx].get_valid_fields();
             ApEvent ready = analysis->target_views[idx]->register_user(
                 analysis->usage, inst_mask, local_expr, op_id, analysis->index,
                 analysis->term_event, map_applied_events, 
                 trace_info, local_space);
             // Record the event as the precondition for the task
-            analysis->target_instances[idx].set_ready_event(ready);
+            targets[idx].set_ready_event(ready);
           }
         }
       }
@@ -1864,10 +1863,9 @@ namespace Legion {
       if (IS_ATOMIC(analysis->usage) && !IS_REDUCE(analysis->usage))
       {
         const bool exclusive = IS_WRITE(analysis->usage);
-        for (unsigned idx = 0; idx < analysis->target_instances.size(); idx++)
+        for (unsigned idx = 0; idx < targets.size(); idx++)
         {
-          const FieldMask &inst_mask = 
-            analysis->target_instances[idx].get_valid_fields();
+          const FieldMask &inst_mask = targets[idx].get_valid_fields();
           MaterializedView *mat_view = 
             analysis->target_views[idx]->as_materialized_view();
           mat_view->find_atomic_reservations(inst_mask, analysis->op,exclusive);
@@ -1913,13 +1911,13 @@ namespace Legion {
       if (registration_precondition.exists() && 
           !registration_precondition.has_triggered())
         registration_precondition.wait();
-      return physical_perform_registration(analysis, trace_info, 
+      return physical_perform_registration(analysis, targets, trace_info, 
                                            map_applied_events);
     }
 
     //--------------------------------------------------------------------------
     RtEvent RegionTreeForest::defer_physical_perform_registration(RtEvent pre,
-                         UpdateAnalysis *analysis,
+                         UpdateAnalysis *analysis, InstanceSet &targets,
                          std::set<RtEvent> &map_applied_events,
                          ApEvent &result)
     //--------------------------------------------------------------------------
@@ -1927,7 +1925,7 @@ namespace Legion {
       RtUserEvent map_applied_done = Runtime::create_rt_user_event();
       map_applied_events.insert(map_applied_done);
       DeferPhysicalRegistrationArgs args(analysis->op->get_unique_op_id(),
-                                         analysis, map_applied_done, result);
+                             analysis, targets, map_applied_done, result);
       return runtime->issue_runtime_meta_task(args, 
                     LG_LATENCY_WORK_PRIORITY, pre);
     }
@@ -1941,7 +1939,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(dargs->analysis->op, false/*init*/);
       std::set<RtEvent> applied_events;
       dargs->result = physical_perform_registration(dargs->analysis, 
-                                                    trace_info, applied_events);
+                        dargs->targets, trace_info, applied_events);
       if (!applied_events.empty())
         Runtime::trigger_event(dargs->map_applied_done,
             Runtime::merge_events(applied_events));

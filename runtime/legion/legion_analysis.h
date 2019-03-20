@@ -1111,7 +1111,7 @@ namespace Legion {
     public:
       const RegionUsage usage;
       RegionNode *const node;
-      InstanceSet target_instances;
+      const InstanceSet target_instances;
       const std::vector<InstanceView*> target_views;
       const ApEvent precondition;
       const ApEvent term_event;
