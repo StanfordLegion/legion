@@ -115,25 +115,12 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_PHYSICAL_REGISTRATION_TASK_ID;
       public:
-        DeferPhysicalRegistrationArgs(
-                               const RegionRequirement &r,
-                               Operation *o, UniqueID uid, unsigned idx,
-                               ApEvent term, InstanceSet &t,
-                               const PhysicalTraceInfo &info,
-                               UpdateAnalysis *ana,
-                               RtUserEvent map_applied,
-                               ApEvent &res)
+        DeferPhysicalRegistrationArgs(UniqueID uid, UpdateAnalysis *ana,
+                                      RtUserEvent map_applied, ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
-            req(r), op(o), index(idx), term_event(term), targets(t), 
-            trace_info(info), analysis(ana),
-            map_applied_done(map_applied), result(res) { }
+            analysis(ana), map_applied_done(map_applied), result(res) 
+          { analysis->add_reference(); }
       public:
-        const RegionRequirement &req;
-        Operation *const op; 
-        const unsigned index;
-        const ApEvent term_event;
-        InstanceSet &targets;
-        const PhysicalTraceInfo &trace_info;
         UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
         ApEvent &result;
@@ -452,13 +439,9 @@ namespace Legion {
                                 const bool defer_copies = true);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
-      ApEvent physical_perform_registration(
-                         const RegionRequirement &req,
-                         Operation *op, unsigned index,
-                         ApEvent term_event, InstanceSet &targets,
-                         const PhysicalTraceInfo &trace_info,
-                         UpdateAnalysis *analysis,
-                         std::set<RtEvent> &map_applied_events);
+      ApEvent physical_perform_registration(UpdateAnalysis *analysis,
+                                 const PhysicalTraceInfo &trace_info,
+                                 std::set<RtEvent> &map_applied_events);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
                                    const RegionRequirement &req,
@@ -476,10 +459,6 @@ namespace Legion {
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,
-                           const RegionRequirement &req,
-                           Operation *op, unsigned index,
-                           ApEvent term_event, InstanceSet &targets,
-                           const PhysicalTraceInfo &trace_info,
                            UpdateAnalysis *analysis,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result);
