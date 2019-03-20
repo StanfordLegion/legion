@@ -148,8 +148,9 @@ def build_terra(terra_dir, terra_branch, llvm_dir, cache, is_cray, thread_count)
         # branch directly.
         env['LUAJIT_URL'] = 'https://github.com/elliottslaughter/LuaJIT.git'
         env['LUAJIT_BRANCH'] = 'patch-1'
+    env.update(dict(list(os.environ.items())))
     if is_cray:
-        env.update(dict(list(os.environ.items()) + [
+        env.update(dict([
             ('CC', os.environ['HOST_CC']),
             ('CXX', os.environ['HOST_CXX']),
         ]))
