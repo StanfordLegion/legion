@@ -2021,8 +2021,8 @@ namespace Legion {
                                          std::set<RtEvent> &map_applied_events)
     //--------------------------------------------------------------------------
     {
-      // If we are a NO_ACCESS or there are no fields then we are already done
-      if (IS_NO_ACCESS(analysis->usage) || analysis->target_instances.empty())
+      // If we are a NO_ACCESS or there are no fields then analysis will be NULL
+      if (analysis == NULL)
         return ApEvent::NO_AP_EVENT;
       // We can skip this if the term event is a 
       // no-event (happens with post-mapping and copies)
