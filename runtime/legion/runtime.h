@@ -1380,8 +1380,8 @@ namespace Legion {
     public:
       static void process_request(Runtime *runtime, Deserializer &derez,
                                   AddressSpaceID source);
-      static LayoutConstraintID process_response(Runtime *runtime, 
-                          Deserializer &derez, AddressSpaceID source);
+      static void process_response(Runtime *runtime, Deserializer &derez, 
+                                   AddressSpaceID source);
     public:
       const LayoutConstraintID layout_id;
       const FieldSpace handle;
@@ -2531,8 +2531,6 @@ namespace Legion {
                                                   Serializer &rez);
       void send_equivalence_set_remote_request_instances(AddressSpaceID target,
                                                          Serializer &rez);
-      void send_equivalence_set_remote_request_reductions(AddressSpaceID target,
-                                                          Serializer &rez);
       void send_equivalence_set_remote_updates(AddressSpaceID target,
                                                Serializer &rez);
       void send_equivalence_set_remote_acquires(AddressSpaceID target,
@@ -2756,8 +2754,6 @@ namespace Legion {
       void handle_equivalence_set_remote_refinement(Deserializer &derez);
       void handle_equivalence_set_remote_request_instances(Deserializer &derez, 
                                                          AddressSpaceID srouce);
-      void handle_equivalence_set_remote_request_reductions(Deserializer &derz,
-                                                         AddressSpaceID source);
       void handle_equivalence_set_remote_updates(Deserializer &derez,
                                                  AddressSpaceID source);
       void handle_equivalence_set_remote_acquires(Deserializer &derez,
@@ -3450,7 +3446,8 @@ namespace Legion {
           LayoutConstraintID id, DistributedID did = 0);
       LayoutConstraints* register_layout(FieldSpace handle,
                const LayoutConstraintSet &cons, bool internal);
-      bool register_layout(LayoutConstraints *new_constraints);
+      bool register_layout(LayoutConstraints *new_constraints,
+                           ReferenceMutator *mutator);
       void release_layout(LayoutConstraintID layout_id);
       void unregister_layout(LayoutConstraintID layout_id);
       static LayoutConstraintID preregister_layout(
@@ -3473,7 +3470,7 @@ namespace Legion {
       static RtEvent configure_runtime(int argc, char **argv,
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
-      static void wait_for_shutdown(void);
+      static int wait_for_shutdown(void);
       static void set_top_level_task_id(Processor::TaskFuncID top_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);

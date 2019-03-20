@@ -18,6 +18,7 @@ local passes_hooks = require("regent/passes_hooks")
 local std = require("regent/std")
 
 local check_parallelizable = require("regent/check_parallelizable")
+local copy_propagate = require("regent/copy_propagate")
 local optimize_config_options = require("regent/optimize_config_options")
 local optimize_divergence = require("regent/optimize_divergence")
 local optimize_futures = require("regent/optimize_futures")
@@ -41,8 +42,11 @@ local needs_optimize_config_options =
   needs_check_parallelizable or std.config["leaf"] or std.config["inner"] or std.config["replicable"]
 
 if needs_optimize_config_options then passes_hooks.add_optimization(8, optimize_config_options) end
-if needs_check_parallelizable then passes_hooks.add_optimization(9, check_parallelizable) end
-if std.config["parallelize"] then passes_hooks.add_optimization(10, parallelize_tasks) end
+if needs_check_parallelizable then
+  passes_hooks.add_optimization(9, check_parallelizable)
+  passes_hooks.add_optimization(10, copy_propagate)
+end
+if std.config["parallelize"] then passes_hooks.add_optimization(14, parallelize_tasks) end
 if std.config["index-launch"] then passes_hooks.add_optimization(25, optimize_index_launches) end
 if std.config["skip-empty-tasks"] then passes_hooks.add_optimization(28, skip_empty_tasks) end
 if std.config["future"] then passes_hooks.add_optimization(30, optimize_futures) end

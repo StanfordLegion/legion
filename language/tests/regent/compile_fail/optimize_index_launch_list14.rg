@@ -12,18 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_index_launch_list14.rg:34: loop optimization failed: fill value is not side-effect free
+--     fill((p[i]), @y)
+--                  ^
+
 import "regent"
 
-task main()
-  var r = region(ispace(ptr, 5), int)
+-- This tests the various loop optimizations supported by the
+-- compiler.
 
-  for i = 0, 5 do
-    regentlib.assert(ptr(i) <= r, "test failed")
-  end
-
-  for i = 5, 10 do
-    regentlib.assert(not (ptr(i) <= r), "test failed")
+task g()
+  var cs = ispace(int1d, 5)
+  var r = region(cs, int)
+  var p = partition(equal, r, cs)
+  var x : int[1]
+  var y = [&int](x)
+  -- not optimized: argument is not side-effect free
+  __demand(__parallel)
+  for i in cs do
+    fill((p[i]), @y)
   end
 end
-
-regentlib.start(main)

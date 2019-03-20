@@ -22,6 +22,14 @@ where reads(r), writes(r) do
   return 5
 end
 
+task check(r : region(int), v : int)
+where reads(r)
+do
+  for e in r do
+    regentlib.assert(@e == v, "test failed")
+  end
+end
+
 task main()
   var n = 5
   var r = region(ispace(ptr, n), int)
@@ -40,6 +48,7 @@ task main()
   end
 
   var s1 = ispace(int1d, 2, 1)
+  var s2 = ispace(int1d, 1, 3)
 
   __demand(__parallel)
   for i in s1 do
@@ -49,6 +58,31 @@ task main()
   __demand(__parallel)
   for i in s1 do
     g(p[i-1])
+  end
+
+  __demand(__parallel)
+  for i in s1 do
+    fill((p[i-0]), 12345)
+  end
+
+  __demand(__parallel)
+  for i in s1 do
+    check(p[i-0], 12345)
+  end
+
+  __demand(__parallel)
+  for i in s1 do
+    fill((p[i-1]), 2468)
+  end
+
+  __demand(__parallel)
+  for i in s1 do
+    check(p[i-1], 2468)
+  end
+
+  __demand(__parallel)
+  for i in s2 do
+    check(p[i-1], 12345)
   end
 end
 regentlib.start(main)

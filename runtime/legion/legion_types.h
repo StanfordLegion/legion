@@ -352,7 +352,10 @@ namespace Legion {
       LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID,
       LG_DEFER_REMOTE_OVERWRITE_TASK_ID,
       LG_DEFER_REMOTE_FILTER_TASK_ID,
-      LG_DEFER_REMOTE_OUTPUT_TASK_ID,
+      LG_DEFER_PERFORM_TRAVERSAL_TASK_ID,
+      LG_DEFER_PERFORM_REMOTE_TASK_ID,
+      LG_DEFER_PERFORM_UPDATE_TASK_ID,
+      LG_DEFER_PERFORM_OUTPUT_TASK_ID,
       LG_DEFER_INSTANCE_MANAGER_TASK_ID,
       LG_DEFER_REDUCTION_MANAGER_TASK_ID,
       LG_MESSAGE_ID, // These two must be the last two
@@ -454,7 +457,10 @@ namespace Legion {
         "Defer Remote Copy Across",                               \
         "Defer Remote Overwrite Equivalence Set",                 \
         "Defer Remote Filter Equivalence Set",                    \
-        "Defer Remote Output",                                    \
+        "Defer Physical Analysis Traversal Stage",                \
+        "Defer Physical Analysis Remote Stage",                   \
+        "Defer Physical Analysis Update Stage",                   \
+        "Defer Physical Analysis Output Stage",                   \
         "Defer Instance Manager Registration",                    \
         "Defer Reduction Manager Registration",                   \
         "Remote Message",                                         \
@@ -746,7 +752,6 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
-      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS,
       SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
       SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
       SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
@@ -910,7 +915,6 @@ namespace Legion {
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Remote Refinement",                     \
         "Send Equivalence Set Remote Request Instances",              \
-        "Send Equivalence Set Remote Request Reductions",             \
         "Send Equivalence Set Remote Updates",                        \
         "Send Equivalence Set Remote Acquires",                       \
         "Send Equivalence Set Remote Releases",                       \

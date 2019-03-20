@@ -170,4 +170,10 @@ task toplevel()
   end
 end
 
-regentlib.start(toplevel, clayout_test.register_mappers)
+if os.getenv('SAVEOBJ') == '1' then
+  local root_dir = arg[0]:match(".*/") or "./"
+  local link_flags = terralib.newlist({"-L" .. root_dir, "-llayout_test"})
+  regentlib.saveobj(toplevel, "layout_test6", "executable", clayout_test.register_mappers, link_flags)
+else
+  regentlib.start(toplevel, clayout_test.register_mappers)
+end

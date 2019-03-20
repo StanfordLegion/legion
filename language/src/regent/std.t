@@ -3913,7 +3913,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       for _, proc_type in ipairs(proc_types) do
         registration_actions:insert(quote
           var [execution_constraints] = c.legion_execution_constraint_set_create()
-          c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, proc_type)
+          c.legion_execution_constraint_set_add_processor_constraint([execution_constraints], proc_type)
           [execution_constraint_actions]
           var [layout_constraints] = c.legion_task_layout_constraint_set_create()
           [layout_constraint_actions]
@@ -3928,10 +3928,10 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
             [task:get_task_id()],
             [task:get_name():concat(".")],
             [variant:get_name()],
-            execution_constraints, layout_constraints, options,
+            [execution_constraints], [layout_constraints], options,
             [task_wrappers[variant:wrapper_name()]], nil, 0)
-          c.legion_execution_constraint_set_destroy(execution_constraints)
-          c.legion_task_layout_constraint_set_destroy(layout_constraints)
+          c.legion_execution_constraint_set_destroy([execution_constraints])
+          c.legion_task_layout_constraint_set_destroy([layout_constraints])
         end)
       end
 

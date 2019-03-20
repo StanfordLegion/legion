@@ -1773,7 +1773,7 @@ namespace Legion {
         // Do the premapping
         if (request_valid_instances)
           runtime->forest->physical_premap_region(this, *it, regions[*it],
-                                                  version_info, valid);
+                                  version_info, valid, applied_conditions);
         // If we need visible instances, filter them as part of the conversion
         if (regions[*it].is_no_access())
           prepare_for_mapping(valid, input.valid_instances[*it]);
@@ -2690,7 +2690,7 @@ namespace Legion {
         InstanceSet &current_valid = valid[idx];
         if (request_valid_instances)
           runtime->forest->physical_premap_region(this, idx, regions[idx],
-                                        version_infos[idx], current_valid);
+                version_infos[idx], current_valid, map_applied_conditions);
         // See if we've already got an output from a must-epoch mapping
         if (!output.chosen_instances[idx].empty())
         {
@@ -3759,10 +3759,7 @@ namespace Legion {
         {
           std::vector<unsigned> performed_regions;
           std::set<RtEvent> registration_postconditions;
-          std::vector<CopyFillAggregator*> 
-            output_aggregators(regions.size(), NULL);
-          std::vector<std::vector<InstanceView*> > target_views(regions.size());
-          std::vector<RtUserEvent> users_registered(regions.size());
+          std::vector<UpdateAnalysis*> analyses(regions.size(), NULL);
           std::vector<ApEvent> effects(regions.size(), ApEvent::NO_AP_EVENT);
           std::vector<RtEvent> reg_pre(regions.size(), RtEvent::NO_RT_EVENT);
           for (unsigned idx = 0; idx < regions.size(); idx++)
@@ -3790,11 +3787,8 @@ namespace Legion {
                                         local_termination_event,
                                         physical_instances[idx],
                                         trace_info,
-                                        output_aggregators[idx],
-                                        users_registered[idx],
                                         map_applied_conditions,
-                                        effects_postconditions,
-                                        target_views[idx],
+                                        analyses[idx],
 #ifdef DEBUG_LEGION
                                         get_logging_name(),
                                         unique_op_id,
@@ -3807,17 +3801,15 @@ namespace Legion {
             // If we have updates for either copy launcher then defer it
             // in order to avoid blocking here, otherwise we can just do
             // it here as we know that we won't block
-            if (reg_pre[*it].exists() || output_aggregators[*it] != NULL)
+            if (reg_pre[*it].exists() || analyses[*it]->has_output_updates())
             {
               const RtEvent registration_post = 
                 runtime->forest->defer_physical_perform_registration(
                                           reg_pre[*it], regions[*it],
                                           this, *it, local_termination_event,
                                           physical_instances[*it], trace_info,
-                                          output_aggregators[*it],
-                                          users_registered[*it],
-                                          target_views[*it], 
-                                          map_applied_conditions, effects[*it]);
+                                          analyses[*it], map_applied_conditions,
+                                          effects[*it]);
               registration_postconditions.insert(registration_post);
             }
             else
@@ -3825,9 +3817,7 @@ namespace Legion {
                                           regions[*it], this, *it, 
                                           local_termination_event,
                                           physical_instances[*it], 
-                                          trace_info, output_aggregators[*it],
-                                          users_registered[*it],
-                                          target_views[*it], 
+                                          trace_info, analyses[*it],
                                           map_applied_conditions);
           }
           // Wait for all the registrations to be done
@@ -3895,7 +3885,8 @@ namespace Legion {
         if (request_valid_instances)
           runtime->forest->physical_premap_region(this, idx, regions[idx], 
                                                   get_version_info(idx),
-                                                  postmap_valid[idx]);
+                                                  postmap_valid[idx],
+                                                  map_applied_conditions);
         // No need to filter these because they are on the way out
         prepare_for_mapping(postmap_valid[idx], input.valid_instances[idx]);  
         prepare_for_mapping(physical_instances[idx], input.mapped_regions[idx]);

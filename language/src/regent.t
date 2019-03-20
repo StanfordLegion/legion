@@ -109,7 +109,6 @@ local language = {
     "fill",
     "hdf5",
     "image",
-    "index_type", -- reserved for future use
     "isnull",
     "ispace",
     "list_cross_product",
@@ -131,7 +130,6 @@ local language = {
     "phase_barrier",
     "preimage",
     "product",
-    "ptr", -- reserved for future use
     "reads",
     "reduces",
     "relaxed",

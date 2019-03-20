@@ -43,7 +43,7 @@ do
   for e in r2 do
     e.g = 0
     e.h = 0
-    e.p = int2d { ([ptr](e)) / size, ([ptr](e)) % size }
+    e.p = int2d { (ptr(e)) / size, (ptr(e)) % size }
   end
 end
 

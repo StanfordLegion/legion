@@ -120,15 +120,12 @@ namespace Legion {
                                Operation *o, UniqueID uid, unsigned idx,
                                ApEvent term, InstanceSet &t,
                                const PhysicalTraceInfo &info,
-                               CopyFillAggregator *&output,
-                               const RtUserEvent user_reg,
-                               std::vector<InstanceView*> &views, 
+                               UpdateAnalysis *ana,
                                RtUserEvent map_applied,
                                ApEvent &res)
           : LgTaskArgs<DeferPhysicalRegistrationArgs>(uid),
             req(r), op(o), index(idx), term_event(term), targets(t), 
-            trace_info(info), output_aggregator(output), 
-            user_registered(user_reg), target_views(views), 
+            trace_info(info), analysis(ana),
             map_applied_done(map_applied), result(res) { }
       public:
         const RegionRequirement &req;
@@ -137,9 +134,7 @@ namespace Legion {
         const ApEvent term_event;
         InstanceSet &targets;
         const PhysicalTraceInfo &trace_info;
-        CopyFillAggregator *const output_aggregator;
-        const RtUserEvent user_registered;
-        std::vector<InstanceView*> &target_views;
+        UpdateAnalysis *const analysis;
         RtUserEvent map_applied_done;
         ApEvent &result;
       };
@@ -436,7 +431,8 @@ namespace Legion {
       void physical_premap_region(Operation *op, unsigned index,
                                   RegionRequirement &req,
                                   VersionInfo &version_info,
-                                  InstanceSet &valid_instances);
+                                  InstanceSet &valid_instances,
+                                  std::set<RtEvent> &map_applied_events);
       // Return a runtime event for when it's safe to perform
       // the registration for this equivalence set
       RtEvent physical_perform_updates(const RegionRequirement &req,
@@ -445,11 +441,8 @@ namespace Legion {
                                 ApEvent precondition, ApEvent term_event,
                                 const InstanceSet &targets,
                                 const PhysicalTraceInfo &trace_info,
-                                CopyFillAggregator *&output_aggregator,
-                                RtUserEvent &user_registered,
                                 std::set<RtEvent> &map_applied_events,
-                                std::set<ApEvent> &effects_events,
-                                std::vector<InstanceView*> &target_views,
+                                UpdateAnalysis *&analysis,
 #ifdef DEBUG_LEGION
                                 const char *log_name,
                                 UniqueID uid,
@@ -464,9 +457,7 @@ namespace Legion {
                          Operation *op, unsigned index,
                          ApEvent term_event, InstanceSet &targets,
                          const PhysicalTraceInfo &trace_info,
-                         CopyFillAggregator *output_aggregator,
-                         const RtUserEvent user_registered,
-                         std::vector<InstanceView*> &target_views,
+                         UpdateAnalysis *analysis,
                          std::set<RtEvent> &map_applied_events);
       // Same as the two above merged together
       ApEvent physical_perform_updates_and_registration(
@@ -489,9 +480,7 @@ namespace Legion {
                            Operation *op, unsigned index,
                            ApEvent term_event, InstanceSet &targets,
                            const PhysicalTraceInfo &trace_info,
-                           CopyFillAggregator *output_aggregator,
-                           const RtUserEvent register_post,
-                           std::vector<InstanceView*> &target_views,
+                           UpdateAnalysis *analysis,
                            std::set<RtEvent> &map_applied_events,
                            ApEvent &result);
       void handle_defer_registration(const void *args);
@@ -3029,7 +3018,8 @@ namespace Legion {
       void filter_curr_epoch_users(LogicalState &state, const FieldMask &mask);
       void report_uninitialized_usage(Operation *op, unsigned index,
                                       const RegionUsage usage,
-                                      const FieldMask &uninitialized);
+                                      const FieldMask &uninitialized,
+                                      RtUserEvent reported);
       void record_logical_reduction(LogicalState &state, ReductionOpID redop,
                                     const FieldMask &user_mask);
       void clear_logical_reduction_fields(LogicalState &state,

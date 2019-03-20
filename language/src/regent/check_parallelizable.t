@@ -640,12 +640,12 @@ function analyze_access.stat_for_num(cx, node)
     end))
   end)
 
-  cx:push_loop_context(node, not has_stride and node.symbol)
+  cx:push_loop_context(node, not (has_stride or cx.demand_cuda) and node.symbol)
   local block = analyze_access.block(cx, node.block)
   local cx = cx:pop_loop_context(node)
   local node = node {
     block = block,
-    metadata = not has_stride and cx:get_metadata(),
+    metadata = not (has_stride or cx.demand_cuda) and cx:get_metadata(),
   }
   check_demands(cx, node)
   return node

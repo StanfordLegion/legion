@@ -1788,13 +1788,7 @@ namespace Legion {
     {
       const PhysicalTraceInfo trace_info(this);
       std::set<RtEvent> registration_postconditions;
-      std::vector<CopyFillAggregator*> 
-        output_aggregators(requirements.size(), NULL);
-      std::vector<std::vector<InstanceView*> > 
-        target_views(requirements.size());
-      std::set<ApEvent> wait_events;
-      std::vector<RtUserEvent> users_registered(requirements.size(),
-                                                RtUserEvent::NO_RT_USER_EVENT);
+      std::vector<UpdateAnalysis*> analyses(requirements.size(), NULL);
       std::vector<ApEvent> effects(requirements.size(), ApEvent::NO_AP_EVENT);
       std::vector<RtEvent> reg_pre(requirements.size(), RtEvent::NO_RT_EVENT);
       for (unsigned idx = 0; idx < requirements.size(); ++idx)
@@ -1807,11 +1801,8 @@ namespace Legion {
                                                   completion_event,
                                                   instances[idx],
                                                   trace_info,
-                                                  output_aggregators[idx],
-                                                  users_registered[idx],
                                                   map_applied_conditions,
-                                                  wait_events,
-                                                  target_views[idx],
+                                                  analyses[idx],
 #ifdef DEBUG_LEGION
                                                   get_logging_name(),
                                                   unique_op_id,
@@ -1820,7 +1811,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < requirements.size(); idx++)
       {
-        if (reg_pre[idx].exists() || (output_aggregators[idx] != NULL))
+        if (reg_pre[idx].exists() || analyses[idx]->has_output_updates())
         {
           const RtEvent postcondition = 
             runtime->forest->defer_physical_perform_registration(reg_pre[idx],
@@ -1829,9 +1820,7 @@ namespace Legion {
                                                  completion_event,
                                                  instances[idx],
                                                  trace_info,
-                                                 output_aggregators[idx],
-                                                 users_registered[idx],
-                                                 target_views[idx],
+                                                 analyses[idx],
                                                  map_applied_conditions,
                                                  effects[idx]);
           registration_postconditions.insert(postcondition);
@@ -1844,9 +1833,7 @@ namespace Legion {
                                                  completion_event,
                                                  instances[idx],
                                                  trace_info,
-                                                 output_aggregators[idx],
-                                                 users_registered[idx],
-                                                 target_views[idx],
+                                                 analyses[idx],
                                                  map_applied_conditions);
       }
       if (!registration_postconditions.empty())
@@ -1855,6 +1842,7 @@ namespace Legion {
           Runtime::merge_events(registration_postconditions);
         wait_on.wait();
       }
+      std::set<ApEvent> wait_events;
       for (unsigned idx = 0; idx < effects.size(); idx++)
         if (effects[idx].exists())
           wait_events.insert(effects[idx]);

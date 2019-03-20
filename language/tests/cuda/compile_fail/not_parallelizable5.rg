@@ -12,18 +12,17 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- not_parallelizable5.rg:26: CUDA code generation failed: found a region access outside parallelizable loops
+--     r[i] = 1
+--      ^
+
 import "regent"
 
-task main()
-  var r = region(ispace(ptr, 5), int)
-
-  for i = 0, 5 do
-    regentlib.assert(ptr(i) <= r, "test failed")
-  end
-
-  for i = 5, 10 do
-    regentlib.assert(not (ptr(i) <= r), "test failed")
+__demand(__cuda)
+task check(r : region(ispace(int1d), int))
+where reads writes(r) do
+  for i = 0, 10 do
+    r[i] = 1
   end
 end
-
-regentlib.start(main)

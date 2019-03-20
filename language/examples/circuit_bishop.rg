@@ -281,7 +281,7 @@ do
       in_node += pn_ptr_offset - snpp
     end
 
-    wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), [ptr](in_node))
+    wire.in_ptr = dynamic_cast(ptr(node, rpn, rsn), ptr(in_node))
     regentlib.assert(not isnull(wire.in_ptr), "picked an invalid random pointer")
 
     var out_node = 0
@@ -309,7 +309,7 @@ do
       max_shared_node_id = max(max_shared_node_id, out_node)
       min_shared_node_id = min(min_shared_node_id, out_node)
     end
-    wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), [ptr](out_node))
+    wire.out_ptr = dynamic_cast(ptr(node, rpn, rsn, all_shared), ptr(out_node))
   end
 
   for range in rgr do
@@ -494,21 +494,21 @@ terra create_colorings(conf : Config)
     (num_circuit_nodes - num_shared_nodes) % conf.num_pieces == 0,
     "something went wrong in the arithmetic")
 
-  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](1),
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(1),
     c.legion_ptr_t { value = 0 },
     c.legion_ptr_t { value = num_shared_nodes - 1})
 
-  c.legion_point_coloring_add_range(coloring.privacy_map, [ptr](0),
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(0),
     c.legion_ptr_t { value = num_shared_nodes },
     c.legion_ptr_t { value = num_circuit_nodes - 1})
 
   var snpp = conf.shared_nodes_per_piece
   var pnpp = conf.nodes_per_piece - snpp
   for piece_id = 0, conf.num_pieces do
-    c.legion_point_coloring_add_range(coloring.shared_node_map, [ptr](piece_id),
+    c.legion_point_coloring_add_range(coloring.shared_node_map, ptr(piece_id),
       c.legion_ptr_t { value = piece_id * snpp },
       c.legion_ptr_t { value = (piece_id + 1) * snpp - 1})
-    c.legion_point_coloring_add_range(coloring.private_node_map, [ptr](piece_id),
+    c.legion_point_coloring_add_range(coloring.private_node_map, ptr(piece_id),
       c.legion_ptr_t { value = num_shared_nodes + piece_id * pnpp},
       c.legion_ptr_t { value = num_shared_nodes + (piece_id + 1) * pnpp - 1})
   end

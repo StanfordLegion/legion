@@ -12,18 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- optimize_index_launch_list17.rg:34: loop optimization failed: fill target interferes with itself
+--     fill((p[i]), 1)
+--        ^
+
 import "regent"
 
-task main()
-  var r = region(ispace(ptr, 5), int)
+-- This tests the various loop optimizations supported by the
+-- compiler.
 
-  for i = 0, 5 do
-    regentlib.assert(ptr(i) <= r, "test failed")
-  end
-
-  for i = 5, 10 do
-    regentlib.assert(not (ptr(i) <= r), "test failed")
+task g()
+  var cs = ispace(int1d, 5)
+  var r = region(cs, int)
+  var t : transform(1, 1); t[{0, 0}] = 0
+  var e = r.bounds
+  var p = restrict(r, t, e, cs)
+  -- not optimized: argument is not projectable
+  __demand(__parallel)
+  for i in cs do
+    fill((p[i]), 1)
   end
 end
-
-regentlib.start(main)

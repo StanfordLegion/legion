@@ -6966,12 +6966,6 @@ namespace Legion {
                                                         remote_address_space);
               break;
             }
-          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS:
-            {
-              runtime->handle_equivalence_set_remote_request_reductions(derez,
-                                                        remote_address_space);
-              break;
-            }
           case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
             {
               runtime->handle_equivalence_set_remote_updates(derez,
@@ -8694,7 +8688,7 @@ namespace Legion {
                                      Runtime *rt, bool inter, DistributedID did)
       : LayoutConstraintSet(), DistributedCollectable(rt, (did > 0) ? did : 
           rt->get_available_distributed_id(), get_owner_space(lay_id, rt), 
-          (did == 0)), layout_id(lay_id), handle(h), internal(inter), 
+          false/*register*/), layout_id(lay_id), handle(h), internal(inter), 
         constraints_name(NULL)
     //--------------------------------------------------------------------------
     {
@@ -8709,7 +8703,8 @@ namespace Legion {
       const LayoutConstraintRegistrar &registrar, bool inter, DistributedID did)
       : LayoutConstraintSet(registrar.layout_constraints), 
         DistributedCollectable(rt, (did > 0) ? did : 
-            rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+            rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+            false/*register with runtime*/), 
         layout_id(lay_id), handle(registrar.handle), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -8731,7 +8726,8 @@ namespace Legion {
                                          const LayoutConstraintSet &cons,
                                          FieldSpace h, bool inter)
       : LayoutConstraintSet(cons), DistributedCollectable(rt,
-          rt->get_available_distributed_id(), get_owner_space(lay_id, rt)), 
+          rt->get_available_distributed_id(), get_owner_space(lay_id, rt),
+          false/*register with runtime*/), 
         layout_id(lay_id), handle(h), internal(inter)
     //--------------------------------------------------------------------------
     {
@@ -9116,7 +9112,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ LayoutConstraintID LayoutConstraints::process_response(
+    /*static*/ void LayoutConstraints::process_response(
                    Runtime *runtime, Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
@@ -9134,14 +9130,10 @@ namespace Legion {
         new LayoutConstraints(lay_id, handle, runtime, internal, did);
       new_constraints->update_constraints(derez);
       std::set<RtEvent> preconditions;
+      WrapperReferenceMutator mutator(preconditions);
       // Now try to register this with the runtime
-      if (!runtime->register_layout(new_constraints))
+      if (!runtime->register_layout(new_constraints, &mutator))
         delete new_constraints;
-      else
-      {
-        WrapperReferenceMutator mutator(preconditions);
-        new_constraints->register_with_runtime(&mutator);
-      }
       // Trigger our done event and then return it
       RtUserEvent done_event;
       derez.deserialize(done_event);
@@ -9149,7 +9141,6 @@ namespace Legion {
         Runtime::trigger_event(done_event,Runtime::merge_events(preconditions));
       else
         Runtime::trigger_event(done_event);
-      return lay_id;
     }
 
     /////////////////////////////////////////////////////////////
@@ -15997,16 +15988,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::send_equivalence_set_remote_request_reductions(
-                                         AddressSpaceID target, Serializer &rez)
-    //--------------------------------------------------------------------------
-    {
-      find_messenger(target)->send_message(rez,
-          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_REDUCTIONS, 
-          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_updates(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17333,15 +17314,7 @@ namespace Legion {
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_request_instances(derez, this, source);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::handle_equivalence_set_remote_request_reductions(
-                                     Deserializer &derez, AddressSpaceID source)
-    //--------------------------------------------------------------------------
-    {
-      RemoteEqTracker::handle_remote_request_reductions(derez, this, source);
+      ValidInstAnalysis::handle_remote_request_instances(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17349,7 +17322,7 @@ namespace Legion {
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_updates(derez, this, source);
+      UpdateAnalysis::handle_remote_updates(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17357,7 +17330,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_acquires(derez, this, source);
+      AcquireAnalysis::handle_remote_acquires(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17365,7 +17338,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_releases(derez, this, source);
+      ReleaseAnalysis::handle_remote_releases(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17373,7 +17346,7 @@ namespace Legion {
                                      Deserializer &derez, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_copies_across(derez, this, source);
+      CopyAcrossAnalysis::handle_remote_copies_across(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17381,7 +17354,7 @@ namespace Legion {
                                                           AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_overwrites(derez, this, source);
+      OverwriteAnalysis::handle_remote_overwrites(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -17389,14 +17362,14 @@ namespace Legion {
                                                         AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_filters(derez, this, source);
+      FilterAnalysis::handle_remote_filters(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
     void Runtime::handle_equivalence_set_remote_instances(Deserializer &derez)
     //--------------------------------------------------------------------------
     {
-      RemoteEqTracker::handle_remote_instances(derez, this);
+      PhysicalAnalysis::handle_remote_instances(derez, this);
     }
 
     //--------------------------------------------------------------------------
@@ -17526,11 +17499,7 @@ namespace Legion {
                                              AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      LayoutConstraintID to_remove = 
-        LayoutConstraints::process_response(this, derez, source);
-      // Remove the done event from our set of pending events
-      AutoLock l_lock(layout_constraints_lock);
-      pending_constraint_requests.erase(to_remove);
+      LayoutConstraints::process_response(this, derez, source);
     }
 
     //--------------------------------------------------------------------------
@@ -20742,7 +20711,9 @@ namespace Legion {
       // Now make our entry and then return the result
       LayoutConstraints *constraints = 
         new LayoutConstraints(layout_id, this, registrar,false/*internal*/,did);
-      register_layout(constraints);
+      // If someone else already registered this ID then we delete our object
+      if (!register_layout(constraints, NULL/*mutator*/))
+        delete constraints;
       return layout_id;
     }
 
@@ -20753,12 +20724,13 @@ namespace Legion {
     {
       LayoutConstraints *constraints = new LayoutConstraints(
           get_unique_constraint_id(), this, cons, handle, internal);
-      register_layout(constraints);
+      register_layout(constraints, NULL/*mutator*/);
       return constraints;
     }
 
     //--------------------------------------------------------------------------
-    bool Runtime::register_layout(LayoutConstraints *new_constraints)
+    bool Runtime::register_layout(LayoutConstraints *new_constraints,
+                                  ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       new_constraints->add_base_resource_ref(RUNTIME_REF);
@@ -20772,6 +20744,10 @@ namespace Legion {
       if (finder != layout_constraints_table.end())
         return false;
       layout_constraints_table[new_constraints->layout_id] = new_constraints;
+      // Remove any pending requests
+      pending_constraint_requests.erase(new_constraints->layout_id);
+      // Now we can do the registration with the runtime
+      new_constraints->register_with_runtime(mutator);
       return true;
     }
 
@@ -21070,7 +21046,7 @@ namespace Legion {
       // If we are supposed to background this thread, then we wait
       // for the runtime to shutdown, otherwise we can now return
       if (!background)
-        realm.wait_for_shutdown();
+        return realm.wait_for_shutdown();
       return 0;
     }
 
@@ -21648,14 +21624,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::wait_for_shutdown(void)
+    /*static*/ int Runtime::wait_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
       if (!runtime_backgrounded)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_WAIT_FOR_SHUTDOWN, 
                       "Illegal call to wait_for_shutdown when runtime was "
                       "not launched in background mode!");
-      RealmRuntime::get_runtime().wait_for_shutdown();
+      return RealmRuntime::get_runtime().wait_for_shutdown();
     }
 
     //--------------------------------------------------------------------------
@@ -22652,22 +22628,24 @@ namespace Legion {
             RemoteOp::handle_deferred_deletion(args);
             break;
           }
-        case LG_DEFER_REMOTE_INSTANCE_TASK_ID:
-        case LG_DEFER_REMOTE_REDUCTION_TASK_ID:
-        case LG_DEFER_REMOTE_UPDATE_TASK_ID:
-        case LG_DEFER_REMOTE_ACQUIRE_TASK_ID:
-        case LG_DEFER_REMOTE_RELEASE_TASK_ID:
-        case LG_DEFER_REMOTE_COPIES_ACROSS_TASK_ID:
-        case LG_DEFER_REMOTE_OVERWRITE_TASK_ID:
-        case LG_DEFER_REMOTE_FILTER_TASK_ID:
+        case LG_DEFER_PERFORM_TRAVERSAL_TASK_ID:
           {
-            // These all go through the same path
-            RemoteEqTracker::handle_deferred_remote(tid, args, runtime);
+            PhysicalAnalysis::handle_deferred_traversal(args);
             break;
           }
-        case LG_DEFER_REMOTE_OUTPUT_TASK_ID:
+        case LG_DEFER_PERFORM_REMOTE_TASK_ID:
           {
-            RemoteEqTracker::handle_deferred_output(args);
+            PhysicalAnalysis::handle_deferred_remote(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_UPDATE_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_update(args);
+            break;
+          }
+        case LG_DEFER_PERFORM_OUTPUT_TASK_ID:
+          {
+            PhysicalAnalysis::handle_deferred_output(args);
             break;
           }
         case LG_DEFER_INSTANCE_MANAGER_TASK_ID:

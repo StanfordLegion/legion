@@ -37,11 +37,11 @@ task init(r1 : region(fs1), r2 : region(fs2(r1)), size : int)
 where reads writes(r1, r2)
 do
   for e in r1 do
-    e.f = 0.3 * ([ptr](e) + 1)
-    e.g = 0.3 * ([ptr](e) + 1)
+    e.f = 0.3 * (ptr(e) + 1)
+    e.g = 0.3 * (ptr(e) + 1)
   end
   for e in r2 do
-    e.p = unsafe_cast(ptr(fs1, r1), [ptr](e))
+    e.p = unsafe_cast(ptr(fs1, r1), ptr(e))
   end
 end
 

@@ -303,7 +303,7 @@ namespace Legion {
           : LgTaskArgs<DeferInstanceManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
             domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
-            layout_id(l), pointer(new PointerConstraint(p)) { }
+            layout_id(l), pointer(new PointerConstraint(p)), use_event(use) { }
       public:
         const DistributedID did;
         const AddressSpaceID owner;
@@ -392,8 +392,8 @@ namespace Legion {
           : LgTaskArgs<DeferReductionManagerArgs>(implicit_provenance),
             did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
             domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
-            layout_id(l), pointer(new PointerConstraint(p)), foldable(fold),
-            ptr_space(ptr), redop(r) { }
+            layout_id(l), pointer(new PointerConstraint(p)), use_event(use),
+            foldable(fold), ptr_space(ptr), redop(r) { }
       public:
         const DistributedID did;
         const AddressSpaceID owner;

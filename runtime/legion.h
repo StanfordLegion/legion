@@ -6805,9 +6805,9 @@ namespace Legion {
       /**
        * Blocking call to wait for the runtime to shutdown when
        * running in background mode.  Otherwise it is illegal to 
-       * invoke this method.
+       * invoke this method. Returns the exit code for the application.
        */
-      static void wait_for_shutdown(void);
+      static int wait_for_shutdown(void);
       
       /**
        * Set the top-level task ID for the runtime to use when beginning
