@@ -967,6 +967,10 @@ function task_generator.new(node)
       for field, field_privileges in all_privileges:items() do
         field_privileges:foreach(function(privilege)
           region_privileges:insert(std.privilege(privilege, region_param, field))
+          local field_type = std.get_field_path(region_param:gettype():fspace(), field)
+          if std.is_reduce(privilege) and field_type:isarray() then
+            std.update_reduction_op(privilege.op, field_type)
+          end
         end)
       end
       privileges:insert(region_privileges)
