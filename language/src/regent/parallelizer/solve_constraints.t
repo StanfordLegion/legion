@@ -1508,6 +1508,15 @@ function solver_context:synthesize_partitions(color_space_symbol)
     diff_partitions[data.newtuple(all_image_range, disjoint_range)] = ghost_range
   end
 
+  self.sources:foreach(function(source)
+    if not created:has(source) then
+      local partition = self.constraints:get_partition(source)
+      stats:insert(
+        create_equal_partition(source, partition.region, color_space_symbol))
+      created:insert(source)
+    end
+  end)
+
   -- Finally, we create union partitions for accesses with multiple ranges
   for region_symbol, accesses_summary in self.field_accesses:items() do
     for field_path, summary in accesses_summary:items() do
