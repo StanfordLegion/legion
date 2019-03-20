@@ -671,6 +671,26 @@ function rewrite_accesses.stat_assignment_or_reduce(cx, stat)
   }
 end
 
+function rewrite_accesses.stat_var_unpack(cx, stat)
+  return stat { value = rewrite_accesses.expr(cx, stat.value) }
+end
+
+function rewrite_accesses.stat_expr(cx, stat)
+  return stat { expr = rewrite_accesses.expr(cx, stat.expr) }
+end
+
+function rewrite_accesses.stat_raw_delete(cx, stat)
+  return stat { value = rewrite_accesses.expr(cx, stat.value) }
+end
+
+function rewrite_accesses.stat_return(cx, stat)
+  return stat { value = stat.value and rewrite_accesses.expr(cx, stat.value) }
+end
+
+function rewrite_accesses.stat_parallel_prefix(cx, stat)
+  return stat { dir = rewrite_accesses.expr(cx, stat.dir) }
+end
+
 function rewrite_accesses.pass_through_stat(cx, stat) return stat end
 
 local rewrite_accesses_stat_table = {
@@ -686,13 +706,13 @@ local rewrite_accesses_stat_table = {
   [ast.typed.stat.Assignment]      = rewrite_accesses.stat_assignment_or_reduce,
   [ast.typed.stat.Reduce]          = rewrite_accesses.stat_assignment_or_reduce,
 
-  [ast.typed.stat.VarUnpack]       = rewrite_accesses.pass_through_stat,
-  [ast.typed.stat.Return]          = rewrite_accesses.pass_through_stat,
-  [ast.typed.stat.Expr]            = rewrite_accesses.pass_through_stat,
+  [ast.typed.stat.VarUnpack]       = rewrite_accesses.stat_var_unpack,
+  [ast.typed.stat.Expr]            = rewrite_accesses.stat_expr,
+  [ast.typed.stat.Return]          = rewrite_accesses.stat_return,
+  [ast.typed.stat.RawDelete]       = rewrite_accesses.stat_raw_delete,
+  [ast.typed.stat.ParallelPrefix]  = rewrite_accesses.stat_parallel_prefix,
 
   [ast.typed.stat.Break]           = rewrite_accesses.pass_through_stat,
-  [ast.typed.stat.ParallelPrefix]  = rewrite_accesses.pass_through_stat,
-  [ast.typed.stat.RawDelete]       = rewrite_accesses.pass_through_stat,
   [ast.typed.stat.Fence]           = rewrite_accesses.pass_through_stat,
 
   [ast.typed.stat.Elseif]          = unreachable,
