@@ -3751,9 +3751,7 @@ namespace Legion {
           analysis->add_reference();
           // Note that this call will clean up the analysis allocation
           effects_done = runtime->forest->physical_perform_registration(
-                                  requirement, this, 0/*index*/, 
-                                  termination_event, mapped_instances,
-                                  trace_info, analysis, map_applied_conditions);
+                                  analysis, trace_info, map_applied_conditions);
         }
         else
           effects_done = 
@@ -3786,9 +3784,8 @@ namespace Legion {
         analysis->add_reference();
         // Note that this call will clean up the analysis allocation
         effects_done = 
-          runtime->forest->physical_perform_registration(requirement, 
-              this, 0/*index*/, termination_event, mapped_instances, 
-              trace_info, analysis, map_applied_conditions); 
+          runtime->forest->physical_perform_registration(analysis, trace_info,
+                                                       map_applied_conditions);
         // We need to fill in the sharded view before we do the next
         // call in case there are output effects due to restriction
         exchange->complete_exchange(this, sharded_view, 
@@ -3864,9 +3861,8 @@ namespace Legion {
         // Then do the registration, no need to track output effects since we
         // know that this instance can't be restricted in a control 
         // replicated context
-        runtime->forest->physical_perform_registration(requirement,
-            this, 0/*index*/, termination_event, mapped_instances, trace_info,
-            analysis, map_applied_conditions);
+        runtime->forest->physical_perform_registration(analysis, trace_info,
+                                                       map_applied_conditions);
         // If we have a write then we make a sharded view and 
         // then shard 0 will do the overwrite
         if (is_write)
@@ -4256,9 +4252,8 @@ namespace Legion {
         const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration
         // Note this will clean up the analysis allocation above
-        runtime->forest->physical_perform_registration(requirement, 
-            this, 0/*idx*/, completion_event, attach_instances, trace_info, 
-            analysis, map_applied_conditions);
+        runtime->forest->physical_perform_registration(analysis, trace_info,
+                                                       map_applied_conditions);
         exchange->complete_exchange(this, sharded_view, 
                                     attach_instances, map_applied_conditions);
         // Make sure all these are done before we do the overwrite
