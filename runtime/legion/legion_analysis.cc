@@ -3841,7 +3841,6 @@ namespace Legion {
             Runtime::merge_events(applied_events));
       else
         Runtime::trigger_event(dargs->applied_event);
-      printf("Handle deferred remote %p\n", dargs->analysis);
       if (dargs->analysis->on_heap && dargs->analysis->remove_reference())
         delete dargs->analysis;
     }
@@ -4149,7 +4148,6 @@ namespace Legion {
         output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
-      printf("Make update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
@@ -4167,7 +4165,6 @@ namespace Legion {
         remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
-      printf("Make update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
@@ -4187,7 +4184,6 @@ namespace Legion {
     UpdateAnalysis::~UpdateAnalysis(void)
     //--------------------------------------------------------------------------
     { 
-      printf("Delete update analysis at %p\n", this);
     }
 
     //--------------------------------------------------------------------------
