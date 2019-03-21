@@ -1798,6 +1798,7 @@ namespace Legion {
     extern Realm::Logger log_inst;             \
     extern Realm::Logger log_variant;          \
     extern Realm::Logger log_allocation;       \
+    extern Realm::Logger log_migration;        \
     extern Realm::Logger log_prof;             \
     extern Realm::Logger log_garbage;          \
     extern Realm::Logger log_spy;              \

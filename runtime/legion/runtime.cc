@@ -63,6 +63,7 @@ namespace Legion {
     Realm::Logger log_inst("instances");
     Realm::Logger log_variant("variants");
     Realm::Logger log_allocation("allocation");
+    Realm::Logger log_migration("migration");
     Realm::Logger log_prof("legion_prof");
     Realm::Logger log_garbage("legion_gc");
     Realm::Logger log_shutdown("shutdown");

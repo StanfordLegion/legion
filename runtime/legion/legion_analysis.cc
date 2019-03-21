@@ -8475,6 +8475,8 @@ namespace Legion {
         return;
       }
       // At this point we've decided to do the migration
+      log_migration.info("Migrating Equivalence Set %lld from %d to %d",
+          did, local_space, max_user);
       logical_owner_space = max_user;
       // Add ourselves and remove the new owner from remote subsets
       remote_subsets.insert(local_space);

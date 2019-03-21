@@ -696,7 +696,7 @@ function type_check.expr_index_access(cx, node)
     if value:is(ast.typed.expr.ID) then
       region_symbol = value.value
     else
-      region_symbol = terralib.newsymbol(value_type)
+      region_symbol = std.newsymbol(value_type)
     end
     local result_type = std.ref(region_index_type(value_type:fspace(), region_symbol))
 
