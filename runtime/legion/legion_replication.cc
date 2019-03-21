@@ -3826,7 +3826,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
-              true/*track effects*/); 
+              // Can't track initialized here because it might not be
+              // correct with our altered privileges
+              true/*track effects*/, false/*check initialized*/); 
         // If we're a write, then switch back privileges
         if (is_write)
         {
