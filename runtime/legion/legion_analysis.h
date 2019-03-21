@@ -1035,6 +1035,7 @@ namespace Legion {
       ValidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                         ReductionOpID redop = 0);
       ValidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                        Operation *op, unsigned index, 
                         ValidInstAnalysis *target, ReductionOpID redop);
       ValidInstAnalysis(const ValidInstAnalysis &rhs);
       virtual ~ValidInstAnalysis(void);

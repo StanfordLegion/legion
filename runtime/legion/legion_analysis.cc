@@ -3564,8 +3564,9 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     ValidInstAnalysis::ValidInstAnalysis(Runtime *rt, AddressSpaceID src, 
-                   AddressSpaceID prev, ValidInstAnalysis *t, ReductionOpID red)
-      : PhysicalAnalysis(rt, src, prev, NULL, 0, true/*on heap*/), 
+                   AddressSpaceID prev, Operation *o, unsigned idx,
+                   ValidInstAnalysis *t, ReductionOpID red)
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
         redop(red), target(t)
     //--------------------------------------------------------------------------
     {
@@ -3649,6 +3650,8 @@ namespace Legion {
             rez.serialize(it->first->did);
             rez.serialize(it->second);
           }
+          op->pack_remote_operation(rez, rit->first);
+          rez.serialize(index);
           rez.serialize(redop);
           rez.serialize(target);
           rez.serialize(ready);
@@ -3730,6 +3733,10 @@ namespace Legion {
           ready_events.insert(ready);
         derez.deserialize(eq_masks[idx]);
       }
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      unsigned index;
+      derez.deserialize(index);
       ReductionOpID redop;
       derez.deserialize(redop);
       ValidInstAnalysis *target;
@@ -3739,8 +3746,8 @@ namespace Legion {
       RtUserEvent applied;
       derez.deserialize(applied);
 
-      ValidInstAnalysis *analysis = 
-        new ValidInstAnalysis(runtime, original_source, previous, target,redop);
+      ValidInstAnalysis *analysis = new ValidInstAnalysis(runtime, 
+          original_source, previous, op, index, target, redop);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events;
       // Wait for the equivalence sets to be ready if necessary
