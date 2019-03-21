@@ -1068,6 +1068,7 @@ namespace Legion {
       ValidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
                         ReductionOpID redop = 0);
       ValidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                        Operation *op, unsigned index, 
                         ValidInstAnalysis *target, ReductionOpID redop);
       ValidInstAnalysis(const ValidInstAnalysis &rhs);
       virtual ~ValidInstAnalysis(void);
@@ -1870,6 +1871,8 @@ namespace Legion {
       // the smaples per migration count, if it ever exceeds this 
       // then we'll issue a warning
       static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      // How many total samples do we want to remember
+      static const unsigned MIGRATION_MEMORIES = 64;
       std::vector<AddressSpaceID> user_samples;
       std::vector<unsigned> user_counts;
       unsigned sample_count;
