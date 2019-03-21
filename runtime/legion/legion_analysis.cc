@@ -3436,15 +3436,6 @@ namespace Legion {
     PhysicalAnalysis::~PhysicalAnalysis(void)
     //--------------------------------------------------------------------------
     {
-      if (!alt_sets.empty() || !delete_sets.empty())
-      {
-#ifdef DEBUG_LEGION
-        assert(version_info != NULL);
-        assert(update_event.exists());
-#endif
-        version_info->update_equivalence_sets(alt_sets, delete_sets);
-        Runtime::trigger_event(update_event);
-      }
       if (remote_instances != NULL)
         delete remote_instances;
       if (owns_op && (op != NULL))
@@ -3678,6 +3669,9 @@ namespace Legion {
                                            std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(version_info != NULL);
+#endif
       AutoLock a_lock(*this);
       FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
       // Remove any fields we already traversed
@@ -3690,17 +3684,7 @@ namespace Legion {
         finder.merge(mask);
       }
       else
-      {
-        if (alt_sets.empty() && delete_sets.empty())
-        {
-#ifdef DEBUG_LEGION
-          assert(!update_event.exists());
-#endif
-          update_event = Runtime::create_rt_user_event();
-          applied_events.insert(update_event);
-        }
         alt_sets.insert(set, mask);
-      }
       return false;
     }
 
@@ -3709,23 +3693,17 @@ namespace Legion {
                                            const FieldMask &mask)
     //--------------------------------------------------------------------------
     {
+      // If we don't have a version info then we can skip this because 
+      // we know we don't record anything if version_info is NULL
+      if (version_info == NULL)
+        return;
       AutoLock a_lock(*this);
       FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
       if (finder != alt_sets.end())
       {
         finder.filter(mask);
         if (!finder->second)
-        {
           alt_sets.erase(finder);
-          if (alt_sets.empty())
-          {
-#ifdef DEBUG_LEGION
-            assert(update_event.exists());
-#endif
-            Runtime::trigger_event(update_event);
-            update_event = RtUserEvent::NO_RT_USER_EVENT;
-          }
-        }
       }
     }
 
@@ -3734,16 +3712,24 @@ namespace Legion {
                        const FieldMask &mask, std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
     {
-      AutoLock a_lock(*this);    
-      if (delete_sets.empty() && alt_sets.empty())
-      {
 #ifdef DEBUG_LEGION
-        assert(!update_event.exists());
+      assert(version_info != NULL);
 #endif
-        update_event = Runtime::create_rt_user_event();
-        applied_events.insert(update_event);
-      }
+      AutoLock a_lock(*this);    
       delete_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::apply_update_equivalence_sets(void)
+    //--------------------------------------------------------------------------
+    {
+      // No need for the lock here since we know there are no 
+      // races because there are no more traversals being performed
+#ifdef DEBUG_LEGION
+      assert(version_info != NULL);
+      assert(!alt_sets.empty() || !delete_sets.empty());
+#endif
+      version_info->update_equivalence_sets(alt_sets, delete_sets);
     }
 
     //--------------------------------------------------------------------------
@@ -4033,6 +4019,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       if (remote_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -4334,6 +4322,8 @@ namespace Legion {
         node->report_uninitialized_usage(op, index, usage, uninitialized,
                                          uninitialized_reported);
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       if (!input_aggregators.empty())
       {
         const bool needs_deferral = !already_deferred || 
@@ -4589,6 +4579,9 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      // Filter has no perform_updates call so we apply this here
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       // Easy out if there is nothing to do
       if (remote_sets.empty())
         return RtEvent::NO_RT_EVENT;
@@ -4642,6 +4635,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       if (remote_instances != NULL)
       {
         if (original_source != runtime->address_space)
@@ -4874,6 +4869,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       // See if we have any instance names to send back
       if ((target != this) && (remote_instances != NULL))
       {
@@ -5228,6 +5225,8 @@ namespace Legion {
         src_node->report_uninitialized_usage(op, src_index, src_usage, 
                                 uninitialized, uninitialized_reported);
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       if (across_aggregator != NULL)
       {
 #ifdef DEBUG_LEGION
@@ -5663,6 +5662,8 @@ namespace Legion {
         applied_events.insert(args.applied_event);
         return args.done_event;
       }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
       if (output_aggregator != NULL)
       {
         const PhysicalTraceInfo trace_info(op, false/*initialize*/);
