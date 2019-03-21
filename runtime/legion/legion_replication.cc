@@ -3747,7 +3747,8 @@ namespace Legion {
                                       requirement, node, mapped_instances,
                                       mapped_views, init_precondition,
                                       termination_event, true/*track effects*/,
-                                      false/*check initialized*/);
+                                      false/*check initialized*/,
+                                      false/*skip output*/);
           analysis->add_reference();
           // Note that this call will clean up the analysis allocation
           effects_done = runtime->forest->physical_perform_registration(
@@ -3780,7 +3781,8 @@ namespace Legion {
                                       requirement, node, mapped_instances,
                                       mapped_views, init_precondition,
                                       termination_event, true/*track effects*/,
-                                      false/*check initialized*/);
+                                      false/*check initialized*/,
+                                      false/*skip output*/);
         analysis->add_reference();
         // Note that this call will clean up the analysis allocation
         effects_done = 
@@ -3826,9 +3828,14 @@ namespace Legion {
 #ifdef DEBUG_LEGION
               get_logging_name(), unique_op_id,
 #endif
+              // No need to track effects since we know it can't be 
+              // restricted in a control replicated context
               // Can't track initialized here because it might not be
               // correct with our altered privileges
-              true/*track effects*/, false/*check initialized*/); 
+              false/*track effects*/, false/*check initialized*/,
+              // We can skip output for the same reason we don't 
+              // need to track any effects
+              true/*defer copies*/, true/*skip output*/); 
         // If we're a write, then switch back privileges
         if (is_write)
         {
@@ -4249,7 +4256,7 @@ namespace Legion {
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
             &version_info, requirement, node, attach_instances, attach_views,
             ApEvent::NO_AP_EVENT, completion_event, false/*track effects*/,
-            false/*check initialized*/);
+            false/*check initialized*/, true/*skip output*/);
         analysis->add_reference();
         const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration

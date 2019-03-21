@@ -437,7 +437,8 @@ namespace Legion {
 #endif
                                 const bool track_effects,
                                 const bool check_initialized = true,
-                                const bool defer_copies = true);
+                                const bool defer_copies = true,
+                                const bool skip_output = false);
       // Return an event for when the copy-out effects of the 
       // registration are done (e.g. for restricted coherence)
       ApEvent physical_perform_registration(UpdateAnalysis *analysis,

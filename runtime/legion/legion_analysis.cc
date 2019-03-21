@@ -4128,12 +4128,12 @@ namespace Legion {
                      RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      const ApEvent pre, const ApEvent term,
-                     const bool track, const bool check)
+                     const bool track, const bool check, const bool skip)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        output_aggregator(NULL)
+        skip_output(skip), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4145,11 +4145,12 @@ namespace Legion {
                      InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      const RtEvent user_reg, const ApEvent pre, 
-                     const ApEvent term, const bool track, const bool check)
+                     const ApEvent term, const bool track, 
+                     const bool check, const bool skip)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
-        check_initialized(check), output_aggregator(NULL),
+        check_initialized(check), skip_output(skip), output_aggregator(NULL),
         remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
@@ -4161,7 +4162,7 @@ namespace Legion {
         target_instances(rhs.target_instances), target_views(rhs.target_views),
         precondition(rhs.precondition), term_event(rhs.term_event), 
         track_effects(rhs.track_effects), 
-        check_initialized(rhs.check_initialized)
+        check_initialized(rhs.check_initialized), skip_output(rhs.skip_output)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4286,6 +4287,7 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(effects);
           rez.serialize<bool>(check_initialized);
+          rez.serialize<bool>(skip_output);
         }
         runtime->send_equivalence_set_remote_updates(rit->first, rez);
         remote_events.insert(updated);
@@ -4364,12 +4366,23 @@ namespace Legion {
         DeferPerformOutputArgs args(this);
         runtime->issue_runtime_meta_task(args,
             LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
-        applied_events.insert(args.applied_event);
-        return args.effects_event;
+        // If we're skipping the output we still need to launch this 
+        // meta-task to prevent the analysis from being deleted until
+        // everything else is done, we just don't record any output
+        if (!skip_output)
+        {
+          applied_events.insert(args.applied_event);
+          return args.effects_event;
+        }
+        else
+          return ApEvent::NO_AP_EVENT;
       }
       ApEvent result;
       if (output_aggregator != NULL)
       {
+#ifdef DEBUG_LEGION
+        assert(!skip_output);
+#endif
         // Make sure we don't defer this
         const PhysicalTraceInfo trace_info(op, false/*initialize*/);
         output_aggregator->issue_updates(trace_info, term_event);
@@ -4450,13 +4463,15 @@ namespace Legion {
       const bool track_effects = effects_done.exists();
       bool check_initialized;
       derez.deserialize(check_initialized);
+      bool skip_output;
+      derez.deserialize(skip_output);
 
       RegionNode *node = runtime->forest->get_node(handle);
       // This takes ownership of the remote operation
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
           previous, op, index, usage, node, targets, target_views, 
           remote_user_registered, precondition, term_event, track_effects, 
-          check_initialized);
+          check_initialized, skip_output);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready

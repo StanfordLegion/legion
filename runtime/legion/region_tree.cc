@@ -1947,7 +1947,8 @@ namespace Legion {
 #endif
                                const bool track_effects,
                                const bool check_initialized,
-                               const bool defer_copies)
+                               const bool defer_copies,
+                               const bool skip_output)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, REGION_TREE_PHYSICAL_REGISTER_ONLY_CALL);
@@ -1983,8 +1984,8 @@ namespace Legion {
 #endif
       analysis = new UpdateAnalysis(runtime, op, index, &version_info, req, 
                                     region_node, targets, target_views, 
-                                    precondition, term_event,
-                                    track_effects, check_initialized);
+                                    precondition, term_event, track_effects,
+                                    check_initialized, skip_output);
       analysis->add_reference();
       // Iterate over all the equivalence classes and perform the analysis
       // Only need to check for uninitialized data for things not discarding

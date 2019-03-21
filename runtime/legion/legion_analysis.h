@@ -1107,14 +1107,16 @@ namespace Legion {
                      RegionNode *node, const InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool track_effects, const bool check_initialized);
+                     const bool track_effects, const bool check_initialized,
+                     const bool skip_output);
       UpdateAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
                      Operation *op, unsigned index, const RegionUsage &usage,
                      RegionNode *node, InstanceSet &target_instances,
                      std::vector<InstanceView*> &target_views,
                      const RtEvent user_registered,
                      const ApEvent precondition, const ApEvent term_event,
-                     const bool track_effects, const bool check_initialized);
+                     const bool track_effects, const bool check_initialized,
+                     const bool skip_output);
       UpdateAnalysis(const UpdateAnalysis &rhs);
       virtual ~UpdateAnalysis(void);
     public:
@@ -1152,6 +1154,7 @@ namespace Legion {
       const ApEvent term_event;
       const bool track_effects;
       const bool check_initialized;
+      const bool skip_output;
     public:
       // Have to lock the analysis to access these safely
       std::map<RtEvent,CopyFillAggregator*> input_aggregators;
