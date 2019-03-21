@@ -996,6 +996,9 @@ namespace Legion {
       // Lock must be held from caller
       void record_instance(InstanceView* view, const FieldMask &mask);
       inline void record_restriction(void) { restricted = true; }
+    protected:
+      // Can only be called once all traversals are done
+      void apply_update_equivalence_sets(void);
     public:
       static void handle_remote_instances(Deserializer &derez, Runtime *rt);
       static void handle_deferred_traversal(const void *args);
@@ -1015,7 +1018,6 @@ namespace Legion {
       // For updates to the traversal data structures
       FieldMaskSet<EquivalenceSet> alt_sets;
       FieldMaskSet<EquivalenceSet> delete_sets;
-      RtUserEvent update_event;
     protected:
       LegionMap<AddressSpaceID,
                 FieldMaskSet<EquivalenceSet> >::aligned remote_sets;
