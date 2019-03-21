@@ -7133,6 +7133,16 @@ namespace Legion {
         }
         disjoint_partition_refinements.clear();
       }
+      // Pack the user samples and counts
+#ifdef DEBUG_LEGION
+      assert(user_samples.size() == user_counts.size());
+#endif
+      rez.serialize<size_t>(user_samples.size());
+      for (unsigned idx = 0; idx < user_samples.size(); idx++)
+      {
+        rez.serialize(user_samples[idx]);
+        rez.serialize(user_counts[idx]);
+      }
       if (late_references != NULL)
       {
         // Launch a task to remove the references once the migration is done
@@ -7325,6 +7335,18 @@ namespace Legion {
         FieldMask mask;
         derez.deserialize(mask);
         disjoint_partition_refinements.insert(dis, mask);
+      }
+      size_t num_samples;
+      derez.deserialize(num_samples);
+      if (num_samples > 0)
+      {
+        user_samples.resize(num_samples);
+        user_counts.resize(num_samples);
+        for (unsigned idx = 0; idx < num_samples; idx++)
+        {
+          derez.deserialize(user_samples[idx]);
+          derez.deserialize(user_counts[idx]);
+        }
       }
       // Make all the events we'll need to wait on
       RtEvent ready_for_references, guards_done;
