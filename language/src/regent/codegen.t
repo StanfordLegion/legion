@@ -7310,6 +7310,7 @@ function codegen.expr_binary(cx, node)
     local lhs = codegen.expr(cx, node.lhs):read(cx, node.lhs.expr_type)
     local rhs = codegen.expr(cx, node.rhs):read(cx, node.rhs.expr_type)
     local result = terralib.newsymbol(expr_type)
+    local bounds_actions, domain, bounds = index_space_bounds(cx, `([result].impl), expr_type)
     local actions = quote
       [lhs.actions];
       [rhs.actions];
@@ -7321,7 +7322,10 @@ function codegen.expr_binary(cx, node)
         args[1] = [rhs.value].impl
         [result] = [expr_type] { impl = [ispace_op]([cx.runtime], [cx.context], args, 2) }
       end
+      [bounds_actions]
     end
+    cx:add_ispace_root(expr_type, `([result].impl), false, domain, bounds)
+
     return values.value(
       node,
       expr.just(actions, result),
