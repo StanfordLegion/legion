@@ -1834,6 +1834,8 @@ namespace Legion {
       // the smaples per migration count, if it ever exceeds this 
       // then we'll issue a warning
       static const unsigned SAMPLES_PER_MIGRATION_TEST = 64;
+      // How many total samples do we want to remember
+      static const unsigned MIGRATION_MEMORIES = 64;
       std::vector<AddressSpaceID> user_samples;
       std::vector<unsigned> user_counts;
       unsigned sample_count;

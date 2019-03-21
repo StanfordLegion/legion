@@ -8067,37 +8067,85 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!user_samples.empty());
 #endif
-      // Figure out which node(s) has/have the most uses 
-      // Make sure that the current owner node is sticky
-      // if it is tied for the most uses
-      unsigned max = user_counts[0]; 
-      AddressSpaceID max_user = user_samples[0];
-      for (unsigned idx = 1; idx < user_samples.size(); idx++)
+      AddressSpaceID new_logical_owner = logical_owner_space;
+      if (user_samples.size() > 1)
       {
-        if (user_counts[idx] < max)
-          continue;
-        if ((user_counts[idx] == max) && 
-            (user_samples[idx] != logical_owner_space))
-          continue;
-        max = user_counts[idx];
-        max_user = user_samples[idx];
+        bool has_logical_owner = false;
+        // Figure out which node(s) has/have the most uses 
+        // Make sure that the current owner node is sticky
+        // if it is tied for the most uses
+        unsigned max = user_counts[0]; 
+        unsigned total_users = max;
+        AddressSpaceID max_user = user_samples[0];
+        for (unsigned idx = 1; idx < user_samples.size(); idx++)
+        {
+          const unsigned user_count = user_counts[idx];
+          const AddressSpaceID user = user_samples[idx];
+          if (user == logical_owner_space)
+            has_logical_owner = true;
+          else if (!has_logical_owner)
+            // Only need this statistic if we don't have the logical owner
+            total_users += user_count;
+          if (user_count < max)
+            continue;
+          // This is the part where we guarantee stickiness
+          if ((user_count == max) && (user != logical_owner_space))
+            continue;
+          max = user_counts[idx];
+          max_user = user_samples[idx];
+        }   
+        if (has_logical_owner)
+        {
+          // If the logical owner is one of the current users then
+          // we really better have a good reason to move this 
+          // equivalence set to a new node. Make sure it has at
+          // least double the number of expected users
+          const unsigned needed_users = (2 * total_users) / user_samples.size();
+          // Do the migration if we had more than this number of users
+          if (max > needed_users)
+            new_logical_owner = max_user;
+        }
+        else
+          // If we didn't have the current logical owner then
+          // just pick the maximum one
+          new_logical_owner = max_user;
+        // Now reset the data structure for the next iteration
+        if (total_users >= (MIGRATION_MEMORIES * SAMPLES_PER_MIGRATION_TEST))
+        {
+          // Scale each one by it's ratio, if it's zero then prune it
+          // from the list of active users
+          unsigned output_index = 0;
+          for (unsigned idx = 0; idx < user_samples.size(); idx++)
+          {
+            const unsigned new_count = 
+              ((MIGRATION_MEMORIES-1) * SAMPLES_PER_MIGRATION_TEST * 
+               user_samples[idx]) / total_users;
+            if (new_count == 0)
+              continue;
+            if (output_index != idx)
+              user_samples[output_index] = user_samples[idx];
+            user_counts[output_index++] = new_count;
+          }
+          if (output_index < user_samples.size())
+          {
+            // These will shrink but not necessarily deallocate
+            user_samples.resize(output_index);
+            user_counts.resize(output_index);
+          }
+        }
       }
-      // Reset the data structures for the next run
-      user_samples.clear();
-      user_counts.clear();
+      else
+      {
+        // If all the requests came from the same node, send it there
+        new_logical_owner = user_samples.front();
+        // Reset our counts for the next iteration
+        if (user_counts[0] >= (MIGRATION_MEMORIES * SAMPLES_PER_MIGRATION_TEST))
+          user_counts[0] -= SAMPLES_PER_MIGRATION_TEST;
+      }
+      // This always get reset here
       sample_count = 0;
-      // Then decide if we need to do the migration
-      // If the max_user is the logical_owner_space that is easy
-      // since we don't need to move anything
-      // We also check for the ping-pong case of two nodes that are
-      // about evenly balance, make sure one has a 2/3 majority count
-      // before migrating
-      if ((max_user == logical_owner_space) ||
-          // Everything below here is the test for ping pong cases
-          ((user_samples.size() == 2) && 
-           ((user_samples[0] == logical_owner_space) ||
-            (user_samples[1] == logical_owner_space)) &&
-           (max < (2 * SAMPLES_PER_MIGRATION_TEST / 3))))
+      // See if we are actually going to do the migration
+      if (logical_owner_space == new_logical_owner)
       {
         // No need to do the migration in this case
         // Check to see if the request bounced off a stale owner 
@@ -8119,8 +8167,8 @@ namespace Legion {
       }
       // At this point we've decided to do the migration
       log_migration.info("Migrating Equivalence Set %lld from %d to %d",
-          did, local_space, max_user);
-      logical_owner_space = max_user;
+          did, local_space, new_logical_owner);
+      logical_owner_space = new_logical_owner;
       // Add ourselves and remove the new owner from remote subsets
       remote_subsets.insert(local_space);
       remote_subsets.erase(logical_owner_space);
