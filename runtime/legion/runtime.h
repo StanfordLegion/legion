@@ -947,12 +947,13 @@ namespace Legion {
       struct PartialMessage {
       public:
         PartialMessage(void)
-          : buffer(NULL), size(0), index(0), messages(0) { }
+          : buffer(NULL), size(0), index(0), messages(0), total(0) { }
       public:
         char *buffer;
         size_t size;
         unsigned index;
         unsigned messages;
+        unsigned total;
       };
     public:
       VirtualChannel(VirtualChannelKind kind,AddressSpaceID local_address_space,
@@ -971,7 +972,7 @@ namespace Legion {
     private:
       void send_message(bool complete, Runtime *runtime, 
                         Processor target, bool response, bool shutdown);
-      void handle_messages(unsigned num_messages, Runtime *runtime, 
+      bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen) const;
       static void buffer_messages(unsigned num_messages,
@@ -979,7 +980,8 @@ namespace Legion {
                                   char *&receiving_buffer,
                                   size_t &receiving_buffer_size,
                                   unsigned &receiving_index,
-                                  unsigned &received_messages);
+                                  unsigned &received_messages,
+                                  unsigned &partial_messages);
       void filter_unordered_events(void);
     private:
       mutable LocalLock channel_lock;
@@ -1006,9 +1008,10 @@ namespace Legion {
       // channels, for un-ordered virtual channels then
       // we know that we do need the lock
       char *receiving_buffer;
-      unsigned receiving_index;
       size_t receiving_buffer_size;
+      unsigned receiving_index;
       unsigned received_messages;
+      unsigned partial_messages;
       std::map<unsigned/*message id*/,PartialMessage> *partial_assembly;
       mutable bool observed_recent;
     private:
