@@ -5574,7 +5574,7 @@ namespace Legion {
         response_priority((kind == THROUGHPUT_VIRTUAL_CHANNEL) ?
             LG_THROUGHPUT_RESPONSE_PRIORITY : (kind == UPDATE_VIRTUAL_CHANNEL) ?
             LG_LATENCY_MESSAGE_PRIORITY : LG_LATENCY_RESPONSE_PRIORITY),
-        observed_recent(true), profiler(prof)
+        partial_messages(0), observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
     {
@@ -5949,8 +5949,21 @@ namespace Legion {
         case FULL_MESSAGE:
           {
             // Can handle these messages directly
-            handle_messages(num_messages, runtime, 
-                            remote_address_space, buffer, arglen);
+            if (handle_messages(num_messages, runtime, 
+                                remote_address_space, buffer, arglen) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                          LegionProfiler::LEGION_PROF_MESSAGE);
+#else
+              profiler->decrement_total_outstanding_requests();
+#endif
+            }
             break;
           }
         case PARTIAL_MESSAGE:
@@ -5974,13 +5987,13 @@ namespace Legion {
               }
               buffer_messages(num_messages, buffer, arglen,
                               message.buffer, message.size,
-                              message.index, message.messages);
+                              message.index, message.messages, message.total);
             }
             else
               // Ordered channels don't need the lock
-              buffer_messages(num_messages, buffer, arglen,
-                              receiving_buffer, receiving_buffer_size,
-                              receiving_index, received_messages);
+              buffer_messages(num_messages, buffer, arglen, receiving_buffer, 
+                              receiving_buffer_size, receiving_index, 
+                              received_messages, partial_messages);
             break;
           }
         case FINAL_MESSAGE:
@@ -5988,7 +6001,7 @@ namespace Legion {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
             char *final_buffer = NULL;
-            unsigned final_messages = 0, final_index = 0;
+            unsigned final_messages = 0, final_index = 0, final_total = 0;
             bool free_buffer = false;
             if (!ordered_channel)
             {
@@ -6004,26 +6017,43 @@ namespace Legion {
 #endif
               buffer_messages(num_messages, buffer, arglen,
                               finder->second.buffer, finder->second.size,
-                              finder->second.index, finder->second.messages);
+                              finder->second.index, finder->second.messages,
+                              finder->second.total);
               final_index = finder->second.index;
               final_buffer = finder->second.buffer;
               final_messages = finder->second.messages;
+              final_total = finder->second.total;
               free_buffer = true;
               partial_assembly->erase(finder);
             }
             else
             {
-              buffer_messages(num_messages, buffer, arglen,
-                              receiving_buffer, receiving_buffer_size,
-                              receiving_index, received_messages);
+              buffer_messages(num_messages, buffer, arglen, receiving_buffer,
+                              receiving_buffer_size, receiving_index, 
+                              received_messages, partial_messages);
               final_index = receiving_index;
               final_buffer = receiving_buffer;
               final_messages = received_messages;
+              final_total = partial_messages;
               receiving_index = 0;
               received_messages = 0;
+              partial_messages = 0;
             }
-            handle_messages(final_messages, runtime, remote_address_space,
-                            final_buffer, final_index);
+            if (handle_messages(final_messages, runtime, remote_address_space,
+                                final_buffer, final_index) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                          LegionProfiler::LEGION_PROF_MESSAGE, final_total);
+#else
+              profiler->decrement_total_outstanding_requests(final_total);
+#endif
+            }
             if (free_buffer)
               free(final_buffer);
             break;
@@ -6034,12 +6064,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::handle_messages(unsigned num_messages,
+    bool VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
                                          const char *args, size_t arglen) const
     //--------------------------------------------------------------------------
     {
+      bool has_shutdown = false;
       // For profiling if we are doing it
       unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
@@ -6826,31 +6857,19 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true; 
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true;
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -6869,6 +6888,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(arglen == 0); // make sure we processed everything
 #endif
+      return has_shutdown;
     }
 
     //--------------------------------------------------------------------------
@@ -6877,10 +6897,12 @@ namespace Legion {
                                          char *&receiving_buffer,
                                          size_t &receiving_buffer_size,
                                          unsigned &receiving_index,
-                                         unsigned &received_messages)
+                                         unsigned &received_messages,
+                                         unsigned &partial_messages)
     //--------------------------------------------------------------------------
     {
       received_messages += num_messages;
+      partial_messages += 1; // up the number of partial messages received
       // Check to see if it fits
       if (receiving_buffer_size < (receiving_index+arglen))
       {
