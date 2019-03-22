@@ -18426,6 +18426,9 @@ namespace Legion {
                                                              RtEvent &ready)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(LEGION_DISTRIBUTED_HELP_DECODE(did) == EQUIVALENCE_SET_DC);
+#endif
       DistributedCollectable *dc = find_or_request_distributed_collectable<
         EquivalenceSet, SEND_EQUIVALENCE_SET_REQUEST, DEFAULT_VIRTUAL_CHANNEL>(
                                                                     did, ready);

@@ -6047,7 +6047,9 @@ namespace Legion {
                                    IndexSpaceExpression *expr,
                                    IndexSpaceNode *node,
                                    bool reg_now)
-      : DistributedCollectable(rt, did, owner, reg_now), set_expr(expr),
+      : DistributedCollectable(rt, 
+          LEGION_DISTRIBUTED_HELP_ENCODE(did, EQUIVALENCE_SET_DC), 
+          owner, reg_now), set_expr(expr),
         index_space_node(node), logical_owner_space(logical),
         eq_state(is_logical_owner() ? MAPPING_STATE : 
             // If we're not the logical owner but we are the owner
