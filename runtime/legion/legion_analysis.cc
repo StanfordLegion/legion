@@ -3065,7 +3065,8 @@ namespace Legion {
                                        unsigned idx, VersionInfo *info, bool h)
       : previous(rt->address_space), original_source(rt->address_space),
         runtime(rt), op(o), index(idx), version_info(info), owns_op(false),
-        on_heap(h), remote_instances(NULL), restricted(false)
+        on_heap(h), remote_instances(NULL), restricted(false), 
+        parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3075,7 +3076,7 @@ namespace Legion {
                         AddressSpaceID prev, Operation *o, unsigned idx, bool h)
       : previous(prev), original_source(source), runtime(rt), op(o), index(idx),
         version_info(NULL), owns_op(true), on_heap(h), remote_instances(NULL), 
-        restricted(false)
+        restricted(false), parallel_traversals(false)
     //--------------------------------------------------------------------------
     {
     }
@@ -3133,6 +3134,7 @@ namespace Legion {
                                            const bool already_deferred)
     //--------------------------------------------------------------------------
     {
+      // Make sure that we record that this has parallel traversals
       DeferPerformTraversalArgs args(this, set, mask, 
                     deferral_event, already_deferred);
       runtime->issue_runtime_meta_task(args, 
@@ -3330,19 +3332,39 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(version_info != NULL);
 #endif
-      AutoLock a_lock(*this);
-      FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-      // Remove any fields we already traversed
-      if (finder != alt_sets.end())
+      if (parallel_traversals)
       {
-        mask -= finder->second;
-        // If we already traversed it then we don't need to do it again 
-        if (!mask)
-          return true; // early out
-        finder.merge(mask);
+        // Need the lock in this case
+        AutoLock a_lock(*this);
+        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
+        // Remove any fields we already traversed
+        if (finder != alt_sets.end())
+        {
+          mask -= finder->second;
+          // If we already traversed it then we don't need to do it again 
+          if (!mask)
+            return true; // early out
+          finder.merge(mask);
+        }
+        else
+          alt_sets.insert(set, mask);
       }
       else
-        alt_sets.insert(set, mask);
+      {
+        // No parallel traversals means we're the only thread
+        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
+        // Remove any fields we already traversed
+        if (finder != alt_sets.end())
+        {
+          mask -= finder->second;
+          // If we already traversed it then we don't need to do it again 
+          if (!mask)
+            return true; // early out
+          finder.merge(mask);
+        }
+        else
+          alt_sets.insert(set, mask);
+      }
       return false;
     }
 
@@ -3355,13 +3377,28 @@ namespace Legion {
       // we know we don't record anything if version_info is NULL
       if (version_info == NULL)
         return;
-      AutoLock a_lock(*this);
-      FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
-      if (finder != alt_sets.end())
+      if (parallel_traversals)
       {
-        finder.filter(mask);
-        if (!finder->second)
-          alt_sets.erase(finder);
+        // Need the lock if there are parallel traversals
+        AutoLock a_lock(*this);
+        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
+        if (finder != alt_sets.end())
+        {
+          finder.filter(mask);
+          if (!finder->second)
+            alt_sets.erase(finder);
+        }
+      }
+      else
+      {
+        // No parallel traversals means no lock needed
+        FieldMaskSet<EquivalenceSet>::iterator finder = alt_sets.find(set);
+        if (finder != alt_sets.end())
+        {
+          finder.filter(mask);
+          if (!finder->second)
+            alt_sets.erase(finder);
+        }
       }
     }
 
@@ -3373,8 +3410,31 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(version_info != NULL);
 #endif
-      AutoLock a_lock(*this);    
-      delete_sets.insert(set, mask);
+      if (parallel_traversals)
+      {
+        // Lock needed if we're doing parallel traversals
+        AutoLock a_lock(*this);    
+        delete_sets.insert(set, mask);
+      }
+      else
+        // No lock needed if we're the only one
+        delete_sets.insert(set, mask);
+    }
+
+    //--------------------------------------------------------------------------
+    void PhysicalAnalysis::record_remote(EquivalenceSet *set, 
+                                         const FieldMask &mask,
+                                         const AddressSpaceID owner)
+    //--------------------------------------------------------------------------
+    {
+      if (parallel_traversals)
+      {
+        AutoLock a_lock(*this);
+        remote_sets[owner].insert(set, mask);
+      }
+      else
+        // No lock needed if we're the only one
+        remote_sets[owner].insert(set, mask);
     }
 
     //--------------------------------------------------------------------------
@@ -3430,6 +3490,7 @@ namespace Legion {
         already_deferred(def)
     //--------------------------------------------------------------------------
     {
+      analysis->record_parallel_traversals();
       if (analysis->on_heap)
         analysis->add_reference();
     }
