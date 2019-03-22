@@ -980,9 +980,8 @@ namespace Legion {
     public:
       inline bool has_remote_sets(void) const
         { return !remote_sets.empty(); }
-      inline void record_remote(EquivalenceSet *set, const FieldMask &mask,
-                                const AddressSpaceID owner)
-        { remote_sets[owner].insert(set, mask); }
+      inline void record_parallel_traversals(void)
+        { parallel_traversals = true; } 
     public:
       void traverse(RtEvent precondition, EquivalenceSet *set,
               const FieldMask &mask, std::set<RtEvent> &deferral_events,
@@ -1019,12 +1018,14 @@ namespace Legion {
       // Return true if any are restricted
       bool report_instances(FieldMaskSet<InstanceView> &instances);
     public:
-      // Lock taken by these methods
+      // Lock taken by these methods if needed
       bool update_alt_sets(EquivalenceSet *set, FieldMask &mask,
                            std::set<RtEvent> &applied_events);
       void filter_alt_sets(EquivalenceSet *set, const FieldMask &mask);
       void record_delete_set(EquivalenceSet *set, const FieldMask &mask,
                              std::set<RtEvent> &applied_events);
+      void record_remote(EquivalenceSet *set, const FieldMask &mask,
+                         const AddressSpaceID owner);
     public:
       // Lock must be held from caller
       void record_instance(InstanceView* view, const FieldMask &mask);
@@ -1056,6 +1057,10 @@ namespace Legion {
                 FieldMaskSet<EquivalenceSet> >::aligned remote_sets;
       FieldMaskSet<InstanceView> *remote_instances;
       bool restricted;
+    private:
+      // This tracks whether this analysis is being used 
+      // for parallel traversals or not
+      bool parallel_traversals;
     };
 
     /**
