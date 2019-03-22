@@ -5559,7 +5559,7 @@ namespace Legion {
         AddressSpaceID local_address_space, 
         size_t max_message_size, LegionProfiler *prof)
       : sending_buffer((char*)malloc(max_message_size)), 
-        sending_buffer_size(max_message_size), 
+        sending_buffer_size(max_message_size), partial_messages(0),
         observed_recent(true), profiler(prof)
     //--------------------------------------------------------------------------
     //
@@ -5803,8 +5803,21 @@ namespace Legion {
         case FULL_MESSAGE:
           {
             // Can handle these messages directly
-            handle_messages(num_messages, runtime, 
-                            remote_address_space, buffer, arglen);
+            if (handle_messages(num_messages, runtime, 
+                                remote_address_space, buffer, arglen) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                          LegionProfiler::LEGION_PROF_MESSAGE);
+#else
+              profiler->decrement_total_outstanding_requests();
+#endif
+            }
             break;
           }
         case PARTIAL_MESSAGE:
@@ -5819,11 +5832,25 @@ namespace Legion {
             // Save the remaining messages onto the receiving
             // buffer, then handle them and reset the state.
             buffer_messages(num_messages, buffer, arglen);
-            handle_messages(received_messages, runtime,
-                            remote_address_space,
-                            receiving_buffer, receiving_index);
+            if (handle_messages(received_messages, runtime,
+                                remote_address_space,
+                                receiving_buffer, receiving_index) &&
+                // If we had a shutdown message and a profiler then we
+                // shouldn't have incremented the outstanding profiling
+                // count because we don't actually do profiling requests
+                // on any shutdown messages
+                (profiler != NULL))
+            {
+#ifdef DEBUG_LEGION
+              profiler->decrement_total_outstanding_requests(
+                        LegionProfiler::LEGION_PROF_MESSAGE, partial_messages);
+#else
+              profiler->decrement_total_outstanding_requests(partial_messages);
+#endif
+            }
             receiving_index = 0;
             received_messages = 0;
+            partial_messages = 0;
             break;
           }
         default:
@@ -5832,12 +5859,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualChannel::handle_messages(unsigned num_messages,
+    bool VirtualChannel::handle_messages(unsigned num_messages,
                                          Runtime *runtime,
                                          AddressSpaceID remote_address_space,
                                          const char *args, size_t arglen)
     //--------------------------------------------------------------------------
     {
+      bool has_shutdown = false;
       // For profiling if we are doing it
       unsigned long long start = 0, stop = 0;
       for (unsigned idx = 0; idx < num_messages; idx++)
@@ -6575,31 +6603,19 @@ namespace Legion {
             }
           case SEND_SHUTDOWN_NOTIFICATION:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true; 
               runtime->handle_shutdown_notification(derez,remote_address_space);
               break;
             }
           case SEND_SHUTDOWN_RESPONSE:
             {
-              // If we have a profiler, we shouldn't have incremented the
-              // outstanding profiling count because we don't actually
-              // do profiling requests on shutdown messages
-              if (profiler != NULL)
 #ifdef DEBUG_LEGION
-                profiler->decrement_total_outstanding_requests(
-                            LegionProfiler::LEGION_PROF_MESSAGE);
-#else
-                profiler->decrement_total_outstanding_requests();
+              assert(!has_shutdown); // should only be one per message
 #endif
+              has_shutdown = true;
               runtime->handle_shutdown_response(derez);
               break;
             }
@@ -6618,6 +6634,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(arglen == 0); // make sure we processed everything
 #endif
+      return has_shutdown;
     }
 
     //--------------------------------------------------------------------------
@@ -6626,6 +6643,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       received_messages += num_messages;
+      partial_messages += 1; // up the number of partial messages received
       // Check to see if it fits
       if (receiving_buffer_size < (receiving_index+arglen))
       {

@@ -909,7 +909,7 @@ namespace Legion {
     private:
       void send_message(bool complete, Runtime *runtime, 
                         Processor target, bool response, bool shutdown);
-      void handle_messages(unsigned num_messages, Runtime *runtime, 
+      bool handle_messages(unsigned num_messages, Runtime *runtime, 
                            AddressSpaceID remote_address_space,
                            const char *args, size_t arglen);
       void buffer_messages(unsigned num_messages,
@@ -927,9 +927,10 @@ namespace Legion {
       // No lock for receiving messages since we know
       // that they are ordered
       char *receiving_buffer;
-      unsigned receiving_index;
       size_t receiving_buffer_size;
+      unsigned receiving_index;
       unsigned received_messages;
+      unsigned partial_messages;
       bool observed_recent;
     private:
       LegionProfiler *const profiler;
