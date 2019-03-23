@@ -728,6 +728,11 @@ function analyze_access.stat_assignment(cx, node)
   }
 end
 
+-- TODO: This function should change once we add support for custom reduction operators
+local function reducible_type(type)
+  return type:isprimitive() or (type:isarray() and type.type:isprimitive())
+end
+
 function analyze_access.stat_reduce(cx, node)
   cx:forall_context(function(cx)
     return analyze_access.expr(cx, node.rhs, std.reads)
@@ -740,7 +745,7 @@ function analyze_access.stat_reduce(cx, node)
   local atomic = nil
   local scalar = false
   local privilege =
-    (lhs_type:isprimitive() and rhs_type:isprimitive() and std.reduces(node.op)) or
+    (reducible_type(lhs_type) and reducible_type(rhs_type) and std.reduces(node.op)) or
     "reads_writes"
   cx:forall_context(function(cx)
     local private, center, region_access =

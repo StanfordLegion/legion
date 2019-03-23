@@ -1417,13 +1417,13 @@ function ref:reduce(cx, value, op, expr_type, atomic)
            if cx.variant:is_openmp() and atomic then
              return quote
                for i = 0, N do
-                 [openmphelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+                 [openmphelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
                end
              end
            elseif cx.variant:is_cuda() and atomic then
              return quote
                for i = 0, N do
-                 [cudahelper.generate_atomic_update(fold_op, value_type)](&([field_value][i]), result[i])
+                 [cudahelper.generate_atomic_update(fold_op, expr_type.type)](&([field_value][i]), result[i])
                end
              end
            else
