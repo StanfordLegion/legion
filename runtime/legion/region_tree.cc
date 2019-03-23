@@ -13669,6 +13669,8 @@ namespace Legion {
       {
         if (HAS_SKIP && (to_skip == it->op) && (skip_gen == it->gen))
         {
+          if (TRACK_DOM)
+            dominator_mask -= it->field_mask;
           it++;
           continue;
         }
