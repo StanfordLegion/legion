@@ -915,12 +915,14 @@ function task_generator.new(node)
               end)
             local loop_range_region_param =
               partitions_to_region_params[loop_range_partition]
-            local my_cases = data.newmap()
-            cases:map(function(partition, case_id)
-              my_cases[partitions_to_region_params[partition]] = case_id
-            end)
-            my_incl_check_cache[loop_range_region_param] =
-              { my_cache_param, my_cases, num_cases }
+            if loop_range_region_param ~= nil then
+              local my_cases = data.newmap()
+              cases:map(function(partition, case_id)
+                my_cases[partitions_to_region_params[partition]] = case_id
+              end)
+              my_incl_check_cache[loop_range_region_param] =
+                { my_cache_param, my_cases, num_cases }
+            end
           end
           local indices = cx:find_indices_of_range(my_range)
           for _, index in ipairs(indices) do
