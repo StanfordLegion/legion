@@ -696,6 +696,7 @@ end
 local op_name = {
   ["|"] = "|",
   ["-"] = "-",
+  ["&"] = "&",
 }
 
 local function create_partition_by_binary_op(disjointness, lhs, rhs, op)
@@ -1250,16 +1251,89 @@ function solver_context:synthesize_partitions(color_space_symbol)
   local mappings_by_range_sets = data.newmap()
   local ghost_to_primary = data.newmap()
 
-  -- Synthesize preimage partitions for children that cannot be partitioned
-  -- otherwise. We first find non-trivial paths to disjoint partitions.
-  -- Then, we create equal partitions for disjoint children and derive preimage
-  -- for their ancestors in reverse topological order.
-  local paths = data.filter(function(path)
-      assert(#path > 0)
-      if #path > 1 then return true end
-      local _, range = unpack(path[1])
-      return self.constraints:is_constrained(range)
-    end, self.constraints:find_paths_to_disjoint_children(self.sources))
+  -- Sort source ranges for deterministic compilation
+  self.sources:canonicalize()
+
+  -- First try to find constraints subsumed by others. Specifically,
+  -- when we have an image constraint C = R[P1] <= P2 and we need a
+  -- disjoint partition for P1, then any image constraint R[P3] <= P4,
+  -- for which we also know P3 <= P1, is discharged by C. Using
+  -- subsumptions, we can further unify partitions.
+
+  -- TODO: We look at only immediate children of subset constraints
+  --       and do not traverse down distant children.
+  local subsumed_constraints = terralib.newlist()
+  local unifiable_ranges = data.newmap()
+  self.sources:foreach(function(source)
+    if self.constraints.constraints[source] ~= nil then
+      -- Find all image or affine constraints of the source.
+      local source_constraints = data.newmap()
+      for info, dst_range in self.constraints.constraints[source]:items() do
+        if not info:is_subset() then
+          source_constraints[info] = dst_range
+        end
+      end
+
+      -- Then, find all ranges that are subsumed by the source
+      local source_region = self.constraints:get_partition(source).region
+      local subsumed_ranges = terralib.newlist()
+      for src_range, constraints in self.constraints.constraints:items() do
+        for info, dst_range in constraints:items() do
+          if info:is_subset() and
+             source_region == self.constraints:get_partition(dst_range).region
+          then
+            subsumed_ranges:insert({src_range, dst_range})
+          end
+        end
+      end
+
+      -- Finally, find all subsumed constraints
+      for _, pair in ipairs(subsumed_ranges) do
+        local subsumed_range, subsumed_parent = unpack(pair)
+        for info, dst_range in self.constraints.constraints[subsumed_range]:items() do
+          local source_dst_range = source_constraints[info]
+          if source_dst_range ~= nil then
+            subsumed_constraints:insert({subsumed_range, info})
+            unifiable_ranges[dst_range] = source_dst_range
+            unifiable_ranges[subsumed_parent] = source
+          end
+        end
+      end
+    end
+  end)
+
+  if #subsumed_constraints > 0 then
+    for _, pair in ipairs(subsumed_constraints) do
+      local range, info = unpack(pair)
+      self.constraints:remove_constraint(range, info)
+    end
+    self.constraints = self.constraints:clone(unifiable_ranges)
+
+    local function mapping(range) return unifiable_ranges[range] or range end
+    local field_accesses = data.newmap()
+    for region_symbol, accesses_summary in self.field_accesses:items() do
+      local new_access_summary = data.newmap()
+      for field_path, summary in accesses_summary:items() do
+        local new_summary = data.newmap()
+        for privilege, ranges_set in summary:items() do
+          local unified = ranges_set:map(mapping)
+          unified:canonicalize()
+          new_summary[privilege] = unified
+        end
+        new_access_summary[field_path] = new_summary
+      end
+      field_accesses[region_symbol] = new_access_summary
+    end
+    self.field_accesses = field_accesses
+  end
+
+  -- Synthesize partitions on non-trivial paths to disjoint children
+  -- in reverse topological order, as they cannot be partitioned otherwise.
+  -- We create equal partitions for the children and derive partitions
+  -- for their ancestors.
+  local paths = data.filter(function(path) return #path > 1 end,
+      self.constraints:find_paths_to_disjoint_children(self.sources))
+
   paths:map(function(path)
     local parent = nil
     for idx = 1, #path do
@@ -1296,34 +1370,78 @@ function solver_context:synthesize_partitions(color_space_symbol)
   --  * For each constraint P1 <= P2 where P1 is a partition of R and P2 is of S,
   --    we emit `var P1 = R & P2`. If P2 does not exist, we create an equal partition of
   --    S for P2.
-  --  * For each constraint P1 + offset <= P2, we use partition by restriction to derive
-  --    P2 from P1.
-  --  * Constraints of form (P1 + offset) % bounds <= P2 are treated specially as there is
-  --    no single step to handle this case. We eventually use partition by image range, for
-  --    which we meta-program a task that initializes a region containing those ranges.
+  --  * For each constraint (P1 + offset) % mod <= P2, we use a variant of image partition
+  --    `var P2 = image(S, P1, \x.(x + offset) % mod). This is currently backed by
+  --    a shim as Realm doesn't have support for this.
 
-  local worklist = paths:map(function(path)
-    local key, range = unpack(path[#path])
-    return range
-  end)
+  -- We first build a inverse map of subset constraints to construct subset partitions
+  -- in the correct order.
+
+  local subset_relation = data.newmap()
+  local supset_relation = data.newmap()
+  for src_range, constraints in self.constraints.constraints:items() do
+    for info, dst_range in constraints:items() do
+      if info:is_subset() then
+        find_or_create(subset_relation, src_range)[dst_range] = true
+        find_or_create(supset_relation, dst_range)[src_range] = true
+      end
+    end
+  end
+  do
+    local sources = hash_set.new()
+    for src_range, _ in supset_relation:items() do
+      if subset_relation[src_range] == nil then
+        sources:insert(src_range)
+      end
+    end
+    sources:canonicalize()
+    local worklist = sources:to_list()
+    local idx = 1
+    while idx <= #worklist do
+      local src_range = worklist[idx]
+      idx = idx + 1
+      local subsets = supset_relation[src_range]
+      if subsets ~= nil then
+        if not created:has(src_range) then
+          local src_partition = self.constraints:get_partition(src_range)
+          stats:insert(
+            create_equal_partition(src_range, src_partition.region, color_space_symbol))
+          created:insert(src_range)
+          find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
+        end
+        for dst_range, _ in subsets:items() do
+          if not created:has(dst_range) then
+            local dst_partition = self.constraints:get_partition(dst_range)
+            local dst_range, partition_stat =
+              create_intersection_partition_region(dst_partition.region, src_range, dst_range)
+            stats:insert(partition_stat)
+            created:insert(dst_range)
+          end
+          worklist:insert(dst_range)
+        end
+      end
+    end
+  end
+
+  -- Now we synthesize image partitions
+  local worklist = self.sources:to_list()
   local idx = 1
   while idx <= #worklist do
     local src_range = worklist[idx]
     idx = idx + 1
-    local image_constraints = self.constraints.constraints[src_range]
-    if image_constraints ~= nil then
-      for info, dst_range in image_constraints:items() do
+    local constraints = self.constraints.constraints[src_range]
+    if constraints ~= nil then
+      for info, dst_range in constraints:items() do
+        if not created:has(src_range) then
+          local src_partition = self.constraints:get_partition(src_range)
+          stats:insert(
+            create_equal_partition(src_range, src_partition.region, color_space_symbol))
+          created:insert(src_range)
+          find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
+        end
+
         if not created:has(dst_range) then
           assert(not info:is_subset())
-          -- We are about to synthesize a new image partition
-          if not created:has(src_range) then
-            local src_partition = self.constraints:get_partition(src_range)
-            stats:insert(
-              create_equal_partition(src_range, src_partition.region, color_space_symbol))
-            created:insert(src_range)
-            find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
-          end
-
           local dst_partition = self.constraints:get_partition(dst_range)
           local partition_stats =
             create_image_partition(dst_range, dst_partition.region, src_range, info)
@@ -1440,6 +1558,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
         dst_range = src_range
         prev_preimage_range = preimage_range
       end
+      assert(#image_infos > 0 and preimage_range ~= nil)
 
       local diff_range, diff_partition_stat =
         create_difference_partition(preimage_range, dst_range)
@@ -1549,6 +1668,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
         end
 
       else
+        all_ranges:canonicalize()
+
         local primary_range = nil
         local secondary_ranges = terralib.newlist()
         all_ranges:foreach(function(range)
@@ -1560,47 +1681,55 @@ function solver_context:synthesize_partitions(color_space_symbol)
             secondary_ranges:insert(range)
           end
         end)
-        assert(primary_range ~= nil)
 
         mapping = mappings_by_range_sets[all_ranges]
         if mapping == nil then
           mapping = data.newmap()
-          local primary_partitions = nil
-          if disjoint_partitions[primary_range] ~= nil then
-            primary_partitions = disjoint_partitions[primary_range]:to_list()
+          if primary_range == nil then
+            assert(not has_reduce)
+            local union_range, union_partition_stats =
+              create_union_partitions(secondary_ranges, union_partitions)
+            stats:insertall(union_partition_stats)
+            local union_range = terralib.newlist({union_range})
+            all_ranges:foreach(function(range) mapping[range] = union_range end)
           else
-            primary_partitions = terralib.newlist({primary_range})
-          end
+            local primary_partitions = nil
+            if disjoint_partitions[primary_range] ~= nil then
+              primary_partitions = disjoint_partitions[primary_range]:to_list()
+            else
+              primary_partitions = terralib.newlist({primary_range})
+            end
 
-          mapping[primary_range] = primary_partitions
-          if self.loop_ranges:has(primary_range) then
-            self.loop_range_partitions[primary_range] = primary_partitions
-          end
+            mapping[primary_range] = primary_partitions
+            if self.loop_ranges:has(primary_range) then
+              self.loop_range_partitions[primary_range] = primary_partitions
+            end
 
-          local union_range, union_partition_stats =
-            create_union_partitions(secondary_ranges, union_partitions)
-          stats:insertall(union_partition_stats)
-          local ghost_range =
-            diff_partitions[data.newtuple(union_range, primary_range)]
-          if ghost_range == nil then
-            local diff_range, diff_partition_stat =
-              create_difference_partition(union_range, primary_range)
-            stats:insert(diff_partition_stat)
-            ghost_range = diff_range
-            diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
-          end
+            local union_range, union_partition_stats =
+              create_union_partitions(secondary_ranges, union_partitions)
+            stats:insertall(union_partition_stats)
+            local ghost_range =
+              diff_partitions[data.newtuple(union_range, primary_range)]
+            if ghost_range == nil then
+              local diff_range, diff_partition_stat =
+                create_difference_partition(union_range, primary_range)
+              stats:insert(diff_partition_stat)
+              ghost_range = diff_range
+              diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
+            end
 
-          local ghost_ranges = terralib.newlist()
-          ghost_ranges:insertall(primary_partitions)
-          ghost_ranges:insert(ghost_range)
-          secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
+            local ghost_ranges = terralib.newlist()
+            ghost_ranges:insertall(primary_partitions)
+            ghost_ranges:insert(ghost_range)
+            secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
+
+            secondary_ranges:map(function(range)
+              assert(ghost_to_primary[range] == nil or
+                     ghost_to_primary[range] == primary_range)
+              ghost_to_primary[range] = primary_range
+            end)
+          end
           mappings_by_range_sets[all_ranges] = mapping
-
-          secondary_ranges:map(function(range)
-            assert(ghost_to_primary[range] == nil or
-                   ghost_to_primary[range] == primary_range)
-            ghost_to_primary[range] = primary_range
-          end)
         end
       end
 
@@ -1634,9 +1763,9 @@ function solver_context:synthesize_partitions(color_space_symbol)
       -- TODO: Handle cases when one ghost range corresponds to a non-source loop range
       assert(self.loop_ranges:has(loop_range))
 
-      local loop_range_partitions = self.loop_range_partitions[loop_range]
-      assert(#loop_range_partitions > 0)
-      local orig_region = loop_range_partitions[1]:gettype().parent_region_symbol
+      -- partitions in loop_range_partitions are just a decomposition of the original loop nrage
+      assert(loop_range:hastype())
+      local orig_region = loop_range:gettype().parent_region_symbol
       local cache_region, cache_stats =
         create_isomorphic_region("cache_" .. tostring(ghost_range), orig_region, uint8)
       stats:insertall(cache_stats)
@@ -1644,42 +1773,57 @@ function solver_context:synthesize_partitions(color_space_symbol)
       std.add_privilege(self.task_constraints, std.reads, cache_region:gettype(), data.newtuple())
       std.add_privilege(self.task_constraints, std.writes, cache_region:gettype(), data.newtuple())
 
-      for _, loop_range_partition in ipairs(loop_range_partitions) do
-        -- We mark all the entries as potentially pointing to ghost elements
-        local cache_partition, partition_stat =
-          create_intersection_partition_region(cache_region, loop_range_partition)
-        stats:insert(partition_stat)
-        local fill_loop = create_index_fill(self.task_constraints, cache_partition,
-            color_space_symbol, num_cases, uint8)
-        stats:insert(fill_loop)
+      -- We mark all the entries as potentially pointing to ghost elements
+      local cache_partition, partition_stat =
+        create_intersection_partition_region(cache_region, loop_range)
+      stats:insert(partition_stat)
+      local fill_loop = create_index_fill(self.task_constraints, cache_partition,
+          color_space_symbol, num_cases, uint8)
+      stats:insert(fill_loop)
 
-        local cases = data.newmap()
-        find_or_create(self.incl_check_caches, ghost_range)[loop_range_partition] =
-          { cache_partition, cases, num_cases }
-
-        for case_id, primary_partition in ipairs(primary_partitions) do
-          local preimage_partition = primary_partition
-          for i = 1, #paths do
-            local info, range = unpack(paths[i])
-            local region = self.constraints:get_partition(range).region
-            local next_preimage_partition = new_range()
-            stats:insert(
-              create_preimage_partition(next_preimage_partition, region, preimage_partition, info))
-            preimage_partition = next_preimage_partition
-          end
-          local cache_subpartition, partition_stat =
-            create_intersection_partition(cache_partition, preimage_partition)
-          stats:insert(partition_stat)
-          local fill_loop = create_index_fill(self.task_constraints, cache_subpartition,
-              color_space_symbol, case_id, uint8)
-          stats:insert(fill_loop)
-          cases[primary_partition] = case_id
+      local cases = data.newmap()
+      for case_id, primary_partition in ipairs(primary_partitions) do
+        local preimage_partition = primary_partition
+        for i = 1, #paths do
+          local info, range = unpack(paths[i])
+          local region = self.constraints:get_partition(range).region
+          local next_preimage_partition = new_range()
+          stats:insert(
+            create_preimage_partition(next_preimage_partition, region, preimage_partition, info))
+          preimage_partition = next_preimage_partition
         end
+        local cache_subpartition, partition_stat =
+          create_intersection_partition(cache_partition, preimage_partition)
+        stats:insert(partition_stat)
+        local fill_loop = create_index_fill(self.task_constraints, cache_subpartition,
+            color_space_symbol, case_id, uint8)
+        stats:insert(fill_loop)
+        cases[primary_partition] = case_id
+      end
+
+      -- We can use the same cache for any partition of a subset of the loop range
+      local loop_range_partitions = terralib.newlist()
+      loop_range_partitions:insertall(self.loop_range_partitions[loop_range])
+      -- TODO: We need to traverse down the chain of subset constraints
+      for src_range, constraints in self.constraints.constraints:items() do
+        for info, dst_range in constraints:items() do
+          if info:is_subset() and dst_range == loop_range and
+             self.loop_ranges:has(src_range)
+          then
+            loop_range_partitions:insertall(self.loop_range_partitions[src_range])
+          end
+        end
+      end
+      assert(#loop_range_partitions > 0)
+      for _, loop_range_partition in ipairs(loop_range_partitions) do
+        local all_caches  =find_or_create(self.incl_check_caches, ghost_range)
+        assert(all_caches[loop_range_partition] == nil)
+        all_caches[loop_range_partition] = { cache_partition, cases, num_cases }
       end
     end
   end
 
-  return stats
+  return stats, unifiable_ranges
 end
 
 function solver_context:print_all_constraints()
@@ -1692,6 +1836,10 @@ function solver_context:print_all_constraints()
   for region, source in self.sources_by_regions:items() do
     print("    " .. tostring(region) .. " -> " .. tostring(source))
   end
+  print("* loop ranges:")
+  self.loop_ranges:foreach(function(range)
+    print("    " .. tostring(range))
+  end)
   self.constraints:print_constraints()
   print("* accesses:")
   for region_symbol, accesses in self.field_accesses:items() do
@@ -1708,6 +1856,14 @@ function solver_context:print_all_constraints()
 end
 
 local solve_constraints = {}
+
+local function combine_mapping(m1, m2)
+  local m = data.newmap()
+  for from, to in m2:items() do
+    m[from] = m1[to] or to
+  end
+  return m
+end
 
 function solve_constraints.solve(cx, stat)
   assert(stat:is(ast.typed.stat.ParallelizeWith))
@@ -1751,8 +1907,15 @@ function solve_constraints.solve(cx, stat)
     return {range_mapping, region_mapping}
   end)
 
-  local partition_stats =
+  local partition_stats, unified_ranges =
     solver_cx:synthesize_partitions(color_space_symbol)
+
+  if not unified_ranges:is_empty() then
+    mappings = mappings:map(function(pair)
+      local range_mapping, region_mapping = unpack(pair)
+      return {combine_mapping(unified_ranges, range_mapping), region_mapping}
+    end)
+  end
 
   local all_mappings = {}
   for idx = 1, #all_tasks do
