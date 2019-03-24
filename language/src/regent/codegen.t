@@ -3576,7 +3576,7 @@ function codegen.expr_raw_context(cx, node)
 end
 
 function codegen.expr_raw_fields(cx, node)
-  local region = codegen.expr(cx, node.region):read(cx)
+  local region = codegen.expr_region_root(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
@@ -3604,7 +3604,7 @@ function codegen.expr_raw_fields(cx, node)
 end
 
 function codegen.expr_raw_physical(cx, node)
-  local region = codegen.expr(cx, node.region):read(cx)
+  local region = codegen.expr_region_root(cx, node.region):read(cx)
   local region_type = std.as_read(node.region.expr_type)
   local expr_type = std.as_read(node.expr_type)
 
