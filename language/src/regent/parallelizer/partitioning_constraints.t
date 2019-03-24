@@ -159,10 +159,6 @@ function partitioning_constraints:get_partition(range)
   return self.ranges[range]
 end
 
-function partitioning_constraints:is_constrained(range)
-  return self.constraints[range] ~= nil
-end
-
 function partitioning_constraints:find_or_create_subset_constraint(src_range, region_symbol)
   local constraints = find_or_create(self.constraints, src_range)
   local key = constraint_info.new(constraint_type.subset, region_symbol)
@@ -179,6 +175,11 @@ function partitioning_constraints:find_or_create_analytic_constraint(src_range, 
   local constraints = find_or_create(self.constraints, src_range)
   local key = constraint_info.new(constraint_type.affine, offset)
   return find_or_create(constraints, key, ranges.new)
+end
+
+function partitioning_constraints:remove_constraint(src_range, key)
+  local constraints = find_or_create(self.constraints, src_range)
+  constraints[key] = nil
 end
 
 local function lift(tbl)
