@@ -341,52 +341,29 @@ do
     var old_i : float[WIRE_SEGMENTS]
     var old_v : float[WIRE_SEGMENTS - 1]
 
-    var temp_i_0 = rw[w].current._0
-    var temp_i_1 = rw[w].current._1
-    var temp_i_2 = rw[w].current._2
-    var temp_i_3 = rw[w].current._3
-    var temp_i_4 = rw[w].current._4
-    var temp_i_5 = rw[w].current._5
-    var temp_i_6 = rw[w].current._6
-    var temp_i_7 = rw[w].current._7
-    var temp_i_8 = rw[w].current._8
-    var temp_i_9 = rw[w].current._9
-
-    temp_i[0] = temp_i_0
-    temp_i[1] = temp_i_1
-    temp_i[2] = temp_i_2
-    temp_i[3] = temp_i_3
-    temp_i[4] = temp_i_4
-    temp_i[5] = temp_i_5
-    temp_i[6] = temp_i_6
-    temp_i[7] = temp_i_7
-    temp_i[8] = temp_i_8
-    temp_i[9] = temp_i_9
-
+    temp_i[0] = w.current._0
+    temp_i[1] = w.current._1
+    temp_i[2] = w.current._2
+    temp_i[3] = w.current._3
+    temp_i[4] = w.current._4
+    temp_i[5] = w.current._5
+    temp_i[6] = w.current._6
+    temp_i[7] = w.current._7
+    temp_i[8] = w.current._8
+    temp_i[9] = w.current._9
     for i = 0, WIRE_SEGMENTS do
       old_i[i] = temp_i[i]
     end
 
-    var temp_v_1 = rw[w].voltage._0
-    var temp_v_2 = rw[w].voltage._1
-    var temp_v_3 = rw[w].voltage._2
-    var temp_v_4 = rw[w].voltage._3
-    var temp_v_5 = rw[w].voltage._4
-    var temp_v_6 = rw[w].voltage._5
-    var temp_v_7 = rw[w].voltage._6
-    var temp_v_8 = rw[w].voltage._7
-    var temp_v_9 = rw[w].voltage._8
-
-    temp_v[1] = temp_v_1
-    temp_v[2] = temp_v_2
-    temp_v[3] = temp_v_3
-    temp_v[4] = temp_v_4
-    temp_v[5] = temp_v_5
-    temp_v[6] = temp_v_6
-    temp_v[7] = temp_v_7
-    temp_v[8] = temp_v_8
-    temp_v[9] = temp_v_9
-
+    temp_v[1] = w.voltage._0
+    temp_v[2] = w.voltage._1
+    temp_v[3] = w.voltage._2
+    temp_v[4] = w.voltage._3
+    temp_v[5] = w.voltage._4
+    temp_v[6] = w.voltage._5
+    temp_v[7] = w.voltage._6
+    temp_v[8] = w.voltage._7
+    temp_v[9] = w.voltage._8
     for i = 0, WIRE_SEGMENTS - 1 do
       old_v[i] = temp_v[i + 1]
     end
