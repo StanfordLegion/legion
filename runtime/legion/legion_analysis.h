@@ -1467,13 +1467,9 @@ namespace Legion {
                           // These are just for the case where the
                           // request comes from a remote node and
                           // we're waiting for the expression to load
-                          bool is_expr_s = false, 
+                          bool is_local=true, bool is_expr_s = false,
                           IndexSpace expr_h = IndexSpace::NO_SPACE,
-                          IndexSpaceExprID expr_i = 0)
-          : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
-            set(s), target(t), expr(e), handle(h), origin(o), 
-            done(d), deferral(def), ray_mask(new FieldMask(m)),
-            expr_handle(expr_h), expr_id(expr_i), is_expr_space(is_expr_s) { }
+                          IndexSpaceExprID expr_i = 0);
       public:
         EquivalenceSet *const set;
         VersionManager *const target;
@@ -1485,6 +1481,7 @@ namespace Legion {
         FieldMask *const ray_mask;
         const IndexSpace expr_handle;
         const IndexSpaceExprID expr_id;
+        const bool is_local;
         const bool is_expr_space;
       };
       struct DeferRayTraceFinishArgs : 

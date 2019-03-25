@@ -5568,13 +5568,12 @@ namespace Legion {
     //--------------------------------------------------------------------------
     /*static*/ IndexSpaceExpression* IndexSpaceExpression::unpack_expression(
                            Deserializer &derez, RegionTreeForest *forest, 
-                           AddressSpaceID source, bool &is_index_space,
-                           IndexSpace &handle, IndexSpaceExprID &remote_expr_id,
-                           RtEvent &wait_for)
+                           AddressSpaceID source, bool &is_local, 
+                           bool &is_index_space, IndexSpace &handle, 
+                           IndexSpaceExprID &remote_expr_id, RtEvent &wait_for)
     //--------------------------------------------------------------------------
     {
       // Handle the special case where this is a local index space expression 
-      bool is_local;
       derez.deserialize(is_local);
       if (is_local)
       {

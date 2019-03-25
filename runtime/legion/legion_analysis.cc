@@ -10384,27 +10384,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::DeferRayTraceArgs::DeferRayTraceArgs(EquivalenceSet *s, 
+                          VersionManager *t, IndexSpaceExpression *e, 
+                          IndexSpace h, AddressSpaceID o, RtUserEvent d,
+                          RtUserEvent def, const FieldMask &m,
+                          bool local, bool is_expr_s, IndexSpace expr_h,
+                          IndexSpaceExprID expr_i)
+      : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
+          set(s), target(t), expr(local ? e : NULL), handle(h), origin(o), 
+          done(d), deferral(def), ray_mask(new FieldMask(m)),
+          expr_handle(expr_h), expr_id(expr_i), is_local(local),
+          is_expr_space(is_expr_s)
+    //--------------------------------------------------------------------------
+    {
+      if (local)
+        expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_ray_trace(const void *args,
                                                      Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
+
       // See if we need to load the expression or not
-      if (dargs->expr == NULL)
-      {
-        IndexSpaceExpression *expr = (dargs->is_expr_space) ?
-          runtime->forest->get_node(dargs->expr_handle) :
-          runtime->forest->find_remote_expression(dargs->expr_id);
-        dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
-                            *(dargs->ray_mask), dargs->handle, dargs->origin,
-                            dargs->done, dargs->deferral);
-      }
-      else
-        dargs->set->ray_trace_equivalence_sets(dargs->target, dargs->expr,
-                            *(dargs->ray_mask), dargs->handle, dargs->origin,
-                            dargs->done, dargs->deferral);
+      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
+        (dargs->is_expr_space) ? runtime->forest->get_node(dargs->expr_handle) 
+        : runtime->forest->find_remote_expression(dargs->expr_id);
+      dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
+                          *(dargs->ray_mask), dargs->handle, dargs->origin,
+                          dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
+      // Remove our expression reference too
+      if (dargs->is_local && dargs->expr->remove_expression_reference())
+        delete dargs->expr;
     }
 
     //--------------------------------------------------------------------------
@@ -10588,13 +10603,13 @@ namespace Legion {
 
       VersionManager *target;
       derez.deserialize(target);
-      bool is_expr_space;
+      bool is_local, is_expr_space;
       IndexSpace expr_handle;
       IndexSpaceExprID expr_id;
       RtEvent expr_ready;
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                              is_expr_space, expr_handle, expr_id, expr_ready);
+                    is_local, is_expr_space, expr_handle, expr_id, expr_ready);
       FieldMask ray_mask;
       derez.deserialize(ray_mask);
       IndexSpace handle;
@@ -10612,7 +10627,7 @@ namespace Legion {
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
                                  RtUserEvent::NO_RT_USER_EVENT,
-                                 ray_mask, is_expr_space, 
+                                 ray_mask, is_local, is_expr_space, 
                                  expr_handle, expr_id);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 

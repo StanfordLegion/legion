@@ -1312,13 +1312,13 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
-      bool domain_is;
+      bool local_is, domain_is;
       IndexSpace domain_handle;
       IndexSpaceExprID domain_expr_id;
       RtEvent domain_ready;
       IndexSpaceExpression *inst_domain = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, 
-            source, domain_is, domain_handle, domain_expr_id, domain_ready);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
+              local_is, domain_is, domain_handle, domain_expr_id, domain_ready);
       FieldSpace handle;
       derez.deserialize(handle);
       RtEvent fs_ready;
@@ -1343,8 +1343,9 @@ namespace Legion {
         {
           // We need to defer this instance creation
           DeferInstanceManagerArgs args(did, owner_space, mem, inst,
-              inst_footprint, domain_is, domain_handle, domain_expr_id, 
-              handle, tree_id, layout_id, pointer_constraint, use_event);
+              inst_footprint, local_is, inst_domain, domain_is, domain_handle, 
+              domain_expr_id, handle, tree_id, layout_id, pointer_constraint, 
+              use_event);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1367,14 +1368,31 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    InstanceManager::DeferInstanceManagerArgs::DeferInstanceManagerArgs(
+            DistributedID d, AddressSpaceID own, Memory m, PhysicalInstance i, 
+            size_t f, bool local, IndexSpaceExpression *lx, bool is, 
+            IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
+            LayoutConstraintID l, PointerConstraint &p, ApEvent use)
+      : LgTaskArgs<DeferInstanceManagerArgs>(implicit_provenance),
+            did(d), owner(own), mem(m), inst(i), footprint(f), local_is(local),
+            domain_is(is), local_expr(local ? lx : NULL), domain_handle(dh), 
+            domain_expr(dx), handle(h), tree_id(tid), layout_id(l), 
+            pointer(new PointerConstraint(p)), use_event(use)
+    //--------------------------------------------------------------------------
+    {
+      if (local_is)
+        local_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void InstanceManager::handle_defer_manager(const void *args,
                                                           Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferInstanceManagerArgs *dargs = 
         (const DeferInstanceManagerArgs*)args; 
-      IndexSpaceExpression *inst_domain = dargs->domain_is ? 
-        runtime->forest->get_node(dargs->domain_handle) :
+      IndexSpaceExpression *inst_domain = dargs->local_is ? dargs->local_expr :
+        dargs->domain_is ? runtime->forest->get_node(dargs->domain_handle) :
         runtime->forest->find_remote_expression(dargs->domain_expr);
       FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
       LayoutConstraints *constraints = 
@@ -1384,6 +1402,9 @@ namespace Legion {
           dargs->tree_id, constraints, dargs->use_event, *(dargs->pointer));
       // Free up the pointer memory
       delete dargs->pointer;
+      // Remove the local expression reference if necessary
+      if (dargs->local_is && dargs->local_expr->remove_expression_reference())
+        delete dargs->local_expr;
     }
 
     //--------------------------------------------------------------------------
@@ -1501,13 +1522,13 @@ namespace Legion {
       derez.deserialize(inst);
       size_t inst_footprint;
       derez.deserialize(inst_footprint);
-      bool domain_is;
+      bool local_is, domain_is;
       IndexSpace domain_handle;
       IndexSpaceExprID domain_expr_id;
       RtEvent domain_ready;
       IndexSpaceExpression *inst_domain = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-            domain_is, domain_handle, domain_expr_id, domain_ready);
+            local_is, domain_is, domain_handle, domain_expr_id, domain_ready);
       ReductionOpID redop;
       derez.deserialize(redop);
       FieldSpace handle;
@@ -1538,9 +1559,9 @@ namespace Legion {
         {
           // We need to defer this instance creation
           DeferReductionManagerArgs args(did, owner_space, mem, inst,
-              inst_footprint, domain_is, domain_handle, domain_expr_id, 
-              handle, tree_id, layout_id, pointer_constraint, use_event,
-              foldable, ptr_space, redop);
+              inst_footprint, local_is, inst_domain, domain_is, 
+              domain_handle, domain_expr_id, handle, tree_id, layout_id, 
+              pointer_constraint, use_event, foldable, ptr_space, redop);
           runtime->issue_runtime_meta_task(args,
               LG_LATENCY_RESPONSE_PRIORITY, precondition);
           return;
@@ -1563,14 +1584,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ReductionManager::DeferReductionManagerArgs::DeferReductionManagerArgs(
+            DistributedID d, AddressSpaceID own, Memory m,
+            PhysicalInstance i, size_t f, bool local, IndexSpaceExpression *lx,
+            bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, PointerConstraint &p, 
+            ApEvent use, bool fold, const Domain &ptr, ReductionOpID r)
+      : LgTaskArgs<DeferReductionManagerArgs>(implicit_provenance),
+            did(d), owner(own), mem(m), inst(i), footprint(f), local_is(local),
+            domain_is(is), local_expr(local ? lx : NULL), domain_handle(dh), 
+            domain_expr(dx), handle(h), tree_id(tid), layout_id(l), 
+            pointer(new PointerConstraint(p)), use_event(use), foldable(fold), 
+            ptr_space(ptr), redop(r)
+    //--------------------------------------------------------------------------
+    {
+      if (local_is)
+        local_expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ReductionManager::handle_defer_manager(const void *args,
                                                            Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferReductionManagerArgs *dargs = 
         (const DeferReductionManagerArgs*)args; 
-      IndexSpaceExpression *inst_domain = dargs->domain_is ? 
-        runtime->forest->get_node(dargs->domain_handle) :
+      IndexSpaceExpression *inst_domain = dargs->local_is ? dargs->local_expr :
+        dargs->domain_is ? runtime->forest->get_node(dargs->domain_handle) :
         runtime->forest->find_remote_expression(dargs->domain_expr);
       FieldSpaceNode *space_node = runtime->forest->get_node(dargs->handle);
       LayoutConstraints *constraints = 
@@ -1581,6 +1621,9 @@ namespace Legion {
           dargs->foldable, dargs->ptr_space, dargs->redop);
       // Free up the pointer memory
       delete dargs->pointer;
+      // Remove the local expression reference if necessary
+      if (dargs->local_is && dargs->local_expr->remove_expression_reference())
+        delete dargs->local_expr;
     }
 
     //--------------------------------------------------------------------------
