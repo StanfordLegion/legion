@@ -17,9 +17,9 @@ local data = require("common/data")
 local std = require("regent/std")
 
 local hash_set                 = require("regent/parallelizer/hash_set")
-local ranges                   = require("regent/parallelizer/ranges")
 local partition_info           = require("regent/parallelizer/partition_info")
 local partitioning_constraints = require("regent/parallelizer/partitioning_constraints")
+local ranges                   = require("regent/parallelizer/ranges")
 local task_generator           = require("regent/parallelizer/task_generator")
 
 local function find_or_create(map, key, init)

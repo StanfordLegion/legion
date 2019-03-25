@@ -17,7 +17,6 @@ local data = require("common/data")
 local std = require("regent/std")
 
 local hash_set       = require("regent/parallelizer/hash_set")
-local partition_info = require("regent/parallelizer/partition_info")
 local ranges         = require("regent/parallelizer/ranges")
 
 local function find_or_create(map, key, init)
@@ -34,10 +33,12 @@ local constraint_type = common_ast.make_factory("constraint_type")
 constraint_type:leaf("Subset"):set_memoize():set_print_custom("subset")
 constraint_type:leaf("Image"):set_memoize():set_print_custom("image")
 constraint_type:leaf("Affine"):set_memoize():set_print_custom("affine")
+constraint_type:leaf("Preimage"):set_memoize():set_print_custom("preimage")
 
 constraint_type.subset = constraint_type.Subset {}
 constraint_type.image  = constraint_type.Image {}
 constraint_type.affine = constraint_type.Affine {}
+constraint_type.preimage = constraint_type.Preimage {}
 
 local constraint_info = {}
 
@@ -67,11 +68,15 @@ function constraint_info:is_subset()
   return self.type:is(constraint_type.Subset)
 end
 
+function constraint_info:is_preimage()
+  return self.type:is(constraint_type.Preimage)
+end
+
 function constraint_info:clone(mapping)
   local info = self.info
   if self:is_subset() then
     info = mapping(info)
-  elseif self:is_image() then
+  elseif self:is_image() or self:is_preimage() then
     local region_symbol, field_path = unpack(info)
     info = data.newtuple(mapping(region_symbol), field_path)
   elseif self:is_affine() then
@@ -107,8 +112,14 @@ end
 
 local function render_image_constraint(src, key, dst)
   local region_symbol, field_path = unpack(key)
-  return tostring(region_symbol) .. "[" .. tostring(src) .. "]." ..
-    field_path:mkstring("", ".", "") .. " <= " .. tostring(dst)
+  return (data.newtuple(region_symbol) .. field_path):mkstring(".") ..
+    "[" .. tostring(src) .. "]" .. " <= " .. tostring(dst)
+end
+
+local function render_preimage_constraint(src, key, dst)
+  local region_symbol, field_path = unpack(key)
+  return "inv(" .. (data.newtuple(region_symbol) .. field_path):mkstring(".") ..
+    ")[" .. tostring(src) .. "]" .. " <= " .. tostring(dst)
 end
 
 local function render_analytic_constraint(src, offset, dst)
@@ -116,12 +127,11 @@ local function render_analytic_constraint(src, offset, dst)
     local symbol = offset[#offset]
     local o = offset:slice(1, #offset - 1)
     local divider = tostring(symbol)
-    return "(" ..tostring(src) .. " + {" ..
-      o:mkstring("",",","") .. "}) % " ..
+    return "(" ..tostring(src) .. " + {" .. o:mkstring(",") .. "}) % " ..
       divider .. " <= " .. tostring(dst)
   else
-    return tostring(src) .. " + {" ..
-      offset:mkstring("",",","") .. "} <= " .. tostring(dst)
+    return tostring(src) .. " + {" ..  offset:mkstring(",") .. "} <= " ..
+      tostring(dst)
   end
 end
 
@@ -132,6 +142,8 @@ local function render_constraint(src, info, dst)
     return render_image_constraint(src, info.info, dst)
   elseif info:is_affine() then
     return render_analytic_constraint(src, info.info, dst)
+  elseif info:is_preimage() then
+    return render_preimage_constraint(src, info.info, dst)
   else
     assert(false)
   end
@@ -165,6 +177,13 @@ function partitioning_constraints:find_or_create_subset_constraint(src_range, re
   return find_or_create(constraints, key, ranges.new)
 end
 
+function partitioning_constraints:add_subset_constraint(src_range, region_symbol, dst_range)
+  local constraints = find_or_create(self.constraints, src_range)
+  local key = constraint_info.new(constraint_type.subset, region_symbol)
+  constraints[key] = dst_range
+  return dst_range
+end
+
 function partitioning_constraints:find_or_create_image_constraint(src_range, region_symbol, field_path)
   local constraints = find_or_create(self.constraints, src_range)
   local key = constraint_info.new(constraint_type.image, data.newtuple(region_symbol, field_path))
@@ -174,6 +193,12 @@ end
 function partitioning_constraints:find_or_create_analytic_constraint(src_range, offset)
   local constraints = find_or_create(self.constraints, src_range)
   local key = constraint_info.new(constraint_type.affine, offset)
+  return find_or_create(constraints, key, ranges.new)
+end
+
+function partitioning_constraints:find_or_create_preimage_constraint(src_range, region_symbol, field_path)
+  local constraints = find_or_create(self.constraints, src_range)
+  local key = constraint_info.new(constraint_type.preimage, data.newtuple(region_symbol, field_path))
   return find_or_create(constraints, key, ranges.new)
 end
 

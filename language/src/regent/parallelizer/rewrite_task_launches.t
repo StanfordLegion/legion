@@ -26,6 +26,7 @@ function rewriter_context.new(mappings,
                               mappings_by_access_paths,
                               loop_range_partitions,
                               incl_check_caches,
+                              reindexed_ranges,
                               color_space_symbol,
                               constraints)
   local cx = {
@@ -33,6 +34,7 @@ function rewriter_context.new(mappings,
     mappings_by_access_paths = mappings_by_access_paths,
     loop_range_partitions    = loop_range_partitions,
     incl_check_caches        = incl_check_caches,
+    reindexed_ranges         = reindexed_ranges,
     color_space_symbol       = color_space_symbol,
     constraints              = constraints,
   }
@@ -106,6 +108,7 @@ local function create_index_launch(cx, task, call, stat)
   args:insertall(data.filter(function(arg)
     return not std.is_region(std.as_read(arg.expr_type)) end,
   call.args))
+  args:insert(loop_var)
 
   if stat:is(ast.typed.stat.Var) and metadata.reduction then
     local value_type = metadata.reduction:gettype()
@@ -288,6 +291,7 @@ function rewrite_task_launches.rewrite(solution, caller_constraints, stat)
       solution.mappings_by_access_paths,
       solution.loop_range_partitions,
       solution.incl_check_caches,
+      solution.reindexed_ranges,
       solution.color_space_symbol,
       caller_constraints)
   local block = rewrite_task_launches.block(cx, stat.block)
