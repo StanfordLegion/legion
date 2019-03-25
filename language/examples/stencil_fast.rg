@@ -27,7 +27,7 @@ local common = require("stencil_common")
 
 local DTYPE = double
 local RADIUS = 2
-local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '1') == '1'
+local USE_FOREIGN = (os.getenv('USE_FOREIGN') or '0') == '1'
 
 local c = regentlib.c
 
@@ -347,7 +347,7 @@ local function make_stencil_interior(private, interior, radius)
 end
 
 local function make_stencil(radius)
-  local --__demand(__cuda)
+  local __demand(__cuda)
         task stencil(private : region(ispace(int2d), point),
                      interior : region(ispace(int2d), point),
                      xm : region(ispace(int2d), point),
@@ -359,7 +359,7 @@ local function make_stencil(radius)
     reads writes(private.{input, output}),
     reads(xm.input, xp.input, ym.input, yp.input)
   do
-    if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+    --if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 
     var interior_rect = get_rect(interior.ispace)
     var interior_lo = int2d { x = interior_rect.lo.x[0], y = interior_rect.lo.x[1] }
@@ -432,7 +432,7 @@ where reads writes(private.input, xm.input, xp.input, ym.input, yp.input) do
   for i in ym do i.input += 1 end
   for i in yp do i.input += 1 end
 
-  if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
+  --if print_ts then c.printf("t: %ld\n", c.legion_get_current_time_in_micros()) end
 end
 
 task check(private : region(ispace(int2d), point),
@@ -531,8 +531,15 @@ task main()
     --   fill_(private[i], init)
     -- end
 
-    __demand(__trace)
+    __fence(__execution, __block)
+    var ts_start = c.legion_get_current_time_in_micros()
+    var ts_end = ts_start
+    --__demand(__trace)
     for t = 0, tsteps do
+      if t == tprune then
+        __fence(__execution, __block)
+        ts_start = c.legion_get_current_time_in_micros()
+      end
       -- __demand(__parallel)
       for i = 0, nt2 do
         stencil(private[i], interior[i], pxm_in[i], pxp_in[i], pym_in[i], pyp_in[i], t == tprune)
@@ -541,7 +548,14 @@ task main()
       for i = 0, nt2 do
         increment(private[i], exterior[i], pxm_out[i], pxp_out[i], pym_out[i], pyp_out[i], t == tsteps - tprune - 1)
       end
+
+      if t == tsteps - tprune - 1 then
+        __fence(__execution, __block)
+        ts_end = c.legion_get_current_time_in_micros()
+      end
     end
+    var sim_time = 1e-6 * (ts_end - ts_start)
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
 
     for i = 0, nt2 do
       check(private[i], interior[i], tsteps, init)

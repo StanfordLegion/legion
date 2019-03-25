@@ -374,6 +374,7 @@ do
   end
 end
 
+__demand(__cuda)
 task calculate_new_currents(print_ts : bool,
                             steps : uint,
                             rpn : region(node),
@@ -470,6 +471,7 @@ do
   end
 end
 
+__demand(__cuda)
 task distribute_charge(rpn : region(node),
                        rsn : region(node),
                        rgn : region(node),
@@ -487,6 +489,7 @@ do
   end
 end
 
+__demand(__cuda)
 task update_voltages(print_ts : bool,
                      rpn : region(node),
                      rsn : region(node))
@@ -683,8 +686,13 @@ task toplevel()
 
   __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
-  __demand(__spmd, __trace)
+  var ts_end = ts_start
+  __demand(__spmd)
   for j = 0, num_loops do
+    if j == prune then
+      __fence(__execution, __block)
+      ts_start = c.legion_get_current_time_in_micros()
+    end
     for i = 0, num_superpieces do
       calculate_new_currents(j == prune, steps, rp_private[i], rp_shared[i], rp_ghost[i], rp_wires[i])
     end
@@ -694,9 +702,12 @@ task toplevel()
     for i = 0, num_superpieces do
       update_voltages(j == num_loops - prune - 1, rp_private[i], rp_shared[i])
     end
+    if j == num_loops - prune - 1 then
+      __fence(__execution, __block)
+      ts_end = c.legion_get_current_time_in_micros()
+    end
   end
-  __fence(__execution, __block)
-  var ts_end = c.legion_get_current_time_in_micros()
+  --__fence(__execution, __block)
 
   if simulation_success then
     c.printf("SUCCESS!\n")

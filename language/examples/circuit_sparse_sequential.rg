@@ -521,19 +521,25 @@ task toplevel()
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
 
-  var ts_start : int64
+  __fence(__execution, __block)
+  var ts_start = c.legion_get_current_time_in_micros()
+  var ts_end = ts_start
   __parallelize_with color_space do
-    __fence(__execution, __block)
-    ts_start = c.legion_get_current_time_in_micros()
     __demand(__spmd)
     for j = 0, num_loops do
+      if j == prune then
+        __fence(__execution, __block)
+        ts_start = c.legion_get_current_time_in_micros()
+      end
       calculate_new_currents(steps, rn, rw)
       distribute_charge(rn, rw)
       update_voltages(rn)
+      if j == num_loops - prune - 1 then
+        __fence(__execution, __block)
+        ts_end = c.legion_get_current_time_in_micros()
+      end
     end
   end
-  __fence(__execution, __block)
-  var ts_end = c.legion_get_current_time_in_micros()
   if simulation_success then
     c.printf("SUCCESS!\n")
   else
