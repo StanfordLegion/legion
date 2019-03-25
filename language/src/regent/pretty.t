@@ -374,11 +374,11 @@ function pretty.expr_raw_context(cx, node)
 end
 
 function pretty.expr_raw_fields(cx, node)
-  return join({"__fields(", pretty.expr(cx, node.region), ")"})
+  return join({"__fields(", pretty.expr_region_root(cx, node.region), ")"})
 end
 
 function pretty.expr_raw_physical(cx, node)
-  return join({"__physical(", pretty.expr(cx, node.region), ")"})
+  return join({"__physical(", pretty.expr_region_root(cx, node.region), ")"})
 end
 
 function pretty.expr_raw_runtime(cx, node)

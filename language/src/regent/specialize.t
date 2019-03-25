@@ -701,7 +701,7 @@ end
 
 function specialize.expr_raw_fields(cx, node, allow_lists)
   return ast.specialized.expr.RawFields {
-    region = specialize.expr(cx, node.region),
+    region = specialize.expr_region_root(cx, node.region),
     annotations = node.annotations,
     span = node.span,
   }
@@ -709,7 +709,7 @@ end
 
 function specialize.expr_raw_physical(cx, node, allow_lists)
   return ast.specialized.expr.RawPhysical {
-    region = specialize.expr(cx, node.region),
+    region = specialize.expr_region_root(cx, node.region),
     annotations = node.annotations,
     span = node.span,
   }

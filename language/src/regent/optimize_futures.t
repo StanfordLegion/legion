@@ -550,12 +550,12 @@ function optimize_futures.expr_ctor(cx, node)
 end
 
 function optimize_futures.expr_raw_fields(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
 function optimize_futures.expr_raw_physical(cx, node)
-  local region = concretize(optimize_futures.expr(cx, node.region))
+  local region = concretize(optimize_futures.expr_region_root(cx, node.region))
   return node { region = region }
 end
 
