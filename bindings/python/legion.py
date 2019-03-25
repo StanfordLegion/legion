@@ -1186,6 +1186,8 @@ if is_script:
         assert run_name not in sys.modules
         sys.modules[run_name] = module
 
+        sys.path.append(os.path.dirname(filename))
+
         with open(filename) as f:
             code = compile(f.read(), filename, 'exec')
             exec(code, module.__dict__)
