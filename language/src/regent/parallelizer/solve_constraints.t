@@ -16,9 +16,11 @@
 
 local ast = require("regent/ast")
 local data = require("common/data")
+local pretty = require("regent/pretty")
 local std = require("regent/std")
 
 local hash_set                 = require("regent/parallelizer/hash_set")
+local partition_info           = require("regent/parallelizer/partition_info")
 local partitioning_constraints = require("regent/parallelizer/partitioning_constraints")
 local ranges                   = require("regent/parallelizer/ranges")
 
@@ -699,25 +701,27 @@ local op_name = {
   ["&"] = "&",
 }
 
-local function create_partition_by_binary_op(disjointness, lhs, rhs, op)
+local function create_partition_by_binary_op(disjointness, lhs, rhs, op, result_symbol)
   if rhs == nil then return lhs, nil end
   local lhs_type = lhs:gettype()
   local partition_type = std.partition(disjointness,
       lhs_type.parent_region_symbol, lhs_type.colors_symbol)
-  local variable = nil
-  if std.config["parallelize-debug"] then
-    variable = std.newsymbol(partition_type,
-        "(".. lhs:getname() .. op_name[op] .. rhs:getname() .. ")")
-  else
-    variable = new_range()
-    variable:settype(partition_type)
+  local variable = result_symbol
+  if variable == nil then
+    if std.config["parallelize-debug"] then
+      variable = std.newsymbol(partition_type,
+          "(".. lhs:getname() .. op_name[op] .. rhs:getname() .. ")")
+    else
+      variable = new_range()
+      variable:settype(partition_type)
+    end
   end
   return variable, ast.typed.stat.Var {
     symbol = variable,
-    type = partition_type,
+    type = variable:gettype(),
     value = ast.typed.expr.Binary {
       op = op,
-      expr_type = partition_type,
+      expr_type = variable:gettype(),
       lhs = ast.typed.expr.ID {
         value = lhs,
         expr_type = std.rawref(&lhs_type),
@@ -738,20 +742,20 @@ local function create_partition_by_binary_op(disjointness, lhs, rhs, op)
   }
 end
 
-local function create_union_partition(lhs, rhs)
-  return create_partition_by_binary_op(std.aliased, lhs, rhs, "|")
+local function create_union_partition(lhs, rhs, result_symbol)
+  return create_partition_by_binary_op(std.aliased, lhs, rhs, "|", result_symbol)
 end
 
-local function create_difference_partition(lhs, rhs)
-  return create_partition_by_binary_op(lhs:gettype().disjointness, lhs, rhs, "-")
+local function create_difference_partition(lhs, rhs, result_symbol)
+  return create_partition_by_binary_op(lhs:gettype().disjointness, lhs, rhs, "-", result_symbol)
 end
 
-local function create_intersection_partition(lhs, rhs)
+local function create_intersection_partition(lhs, rhs, result_symbol)
   local disjointness = std.aliased
   if lhs:gettype():is_disjoint() or rhs:gettype():is_disjoint() then
     disjointness = std.disjoint
   end
-  return create_partition_by_binary_op(disjointness, lhs, rhs, "&")
+  return create_partition_by_binary_op(disjointness, lhs, rhs, "&", result_symbol)
 end
 
 local terra _create_pvs_partition(runtime : c.legion_runtime_t,
@@ -1173,10 +1177,10 @@ local function create_isomorphic_region(name, orig_region, elem_type)
   return region_symbol, stats
 end
 
-local function create_index_fill(cx, partition, color_space_symbol, value, elem_type)
-  local stats = terralib.newlist()
+local function create_index_fill(cx, partition, color_space_symbol, elem_type, value)
   local partition_type = partition:gettype()
   local parent_type = partition_type:parent_region()
+  local stats = terralib.newlist()
   local color_symbol = std.newsymbol(color_space_symbol:gettype().index_type, "color")
   local color = ast.typed.expr.ID {
     value = color_symbol,
@@ -1217,12 +1221,12 @@ local function create_index_fill(cx, partition, color_space_symbol, value, elem_
               span = ast.trivial_span(),
               annotations = ast.default_annotations(),
             },
-            value = ast.typed.expr.Constant {
+            value = (value and ast.typed.expr.Constant {
               value = value,
               expr_type = elem_type,
               span = ast.trivial_span(),
               annotations = ast.default_annotations(),
-            },
+            }) or color,
             expr_type = terralib.types.unit,
             conditions = terralib.newlist(),
             span = ast.trivial_span(),
@@ -1240,11 +1244,36 @@ local function create_index_fill(cx, partition, color_space_symbol, value, elem_
   }
 end
 
+local function create_assignment(lhs, rhs)
+  lhs:settype(rhs:gettype())
+  return ast.typed.stat.Var {
+    symbol = lhs,
+    type = rhs:gettype(),
+    value = ast.typed.expr.ID {
+      value = rhs,
+      expr_type = std.rawref(&rhs:gettype()),
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    },
+    span = ast.trivial_span(),
+    annotations = ast.default_annotations(),
+  }
+end
+
+local function combine_mapping(m1, m2)
+  local m = data.newmap()
+  for from, to in m2:items() do
+    m[from] = m1[to] or to
+  end
+  return m
+end
+
 function solver_context:synthesize_partitions(color_space_symbol)
   local stats = terralib.newlist()
 
   local created = hash_set.new()
   local disjoint_partitions = data.newmap()
+  local preimage_partitions = data.newmap()
   local image_partitions = data.newmap()
   local union_partitions = data.newmap()
   local diff_partitions = data.newmap()
@@ -1363,10 +1392,132 @@ function solver_context:synthesize_partitions(color_space_symbol)
     end
   end)
 
+  -- Find image ranges that are used for reductions but can be reindexed to
+  -- a disjoint range. The reindexing may require sources of the original
+  -- image ranges to be aliased when they need to be a union of multiple
+  -- preimage ranges, and this cannot be done if those sources are being
+  -- used for write accesses, which can be parallelized only with
+  -- disjoint ranges or relaxed coherence that is yet to be implemented.
+  -- Until relaxed coherence becomes available and then we can do a
+  -- cost-based reasoning on multiple partitioning strategies, we do this
+  -- reindexing only when source ranges are aliased.
+
+  -- TODO: The previous step that synthesizes partitions for disjoint children
+  --       can be merged with this step.
+  local reduction_ranges = hash_set.new()
+  for region_symbol, accesses_summary in self.field_accesses:items() do
+    for field_path, summary in accesses_summary:items() do
+      for privilege, range_set in summary:items() do
+        if std.is_reduce(privilege) then
+          range_set:foreach(function(range)
+            if not created:has(range) then reduction_ranges:insert(range) end
+          end)
+        end
+      end
+    end
+  end
+  reduction_ranges:canonicalize()
+
+  local reindexed = data.newmap()
+  local replaced_constraints = terralib.newlist()
+  for src_range, constraints in self.constraints.constraints:items() do
+    local src_partition = self.constraints:get_partition(src_range)
+    for info, dst_range in constraints:items() do
+      local dst_partition = self.constraints:get_partition(dst_range)
+      if reduction_ranges:has(dst_range) and info:is_image() and
+         not src_partition.disjoint and
+         -- TODO: Here we limit ourselves to indirect accesses with only one region
+         --       (e.g., R[S[e]] += ...), even though reindexing is applicable to
+         --       those with more than one region being involed.
+         --       (e.g., R[S[T[U[e]]]] += ...)
+         self.loop_ranges:has(src_range)
+      then
+        local new_dst_range = self.sources_by_regions[dst_partition.region]
+        if new_dst_range == nil then
+          local new_dst_range = new_range()
+          -- We are going to use an equal partition, hence disjoint and complete.
+          self.constraints:set_partition(new_dst_range,
+              partition_info.new(dst_partition.region, true, true))
+          self.sources_by_regions[dst_partition.region] = new_dst_range
+        else
+          local new_dst_partition = self.constraints:get_partition(new_dst_range)
+          new_dst_partition:meet_disjointness(true)
+          new_dst_partition:meet_completeness(true)
+        end
+
+        reindexed[dst_range] = new_dst_range
+        replaced_constraints:insert({src_range, info, dst_range})
+      end
+    end
+  end
+  if #replaced_constraints > 0 then
+    for _, tuple in ipairs(replaced_constraints) do
+      local src_range, info, dst_range = unpack(tuple)
+      local src_partition = self.constraints:get_partition(src_range)
+      local new_dst_range = reindexed[dst_range]
+      local dst_partition = self.constraints:get_partition(new_dst_range)
+      local region_symbol, field_path = unpack(info.info)
+      local preimage_range = self.constraints:find_or_create_preimage_constraint(
+          new_dst_range, region_symbol, field_path)
+      -- TODO: The Realm implementation of preimage operator doesn't preserve
+      --       completeness, though there is an obvious way to make the result complete.
+      --       We simply assume that preiamge partitions are complete,
+      --       which implies that the region is a surjective function.
+      self.constraints:set_partition(preimage_range,
+        partition_info.new(src_partition.region, true, true))
+      self.constraints:add_subset_constraint(preimage_range, dst_partition.region,
+        src_range)
+      self.sources:remove(src_range)
+      if self.sources_by_regions[src_partition.region] == src_range then
+        self.sources_by_regions[src_partition.region] = nil
+      end
+      assert(ghost_to_primary[dst_range] == nil or
+             ghost_to_primary[dst_range] == new_dst_range)
+      ghost_to_primary[dst_range] = new_dst_range
+    end
+
+    -- TODO: Need to refactor substitution for field accesses
+    local function mapping(range) return reindexed[range] or range end
+    local field_accesses = data.newmap()
+    for region_symbol, accesses_summary in self.field_accesses:items() do
+      local new_access_summary = data.newmap()
+      for field_path, summary in accesses_summary:items() do
+        local new_summary = data.newmap()
+        for privilege, ranges_set in summary:items() do
+          if std.is_reduce(privilege) then
+            local unified = ranges_set:map(mapping)
+            local unified_list = unified:to_list()
+            if #unified_list == 1 and
+               self.constraints:get_partition(unified_list[1]).disjoint
+            then
+              privilege = "reads_writes"
+            else
+              unified:canonicalize()
+            end
+            if privilege == "reads_writes" then
+              find_or_create(new_summary, std.reads, hash_set.new):insert_all(unified)
+              find_or_create(new_summary, std.writes, hash_set.new):insert_all(unified)
+            else
+              find_or_create(new_summary, privilege, hash_set.new):insert_all(unified)
+            end
+          else
+            find_or_create(new_summary, privilege, hash_set.new):insert_all(ranges_set)
+          end
+        end
+        new_access_summary[field_path] = new_summary
+      end
+      field_accesses[region_symbol] = new_access_summary
+    end
+    self.field_accesses = field_accesses
+  end
+
   -- Synthesize a partition for each of the constraints using the following heuristics:
   --  * For each constraint R[P1] <= P2 where P2 is a partition of S,
   --    we emit an image partition `var P2 = image(S, P1, R)`. If P1 does not exist,
   --    we create an equal partition of R for P2.
+  --  * For constraints P1 <= Q, P2 <= Q, ..., Pn <= Q, we emit a union partition
+  --    `var Q = P1 | P2 | ... | Pn`. The synthesis fails (or can produce a code that is
+  --    conditionally parallelizable) when Q needs to be disjoint.
   --  * For each constraint P1 <= P2 where P1 is a partition of R and P2 is of S,
   --    we emit `var P1 = R & P2`. If P2 does not exist, we create an equal partition of
   --    S for P2.
@@ -1374,20 +1525,90 @@ function solver_context:synthesize_partitions(color_space_symbol)
   --    `var P2 = image(S, P1, \x.(x + offset) % mod). This is currently backed by
   --    a shim as Realm doesn't have support for this.
 
-  -- We first build a inverse map of subset constraints to construct subset partitions
-  -- in the correct order.
+  -- Synthesize all preimage partitions
+  local worklist = self.sources:to_list()
+  local idx = 1
+  while idx <= #worklist do
+    local src_range = worklist[idx]
+    idx = idx + 1
+    local constraints = self.constraints.constraints[src_range]
+    if constraints ~= nil then
+      for info, dst_range in constraints:items() do
+        if info:is_preimage() then
+          if not created:has(src_range) then
+            local src_partition = self.constraints:get_partition(src_range)
+            stats:insert(
+              create_equal_partition(src_range, src_partition.region, color_space_symbol))
+            created:insert(src_range)
+          end
+          if not created:has(dst_range) then
+            local dst_partition = self.constraints:get_partition(dst_range)
+            stats:insert(
+              create_preimage_partition(dst_range, dst_partition.region, src_range, info))
+            created:insert(dst_range)
 
+            local key = data.newtuple(dst_partition.region, src_range, info.info)
+            if preimage_partitions[key] == nil then preimage_partitions[key] = dst_range end
+          end
+        end
+        worklist:insert(dst_range)
+      end
+    end
+  end
+
+  -- Build subset and supset relations from subset constraints.
   local subset_relation = data.newmap()
   local supset_relation = data.newmap()
   for src_range, constraints in self.constraints.constraints:items() do
     for info, dst_range in constraints:items() do
       if info:is_subset() then
-        find_or_create(subset_relation, src_range)[dst_range] = true
-        find_or_create(supset_relation, dst_range)[src_range] = true
+        find_or_create(subset_relation, src_range, hash_set.new):insert(dst_range)
+        find_or_create(supset_relation, dst_range, hash_set.new):insert(src_range)
       end
     end
   end
+
+  -- Find subset constraints P <= Q where P is fixed and there is no other P' such that
+  -- P' <= Q. We can simply put `var Q = P` for such P and Q.
   do
+    local sources = hash_set.new()
+    for src_range, _ in subset_relation:items() do
+      if supset_relation[src_range] == nil and created:has(src_range) then
+        sources:insert(src_range)
+      end
+    end
+    sources:canonicalize()
+    local worklist = sources:to_list()
+    local idx = 1
+    while idx <= #worklist do
+      local src_range = worklist[idx]
+      local src_partition = self.constraints:get_partition(src_range)
+      idx = idx + 1
+      if created:has(src_range) then
+        local supsets = subset_relation[src_range]
+        if supsets ~= nil then
+          supsets:filter(function(range)
+            return supset_relation[range] ~= nil and not created:has(range)
+          end):foreach(function(dst_range)
+            local subsets_list = supset_relation[dst_range]:to_list()
+            if #subsets_list == 1 then
+              local dst_partition = self.constraints:get_partition(dst_range)
+              assert(not created:has(dst_range))
+              if src_partition.region == dst_partition.region and
+                 src_partition.complete
+              then
+                stats:insert(create_assignment(dst_range, src_range))
+                dst_partition:meet_disjointness(src_partition.disjoint)
+                dst_partition:meet_completeness(src_partition.complete)
+                created:insert(dst_range)
+              end
+            end
+            worklist:insert(dst_range)
+          end)
+        end
+      end
+    end
+
     local sources = hash_set.new()
     for src_range, _ in supset_relation:items() do
       if subset_relation[src_range] == nil then
@@ -1404,12 +1625,38 @@ function solver_context:synthesize_partitions(color_space_symbol)
       if subsets ~= nil then
         if not created:has(src_range) then
           local src_partition = self.constraints:get_partition(src_range)
-          stats:insert(
-            create_equal_partition(src_range, src_partition.region, color_space_symbol))
+          local created_subsets = subsets:filter(function(range)
+            return created:has(range) end)
+          if created_subsets:size() > 0 then
+            local created_subsets_list = created_subsets:to_list()
+            assert(data.any(unpack(created_subsets_list:map(function(range)
+              local partition = self.constraints:get_partition(range)
+              return partition.region == src_partition.region and partition.complete
+            end))))
+            local src_partition = self.constraints:get_partition(src_range)
+            local lifted_subsets = created_subsets_list:map(function(range)
+              local partition = self.constraints:get_partition(range)
+              if partition.region == src_partition.region then
+                return range
+              else
+                local new_range, partition_stat =
+                  create_intersection_partition_region(src_partition.region, range)
+                stats:insert(partition_stat)
+                return new_range
+              end
+            end)
+            local union_range, partition_stats =
+              create_union_partitions(lifted_subsets, union_partitions)
+            stats:insertall(partition_stats)
+            stats:insert(create_assignment(src_range, union_range))
+          else
+            stats:insert(
+              create_equal_partition(src_range, src_partition.region, color_space_symbol))
+          end
           created:insert(src_range)
           find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
         end
-        for dst_range, _ in subsets:items() do
+        subsets:foreach(function(dst_range)
           if not created:has(dst_range) then
             local dst_partition = self.constraints:get_partition(dst_range)
             local dst_range, partition_stat =
@@ -1418,7 +1665,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
             created:insert(dst_range)
           end
           worklist:insert(dst_range)
-        end
+        end)
       end
     end
   end
@@ -1659,6 +1906,9 @@ function solver_context:synthesize_partitions(color_space_symbol)
         if disjoint_partitions[range] ~= nil then
           mapping[range] = disjoint_partitions[range]:to_list()
         else
+          local singleton = hash_set.new()
+          singleton:insert(range)
+          disjoint_partitions[range] = singleton
           mapping[range] = terralib.newlist({range})
         end
 
@@ -1742,7 +1992,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
   self.loop_ranges:foreach(function(range)
     if self.loop_range_partitions[range] == nil then
       local partition = self.constraints:get_partition(range)
-      assert(range:hastype() and range:gettype():is_disjoint() and partition.complete)
+      assert(range:hastype() and partition.complete)
       self.loop_range_partitions[range] = terralib.newlist({range})
     end
   end)
@@ -1763,11 +2013,18 @@ function solver_context:synthesize_partitions(color_space_symbol)
       -- TODO: Handle cases when one ghost range corresponds to a non-source loop range
       assert(self.loop_ranges:has(loop_range))
 
-      -- partitions in loop_range_partitions are just a decomposition of the original loop nrage
+      -- partitions in loop_range_partitions are just a decomposition of the original loop range
       assert(loop_range:hastype())
-      local orig_region = loop_range:gettype().parent_region_symbol
+      local loop_range_type = loop_range:gettype()
+      local cache_value_type = uint8
+      if not loop_range_type:is_disjoint() then
+        -- TODO: We support only the cases when all reductions are reindexed
+        assert(num_cases == 2 and #primary_partitions == 1)
+        cache_value_type = loop_range_type:colors().index_type
+      end
+      local orig_region = loop_range_type.parent_region_symbol
       local cache_region, cache_stats =
-        create_isomorphic_region("cache_" .. tostring(ghost_range), orig_region, uint8)
+        create_isomorphic_region("cache_" .. tostring(ghost_range), orig_region, cache_value_type)
       stats:insertall(cache_stats)
       self.task_constraints.region_universe[cache_region:gettype()] = true
       std.add_privilege(self.task_constraints, std.reads, cache_region:gettype(), data.newtuple())
@@ -1777,9 +2034,11 @@ function solver_context:synthesize_partitions(color_space_symbol)
       local cache_partition, partition_stat =
         create_intersection_partition_region(cache_region, loop_range)
       stats:insert(partition_stat)
-      local fill_loop = create_index_fill(self.task_constraints, cache_partition,
-          color_space_symbol, num_cases, uint8)
-      stats:insert(fill_loop)
+      if loop_range_type:is_disjoint() then
+        local fill_loop = create_index_fill(self.task_constraints, cache_partition,
+            color_space_symbol, cache_value_type, num_cases)
+        stats:insert(fill_loop)
+      end
 
       local cases = data.newmap()
       for case_id, primary_partition in ipairs(primary_partitions) do
@@ -1787,16 +2046,20 @@ function solver_context:synthesize_partitions(color_space_symbol)
         for i = 1, #paths do
           local info, range = unpack(paths[i])
           local region = self.constraints:get_partition(range).region
-          local next_preimage_partition = new_range()
-          stats:insert(
-            create_preimage_partition(next_preimage_partition, region, preimage_partition, info))
+          local next_preimage_partition =
+            preimage_partitions[data.newtuple(region, preimage_partition, info.info)]
+          if next_preimage_partition == nil then
+            next_preimage_partition = new_range()
+            stats:insert(
+              create_preimage_partition(next_preimage_partition, region, preimage_partition, info))
+          end
           preimage_partition = next_preimage_partition
         end
         local cache_subpartition, partition_stat =
           create_intersection_partition(cache_partition, preimage_partition)
         stats:insert(partition_stat)
         local fill_loop = create_index_fill(self.task_constraints, cache_subpartition,
-            color_space_symbol, case_id, uint8)
+            color_space_symbol, cache_value_type, loop_range_type:is_disjoint() and case_id)
         stats:insert(fill_loop)
         cases[primary_partition] = case_id
       end
@@ -1816,14 +2079,15 @@ function solver_context:synthesize_partitions(color_space_symbol)
       end
       assert(#loop_range_partitions > 0)
       for _, loop_range_partition in ipairs(loop_range_partitions) do
-        local all_caches  =find_or_create(self.incl_check_caches, ghost_range)
+        local all_caches = find_or_create(self.incl_check_caches, ghost_range)
         assert(all_caches[loop_range_partition] == nil)
-        all_caches[loop_range_partition] = { cache_partition, cases, num_cases }
+        all_caches[loop_range_partition] =
+          { cache_partition, cases, num_cases, loop_range_type:is_disjoint() }
       end
     end
   end
 
-  return stats, unifiable_ranges
+  return stats, unifiable_ranges, reindexed
 end
 
 function solver_context:print_all_constraints()
@@ -1844,11 +2108,10 @@ function solver_context:print_all_constraints()
   print("* accesses:")
   for region_symbol, accesses in self.field_accesses:items() do
     for field_path, summary in accesses:items() do
-      print("    " .. tostring(region_symbol) .. "." .. field_path:mkstring("", ".", ""))
+      print("    " .. (data.newtuple(region_symbol) .. field_path):mkstring("."))
       for privilege, ranges_set in summary:items() do
-        print("        " .. tostring(region_symbol) .. "[" ..
-          tostring(ranges_set) .. "]." ..  field_path:mkstring("", ".", "") ..
-          " @ " .. tostring(privilege))
+        print("        " .. (data.newtuple(region_symbol) .. field_path):mkstring(".") ..
+            "[" .. tostring(ranges_set) .. "] @ " .. tostring(privilege))
       end
     end
   end
@@ -1856,14 +2119,6 @@ function solver_context:print_all_constraints()
 end
 
 local solve_constraints = {}
-
-local function combine_mapping(m1, m2)
-  local m = data.newmap()
-  for from, to in m2:items() do
-    m[from] = m1[to] or to
-  end
-  return m
-end
 
 function solve_constraints.solve(cx, stat)
   assert(stat:is(ast.typed.stat.ParallelizeWith))
@@ -1907,7 +2162,7 @@ function solve_constraints.solve(cx, stat)
     return {range_mapping, region_mapping}
   end)
 
-  local partition_stats, unified_ranges =
+  local partition_stats, unified_ranges, reindexed_ranges =
     solver_cx:synthesize_partitions(color_space_symbol)
 
   if not unified_ranges:is_empty() then
@@ -1930,6 +2185,7 @@ function solve_constraints.solve(cx, stat)
     incl_check_caches        = solver_cx.incl_check_caches,
     color_space_symbol       = color_space_symbol,
     partition_stats          = partition_stats,
+    reindexed_ranges         = reindexed_ranges,
   }
 end
 

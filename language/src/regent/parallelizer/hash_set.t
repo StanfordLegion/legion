@@ -126,6 +126,13 @@ function hash_set:foreach(fn)
   end
 end
 
+function hash_set:filter(fn)
+  local result = hash_set.new()
+  for v, _ in self.__set:items() do
+    if fn(v) then result.__set[v] = true end
+  end
+  return result
+end
 function hash_set:to_list()
   local l = terralib.newlist()
   for v, _ in self.__set:items() do l:insert(v) end

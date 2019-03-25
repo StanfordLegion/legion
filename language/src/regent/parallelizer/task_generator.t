@@ -39,20 +39,27 @@ local rewriter_context = {}
 rewriter_context.__index = rewriter_context
 
 function rewriter_context.new(accesses_to_region_params,
+                              reindexed_accesses,
+                              region_params_to_partitions,
                               loop_var_to_regions,
                               param_mapping,
                               incl_check_caches,
                               demand_cuda,
+                              task_color_symbol,
                               options)
   local cx = {
-    accesses_to_region_params = accesses_to_region_params,
-    loop_var_to_regions       = loop_var_to_regions,
-    symbol_mapping            = param_mapping:copy(),
-    incl_check_caches         = incl_check_caches,
-    demand_cuda               = demand_cuda,
-    loop_range                = false,
-    loop_var                  = false,
-    colocation                = options.colocation or false,
+    accesses_to_region_params   = accesses_to_region_params,
+    reindexed_accesses          = reindexed_accesses,
+    region_params_to_partitions = region_params_to_partitions,
+    loop_var_to_regions         = loop_var_to_regions,
+    symbol_mapping              = param_mapping:copy(),
+    incl_check_caches           = incl_check_caches,
+    demand_cuda                 = demand_cuda,
+    task_color_symbol           = task_color_symbol,
+    loop_range                  = false,
+    loop_var                    = false,
+    disjoint_loop_range         = true,
+    colocation                  = options.colocation or false,
   }
   return setmetatable(cx, rewriter_context)
 end
@@ -76,6 +83,8 @@ end
 function rewriter_context:set_loop_context(loop_range, loop_var)
   self.loop_range = loop_range
   self.loop_var = loop_var
+  self.disjoint_loop_range =
+    self.region_params_to_partitions[loop_range]:gettype():is_disjoint()
 end
 
 function rewriter_context:get_loop_var()
@@ -432,7 +441,6 @@ local function get_source_location(node)
   return tostring(node.span.source) .. ":" .. tostring(node.span.start.line)
 end
 
--- TODO: Optimize cases when regions are co-located in one instance
 local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   assert(#ref_type.bounds_symbols == 1)
   local region_symbol = ref_type.bounds_symbols[1]
@@ -442,8 +450,10 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     return data.newtuple(region_symbol, ref_type.field_path .. field_path)
   end)
   local region_params_set = hash_set.new()
+  local reindexed = false
   keys:map(function(key)
     region_params_set:insert_all(cx.accesses_to_region_params[key])
+    reindexed = reindexed or cx.reindexed_accesses:has(key)
   end)
   local region_params = region_params_set:to_list()
 
@@ -490,17 +500,140 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     }
   end)
 
-  if #cases == 1 or (cx.colocation and reads) then
+  if cx.colocation and template:is(ast.typed.stat.Assignment) then
     return cases[1]
+  elseif #cases == 1 then
+    local case = cases[1]
+    if not reindexed then
+      return case
+    else
+      if std.config["parallelize-cache-incl-check"] then
+        local loop_var = cx:get_loop_var()
+        local cache_region, cases, num_cases, is_disjoint = unpack(cache)
+        local rhs = ast.typed.expr.Constant {
+          value = 1,
+          expr_type = uint8,
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+        if not is_disjoint then
+          rhs = ast.typed.expr.ID {
+            value = cx.task_color_symbol,
+            expr_type = std.rawref(&cx.task_color_symbol:gettype()),
+            span = template.span,
+            annotations = ast.default_annotations(),
+          }
+        end
+        return ast.typed.stat.If {
+          cond = ast.typed.expr.Binary {
+            op = "==",
+            lhs = ast.typed.expr.IndexAccess {
+              value = ast.typed.expr.ID {
+                value = cache_region,
+                expr_type = std.rawref(&cache_region:gettype()),
+                span = template.span,
+                annotations = ast.default_annotations(),
+              },
+              index = ast.typed.expr.ID {
+                value = loop_var,
+                expr_type = std.rawref(&loop_var:gettype()),
+                span = template.span,
+                annotations = ast.default_annotations(),
+              },
+              expr_type = std.ref(cache_region:gettype():ispace().index_type(
+                    cache_region:gettype():fspace(), cache_region)),
+              span = template.span,
+              annotations = ast.default_annotations(),
+            },
+            rhs = rhs,
+            expr_type = bool,
+            span = template.span,
+            annotations = ast.default_annotations(),
+          },
+          then_block = ast.typed.Block {
+            stats = terralib.newlist({case}),
+            span = template.span,
+          },
+          elseif_blocks = terralib.newlist(),
+          else_block = ast.typed.Block {
+            stats = terralib.newlist(),
+            span = template.span,
+          },
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+
+      else
+        local region_param = region_params[1]
+        return ast.typed.stat.If {
+          cond = ast.typed.expr.Binary {
+            op = "<=",
+            lhs = index,
+            rhs = ast.typed.expr.FieldAccess {
+              field_name = "ispace",
+              value = ast.typed.expr.ID {
+                value = region_param,
+                expr_type = std.rawref(&region_param:gettype()),
+                span = template.span,
+                annotations = ast.default_annotations(),
+              },
+              expr_type = region_param:gettype():ispace(),
+              span = template.span,
+              annotations = ast.default_annotations(),
+            },
+            expr_type = bool,
+            span = template.span,
+            annotations = ast.default_annotations(),
+          },
+          then_block = ast.typed.Block {
+            stats = terralib.newlist({case}),
+            span = template.span,
+          },
+          elseif_blocks = terralib.newlist(),
+          else_block = ast.typed.Block {
+            stats = terralib.newlist(),
+            span = template.span,
+          },
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+      end
+    end
   else
     local conds = nil
     if std.config["parallelize-cache-incl-check"] then
       local loop_var = cx:get_loop_var()
       assert(cache)
-      local cache_region, cases, num_cases = unpack(cache)
+      local cache_region, cases, num_cases, is_disjoint = unpack(cache)
       conds = region_params:map(function(region_param)
         local case_id = cases[region_param]
-        if case_id == nil then case_id = num_cases end
+        if case_id == nil then
+          if not is_disjoint then
+            -- TODO: This case better be checked in the parallelizer itself,
+            --       but we will depend on the bounds checks for the moment.
+            return ast.typed.expr.Constant {
+              value = true,
+              expr_type = bool,
+              span = template.span,
+              annotations = ast.default_annotations(),
+            }
+          end
+          case_id = num_cases
+        end
+        local rhs = ast.typed.expr.Constant {
+          value = case_id,
+          expr_type = uint8,
+          span = template.span,
+          annotations = ast.default_annotations(),
+        }
+        if not is_disjoint then
+          rhs = ast.typed.expr.ID {
+            value = cx.task_color_symbol,
+            expr_type = std.rawref(&cx.task_color_symbol:gettype()),
+            span = template.span,
+            annotations = ast.default_annotations(),
+          }
+        end
         return ast.typed.expr.Binary {
           op = "==",
           lhs = ast.typed.expr.IndexAccess {
@@ -517,16 +650,11 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
               annotations = ast.default_annotations(),
             },
             expr_type = std.ref(cache_region:gettype():ispace().index_type(
-                  uint8, cache_region)),
+                  cache_region:gettype():fspace(), cache_region)),
             span = template.span,
             annotations = ast.default_annotations(),
           },
-          rhs = ast.typed.expr.Constant {
-            value = case_id,
-            expr_type = uint8,
-            span = template.span,
-            annotations = ast.default_annotations(),
-          },
+          rhs = rhs,
           expr_type = bool,
           span = template.span,
           annotations = ast.default_annotations(),
@@ -759,12 +887,14 @@ function task_generator.new(node)
     local mappings_by_access_paths = caller_cx.mappings_by_access_paths
     local loop_range_partitions = caller_cx.loop_range_partitions
     local incl_check_caches = caller_cx.incl_check_caches
+    local reindexed_ranges = caller_cx.reindexed_ranges
     local my_ranges_to_caller_ranges, my_regions_to_caller_regions =
       unpack(pair_of_mappings)
 
     local partitions_to_region_params = data.newmap()
     local privileges_by_region_params = data.newmap()
     local my_accesses_to_region_params = data.newmap()
+    local reindexed_accesses = hash_set.new()
     local loop_var_to_regions = data.newmap()
     local region_params_to_partitions = data.newmap()
     local param_index = 1
@@ -779,6 +909,13 @@ function task_generator.new(node)
           local caller_region = my_regions_to_caller_regions[my_region_symbol]
           local key = data.newtuple(caller_region, field_path)
           local range = my_ranges_to_caller_ranges[my_range]
+          if std.is_reduce(my_privilege) then
+            if reindexed_ranges[range] ~= nil then
+              range = reindexed_ranges[range]
+              reindexed_accesses:insert(
+                data.newtuple(my_region_symbol, field_path))
+            end
+          end
           local partitions = mappings_by_access_paths[key][range]
 
           local region_params = partitions:map(function(partition)
@@ -897,7 +1034,7 @@ function task_generator.new(node)
         if incl_check_caches[range] ~= nil then
           local my_incl_check_cache = data.newmap()
           for loop_range_partition, tuple in incl_check_caches[range]:items() do
-            local cache_partition, cases, num_cases = unpack(tuple)
+            local cache_partition, cases, num_cases, is_disjoint = unpack(tuple)
             local my_cache_param = find_or_create(cache_params_map, range,
               function()
                 local region_symbol = cache_partition:gettype().parent_region_symbol
@@ -921,7 +1058,7 @@ function task_generator.new(node)
                 my_cases[partitions_to_region_params[partition]] = case_id
               end)
               my_incl_check_cache[loop_range_region_param] =
-                { my_cache_param, my_cases, num_cases }
+                { my_cache_param, my_cases, num_cases, is_disjoint }
             end
           end
           local indices = cx:find_indices_of_range(my_range)
@@ -1034,6 +1171,17 @@ function task_generator.new(node)
       local coherence_modes = coherence_modes:copy()
       local options = { [variant_type] = true }
 
+      local task_color_symbol = std.newsymbol(
+          caller_cx.color_space_symbol:gettype().index_type,
+          "task_color")
+      params:insert(ast.typed.top.TaskParam {
+        symbol = task_color_symbol,
+        param_type = task_color_symbol:gettype(),
+        future = false,
+        span = serial_task_ast.span,
+        annotations = ast.default_annotations(),
+      })
+
       parallel_task:set_type(terralib.types.functype(
         params:map(function(param) return param.param_type end),
         serial_task_ast.return_type, false))
@@ -1054,10 +1202,13 @@ function task_generator.new(node)
       parallel_task:set_constraints(constraints)
       local rewriter_cx =
         rewriter_context.new(my_accesses_to_region_params,
+                             reindexed_accesses,
+                             region_params_to_partitions,
                              loop_var_to_regions,
                              param_mapping,
                              my_incl_check_caches,
                              serial_task_ast.annotations.cuda:is(ast.annotation.Demand),
+                             task_color_symbol,
                              options)
       local parallel_task_ast = ast.typed.top.Task {
         name = parallel_task_name,
