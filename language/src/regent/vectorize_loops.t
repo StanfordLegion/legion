@@ -559,8 +559,10 @@ end
 
 function min_simd_width.type(reg_size, ty)
   assert(not (std.is_ref(ty) or std.is_rawref(ty)))
-  if std.is_bounded_type(ty) then
-    return reg_size / sizeof(int64)
+  if std.is_bounded_type(ty) or std.is_index_type(ty) then
+    -- We put the size of index values to be 4 bytes,
+    -- so we can pick the right vector width for the actual computation
+    return reg_size / sizeof(int32)
   elseif ty:isarray() then
     return min_simd_width.type(reg_size, ty.type)
   elseif ty:isstruct() then
