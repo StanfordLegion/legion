@@ -37,62 +37,21 @@ class CircuitMapper : public DefaultMapper
 {
 public:
   CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
-                const char *mapper_name,
-                std::vector<Processor>* procs_list,
-                std::vector<Memory>* sysmems_list,
-                std::map<Memory, std::vector<Processor> >* sysmem_local_procs,
-                std::map<Processor, Memory>* proc_sysmems,
-                std::map<Processor, Memory>* proc_regmems);
-  virtual Processor default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task);
+                const char *mapper_name);
   virtual void default_policy_select_target_processors(
                                     MapperContext ctx,
                                     const Task &task,
                                     std::vector<Processor> &target_procs);
-private:
-  // std::vector<Processor>& procs_list;
-  // std::vector<Memory>& sysmems_list;
-  // std::map<Memory, std::vector<Processor> >& sysmem_local_procs;
-  // std::map<Processor, Memory>& proc_sysmems;
-  // std::map<Processor, Memory>& proc_regmems;
+  virtual Memory default_policy_select_target_memory(
+                                MapperContext ctx,
+                                Processor target_proc,
+                                const RegionRequirement &req);
 };
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
-                             const char *mapper_name,
-                             std::vector<Processor>* _procs_list,
-                             std::vector<Memory>* _sysmems_list,
-                             std::map<Memory, std::vector<Processor> >* _sysmem_local_procs,
-                             std::map<Processor, Memory>* _proc_sysmems,
-                             std::map<Processor, Memory>* _proc_regmems)
-  : DefaultMapper(rt, machine, local, mapper_name) //,
-    // procs_list(*_procs_list),
-    // sysmems_list(*_sysmems_list),
-    // sysmem_local_procs(*_sysmem_local_procs),
-    // proc_sysmems(*_proc_sysmems)// ,
-    // proc_regmems(*_proc_regmems)
+                             const char *mapper_name)
+  : DefaultMapper(rt, machine, local, mapper_name)
 {
-}
-
-Processor CircuitMapper::default_policy_select_initial_processor(
-                                    MapperContext ctx, const Task &task)
-{
-  // const char* task_name = task.get_task_name();
-  // if (strcmp(task_name, "calculate_new_currents") == 0 ||
-  //     strcmp(task_name, "distribute_charge") == 0 ||
-  //     strcmp(task_name, "update_voltages") == 0 ||
-  //     strcmp(task_name, "init_pointers") == 0)
-  // {
-  //   std::vector<Processor> &local_procs =
-  //     sysmem_local_procs[proc_sysmems[local_proc]];
-  //   if (local_procs.size() > 1 && task.regions[0].handle_type == SINGULAR) {
-  //     Color index = runtime->get_logical_region_color(ctx, task.regions[0].region);
-  //     return local_procs[(index % (local_procs.size() - 1)) + 1];
-  //   } else {
-  //     return local_proc;
-  //   }
-  // }
-
-  return DefaultMapper::default_policy_select_initial_processor(ctx, task);
 }
 
 void CircuitMapper::default_policy_select_target_processors(
@@ -103,52 +62,37 @@ void CircuitMapper::default_policy_select_target_processors(
   target_procs.push_back(task.target_proc);
 }
 
+Memory CircuitMapper::default_policy_select_target_memory(MapperContext ctx,
+                                                          Processor target_proc,
+                                                          const RegionRequirement &req)
+{
+  if (target_proc.kind() != Processor::TOC_PROC ||
+      !runtime->has_parent_logical_partition(ctx, req.region))
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
+  LogicalRegion parent = runtime->get_parent_logical_region(ctx,
+      runtime->get_parent_logical_partition(ctx, req.region));
+  if (!runtime->has_parent_logical_partition(ctx, parent))
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
+  DomainPoint color = runtime->get_logical_region_color_point(ctx, parent);
+  if (color[0] > 0)
+  {
+    Machine::MemoryQuery visible_memories(machine);
+    visible_memories.has_affinity_to(target_proc);
+    visible_memories.only_kind(Memory::Z_COPY_MEM);
+    assert(visible_memories.count() > 0);
+    return *visible_memories.begin();
+  }
+  else
+    return DefaultMapper::default_policy_select_target_memory(ctx, target_proc, req);
+}
+
 static void create_mappers(Machine machine, Runtime *runtime, const std::set<Processor> &local_procs)
 {
-  std::vector<Processor>* procs_list = new std::vector<Processor>();
-  std::vector<Memory>* sysmems_list = new std::vector<Memory>();
-  std::map<Memory, std::vector<Processor> >* sysmem_local_procs =
-    new std::map<Memory, std::vector<Processor> >();
-  std::map<Processor, Memory>* proc_sysmems = new std::map<Processor, Memory>();
-  std::map<Processor, Memory>* proc_regmems = new std::map<Processor, Memory>();
-
-
-  std::vector<Machine::ProcessorMemoryAffinity> proc_mem_affinities;
-  machine.get_proc_mem_affinity(proc_mem_affinities);
-
-  for (unsigned idx = 0; idx < proc_mem_affinities.size(); ++idx) {
-    Machine::ProcessorMemoryAffinity& affinity = proc_mem_affinities[idx];
-    if (affinity.p.kind() == Processor::LOC_PROC) {
-      if (affinity.m.kind() == Memory::SYSTEM_MEM) {
-        (*proc_sysmems)[affinity.p] = affinity.m;
-        if (proc_regmems->find(affinity.p) == proc_regmems->end())
-          (*proc_regmems)[affinity.p] = affinity.m;
-      }
-      else if (affinity.m.kind() == Memory::REGDMA_MEM)
-        (*proc_regmems)[affinity.p] = affinity.m;
-    }
-  }
-
-  for (std::map<Processor, Memory>::iterator it = proc_sysmems->begin();
-       it != proc_sysmems->end(); ++it) {
-    procs_list->push_back(it->first);
-    (*sysmem_local_procs)[it->second].push_back(it->first);
-  }
-
-  for (std::map<Memory, std::vector<Processor> >::iterator it =
-        sysmem_local_procs->begin(); it != sysmem_local_procs->end(); ++it)
-    sysmems_list->push_back(it->first);
-
   for (std::set<Processor>::const_iterator it = local_procs.begin();
         it != local_procs.end(); it++)
   {
     CircuitMapper* mapper = new CircuitMapper(runtime->get_mapper_runtime(),
-                                              machine, *it, "circuit_mapper",
-                                              procs_list,
-                                              sysmems_list,
-                                              sysmem_local_procs,
-                                              proc_sysmems,
-                                              proc_regmems);
+                                              machine, *it, "circuit_mapper");
     runtime->replace_default_mapper(mapper, *it);
   }
 }
