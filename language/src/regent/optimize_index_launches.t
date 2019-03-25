@@ -658,6 +658,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       then
         report_fail(call, "loop optimization failed: fill target" ..
             " interferes with itself")
+        return
       end
 
       args_provably.invariant:insert(false)
