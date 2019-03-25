@@ -46,12 +46,28 @@ public:
                                 MapperContext ctx,
                                 Processor target_proc,
                                 const RegionRequirement &req);
+  virtual LogicalRegion default_policy_select_instance_region(
+                                MapperContext ctx, Memory target_memory,
+                                const RegionRequirement &req,
+                                const LayoutConstraintSet &constraints,
+                                bool force_new_instances,
+                                bool meets_constraints);
 };
 
 CircuitMapper::CircuitMapper(MapperRuntime *rt, Machine machine, Processor local,
                              const char *mapper_name)
   : DefaultMapper(rt, machine, local, mapper_name)
 {
+}
+
+LogicalRegion CircuitMapper::default_policy_select_instance_region(
+                              MapperContext ctx, Memory target_memory,
+                              const RegionRequirement &req,
+                              const LayoutConstraintSet &constraints,
+                              bool force_new_instances,
+                              bool meets_constraints)
+{
+  return req.region;
 }
 
 void CircuitMapper::default_policy_select_target_processors(
