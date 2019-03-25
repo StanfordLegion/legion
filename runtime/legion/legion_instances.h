@@ -297,20 +297,19 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_INSTANCE_MANAGER_TASK_ID;
       public:
         DeferInstanceManagerArgs(DistributedID d, AddressSpaceID own, Memory m,
-            PhysicalInstance i, size_t f, bool is, IndexSpace dh, 
-            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, PointerConstraint &p, ApEvent use)
-          : LgTaskArgs<DeferInstanceManagerArgs>(implicit_provenance),
-            did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
-            domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
-            layout_id(l), pointer(new PointerConstraint(p)), use_event(use) { }
+            PhysicalInstance i, size_t f, bool local, IndexSpaceExpression *lx,
+            bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, PointerConstraint &p, 
+            ApEvent use);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
         const Memory mem;
         const PhysicalInstance inst;
         const size_t footprint;
+        const bool local_is;
         const bool domain_is;
+        IndexSpaceExpression *local_expr;
         const IndexSpace domain_handle;
         const IndexSpaceExprID domain_expr;
         const FieldSpace handle;
@@ -385,22 +384,19 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_DEFER_REDUCTION_MANAGER_TASK_ID;
       public:
         DeferReductionManagerArgs(DistributedID d, AddressSpaceID own, Memory m,
-            PhysicalInstance i, size_t f, bool is, IndexSpace dh, 
-            IndexSpaceExprID dx, FieldSpace h, RegionTreeID tid,
-            LayoutConstraintID l, PointerConstraint &p, ApEvent use,
-            bool fold, const Domain &ptr, ReductionOpID r)
-          : LgTaskArgs<DeferReductionManagerArgs>(implicit_provenance),
-            did(d), owner(own), mem(m), inst(i), footprint(f), domain_is(is),
-            domain_handle(dh), domain_expr(dx), handle(h), tree_id(tid),
-            layout_id(l), pointer(new PointerConstraint(p)), use_event(use),
-            foldable(fold), ptr_space(ptr), redop(r) { }
+            PhysicalInstance i, size_t f, bool local, IndexSpaceExpression *lx,
+            bool is, IndexSpace dh, IndexSpaceExprID dx, FieldSpace h, 
+            RegionTreeID tid, LayoutConstraintID l, PointerConstraint &p, 
+            ApEvent use, bool fold, const Domain &ptr, ReductionOpID r);
       public:
         const DistributedID did;
         const AddressSpaceID owner;
         const Memory mem;
         const PhysicalInstance inst;
         const size_t footprint;
+        const bool local_is;
         const bool domain_is;
+        IndexSpaceExpression *const local_expr;
         const IndexSpace domain_handle;
         const IndexSpaceExprID domain_expr;
         const FieldSpace handle;

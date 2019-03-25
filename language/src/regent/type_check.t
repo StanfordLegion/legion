@@ -17,6 +17,7 @@
 local affine_helper = require("regent/affine_helper")
 local ast = require("regent/ast")
 local data = require("common/data")
+local pretty = require("regent/pretty")
 local report = require("common/report")
 local std = require("regent/std")
 local symbol_table = require("regent/symbol_table")
@@ -1154,28 +1155,15 @@ function type_check.expr_raw_context(cx, node)
   }
 end
 
-local function extract_field_path(node)
-  if node:is(ast.specialized.expr.ID) then
-    return node, data.newtuple()
-  elseif node:is(ast.specialized.expr.FieldAccess) then
-    local base, path = extract_field_path(node.value)
-    return base, path .. data.newtuple(node.field_name)
-  else
-    report.error(node, "unexpected type of expression in raw operator")
-  end
-end
-
 function type_check.expr_raw_fields(cx, node)
-  local base, region_field_path = extract_field_path(node.region)
-  local region = type_check.expr(cx, base)
-  local region_type = std.check_read(cx, region)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region.region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
+  local absolute_field_paths =
+    std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
-  for _, field_path in ipairs(field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) and
-       field_path:starts_with(region_field_path)
-    then
+  for _, field_path in ipairs(absolute_field_paths) do
+    if std.check_any_privilege(cx, region_type, field_path) then
       privilege_fields:insert(field_path)
     end
   end
@@ -1191,16 +1179,14 @@ function type_check.expr_raw_fields(cx, node)
 end
 
 function type_check.expr_raw_physical(cx, node)
-  local base, region_field_path = extract_field_path(node.region)
-  local region = type_check.expr(cx, base)
-  local region_type = std.check_read(cx, region)
+  local region = type_check.expr_region_root(cx, node.region)
+  local region_type = std.check_read(cx, region.region)
 
-  local field_paths, _ = std.flatten_struct_fields(region_type:fspace())
+  local absolute_field_paths =
+    std.get_absolute_field_paths(region_type:fspace(), region.fields)
   local privilege_fields = terralib.newlist()
-  for _, field_path in ipairs(field_paths) do
-    if std.check_any_privilege(cx, region_type, field_path) and
-       field_path:starts_with(region_field_path)
-    then
+  for _, field_path in ipairs(absolute_field_paths) do
+    if std.check_any_privilege(cx, region_type, field_path) then
       privilege_fields:insert(field_path)
     end
   end

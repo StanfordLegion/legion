@@ -1032,7 +1032,7 @@ namespace Legion {
                          RegionTreeForest *forest, AddressSpaceID source);
       static IndexSpaceExpression* unpack_expression(Deserializer &derez,
                          RegionTreeForest *forest, AddressSpaceID source,
-                         bool &is_index_space, IndexSpace &handle,
+                         bool &is_local,bool &is_index_space,IndexSpace &handle,
                          IndexSpaceExprID &remote_expr_id, RtEvent &wait_for);
     public:
       const TypeTag type_tag;

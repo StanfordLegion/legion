@@ -8443,6 +8443,33 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    static inline unsigned int_sqrt(unsigned n)
+    //--------------------------------------------------------------------------
+    {
+      // Borrowed from https://en.wikipedia.org/wiki/Integer_square_root
+      unsigned shift = 2;
+      unsigned n_shifted = n >> shift;
+      while ((n_shifted != 0) && (n_shifted != n))
+      {
+        shift += 2;
+        n_shifted = n >> shift;
+      }
+      shift = shift - 2;
+      unsigned result = 0;
+      while (true)
+      {
+        result <<= 1;
+        unsigned candidate = result + 1;
+        if ((candidate * candidate) <= (n >> shift))
+          result = candidate;
+        if (shift == 0)
+          break;
+        shift -= 2;
+      }
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     void EquivalenceSet::check_for_migration(PhysicalAnalysis &analysis,
                                              std::set<RtEvent> &applied_events)
     //--------------------------------------------------------------------------
@@ -8542,22 +8569,60 @@ namespace Legion {
             continue;
           max = user_counts[idx];
           max_user = user_samples[idx];
-        }   
-        if (has_logical_owner)
+        }
+        // If the max_user is different than the current owner do the
+        // analysis to see if we can to change the analysis
+        if (max_user != logical_owner_space)
         {
-          // If the logical owner is one of the current users then
-          // we really better have a good reason to move this 
-          // equivalence set to a new node. Make sure it has at
-          // least double the number of expected users
-          const unsigned needed_users = (2 * total_users) / user_samples.size();
-          // Do the migration if we had more than this number of users
-          if (max > needed_users)
+          if (has_logical_owner)
+          {
+            const unsigned long expected_average = 
+              total_users / user_samples.size();
+#if 0
+            // If the logical owner is one of the current users then
+            // we really better have a good reason to move this 
+            // equivalence set to a new node. Make sure it has at
+            // least double the number of expected users, if it has that
+            // then we compute the estimated standard deviation, if the
+            // max is at least 2 standard deviations from the average then
+            // that means we can move it with ~95% confidence
+            if (max > (2 * expected_average))
+            {
+              unsigned long variance = 0;
+              unsigned long max_diff2 = 0;
+              for (unsigned idx = 0; idx < user_counts.size(); idx++)
+              {
+                const unsigned long diff = user_counts[idx] - expected_average;
+                const unsigned long diff2 = diff * diff;
+                variance += diff2;
+                if (user_samples[idx] == max)
+                  max_diff2 = diff2;
+              }
+              variance /= (user_samples.size() - 1);
+              // Avoid taking the square root by seeing if the max is greater
+              // than two standard deviations (4 variances) away
+              if (max_diff2 >= (4 * variance))
+                new_logical_owner = max_user;
+            }
+#else
+            // If the logical owner is one of the current users then
+            // we really better have a good reason to move this 
+            // equivalence set to a new node. Make sure it has at
+            // least sqrt(N) times the number of expected users,
+            if (max > (2 * expected_average))
+            {
+              const unsigned long sqrt_n = int_sqrt(user_samples.size());
+              // Need + 1 here since int_sqrt rounds down
+              if (max > ((sqrt_n + 1) * expected_average))
+                new_logical_owner = max_user;
+            }
+#endif
+          }
+          else
+            // If we didn't have the current logical owner then
+            // just pick the maximum one
             new_logical_owner = max_user;
         }
-        else
-          // If we didn't have the current logical owner then
-          // just pick the maximum one
-          new_logical_owner = max_user;
         // Now reset the data structure for the next iteration
         if (total_users >= (MIGRATION_MEMORIES * SAMPLES_PER_MIGRATION_TEST))
         {
@@ -10741,27 +10806,42 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::DeferRayTraceArgs::DeferRayTraceArgs(EquivalenceSet *s, 
+                          VersionManager *t, IndexSpaceExpression *e, 
+                          IndexSpace h, AddressSpaceID o, RtUserEvent d,
+                          RtUserEvent def, const FieldMask &m,
+                          bool local, bool is_expr_s, IndexSpace expr_h,
+                          IndexSpaceExprID expr_i)
+      : LgTaskArgs<DeferRayTraceArgs>(implicit_provenance),
+          set(s), target(t), expr(local ? e : NULL), handle(h), origin(o), 
+          done(d), deferral(def), ray_mask(new FieldMask(m)),
+          expr_handle(expr_h), expr_id(expr_i), is_local(local),
+          is_expr_space(is_expr_s)
+    //--------------------------------------------------------------------------
+    {
+      if (local)
+        expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_ray_trace(const void *args,
                                                      Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const DeferRayTraceArgs *dargs = (const DeferRayTraceArgs*)args;
+
       // See if we need to load the expression or not
-      if (dargs->expr == NULL)
-      {
-        IndexSpaceExpression *expr = (dargs->is_expr_space) ?
-          runtime->forest->get_node(dargs->expr_handle) :
-          runtime->forest->find_remote_expression(dargs->expr_id);
-        dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
-                            *(dargs->ray_mask), dargs->handle, dargs->origin,
-                            dargs->done, dargs->deferral);
-      }
-      else
-        dargs->set->ray_trace_equivalence_sets(dargs->target, dargs->expr,
-                            *(dargs->ray_mask), dargs->handle, dargs->origin,
-                            dargs->done, dargs->deferral);
+      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
+        (dargs->is_expr_space) ? runtime->forest->get_node(dargs->expr_handle) 
+        : runtime->forest->find_remote_expression(dargs->expr_id);
+      dargs->set->ray_trace_equivalence_sets(dargs->target, expr,
+                          *(dargs->ray_mask), dargs->handle, dargs->origin,
+                          dargs->done, dargs->deferral);
       // Clean up our ray mask
       delete dargs->ray_mask;
+      // Remove our expression reference too
+      if (dargs->is_local && dargs->expr->remove_expression_reference())
+        delete dargs->expr;
     }
 
     //--------------------------------------------------------------------------
@@ -10945,13 +11025,13 @@ namespace Legion {
 
       VersionManager *target;
       derez.deserialize(target);
-      bool is_expr_space;
+      bool is_local, is_expr_space;
       IndexSpace expr_handle;
       IndexSpaceExprID expr_id;
       RtEvent expr_ready;
       IndexSpaceExpression *expr = 
         IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
-                              is_expr_space, expr_handle, expr_id, expr_ready);
+                    is_local, is_expr_space, expr_handle, expr_id, expr_ready);
       FieldMask ray_mask;
       derez.deserialize(ray_mask);
       IndexSpace handle;
@@ -10969,7 +11049,7 @@ namespace Legion {
           DeferRayTraceArgs args(set, target, expr, 
                                  handle, origin, done_event,
                                  RtUserEvent::NO_RT_USER_EVENT,
-                                 ray_mask, is_expr_space, 
+                                 ray_mask, is_local, is_expr_space, 
                                  expr_handle, expr_id);
           runtime->issue_runtime_meta_task(args, 
               LG_THROUGHPUT_DEFERRED_PRIORITY, defer); 

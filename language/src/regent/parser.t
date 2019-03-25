@@ -530,7 +530,7 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__fields") then
     p:expect("(")
-    local region = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.RawFields {
       region = region,
@@ -540,7 +540,7 @@ function parser.expr_prefix(p)
 
   elseif p:nextif("__physical") then
     p:expect("(")
-    local region = p:expr()
+    local region = p:expr_region_root()
     p:expect(")")
     return ast.unspecialized.expr.RawPhysical {
       region = region,
