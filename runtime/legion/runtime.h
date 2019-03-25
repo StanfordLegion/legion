@@ -243,14 +243,15 @@ namespace Legion {
       virtual void notify_inactive(ReferenceMutator *mutator);
     public:
       void register_dependence(Operation *consumer_op);
-      void register_waiter(AddressSpaceID sid);
+      void register_waiter(AddressSpaceID sid, ReferenceMutator *mutator);
     protected:
       void mark_sampled(void);
       void broadcast_result(void);
     public:
-      void record_future_registered(ReferenceMutator *creator);
+      void record_future_registered(void);
       static void handle_future_result(Deserializer &derez, Runtime *rt);
-      static void handle_future_subscription(Deserializer &derez, Runtime *rt);
+      static void handle_future_subscription(Deserializer &derez, Runtime *rt,
+                                             AddressSpaceID source);
     public:
       void contribute_to_collective(const DynamicCollective &dc,unsigned count);
       static void handle_contribute_to_collective(const void *args);
@@ -2697,7 +2698,8 @@ namespace Legion {
                                            AddressSpaceID source);
       void handle_manager_request(Deserializer &derez, AddressSpaceID source);
       void handle_future_result(Deserializer &derez);
-      void handle_future_subscription(Deserializer &derez);
+      void handle_future_subscription(Deserializer &derez, 
+                                      AddressSpaceID source);
       void handle_future_map_future_request(Deserializer &derez,
                                             AddressSpaceID source);
       void handle_future_map_future_response(Deserializer &derez);
