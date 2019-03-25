@@ -472,7 +472,7 @@ where reads(private.{input, output}) do
     regentlib.assert(private[i].input == expect_in, "test failed")
     regentlib.assert(private[i].output == expect_out, "test failed")
   end
-  c.printf("check completed successfully\n")
+  --c.printf("check completed successfully\n")
 end
 
 task fill_(r : region(ispace(int2d), point), v : DTYPE)
@@ -484,8 +484,19 @@ end
 
 if not use_python_main then
 
+task read_config()
+  return common.read_config()
+end
+
+task print_time(color : int, sim_time : double)
+  if color == 0 then
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+  end
+end
+
+__demand(__inner, __replicable)
 task main()
-  var conf = common.read_config()
+  var conf = read_config()
 
   var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
   var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
@@ -572,7 +583,7 @@ task main()
       end
     end
     var sim_time = 1e-6 * (ts_end - ts_start)
-    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+    for i = 0, nt2 do print_time(i, sim_time) end
 
     for i = 0, nt2 do
       check(private[i], interior[i], tsteps, init)
