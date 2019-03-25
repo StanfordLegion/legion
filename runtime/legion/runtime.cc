@@ -634,7 +634,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::register_waiter(AddressSpaceID sid)
+    void FutureImpl::register_waiter(AddressSpaceID sid, 
+                                     ReferenceMutator *mutator)
     //--------------------------------------------------------------------------
     {
       if (is_owner())
@@ -665,6 +666,9 @@ namespace Legion {
       }
       else
       {
+#ifdef DEBUG_LEGION
+        assert(mutator != NULL);
+#endif
         // Add a reference to the future to prevent it from being
         // collected until the response comes back
         add_base_resource_ref(RUNTIME_REF);
@@ -672,12 +676,18 @@ namespace Legion {
         Serializer rez;
         rez.serialize(did);
         rez.serialize(sid);
+        // We fuse the subscription with the remote registration for futures
+        // so this has to do the same thing that 
+        // DistributedCollectable::send_remote_registration would do
+        RtUserEvent registered_event = Runtime::create_rt_user_event();
+        rez.serialize(registered_event);
         runtime->send_future_subscription(owner_space, rez);
+        mutator->record_reference_mutation_effect(registered_event);
       }
     }
 
     //--------------------------------------------------------------------------
-    void FutureImpl::record_future_registered(ReferenceMutator *creator)
+    void FutureImpl::record_future_registered(void)
     //--------------------------------------------------------------------------
     {
       // Similar to DistributedCollectable::register_with_runtime but
@@ -687,9 +697,8 @@ namespace Legion {
       assert(!registered_with_runtime);
 #endif
       registered_with_runtime = true;
-      if (!is_owner())
-        // Send the remote registration notice
-        send_remote_registration(creator);
+      // If we're not the owner don't bother with sending the remote
+      // registration as that is fused with the future subscription message
     }
 
     //--------------------------------------------------------------------------
@@ -716,13 +725,15 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     /*static*/ void FutureImpl::handle_future_subscription(
-                                         Deserializer &derez, Runtime *runtime)
+                   Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
       DistributedID did;
       derez.deserialize(did);
       AddressSpaceID subscriber;
       derez.deserialize(subscriber);
+      RtUserEvent registered_event;
+      derez.deserialize(registered_event);
       DistributedCollectable *dc = runtime->find_distributed_collectable(did);
 #ifdef DEBUG_LEGION
       FutureImpl *future = dynamic_cast<FutureImpl*>(dc);
@@ -730,7 +741,12 @@ namespace Legion {
 #else
       FutureImpl *future = static_cast<FutureImpl*>(dc);
 #endif
-      future->register_waiter(subscriber); 
+      // Record the remote instance
+      future->update_remote_instances(source);
+      // Register this as a waiter
+      LocalReferenceMutator mutator;
+      future->register_waiter(subscriber, &mutator); 
+      Runtime::trigger_event(registered_event, mutator.get_done_event());
     }
 
     //--------------------------------------------------------------------------
@@ -6281,7 +6297,7 @@ namespace Legion {
             }
           case SEND_FUTURE_SUBSCRIPTION:
             {
-              runtime->handle_future_subscription(derez);
+              runtime->handle_future_subscription(derez, remote_address_space);
               break;
             }
           case SEND_FUTURE_MAP_REQUEST:
@@ -14335,8 +14351,11 @@ namespace Legion {
                                            Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // Since this message is fused with doing the remote registration for
+      // the future it also needs to go on the same virtual channel as 
+      // send_did_remote_registration which is the REFERENCE_VIRTUAL_CHANNEL 
       find_messenger(target)->send_message(rez, SEND_FUTURE_SUBSCRIPTION,
-                                        FUTURE_VIRTUAL_CHANNEL, true/*flush*/);
+                                REFERENCE_VIRTUAL_CHANNEL, true/*flush*/);
     }
 
     //--------------------------------------------------------------------------
@@ -15457,10 +15476,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::handle_future_subscription(Deserializer &derez)
+    void Runtime::handle_future_subscription(Deserializer &derez, 
+                                             AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
-      FutureImpl::handle_future_subscription(derez, this);
+      FutureImpl::handle_future_subscription(derez, this, source);
     }
 
     //--------------------------------------------------------------------------
@@ -16801,12 +16821,12 @@ namespace Legion {
 #endif
           return result;
         }
-        result->record_future_registered(mutator);
+        result->record_future_registered();
         dist_collectables[did] = result;
       }
       // If we're not the owner send the subscription message
       if (!result->is_owner())
-        result->register_waiter(address_space);
+        result->register_waiter(address_space, mutator);
       return result;
     }
 
