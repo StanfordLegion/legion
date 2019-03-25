@@ -178,11 +178,26 @@ task main()
   --__demand(__spmd)
   __parallelize_with tiles
   do
+    __fence(__execution, __block)
+    var ts_start = c.legion_get_current_time_in_micros()
+    var ts_end = ts_start
     __demand(__spmd)
     for t = 0, tsteps do
+      if t == tprune then
+        __fence(__execution, __block)
+        ts_start = c.legion_get_current_time_in_micros()
+      end
+
       stencil(points, interior)
       increment(points)
+
+      if t == tsteps - tprune - 1 then
+        __fence(__execution, __block)
+        ts_end = c.legion_get_current_time_in_micros()
+      end
     end
+    var sim_time = 1e-6 * (ts_end - ts_start)
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
     check(points, interior, tsteps, init)
   end
 end
@@ -196,7 +211,7 @@ if os.getenv('SAVEOBJ') == '1' then
     os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
   end
 
-  local exe = os.getenv('OBJNAME') or "stencil"
+  local exe = os.getenv('OBJNAME') or "stencil_sequential"
   regentlib.saveobj(main, exe, "executable", cmapper.register_mappers, link_flags)
 else
   regentlib.start(main, cmapper.register_mappers)
