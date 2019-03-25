@@ -69,7 +69,7 @@ local cmath = terralib.includec("math.h")
 local cstring = terralib.includec("string.h")
 rawset(_G, "drand48", std.drand48)
 rawset(_G, "srand48", std.srand48)
-rawset(_G, "ceil", cmath.ceil)
+local ceil = regentlib.ceil(double)
 
 WIRE_SEGMENTS = 10
 STEPS = 10000
@@ -547,7 +547,8 @@ do
   end
 end
 
-terra create_colorings(conf : Config)
+__demand(__inline)
+task create_colorings(conf : Config)
   var coloring : Colorings
   coloring.privacy_map = c.legion_point_coloring_create()
   coloring.private_node_map = c.legion_point_coloring_create()
@@ -601,6 +602,33 @@ do
   return partition(aliased, all_shared, ghost_node_map, ghost_ranges.ispace)
 end
 
+task parse_input(conf : Config)
+  return parse_input_args(conf)
+end
+
+task print_summary(color : int, sim_time : double, conf : Config)
+  if color == 0 then
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+
+    -- Compute the floating point operations per second
+    var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
+    var num_circuit_wires : uint64 = conf.num_pieces * conf.wires_per_piece
+    -- calculate currents
+    var operations : uint64 = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * conf.steps
+    -- distribute charge
+    operations = operations + (num_circuit_wires * 4)
+    -- update voltages
+    operations = operations + (num_circuit_nodes * 4)
+    -- multiply by the number of loops
+    operations = operations * conf.num_loops
+
+    -- Compute the number of gflops
+    var gflops = (1e-9*operations)/sim_time
+    c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
+  end
+end
+
+__demand(__inner, __replicable)
 task toplevel()
   var conf : Config
   conf.num_loops = 5
@@ -620,14 +648,14 @@ task toplevel()
   conf.num_neighbors = 5 -- set 0 if density parameter is to be picked
   conf.window = 3 -- find neighbors among [piece_id - window, piece_id + window]
 
-  conf = parse_input_args(conf)
+  conf = parse_input(conf)
   regentlib.assert(conf.num_pieces % conf.pieces_per_superpiece == 0,
       "pieces should be evenly distributed to superpieces")
   conf.shared_nodes_per_piece =
     [int](ceil(conf.nodes_per_piece * conf.pct_shared_nodes / 100.0))
-  c.printf("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
-    conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
-    conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
+  --c.printf("circuit settings: loops=%d prune=%d pieces=%d (pieces/superpiece=%d) nodes/piece=%d (nodes/piece=%d) wires/piece=%d pct_in_piece=%d seed=%d\n",
+  --  conf.num_loops, conf.prune, conf.num_pieces, conf.pieces_per_superpiece, conf.nodes_per_piece,
+  --  conf.shared_nodes_per_piece, conf.wires_per_piece, conf.pct_wire_in_piece, conf.random_seed)
 
   var num_pieces = conf.num_pieces
   var num_superpieces = conf.num_pieces / conf.pieces_per_superpiece
@@ -638,15 +666,15 @@ task toplevel()
   var all_wires = region(ispace(ptr, num_circuit_wires), wire(wild, wild, wild))
 
   -- report mesh size in bytes
-  do
-    var node_size = [ terralib.sizeof(node) ]
-    var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
-    c.printf("Circuit memory usage:\n")
-    c.printf("  Nodes : %10lld * %4d bytes = %12lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
-    c.printf("  Wires : %10lld * %4d bytes = %12lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
-    var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
-    c.printf("  Total                             %12lld bytes\n", total)
-  end
+  --do
+  --  var node_size = [ terralib.sizeof(node) ]
+  --  var wire_size = [ terralib.sizeof(wire(wild,wild,wild)) ]
+  --  c.printf("Circuit memory usage:\n")
+  --  c.printf("  Nodes : %10lld * %4d bytes = %12lld bytes\n", num_circuit_nodes, node_size, num_circuit_nodes * node_size)
+  --  c.printf("  Wires : %10lld * %4d bytes = %12lld bytes\n", num_circuit_wires, wire_size, num_circuit_wires * wire_size)
+  --  var total = ((num_circuit_nodes * node_size) + (num_circuit_wires * wire_size))
+  --  c.printf("  Total                             %12lld bytes\n", total)
+  --end
 
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, all_nodes, colorings.privacy_map, ispace(ptr, 2))
@@ -678,7 +706,6 @@ task toplevel()
     end
   end
 
-  c.printf("Starting main simulation loop\n")
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
@@ -707,34 +734,9 @@ task toplevel()
       ts_end = c.legion_get_current_time_in_micros()
     end
   end
-  --__fence(__execution, __block)
 
-  if simulation_success then
-    c.printf("SUCCESS!\n")
-  else
-    c.printf("FAILURE!\n")
-  end
-  do
-    var sim_time = 1e-6 * (ts_end - ts_start)
-    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
-
-    -- Compute the floating point operations per second
-    var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
-    var num_circuit_wires : uint64 = conf.num_pieces * conf.wires_per_piece
-    -- calculate currents
-    var operations : uint64 = num_circuit_wires * (WIRE_SEGMENTS*6 + (WIRE_SEGMENTS-1)*4) * conf.steps
-    -- distribute charge
-    operations = operations + (num_circuit_wires * 4)
-    -- update voltages
-    operations = operations + (num_circuit_nodes * 4)
-    -- multiply by the number of loops
-    operations = operations * conf.num_loops
-
-    -- Compute the number of gflops
-    var gflops = (1e-9*operations)/sim_time
-    c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
-  end
-  c.printf("simulation complete - destroying regions\n")
+  var sim_time = 1e-6 * (ts_end - ts_start)
+  for i = 0, num_superpieces do print_summary(i, sim_time, conf) end
 end
 
 if os.getenv('SAVEOBJ') == '1' then

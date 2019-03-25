@@ -57,7 +57,8 @@ do
   local cxx = os.getenv('CXX') or 'c++'
 
   local cxx_flags = os.getenv('CC_FLAGS') or ''
-  cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  --cxx_flags = cxx_flags .. " -O2 -Wall -Werror"
+  cxx_flags = cxx_flags .. " -g "
   if map_locally then cxx_flags = cxx_flags .. " -DMAP_LOCALLY " end
   if os.execute('test "$(uname)" = Darwin') == 0 then
     cxx_flags =
@@ -151,9 +152,19 @@ task make_interior_partition(points : region(ispace(int2d), point),
   return image(points, p, r)
 end
 
-__demand(__inner)
+task read_config()
+  return common.read_config()
+end
+
+task print_time(color : int2d, sim_time : double)
+  if color == int2d({0, 0}) then
+    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+  end
+end
+
+__demand(__inner, __replicable)
 task main()
-  var conf = common.read_config()
+  var conf = read_config()
 
   var nbloated = int2d { conf.nx, conf.ny } -- Grid size along each dimension, including border.
   var nt = int2d { conf.ntx, conf.nty } -- Number of tiles to make in each dimension.
@@ -197,7 +208,8 @@ task main()
       end
     end
     var sim_time = 1e-6 * (ts_end - ts_start)
-    c.printf("ELAPSED TIME = %7.3f s\n", sim_time)
+    for color in tiles do print_time(color, sim_time) end
+
     check(points, interior, tsteps, init)
   end
 end
