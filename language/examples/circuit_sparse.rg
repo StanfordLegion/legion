@@ -400,9 +400,9 @@ where
         rw.{in_ptr, out_ptr, inductance, resistance, wire_cap}),
   reads writes(rw.{current, voltage})
 do
-  if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
-  end
+  --if print_ts then
+  --  c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
+  --end
   var dt : float = DELTAT
   var recip_dt : float = 1.0 / dt
   --__demand(__vectorize)
@@ -523,9 +523,9 @@ do
     node.node_voltage = voltage
     node.charge = 0.0
   end
-  if print_ts then
-    c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
-  end
+  --if print_ts then
+  --  c.printf("t: %ld\n", c.legion_get_current_time_in_micros())
+  --end
 end
 
 if not use_python_main then
