@@ -494,7 +494,7 @@ local node_is_replicable = {
   -- General C and Terra calls are not supported because there is no
   -- way to know in general if they do something non-deterministic.
   [ast.typed.expr.Call] = function(node)
-    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or
+    return {std.is_task(node.fn.value) or std.is_math_fn(node.fn.value) or node.fn.value.replicable or
             node.replicable or std.replicable_whitelist[node.fn.value] or false, node}
   end,
 
