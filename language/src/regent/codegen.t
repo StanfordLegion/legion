@@ -7701,6 +7701,7 @@ function codegen.expr_import_partition(cx, node)
         " is not a disjoint partition"])
     end
   end
+  local dim = math.max(colors_type.dim, 1)
   check_actions = quote
     [check_actions];
     do
@@ -7712,9 +7713,9 @@ function codegen.expr_import_partition(cx, node)
     do
       var cs = std.c.legion_index_partition_get_color_space([cx.runtime], [lp].index_partition)
       var domain = std.c.legion_index_space_get_domain([cx.runtime], cs)
-      std.assert_error(domain.dim == [colors_type.dim],
+      std.assert_error(domain.dim == [dim],
         [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
-        " does not have a " .. tostring(colors_type.dim) .. "D color space"])
+        " does not have a " .. tostring(dim) .. "D color space"])
     end
   end
 
