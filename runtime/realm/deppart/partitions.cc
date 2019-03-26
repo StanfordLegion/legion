@@ -28,6 +28,8 @@
 #include "realm/deppart/byfield.h"
 #include "realm/deppart/setops.h"
 
+#include <unistd.h>
+
 namespace Realm {
 
   Logger log_part("part");
@@ -226,6 +228,9 @@ namespace Realm {
     // TODO: sparse case where we have to wait
     SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
     assert(impl->is_valid());
+    // XXX: Busy waiting until a proper fix for sparse case arrives
+    while (!impl->is_valid())
+      usleep(10);
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
     // initially every subspace will be a copy of this one, and then
     //  we'll decompose the bounds
@@ -281,6 +286,9 @@ namespace Realm {
 
     // TODO: sparse case where we have to wait
     SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
+    // XXX: Busy waiting until a proper fix for sparse case arrives
+    while (!impl->is_valid())
+      usleep(10);
     assert(impl->is_valid());
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
     // initially every subspace will be a copy of this one, and then
