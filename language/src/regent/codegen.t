@@ -833,50 +833,52 @@ local IMPORT_SEMANTIC_TAG   = 0x68e67653
 local IMPORT_SEMANTIC_VALUE = 0xd93a28e2
 
 local function tag_imported(cx, handle)
-  local attach = nil
-  local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    attach = std.c.legion_index_space_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
-    attach = std.c.legion_logical_region_attach_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    attach = std.c.legion_logical_partition_attach_semantic_information
-  else
-    assert(false, "unreachable")
-  end
-  return quote
-    do
-      var result : uint32 = [IMPORT_SEMANTIC_VALUE]
-      var result_size : uint64 = [sizeof(uint32)]
-      [attach]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
-        [&opaque](&result), result_size, false)
-    end
-  end
+  return quote end
+  --local attach = nil
+  --local handle_type = handle.type
+  --if handle_type == std.c.legion_index_space_t then
+  --  attach = std.c.legion_index_space_attach_semantic_information
+  --elseif handle_type == std.c.legion_logical_region_t then
+  --  attach = std.c.legion_logical_region_attach_semantic_information
+  --elseif handle_type == std.c.legion_logical_partition_t then
+  --  attach = std.c.legion_logical_partition_attach_semantic_information
+  --else
+  --  assert(false, "unreachable")
+  --end
+  --return quote
+  --  do
+  --    var result : uint32 = [IMPORT_SEMANTIC_VALUE]
+  --    var result_size : uint64 = [sizeof(uint32)]
+  --    [attach]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+  --      [&opaque](&result), result_size, false)
+  --  end
+  --end
 end
 
 local function check_imported(cx, node, handle)
-  local retrieve = nil
-  local handle_type = handle.type
-  if handle_type == std.c.legion_index_space_t then
-    retrieve = std.c.legion_index_space_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_region_t then
-    retrieve = std.c.legion_logical_region_retrieve_semantic_information
-  elseif handle_type == std.c.legion_logical_partition_t then
-    retrieve = std.c.legion_logical_partition_retrieve_semantic_information
-  else
-    assert(false, "unreachable")
-  end
-  return quote
-    do
-      var result : &opaque
-      var result_size : uint64 = 0
-      [retrieve]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
-        &result, &result_size, true, true)
-      std.assert_error(result_size == 0,
-        [get_source_location(node) ..
-          ": cannot import a handle that is already imported"])
-    end
-  end
+  return quote end
+  --local retrieve = nil
+  --local handle_type = handle.type
+  --if handle_type == std.c.legion_index_space_t then
+  --  retrieve = std.c.legion_index_space_retrieve_semantic_information
+  --elseif handle_type == std.c.legion_logical_region_t then
+  --  retrieve = std.c.legion_logical_region_retrieve_semantic_information
+  --elseif handle_type == std.c.legion_logical_partition_t then
+  --  retrieve = std.c.legion_logical_partition_retrieve_semantic_information
+  --else
+  --  assert(false, "unreachable")
+  --end
+  --return quote
+  --  do
+  --    var result : &opaque
+  --    var result_size : uint64 = 0
+  --    [retrieve]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
+  --      &result, &result_size, true, true)
+  --    std.assert_error(result_size == 0,
+  --      [get_source_location(node) ..
+  --        ": cannot import a handle that is already imported"])
+  --  end
+  --end
 end
 
 local function eq_struct(st, a, b)
