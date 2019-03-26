@@ -1271,6 +1271,37 @@ end
 function solver_context:synthesize_partitions(color_space_symbol)
   local stats = terralib.newlist()
 
+  local ts_start, ts_end
+  if std.config["parallelize-time-deppart"] then
+    ts_start = std.newsymbol(uint64, "__ts_start")
+    stats:insert(ast.typed.stat.Fence {
+      kind = ast.fence_kind.Execution {},
+      blocking = true,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = ts_start,
+      type = uint64,
+      value = ast.typed.expr.Call {
+        fn = ast.typed.expr.Function {
+          value = c.legion_get_current_time_in_micros,
+          expr_type = c.legion_get_current_time_in_micros:gettype(),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = uint64,
+        args = terralib.newlist(),
+        conditions = terralib.newlist(),
+        replicable = true,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+  end
+
   local created = hash_set.new()
   local disjoint_partitions = data.newmap()
   local preimage_partitions = data.newmap()
@@ -2085,6 +2116,79 @@ function solver_context:synthesize_partitions(color_space_symbol)
           { cache_partition, cases, num_cases, loop_range_type:is_disjoint() }
       end
     end
+  end
+
+  if std.config["parallelize-time-deppart"] then
+    ts_end = std.newsymbol(uint64, "__ts_end")
+    stats:insert(ast.typed.stat.Fence {
+      kind = ast.fence_kind.Execution {},
+      blocking = true,
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Var {
+      symbol = ts_end,
+      type = uint64,
+      value = ast.typed.expr.Call {
+        fn = ast.typed.expr.Function {
+          value = c.legion_get_current_time_in_micros,
+          expr_type = c.legion_get_current_time_in_micros:gettype(),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = uint64,
+        args = terralib.newlist(),
+        conditions = terralib.newlist(),
+        replicable = true,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
+    stats:insert(ast.typed.stat.Expr {
+      expr = ast.typed.expr.Call {
+        fn = ast.typed.expr.Function {
+          value = c.printf,
+          expr_type = ({rawstring,uint64}->int32).type,
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = int32,
+        args = terralib.newlist({
+          ast.typed.expr.Constant {
+            value = "partitioning took %llu us\n",
+            expr_type = rawstring,
+            span = ast.trivial_span(),
+            annotations = ast.default_annotations(),
+          },
+          ast.typed.expr.Binary {
+            op = "-",
+            lhs = ast.typed.expr.ID {
+              value = ts_end,
+              expr_type = std.rawref(&ts_end:gettype()),
+              span = ast.trivial_span(),
+              annotations = ast.default_annotations(),
+            },
+            rhs = ast.typed.expr.ID {
+              value = ts_start,
+              expr_type = std.rawref(&ts_start:gettype()),
+              span = ast.trivial_span(),
+              annotations = ast.default_annotations(),
+            },
+            expr_type = uint64,
+            span = ast.trivial_span(),
+            annotations = ast.default_annotations(),
+          }
+        }),
+        conditions = terralib.newlist(),
+        replicable = true,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    })
   end
 
   return stats, unifiable_ranges, reindexed
