@@ -14029,9 +14029,11 @@ namespace Legion {
                                                        Serializer &rez)
     //--------------------------------------------------------------------------
     {
+      // This has to go on the index space virtual channel so that it is
+      // ordered with respect to the index_partition_node messages
       find_messenger(target)->send_message(rez, 
                                 SEND_INDEX_PARTITION_DISJOINT_UPDATE, 
-                                DEFAULT_VIRTUAL_CHANNEL, 
+                                INDEX_SPACE_VIRTUAL_CHANNEL,
                                 true/*flush*/, true/*response*/); 
     }
 
