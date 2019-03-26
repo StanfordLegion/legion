@@ -57,11 +57,11 @@ do
 end
 
 local c = regentlib.c
-local std = terralib.includec("stdlib.h")
 local cmath = terralib.includec("math.h")
 local cstring = terralib.includec("string.h")
-rawset(_G, "drand48", std.drand48)
-rawset(_G, "srand48", std.srand48)
+local drand48 = regentlib.c.drand48
+local srand48 = regentlib.c.srand48
+local atoi = regentlib.c.atoi
 local ceil = regentlib.ceil(double)
 
 WIRE_SEGMENTS = 10
@@ -140,34 +140,34 @@ terra parse_input_args(conf : Config)
   for i = 0, args.argc do
     if cstring.strcmp(args.argv[i], "-l") == 0 then
       i = i + 1
-      conf.num_loops = std.atoi(args.argv[i])
+      conf.num_loops = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-i") == 0 then
       i = i + 1
-      conf.steps = std.atoi(args.argv[i])
+      conf.steps = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-p") == 0 then
       i = i + 1
-      conf.num_pieces = std.atoi(args.argv[i])
+      conf.num_pieces = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-pps") == 0 then
       i = i + 1
-      conf.pieces_per_superpiece = std.atoi(args.argv[i])
+      conf.pieces_per_superpiece = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-npp") == 0 then
       i = i + 1
-      conf.nodes_per_piece = std.atoi(args.argv[i])
+      conf.nodes_per_piece = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-wpp") == 0 then
       i = i + 1
-      conf.wires_per_piece = std.atoi(args.argv[i])
+      conf.wires_per_piece = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-pct") == 0 then
       i = i + 1
-      conf.pct_wire_in_piece = std.atoi(args.argv[i])
+      conf.pct_wire_in_piece = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-s") == 0 then
       i = i + 1
-      conf.random_seed = std.atoi(args.argv[i])
+      conf.random_seed = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-sync") == 0 then
       i = i + 1
-      conf.sync = std.atoi(args.argv[i])
+      conf.sync = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-prune") == 0 then
       i = i + 1
-      conf.prune = std.atoi(args.argv[i])
+      conf.prune = atoi(args.argv[i])
     elseif cstring.strcmp(args.argv[i], "-checks") == 0 then
       conf.perform_checks = true
     elseif cstring.strcmp(args.argv[i], "-dump") == 0 then
@@ -177,6 +177,7 @@ terra parse_input_args(conf : Config)
   return conf
 end
 
+__demand(__parallel)
 task init_nodes(rn : region(ispace(ptr), node))
 where
   reads writes(rn)
@@ -312,14 +313,16 @@ do
   c.free(alread_picked)
 end
 
-task init_piece(spiece_id   : int,
-                conf        : Config,
-                rn          : region(ispace(ptr), node),
-                rw          : region(ispace(ptr), wire))
+task init_piece(spiece_id : int,
+                conf      : Config,
+                rpn       : region(ispace(ptr), node),
+                rsn       : region(ispace(ptr), node),
+                rw        : region(ispace(ptr), wire))
 where
-  reads writes(rn, rw)
+  reads writes(rpn, rsn, rw)
 do
-  init_nodes(rn)
+  init_nodes(rpn)
+  init_nodes(rsn)
   init_wires(spiece_id, conf, rw)
 end
 
@@ -533,13 +536,9 @@ task toplevel()
   --end
 
   var color_space = ispace(ptr, num_superpieces)
-
-  var p_nodes = partition(equal, rn, color_space)
-  var p_wires = partition(equal, rw, color_space)
-  do
-    for color in color_space do
-      init_piece([int](color), conf, p_nodes[color], p_wires[color])
-    end
+  var p_rw = partition(equal, rw, color_space)
+  for color in color_space do
+    init_wires([int](color), conf, p_rw[color])
   end
 
   var simulation_success = true
@@ -547,10 +546,12 @@ task toplevel()
   var prune = conf.prune
   var num_loops = conf.num_loops + 2*prune
 
-  __fence(__execution, __block)
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
+
   __parallelize_with color_space do
+    init_nodes(rn)
+
     __demand(__spmd)
     for j = 0, num_loops do
       if j == prune then
