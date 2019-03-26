@@ -1240,7 +1240,7 @@ legion_index_partition_create_by_affine_image(
     }
 #undef GENERATE_CASE
     assert(rect_size != 0);
-    temp_fid = alloc.allocate_local_field(rect_size);
+    temp_fid = alloc.allocate_field(rect_size);
   }
   LogicalRegion temp_lr =
     runtime->create_logical_region(ctx, temp_is, temp_fs, true);
