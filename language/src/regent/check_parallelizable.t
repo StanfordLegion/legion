@@ -526,6 +526,8 @@ local whitelist = {
   [vectorof]                                = true,
   [std.assert]                              = true,
   [std.assert_error]                        = true,
+  [std.c.drand48]                           = true,
+  [std.c.srand48]                           = true,
 }
 
 local function is_admissible_function(cx, fn)
