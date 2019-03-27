@@ -2497,6 +2497,8 @@ function codegen.expr_index_access(cx, node)
       return values.value(node, expr.just(actions, list), list_type)
     end
   elseif std.is_region(value_type) then
+    -- We still need to do codegen for the value to get the metadata correct
+    local value = codegen.expr(cx, node.value)
     local index = codegen.expr(cx, node.index):read(cx, index_type)
 
     local pointer_type = node.expr_type.pointer_type
