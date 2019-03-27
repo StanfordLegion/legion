@@ -727,7 +727,7 @@ class Task (object):
         else:
             return self.spawn_task(*args, **kwargs)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         if _my.ctx.current_launch:
             return _my.ctx.current_launch.spawn_task(self, *args, **kwargs)
         return TaskLaunch().spawn_task(self, *args, **kwargs)
