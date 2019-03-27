@@ -931,7 +931,8 @@ class _TaskLauncher(object):
         # WARNING: Need to return the interior buffer or else it will be GC'd
         return task_args, task_args_buffer
 
-    def spawn_task(self, *args, point=None):
+    def spawn_task(self, *args, **kwargs):
+        # FIXME: this needs to take kwargs for Python 2 compatibility (since it doesn't have kw-only args)
         assert(isinstance(_my.ctx, Context))
 
         args = self.preprocess_args(args)
@@ -941,8 +942,8 @@ class _TaskLauncher(object):
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
             self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        if point is not None:
-            domain_point = DomainPoint(_IndexValue(point))
+        if 'point' in kwargs:
+            domain_point = DomainPoint(_IndexValue(kwargs['point']))
             c.legion_task_launcher_set_point(launcher, domain_point.raw_value())
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
