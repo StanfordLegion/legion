@@ -713,7 +713,7 @@ class Task (object):
         if register:
             self.register(task_id, top_level)
 
-    def __call__(self, *args):
+    def __call__(self, *args, **kwargs):
         # Hack: This entrypoint needs to be able to handle both being
         # called in user code (to launch a task) and as the task
         # wrapper when the task itself executes. Unfortunately isn't a
@@ -723,14 +723,14 @@ class Task (object):
            isinstance(args[0], bytearray) and \
            isinstance(args[1], bytearray) and \
            isinstance(args[2], long):
-            return self.execute_task(*args)
+            return self.execute_task(*args, **kwargs)
         else:
-            return self.spawn_task(*args)
+            return self.spawn_task(*args, **kwargs)
 
     def spawn_task(self, *args):
         if _my.ctx.current_launch:
-            return _my.ctx.current_launch.spawn_task(self, *args)
-        return TaskLaunch().spawn_task(self, *args)
+            return _my.ctx.current_launch.spawn_task(self, *args, **kwargs)
+        return TaskLaunch().spawn_task(self, *args, **kwargs)
 
     def execute_task(self, raw_args, user_data, proc):
         raw_arg_ptr = ffi.new('char[]', bytes(raw_args))
@@ -931,7 +931,7 @@ class _TaskLauncher(object):
         # WARNING: Need to return the interior buffer or else it will be GC'd
         return task_args, task_args_buffer
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, point=None):
         assert(isinstance(_my.ctx, Context))
 
         args = self.preprocess_args(args)
@@ -941,6 +941,9 @@ class _TaskLauncher(object):
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
             self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
+        if point is not None:
+            domain_point = DomainPoint(_IndexValue(point))
+            c.legion_task_launcher_set_point(launcher, domain_point.raw_value())
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
                 assert i < len(self.task.privileges)
@@ -1024,9 +1027,9 @@ class _IndexLauncher(_TaskLauncher):
 
 class TaskLaunch(object):
     __slots__ = []
-    def spawn_task(self, task, *args):
+    def spawn_task(self, task, *args, **kwargs):
         launcher = _TaskLauncher(task=task)
-        return launcher.spawn_task(*args)
+        return launcher.spawn_task(*args, **kwargs)
 
 class _IndexValue(object):
     __slots__ = ['value']
