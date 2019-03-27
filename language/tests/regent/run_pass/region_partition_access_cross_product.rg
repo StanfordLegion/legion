@@ -28,10 +28,12 @@ task main()
   var cp0 = cp[0]
 
   var x = 0
+  var k = 0
   for i = 0, 10 do
     cp0[0][i] = i
     x = cp0[0][i]
     x = cp0[0][i]
+    x = cp0[k][i]
   end
 
   var j = 0
