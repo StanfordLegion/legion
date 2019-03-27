@@ -134,11 +134,15 @@ local function substitute_stat_while(cx, node)
 end
 
 local function substitute_stat_for_num(cx, node)
+  local symbol = node.symbol
+  local new_symbol = std.newsymbol(nil, symbol:hasname())
+  cx.symbol_mapping[symbol] = new_symbol
   local values = node.values:map(function(value)
     return substitute.expr(cx, value)
   end)
   local block = substitute.block(cx, node.block)
   return node {
+    symbol = new_symbol,
     values = values,
     block = block,
   }
