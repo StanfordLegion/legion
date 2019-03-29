@@ -71,5 +71,10 @@ def main():
     print("child task future contains", child_result.get())
     print("main_task done")
 
+    R2.destroy()
+    R.destroy()
+    F.destroy()
+    I.destroy()
+
 if __name__ == '__legion_main__':
     main()

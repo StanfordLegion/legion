@@ -92,6 +92,9 @@ ffi = cffi.FFI()
 ffi.cdef(header)
 c = ffi.dlopen(None)
 
+# Can't seem to pull this out of the header, so reproduce it here.
+AUTO_GENERATE_ID = -1
+
 # Note: don't use __file__ here, it may return either .py or .pyc and cause
 # non-deterministic failures.
 library_name = "legion.py"
@@ -393,6 +396,14 @@ class Ispace(object):
         handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
         return Ispace(handle)
 
+    def destroy(self):
+        # This is not something you want to have happen in a
+        # destructor, since fspaces may outlive the lifetime of the handle.
+        c.legion_index_space_destroy(
+            _my.ctx.runtime, _my.ctx.context, self.handle[0])
+        # Clear out references. Technically unnecessary but avoids abuse.
+        del self.handle
+
 # Hack: Can't pickle static methods.
 def _Fspace_unpickle(fspace_id, field_ids, field_types):
     handle = ffi.new('legion_field_space_t *')
@@ -426,7 +437,7 @@ class Fspace(object):
                 field_type, field_id = field_entry
             except TypeError:
                 field_type = field_entry
-                field_id = ffi.cast('legion_field_id_t', -1) # AUTO_GENERATE_ID
+                field_id = ffi.cast('legion_field_id_t', AUTO_GENERATE_ID)
             field_id = c.legion_field_allocator_allocate_field(
                 alloc, field_type.size, field_id)
             c.legion_field_id_attach_name(
@@ -436,13 +447,22 @@ class Fspace(object):
         c.legion_field_allocator_destroy(alloc)
         return Fspace(handle, field_ids, field_types)
 
+    def destroy(self):
+        # This is not something you want to have happen in a
+        # destructor, since fspaces may outlive the lifetime of the handle.
+        c.legion_field_space_destroy(
+            _my.ctx.runtime, _my.ctx.context, self.handle[0])
+        # Clear out references. Technically unnecessary but avoids abuse.
+        del self.handle
+        del self.field_ids
+        del self.field_types
+
 # Hack: Can't pickle static methods.
 def _Region_unpickle(tree_id, ispace, fspace):
     handle = ffi.new('legion_logical_region_t *')
     handle[0].tree_id = tree_id
-    handle[0].index_space.tid = ispace.handle[0].tid
-    handle[0].index_space.id = ispace.handle[0].id
-    handle[0].field_space.id = fspace.handle[0].id
+    handle[0].index_space = ispace.handle[0]
+    handle[0].field_space = fspace.handle[0]
 
     return Region(handle[0], ispace, fspace)
 
@@ -607,6 +627,105 @@ class _RegionNdarray(object):
             'data': (base_ptr, read_only),
             'strides': strides,
         }
+
+# Hack: Can't pickle static methods.
+def _Ipartition_unpickle(id, parent, color_space):
+    handle = ffi.new('legion_index_partition_t *')
+    handle[0].id = id
+    handle[0].tid = parent.handle[0].tid
+    handle[0].type_tag = parent.handle[0].type_tag
+
+    return Ipartition(handle[0], parent, color_space)
+
+class Ipartition(object):
+    __slots__ = ['handle', 'parent', 'color_space']
+
+    # Make this speak the Type interface
+    numpy_type = None
+    cffi_type = 'legion_index_partition_t'
+    size = ffi.sizeof(cffi_type)
+
+    def __init__(self, handle, parent, color_space):
+        # Important: Copy handle. Do NOT assume ownership.
+        self.handle = ffi.new('legion_index_partition_t *', handle)
+        self.parent = parent
+        self.color_space = color_space
+
+    def __reduce__(self):
+        return (_Ipartition_unpickle,
+                (self.handle[0].id, self.parent, self.color_space))
+
+    @staticmethod
+    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Ispace)
+        if not isinstance(color_space, Ispace):
+            color_space = Ispace.create(color_space)
+        handle = c.legion_index_partition_create_equal(
+            _my.ctx.runtime, _my.ctx.context,
+            parent.handle[0], color_space.handle[0], granularity, color)
+        return Ipartition(handle, parent, color_space)
+
+    def destroy(self):
+        # This is not something you want to have happen in a
+        # destructor, since partitions may outlive the lifetime of the handle.
+        c.legion_index_partition_destroy(
+            _my.ctx.runtime, _my.ctx.context, self.handle[0])
+        # Clear out references. Technically unnecessary but avoids abuse.
+        del self.handle
+        del self.parent
+        del self.color_space
+
+# Hack: Can't pickle static methods.
+def _Partition_unpickle(parent, ipartition):
+    handle = ffi.new('legion_logical_partition_t *')
+    handle[0].tree_id = parent.handle[0].tree_id
+    handle[0].index_partition = ipartition.handle[0]
+    handle[0].field_space = parent.fspace.handle[0]
+
+    return Partition(handle[0], parent, ipartition)
+
+class Partition(object):
+    __slots__ = ['handle', 'parent', 'ipartition']
+
+    # Make this speak the Type interface
+    numpy_type = None
+    cffi_type = 'legion_logical_partition_t'
+    size = ffi.sizeof(cffi_type)
+
+    def __init__(self, handle, parent, ipartition):
+        # Important: Copy handle. Do NOT assume ownership.
+        self.handle = ffi.new('legion_logical_partition_t *', handle)
+        self.parent = parent
+        self.ipartition = ipartition
+
+    def __reduce__(self):
+        return (_Partition_unpickle,
+                (self.parent,
+                 self.ipartition))
+
+    @staticmethod
+    def create(parent, ipartition):
+        assert isinstance(parent, Region)
+        assert isinstance(ipartition, Ipartition)
+        handle = c.legion_logical_partition_create(
+            _my.ctx.runtime, _my.ctx.context, parent.handle[0], ipartition.handle[0])
+        return Partition(handle, parent, ipartition)
+
+    @staticmethod
+    def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
+        assert isinstance(parent, Region)
+        ipartition = Ipartition.create_equal(parent.ispace, color_space, granularity, color)
+        return Partition.create(parent, ipartition)
+
+    def destroy(self):
+        # This is not something you want to have happen in a
+        # destructor, since partitions may outlive the lifetime of the handle.
+        c.legion_logical_partition_destroy(
+            _my.ctx.runtime, _my.ctx.context, self.handle[0])
+        # Clear out references. Technically unnecessary but avoids abuse.
+        del self.handle
+        del self.parent
+        del self.ipartition
 
 def define_regent_argument_struct(task_id, argument_types, privileges, return_type, arguments):
     if argument_types is None:
