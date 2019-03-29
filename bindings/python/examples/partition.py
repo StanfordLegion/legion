@@ -20,6 +20,11 @@ from __future__ import print_function
 import legion
 from legion import task, RW
 
+@task(privileges=[RW])
+def hello_subregion(R):
+    print('Subregion has volume %s' % R.ispace.volume)
+    return R.ispace.volume
+
 @task
 def main():
     R = legion.Region.create([4, 4], {'x': legion.float64})
@@ -32,6 +37,12 @@ def main():
     P2 = legion.Partition.create(R, IP2)
 
     assert P.color_space.volume == 4
+
+    R00 = P[(0, 0)]
+
+    print('Parent region has volume %s' % R.ispace.volume)
+    assert R.ispace.volume == 16
+    assert hello_subregion(R00).get() == 4
 
     P2.destroy()
     IP2.destroy()

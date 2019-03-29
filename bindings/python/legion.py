@@ -171,11 +171,30 @@ class Context(object):
 
 class DomainPoint(object):
     __slots__ = ['handle']
-    def __init__(self, value):
+    def __init__(self, handle, take_ownership=False):
+        # Important: Copy handle. Do NOT assume ownership unless explicitly told.
+        if take_ownership:
+            self.handle = handle
+        else:
+            self.handle = ffi.new('legion_domain_t *', handle)
+
+    @staticmethod
+    def create(values):
+        assert 1 <= len(values) <= 3
+        handle = ffi.new('legion_domain_point_t *')
+        handle[0].dim = len(values)
+        for i, value in enumerate(values):
+            handle[0].point_data[i] = value
+        return DomainPoint(handle, take_ownership=True)
+
+    @staticmethod
+    def create_from_index(value):
         assert(isinstance(value, _IndexValue))
-        self.handle = ffi.new('legion_domain_point_t *')
-        self.handle[0].dim = 1
-        self.handle[0].point_data[0] = int(value)
+        handle = ffi.new('legion_domain_point_t *')
+        handle[0].dim = 1
+        handle[0].point_data[0] = int(value)
+        return DomainPoint(handle, take_ownership=True)
+
     def raw_value(self):
         return self.handle[0]
 
@@ -486,7 +505,7 @@ def _Region_unpickle(tree_id, ispace, fspace):
     return Region(handle[0], ispace, fspace)
 
 class Region(object):
-    __slots__ = ['handle', 'ispace', 'fspace',
+    __slots__ = ['handle', 'ispace', 'fspace', 'parent',
                  'instances', 'privileges', 'instance_wrappers']
 
     # Make this speak the Type interface
@@ -494,11 +513,12 @@ class Region(object):
     cffi_type = 'legion_logical_region_t'
     size = ffi.sizeof(cffi_type)
 
-    def __init__(self, handle, ispace, fspace):
+    def __init__(self, handle, ispace, fspace, parent=None):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_logical_region_t *', handle)
         self.ispace = ispace
         self.fspace = fspace
+        self.parent = parent
         self.instances = {}
         self.privileges = {}
         self.instance_wrappers = {}
@@ -519,7 +539,7 @@ class Region(object):
             _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
         result = Region(handle, ispace, fspace)
         for field_name in fspace.field_ids.keys():
-            result.set_privilege(field_name, RW)
+            result._set_privilege(field_name, RW)
         return result
 
     def destroy(self):
@@ -528,24 +548,28 @@ class Region(object):
         c.legion_logical_region_destroy(
             _my.ctx.runtime, _my.ctx.context, self.handle[0])
         # Clear out references. Technically unnecessary but avoids abuse.
+        del self.parent
         del self.instance_wrappers
         del self.instances
         del self.handle
         del self.ispace
         del self.fspace
 
-    def set_privilege(self, field_name, privilege):
+    def _set_privilege(self, field_name, privilege):
+        assert self.parent is None # not supported on subregions
         assert field_name not in self.privileges
         self.privileges[field_name] = privilege
 
-    def set_instance(self, field_name, instance, privilege=None):
+    def _set_instance(self, field_name, instance, privilege=None):
+        assert self.parent is None # not supported on subregions
         assert field_name not in self.instances
         self.instances[field_name] = instance
         if privilege is not None:
-            assert field_name not in self.privileges
-            self.privileges[field_name] = privilege
+            self._set_privilege(field_name, privilege)
 
-    def map_inline(self):
+    def _map_inline(self):
+        assert self.parent is None # FIXME: support inline mapping subregions
+
         fields_by_privilege = collections.defaultdict(set)
         for field_name, privilege in self.privileges.items():
             fields_by_privilege[privilege].add(field_name)
@@ -561,14 +585,14 @@ class Region(object):
             instance = c.legion_inline_launcher_execute(
                 _my.ctx.runtime, _my.ctx.context, launcher)
             for field_name in field_names:
-                self.set_instance(field_name, instance)
+                self._set_instance(field_name, instance)
 
     def __getattr__(self, field_name):
         if field_name in self.fspace.field_ids:
             if field_name not in self.instances:
                 if self.privileges[field_name] is None:
                     raise Exception('Invalid attempt to access field "%s" without privileges' % field_name)
-                self.map_inline()
+                self._map_inline()
             if field_name not in self.instance_wrappers:
                 self.instance_wrappers[field_name] = RegionField(
                     self, field_name)
@@ -674,6 +698,13 @@ class Ipartition(object):
         return (_Ipartition_unpickle,
                 (self.handle[0].id, self.parent, self.color_space))
 
+    def __getitem__(self, point):
+        if not isinstance(point, DomainPoint):
+            point = DomainPoint.create(point)
+        subspace = c.legion_index_partition_get_index_subspace_domain_point(
+            _my.ctx.runtime, self.handle[0], point.raw_value())
+        return Ispace(subspace)
+
     @staticmethod
     def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Ispace)
@@ -721,6 +752,14 @@ class Partition(object):
         return (_Partition_unpickle,
                 (self.parent,
                  self.ipartition))
+
+    def __getitem__(self, point):
+        if not isinstance(point, DomainPoint):
+            point = DomainPoint.create(point)
+        subspace = self.ipartition[point]
+        subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
+            _my.ctx.runtime, self.handle[0], point.raw_value())
+        return Region(subregion, subspace, self.parent.fspace, parent=self.parent)
 
     @property
     def color_space(self):
@@ -920,7 +959,7 @@ class Task (object):
                         assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
                     for name, fid in arg.fspace.field_ids.items():
                         if not hasattr(priv, 'fields') or name in priv.fields:
-                            arg.set_instance(name, instance, priv)
+                            arg._set_instance(name, instance, priv)
             assert req == num_regions[0]
 
         # Build context.
@@ -1099,7 +1138,8 @@ class _TaskLauncher(object):
                     launcher, arg.handle[0],
                     priv._legion_privilege(),
                     0, # EXCLUSIVE
-                    arg.handle[0], 0, False)
+                    arg.parent.handle[0] if arg.parent is not None else arg.handle[0],
+                    0, False)
                 if hasattr(priv, 'fields'):
                     assert set(priv.fields) <= set(arg.fspace.field_ids.keys())
                 for name, fid in arg.fspace.field_ids.items():
