@@ -1373,9 +1373,9 @@ class _IndexValue(object):
     def __init__(self, value):
         self.value = value
     def __int__(self):
-        return self.value
+        return self.value.__int__()
     def __index__(self):
-        return self.value
+        return self.value.__index__()
     def __str__(self):
         return str(self.value)
     def __repr__(self):
