@@ -1054,6 +1054,9 @@ class _FuturePoint(object):
         self.point = point
         self.future = None
     def get(self):
+        if self.future is not None:
+            return self.future.get()
+
         if self.launcher.future_map is None:
             raise Exception('Cannot retrieve a future from an index launch until the launch is complete')
 

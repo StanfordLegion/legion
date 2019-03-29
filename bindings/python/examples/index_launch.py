@@ -30,8 +30,9 @@ def main():
     futures = []
     for i in legion.IndexLaunch([10]):
         futures.append(hi(i))
-    for future in futures:
+    for i, future in enumerate(futures):
         print("got %s" % future.get())
+        assert future.get() == i
 
 if __name__ == '__legion_main__':
     main()
