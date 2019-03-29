@@ -45,6 +45,11 @@ except NameError:
     xrange = range # Python 3
 
 try:
+    imap = itertools.imap # Python 2
+except:
+    imap = map # Python 3
+
+try:
     zip_longest = itertools.izip_longest # Python 2
 except:
     zip_longest = itertools.zip_longest # Python 3
@@ -174,6 +179,10 @@ class Context(object):
         assert self.current_launch == launch
         self.current_launch = None
 
+# Hack: Can't pickle static methods.
+def _DomainPoint_unpickle(values):
+    return DomainPoint.create(values)
+
 class DomainPoint(object):
     __slots__ = ['handle']
     def __init__(self, handle, take_ownership=False):
@@ -182,6 +191,44 @@ class DomainPoint(object):
             self.handle = handle
         else:
             self.handle = ffi.new('legion_domain_t *', handle)
+
+    def __reduce__(self):
+        return (_DomainPoint_unpickle,
+                ([self.handle[0].point_data[i] for i in xrange(self.handle[0].dim)],))
+
+    def __int__(self):
+        assert self.handle[0].dim == 1
+        return self.handle[0].point_data[0]
+
+    def __index__(self):
+        assert self.handle[0].dim == 1
+        return self.handle[0].point_data[0]
+
+    def __getitem__(self, i):
+        assert 0 <= i < self.handle[0].dim
+        return self.handle[0].point_data[i]
+
+    def __eq__(self, other):
+        if not isinstance(other, DomainPoint):
+            return NotImplemented
+        if self.handle[0].dim != other.handle[0].dim:
+            return False
+        for i in xrange(self.handle[0].dim):
+            if self.handle[0].point_data[i] != other.handle[0].point_data[i]:
+                return False
+        return True
+
+    def __str__(self):
+        dim = self.handle[0].dim
+        if dim == 1:
+            return str(self.handle[0].point_data[0])
+        return '({})'.format(
+            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
+
+    def __repr__(self):
+        dim = self.handle[0].dim
+        return 'DomainPoint({})'.format(
+            ', '.join(str(self.handle[0].point_data[i]) for i in xrange(dim)))
 
     @staticmethod
     def create(values):
@@ -219,7 +266,15 @@ class Domain(object):
 
     @staticmethod
     def create(extent, start=None):
+        try:
+            len(extent)
+        except TypeError:
+            extent = [extent]
         if start is not None:
+            try:
+                len(start)
+            except TypeError:
+                start = [start]
             assert len(start) == len(extent)
         else:
             start = [0 for _ in extent]
@@ -229,6 +284,16 @@ class Domain(object):
             rect[0].lo.x[i] = start[i]
             rect[0].hi.x[i] = start[i] + extent[i] - 1
         return Domain(getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0]))
+
+    def __iter__(self):
+        dim = self.handle[0].dim
+        return imap(
+            DomainPoint.create,
+            itertools.product(
+                *[xrange(
+                    self.handle[0].rect_data[i],
+                    self.handle[0].rect_data[i+dim] + 1)
+                  for i in xrange(dim)]))
 
     def raw_value(self):
         return self.handle[0]
@@ -328,9 +393,10 @@ class FutureMap(object):
         c.legion_future_map_destroy(self.handle)
 
     def __getitem__(self, point):
-        domain_point = DomainPoint.create(_IndexValue(point))
+        if not isinstance(point, DomainPoint):
+            point = DomainPoint.create(point)
         return Future.from_cdata(
-            c.legion_future_map_get_future(self.handle, domain_point.raw_value()),
+            c.legion_future_map_get_future(self.handle, point.raw_value()),
             value_type=self.value_type)
 
 class Type(object):
@@ -440,6 +506,9 @@ class Ispace(object):
                  self.handle[0].id,
                  self.handle[0].type_tag,
                  self.owned and self.escaped))
+
+    def __iter__(self):
+        return self.domain.__iter__()
 
     @property
     def domain(self):
@@ -1200,9 +1269,10 @@ class _TaskLauncher(object):
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
             self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
-        if 'point' in kwargs:
-            domain_point = DomainPoint.create(_IndexValue(kwargs['point']))
-            c.legion_task_launcher_set_point(launcher, domain_point.raw_value())
+        if point is not None:
+            if not isinstance(point, DomainPoint):
+                point = DomainPoint.create(point)
+            c.legion_task_launcher_set_point(launcher, point.raw_value())
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
                 assert i < len(self.task.privileges)
@@ -1253,10 +1323,9 @@ class _IndexLauncher(_TaskLauncher):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
-        point = DomainPoint.create(index)
         task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
-            self.local_args, point.raw_value(), task_args[0], False)
+            self.local_args, index.value.raw_value(), task_args[0], False)
 
     def attach_future_args(self, *args):
         self.future_args = args
@@ -1328,13 +1397,16 @@ class _FuturePoint(object):
         return self.future.get()
 
 class IndexLaunch(object):
-    __slots__ = ['extent', 'domain', 'launcher', 'point',
+    __slots__ = ['domain', 'launcher', 'point',
                  'saved_task', 'saved_args']
 
-    def __init__(self, extent):
-        assert len(extent) == 1
-        self.extent = extent
-        self.domain = Domain.create(extent)
+    def __init__(self, domain):
+        if isinstance(domain, Domain):
+            self.domain = domain
+        elif isinstance(domain, Ispace):
+            self.domain = ispace.domain
+        else:
+            self.domain = Domain.create(domain)
         self.launcher = None
         self.point = None
         self.saved_task = None
@@ -1343,7 +1415,7 @@ class IndexLaunch(object):
     def __iter__(self):
         _my.ctx.begin_launch(self)
         self.point = _IndexValue(None)
-        for i in xrange(self.extent[0]):
+        for i in self.domain:
             self.point.value = i
             yield self.point
         _my.ctx.end_launch(self)
@@ -1389,7 +1461,7 @@ class IndexLaunch(object):
         self.launcher.attach_local_args(self.point, *args)
         self.launcher.attach_future_args(*futures)
         # TODO: attach region args
-        return _FuturePoint(self.launcher, int(self.point))
+        return _FuturePoint(self.launcher, self.point.value)
 
     def launch(self):
         self.launcher.launch()
