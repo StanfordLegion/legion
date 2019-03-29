@@ -740,6 +740,17 @@ class _RegionNdarray(object):
             'strides': strides,
         }
 
+def fill(region, field_name, value):
+    assert(isinstance(region, Region))
+    field_id = region.fspace.field_ids[field_name]
+    field_type = region.fspace.field_types[field_name]
+    raw_value = ffi.new('{} *'.format(field_type.cffi_type), value)
+    c.legion_runtime_fill_field(
+        _my.ctx.runtime, _my.ctx.context,
+        region.handle[0], region.parent.handle[0] if region.parent is not None else region.handle[0],
+        field_id, raw_value, field_type.size,
+        c.legion_predicate_true())
+
 # Hack: Can't pickle static methods.
 def _Ipartition_unpickle(id, parent, color_space):
     handle = ffi.new('legion_index_partition_t *')
