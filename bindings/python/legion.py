@@ -840,6 +840,10 @@ class Ipartition(object):
             _my.ctx.runtime, self.handle[0], point.raw_value())
         return Ispace(subspace)
 
+    def __iter__(self):
+        for point in self.color_space:
+            yield self[point]
+
     @staticmethod
     def create_equal(parent, color_space, granularity=1, color=AUTO_GENERATE_ID):
         assert isinstance(parent, Ispace)
@@ -896,6 +900,10 @@ class Partition(object):
             _my.ctx.runtime, self.handle[0], point.raw_value())
         return Region(subregion, subspace, self.parent.fspace,
                       parent=self.parent.parent if self.parent.parent is not None else self.parent)
+
+    def __iter__(self):
+        for point in self.color_space:
+            yield self[point]
 
     @property
     def color_space(self):

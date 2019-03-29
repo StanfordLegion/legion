@@ -54,5 +54,9 @@ def main():
             total_volume += hello_subregion(R00xy).get()
     assert total_volume == 4
 
+    # An easy way to iterate subregions:
+    for Rij in P:
+        assert Rij.ispace.volume == 4
+
 if __name__ == '__legion_main__':
     main()
