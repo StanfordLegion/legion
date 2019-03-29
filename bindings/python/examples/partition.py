@@ -54,10 +54,5 @@ def main():
             total_volume += hello_subregion(R00xy).get()
     assert total_volume == 4
 
-    P2.destroy()
-    IP2.destroy()
-    P.destroy()
-    R.destroy()
-
 if __name__ == '__legion_main__':
     main()

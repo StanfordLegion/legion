@@ -31,6 +31,7 @@ import re
 import subprocess
 import sys
 import threading
+import weakref
 
 # Python 3.x compatibility:
 try:
@@ -152,7 +153,8 @@ _my = threading.local()
 
 class Context(object):
     __slots__ = ['context_root', 'context', 'runtime_root', 'runtime',
-                 'task_root', 'task', 'regions', 'current_launch']
+                 'task_root', 'task', 'regions',
+                 'decode_task_args', 'owned_objects', 'current_launch']
     def __init__(self, context_root, runtime_root, task_root, regions):
         self.context_root = context_root
         self.context = self.context_root[0]
@@ -161,7 +163,17 @@ class Context(object):
         self.task_root = task_root
         self.task = self.task_root[0]
         self.regions = regions
+        self.decode_task_args = False
+        self.owned_objects = []
         self.current_launch = None
+    def begin_decode_task_args(self):
+        assert not self.decode_task_args
+        self.decode_task_args = True
+    def end_decode_task_args(self):
+        assert self.decode_task_args
+        self.decode_task_args = False
+    def track_object(self, obj):
+        self.owned_objects.append(weakref.ref(obj))
     def begin_launch(self, launch):
         assert self.current_launch == None
         self.current_launch = launch
@@ -399,25 +411,40 @@ RW = Privilege(read=True, write=True)
 WD = Privilege(write=True, discard=True)
 
 # Hack: Can't pickle static methods.
-def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag):
+def _Ispace_unpickle(ispace_tid, ispace_id, ispace_type_tag, owned):
     handle = ffi.new('legion_index_space_t *')
     handle[0].tid = ispace_tid
     handle[0].id = ispace_id
     handle[0].type_tag = ispace_type_tag
-    return Ispace(handle[0])
+    return Ispace(handle[0], owned=owned)
 
 class Ispace(object):
-    __slots__ = ['handle']
+    __slots__ = [
+        'handle', 'escaped',
+        '__weakref__', # allow weak references
+    ]
 
-    def __init__(self, handle):
+    def __init__(self, handle, owned=False):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_index_space_t *', handle)
+        # Mark task arguments as "escaped" because they came from an
+        # outer context (i.e., do not delete them automatically).
+        self.escaped = _my.ctx.decode_task_args
+
+        assert not (owned and self.escaped)
+        if owned:
+            _my.ctx.track_object(self)
+
+    def __del__(self):
+        if not self.escaped:
+            self.destroy()
 
     def __reduce__(self):
         return (_Ispace_unpickle,
                 (self.handle[0].tid,
                  self.handle[0].id,
-                 self.handle[0].type_tag))
+                 self.handle[0].type_tag,
+                 self.escaped))
 
     @property
     def domain(self):
@@ -432,9 +459,12 @@ class Ispace(object):
     def create(extent, start=None):
         domain = Domain.create(extent, start=start).raw_value()
         handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
-        return Ispace(handle)
+        return Ispace(handle, owned=True)
 
     def destroy(self):
+        # Can't delete an ispace if it has escaped.
+        assert not self.escaped
+
         # This is not something you want to have happen in a
         # destructor, since fspaces may outlive the lifetime of the handle.
         c.legion_index_space_destroy(
@@ -443,25 +473,40 @@ class Ispace(object):
         del self.handle
 
 # Hack: Can't pickle static methods.
-def _Fspace_unpickle(fspace_id, field_ids, field_types):
+def _Fspace_unpickle(fspace_id, field_ids, field_types, owned):
     handle = ffi.new('legion_field_space_t *')
     handle[0].id = fspace_id
-    return Fspace(handle[0], field_ids, field_types)
+    return Fspace(handle[0], field_ids, field_types, owned=owned)
 
 class Fspace(object):
-    __slots__ = ['handle', 'field_ids', 'field_types']
+    __slots__ = [
+        'handle', 'field_ids', 'field_types', 'escaped',
+        '__weakref__', # allow weak references
+    ]
 
-    def __init__(self, handle, field_ids, field_types):
+    def __init__(self, handle, field_ids, field_types, owned=False):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_field_space_t *', handle)
         self.field_ids = field_ids
         self.field_types = field_types
+        # Mark task arguments as "escaped" because they came from an
+        # outer context (i.e., do not delete them automatically).
+        self.escaped = _my.ctx.decode_task_args
+
+        assert not (owned and self.escaped)
+        if owned:
+            _my.ctx.track_object(self)
+
+    def __del__(self):
+        if not self.escaped:
+            self.destroy()
 
     def __reduce__(self):
         return (_Fspace_unpickle,
                 (self.handle[0].id,
                  self.field_ids,
-                 self.field_types))
+                 self.field_types,
+                 self.escaped))
 
     @staticmethod
     def create(fields):
@@ -483,9 +528,12 @@ class Fspace(object):
             field_ids[field_name] = field_id
             field_types[field_name] = field_type
         c.legion_field_allocator_destroy(alloc)
-        return Fspace(handle, field_ids, field_types)
+        return Fspace(handle, field_ids, field_types, owned=True)
 
     def destroy(self):
+        # Can't delete an fspace if it has escaped.
+        assert not self.escaped
+
         # This is not something you want to have happen in a
         # destructor, since fspaces may outlive the lifetime of the handle.
         c.legion_field_space_destroy(
@@ -496,38 +544,55 @@ class Fspace(object):
         del self.field_types
 
 # Hack: Can't pickle static methods.
-def _Region_unpickle(tree_id, ispace, fspace):
+def _Region_unpickle(tree_id, ispace, fspace, owned):
     handle = ffi.new('legion_logical_region_t *')
     handle[0].tree_id = tree_id
     handle[0].index_space = ispace.handle[0]
     handle[0].field_space = fspace.handle[0]
 
-    return Region(handle[0], ispace, fspace)
+    return Region(handle[0], ispace, fspace, owned=owned)
 
 class Region(object):
-    __slots__ = ['handle', 'ispace', 'fspace', 'parent',
-                 'instances', 'privileges', 'instance_wrappers']
+    __slots__ = [
+        'handle', 'ispace', 'fspace', 'parent', 'escaped',
+        'instances', 'privileges', 'instance_wrappers',
+        '__weakref__', # allow weak references
+    ]
 
     # Make this speak the Type interface
     numpy_type = None
     cffi_type = 'legion_logical_region_t'
     size = ffi.sizeof(cffi_type)
 
-    def __init__(self, handle, ispace, fspace, parent=None):
+    def __init__(self, handle, ispace, fspace, parent=None, owned=False):
         # Important: Copy handle. Do NOT assume ownership.
         self.handle = ffi.new('legion_logical_region_t *', handle)
         self.ispace = ispace
         self.fspace = fspace
         self.parent = parent
+        # Mark task arguments as "escaped" because they came from an
+        # outer context (i.e., do not delete them automatically).
+        self.escaped = _my.ctx.decode_task_args
         self.instances = {}
         self.privileges = {}
         self.instance_wrappers = {}
+
+        assert not (owned and self.escaped)
+        if owned:
+            _my.ctx.track_object(self)
+            for field_name in fspace.field_ids.keys():
+                self._set_privilege(field_name, RW)
+
+    def __del__(self):
+        if not self.escaped and not self.parent:
+            self.destroy()
 
     def __reduce__(self):
         return (_Region_unpickle,
                 (self.handle[0].tree_id,
                  self.ispace,
-                 self.fspace))
+                 self.fspace,
+                 self.escaped))
 
     @staticmethod
     def create(ispace, fspace):
@@ -537,12 +602,12 @@ class Region(object):
             fspace = Fspace.create(fspace)
         handle = c.legion_logical_region_create(
             _my.ctx.runtime, _my.ctx.context, ispace.handle[0], fspace.handle[0], False)
-        result = Region(handle, ispace, fspace)
-        for field_name in fspace.field_ids.keys():
-            result._set_privilege(field_name, RW)
-        return result
+        return Region(handle, ispace, fspace, owned=True)
 
     def destroy(self):
+        # Can't delete a region if it has escaped.
+        assert not self.escaped and not self.parent
+
         # This is not something you want to have happen in a
         # destructor, since regions may outlive the lifetime of the handle.
         c.legion_logical_region_destroy(
@@ -928,7 +993,25 @@ class Task (object):
             raw_arg_ptr, raw_arg_size, proc,
             task, raw_regions, num_regions, context, runtime)
 
+        regions = [] # to be filled later
+
+        # Build context.
+        ctx = Context(context, runtime, task, regions)
+
+        # Ensure that we're not getting tangled up in another
+        # thread. There should be exactly one thread per task.
+        try:
+            _my.ctx
+        except AttributeError:
+            pass
+        else:
+            raise Exception('thread-local context already set')
+
+        # Store context in thread-local storage.
+        _my.ctx = ctx
+
         # Decode arguments from Pickle format.
+        _my.ctx.begin_decode_task_args()
         if c.legion_task_get_is_index_space(task[0]):
             arg_ptr = ffi.cast('char *', c.legion_task_get_local_args(task[0]))
             arg_size = c.legion_task_get_local_arglen(task[0])
@@ -940,9 +1023,9 @@ class Task (object):
             args = pickle.loads(ffi.unpack(arg_ptr, arg_size))
         else:
             args = ()
+        _my.ctx.end_decode_task_args()
 
         # Unpack regions.
-        regions = []
         for i in xrange(num_regions[0]):
             regions.append(raw_regions[0][i])
 
@@ -963,23 +1046,14 @@ class Task (object):
                             arg._set_instance(name, instance, priv)
             assert req == num_regions[0]
 
-        # Build context.
-        ctx = Context(context, runtime, task, regions)
-
-        # Ensure that we're not getting tangled up in another
-        # thread. There should be exactly one thread per task.
-        try:
-            _my.ctx
-        except AttributeError:
-            pass
-        else:
-            raise Exception('thread-local context already set')
-
-        # Store context in thread-local storage.
-        _my.ctx = ctx
-
         # Execute task body.
         result = self.body(*args)
+
+        # Mark any remaining objects as escaped.
+        for ref in ctx.owned_objects:
+            obj = ref()
+            if obj is not None:
+                obj.escaped = True
 
         # Encode result.
         if not self.return_type:
