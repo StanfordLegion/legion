@@ -192,6 +192,10 @@ class DomainPoint(object):
 
     @staticmethod
     def create(values):
+        try:
+            len(values)
+        except TypeError:
+            values = [values]
         assert 1 <= len(values) <= 3
         handle = ffi.new('legion_domain_point_t *')
         handle[0].dim = len(values)
@@ -331,7 +335,7 @@ class FutureMap(object):
         c.legion_future_map_destroy(self.handle)
 
     def __getitem__(self, point):
-        domain_point = DomainPoint(_IndexValue(point))
+        domain_point = DomainPoint.create(_IndexValue(point))
         return Future.from_cdata(
             c.legion_future_map_get_future(self.handle, domain_point.raw_value()),
             value_type=self.value_type)
@@ -1203,7 +1207,7 @@ class _TaskLauncher(object):
         launcher = c.legion_task_launcher_create(
             self.task.task_id, task_args[0], c.legion_predicate_true(), 0, 0)
         if 'point' in kwargs:
-            domain_point = DomainPoint(_IndexValue(kwargs['point']))
+            domain_point = DomainPoint.create(_IndexValue(kwargs['point']))
             c.legion_task_launcher_set_point(launcher, domain_point.raw_value())
         for i, arg in zip(range(len(args)), args):
             if isinstance(arg, Region):
@@ -1255,7 +1259,7 @@ class _IndexLauncher(_TaskLauncher):
         raise Exception('IndexLaunch does not support spawn_task')
 
     def attach_local_args(self, index, *args):
-        point = DomainPoint(index)
+        point = DomainPoint.create(index)
         task_args, _ = self.encode_args(args)
         c.legion_argument_map_set_point(
             self.local_args, point.raw_value(), task_args[0], False)
