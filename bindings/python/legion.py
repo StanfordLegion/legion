@@ -170,18 +170,27 @@ class Context(object):
         self.current_launch = None
 
 class DomainPoint(object):
-    __slots__ = ['impl']
+    __slots__ = ['handle']
     def __init__(self, value):
         assert(isinstance(value, _IndexValue))
-        self.impl = ffi.new('legion_domain_point_t *')
-        self.impl[0].dim = 1
-        self.impl[0].point_data[0] = int(value)
+        self.handle = ffi.new('legion_domain_point_t *')
+        self.handle[0].dim = 1
+        self.handle[0].point_data[0] = int(value)
     def raw_value(self):
-        return self.impl[0]
+        return self.handle[0]
 
 class Domain(object):
-    __slots__ = ['impl']
-    def __init__(self, extent, start=None):
+    __slots__ = ['handle']
+    def __init__(self, handle):
+        # Important: Copy handle. Do NOT assume ownership.
+        self.handle = ffi.new('legion_domain_t *', handle)
+
+    @property
+    def volume(self):
+        return c.legion_domain_get_volume(self.handle[0])
+
+    @staticmethod
+    def create(extent, start=None):
         if start is not None:
             assert len(start) == len(extent)
         else:
@@ -191,9 +200,10 @@ class Domain(object):
         for i in xrange(len(extent)):
             rect[0].lo.x[i] = start[i]
             rect[0].hi.x[i] = start[i] + extent[i] - 1
-        self.impl = getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0])
+        return Domain(getattr(c, 'legion_domain_from_rect_{}d'.format(len(extent)))(rect[0]))
+
     def raw_value(self):
-        return self.impl
+        return self.handle[0]
 
 class Future(object):
     __slots__ = ['handle', 'value_type', 'argument_number']
@@ -390,9 +400,18 @@ class Ispace(object):
                  self.handle[0].id,
                  self.handle[0].type_tag))
 
+    @property
+    def domain(self):
+        domain = c.legion_index_space_get_domain(_my.ctx.runtime, self.handle[0])
+        return Domain(domain)
+
+    @property
+    def volume(self):
+        return self.domain.volume
+
     @staticmethod
     def create(extent, start=None):
-        domain = Domain(extent, start=start).raw_value()
+        domain = Domain.create(extent, start=start).raw_value()
         handle = c.legion_index_space_create_domain(_my.ctx.runtime, _my.ctx.context, domain)
         return Ispace(handle)
 
@@ -702,6 +721,10 @@ class Partition(object):
         return (_Partition_unpickle,
                 (self.parent,
                  self.ipartition))
+
+    @property
+    def color_space(self):
+        return self.ipartition.color_space
 
     @staticmethod
     def create(parent, ipartition):
@@ -1198,7 +1221,7 @@ class IndexLaunch(object):
     def __init__(self, extent):
         assert len(extent) == 1
         self.extent = extent
-        self.domain = Domain(extent)
+        self.domain = Domain.create(extent)
         self.launcher = None
         self.point = None
         self.saved_task = None

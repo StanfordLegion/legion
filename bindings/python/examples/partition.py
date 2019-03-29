@@ -31,6 +31,8 @@ def main():
     IP2 = legion.Ipartition.create_equal(R.ispace, [2, 2])
     P2 = legion.Partition.create(R, IP2)
 
+    assert P.color_space.volume == 4
+
     P2.destroy()
     IP2.destroy()
     P.destroy()
