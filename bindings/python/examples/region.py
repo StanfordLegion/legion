@@ -28,7 +28,7 @@ import numpy
 def init(R):
     # The fields of regions are numpy arrays, so you can call normal
     # numpy methods on them.
-    R.x.fill(0)
+    R.x.fill(123)
 
 # It's also possible to pass other arguments to a task, as long as
 # those arguments are pickleable. The second argument here is just a
@@ -57,6 +57,9 @@ def main():
     # This could have also been done with the following shortand, and
     # Legion will automatically create an index space and field space.
     R2 = legion.Region.create([4, 4], {'x': legion.float64})
+
+    # Fill the field x of region R with an initial value.
+    legion.fill(R, 'x', 101)
 
     # Launch two tasks. The second task will depend on the first,
     # since they both write R.
