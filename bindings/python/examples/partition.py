@@ -38,11 +38,21 @@ def main():
 
     assert P.color_space.volume == 4
 
+    # Grab a subregion of P.
     R00 = P[(0, 0)]
 
     print('Parent region has volume %s' % R.ispace.volume)
     assert R.ispace.volume == 16
     assert hello_subregion(R00).get() == 4
+
+    # Partition the subregion again.
+    P00 = legion.Partition.create_equal(R00, [2, 2])
+    total_volume = 0
+    for x in range(2):
+        for y in range(2):
+            R00xy = P00[(x, y)]
+            total_volume += hello_subregion(R00xy).get()
+    assert total_volume == 4
 
     P2.destroy()
     IP2.destroy()

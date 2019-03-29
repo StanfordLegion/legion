@@ -759,7 +759,8 @@ class Partition(object):
         subspace = self.ipartition[point]
         subregion = c.legion_logical_partition_get_logical_subregion_by_color_domain_point(
             _my.ctx.runtime, self.handle[0], point.raw_value())
-        return Region(subregion, subspace, self.parent.fspace, parent=self.parent)
+        return Region(subregion, subspace, self.parent.fspace,
+                      parent=self.parent.parent if self.parent.parent is not None else self.parent)
 
     @property
     def color_space(self):
