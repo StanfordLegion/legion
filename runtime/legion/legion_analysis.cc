@@ -10568,6 +10568,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    EquivalenceSet::DeferResponseArgs::DeferResponseArgs(DistributedID id, 
+                          AddressSpaceID src, AddressSpaceID log, 
+                          IndexSpaceExpression *ex, bool local, bool is_space, 
+                          IndexSpace expr_h, IndexSpaceExprID xid, IndexSpace h)
+      : LgTaskArgs<DeferResponseArgs>(implicit_provenance),
+        did(id), source(src), logical_owner(log), expr(ex), is_local(local), 
+        is_index_space(is_space), expr_handle(expr_h), expr_id(xid), handle(h) 
+    //--------------------------------------------------------------------------
+    {
+      if (is_local)
+        expr->add_expression_reference();
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void EquivalenceSet::handle_equivalence_set_response(
                    Deserializer &derez, Runtime *runtime, AddressSpaceID source)
     //--------------------------------------------------------------------------
@@ -10577,18 +10591,32 @@ namespace Legion {
       derez.deserialize(did);
       AddressSpaceID logical_owner;
       derez.deserialize(logical_owner);
+      bool is_local, is_index_space;
+      IndexSpace expr_handle; IndexSpaceExprID expr_id; RtEvent wait_for;
       IndexSpaceExpression *expr = 
-        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source);
+        IndexSpaceExpression::unpack_expression(derez, runtime->forest, source,
+        is_local, is_index_space, expr_handle, expr_id, wait_for);
       IndexSpace handle;
       derez.deserialize(handle);
+      // We only actually need the index space node on the owner and the
+      // logical owner otherwise we can skip it
+      IndexSpaceNode *node = NULL; RtEvent wait_on;
+      if (handle.exists() && (logical_owner == runtime->address_space))
+        node = runtime->forest->get_node(handle, &wait_on);
+
+      // Defer this if the index space expression isn't ready yet
+      if ((wait_for.exists() && !wait_for.has_triggered()) ||
+          (wait_on.exists() && !wait_on.has_triggered()))
+      {
+        DeferResponseArgs args(did, source, logical_owner, expr, is_local, 
+                      is_index_space, expr_handle, expr_id, handle);
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
+            Runtime::merge_events(wait_for, wait_on));
+        return;
+      }
 
       void *location;
       EquivalenceSet *set = NULL;
-      // We only actually need the index space node on the owner and the
-      // logical owner otherwise we can skip it
-      IndexSpaceNode *node = NULL;
-      if (handle.exists() && (logical_owner == runtime->address_space))
-        node = runtime->forest->get_node(handle);
       if (runtime->find_pending_collectable_location(did, location))
         set = new(location) EquivalenceSet(runtime, did, source, logical_owner,
                                            expr, node, false/*register now*/);
@@ -10597,6 +10625,35 @@ namespace Legion {
                                  expr, node, false/*register now*/);
       // Once construction is complete then we do the registration
       set->register_with_runtime(NULL/*no remote registration needed*/);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void EquivalenceSet::handle_deferred_response(const void *args,
+                                                             Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      const DeferResponseArgs *dargs = (const DeferResponseArgs*)args;
+      IndexSpaceExpression *expr = (dargs->is_local) ? dargs->expr :
+        (dargs->is_index_space) ? runtime->forest->get_node(dargs->expr_handle)
+        : runtime->forest->find_remote_expression(dargs->expr_id);
+      IndexSpaceNode *node = NULL;
+      if (dargs->handle.exists() && 
+          (dargs->logical_owner == runtime->address_space))
+        node = runtime->forest->get_node(dargs->handle);
+
+      void *location;
+      EquivalenceSet *set = NULL;
+      if (runtime->find_pending_collectable_location(dargs->did, location))
+        set = new(location) EquivalenceSet(runtime, dargs->did, dargs->source, 
+            dargs->logical_owner, expr, node, false/*register now*/);
+      else
+        set = new EquivalenceSet(runtime, dargs->did, dargs->source, 
+            dargs->logical_owner, expr, node, false/*register now*/);
+      // Once construction is complete then we do the registration
+      set->register_with_runtime(NULL/*no remote registration needed*/);
+      // Remove our expression reference too
+      if (dargs->is_local && dargs->expr->remove_expression_reference())
+        delete dargs->expr;
     }
 
     //--------------------------------------------------------------------------

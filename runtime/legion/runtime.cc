@@ -20878,6 +20878,11 @@ namespace Legion {
             EquivalenceSet::handle_merge_or_forward(args);
             break;
           }
+        case LG_DEFER_EQ_RESPONSE_TASK_ID:
+          {
+            EquivalenceSet::handle_deferred_response(args, runtime);
+            break;
+          }
         case LG_DEFER_REMOTE_DECREMENT_TASK_ID:
           {
             DistributedCollectable::handle_defer_remote_decrement(args);
