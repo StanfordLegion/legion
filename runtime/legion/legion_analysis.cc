@@ -10962,14 +10962,33 @@ namespace Legion {
         node = runtime->forest->get_node(handle, &wait_on);
 
       // Defer this if the index space expression isn't ready yet
-      if ((wait_for.exists() && !wait_for.has_triggered()) ||
-          (wait_on.exists() && !wait_on.has_triggered()))
+      if (wait_for.exists() || wait_on.exists())
       {
-        DeferResponseArgs args(did, source, logical_owner, expr, is_local, 
-                      is_index_space, expr_handle, expr_id, handle);
-        runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
-            Runtime::merge_events(wait_for, wait_on));
-        return;
+        RtEvent precondition;
+        if (wait_for.exists())
+        {
+          if (wait_on.exists())
+            precondition = Runtime::merge_events(wait_for, wait_on);
+          else
+            precondition = wait_for;
+        }
+        else
+          precondition = wait_on;
+        if (precondition.exists() && !precondition.has_triggered())
+        {
+          DeferResponseArgs args(did, source, logical_owner, expr, is_local,
+                        is_index_space, expr_handle, expr_id, handle);
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_MESSAGE_PRIORITY,
+                                           precondition);
+          return;
+        }
+        // If we fall through we need to refetch things that we didn't get  
+        if (expr == NULL)
+          expr = is_index_space ? runtime->forest->get_node(expr_handle) :
+            runtime->forest->find_remote_expression(expr_id);
+        if ((node == NULL) && handle.exists() &&
+            (logical_owner == runtime->address_space))
+          node = runtime->forest->get_node(handle);
       }
 
       void *location;
