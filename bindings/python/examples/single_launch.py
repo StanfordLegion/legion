@@ -28,18 +28,13 @@ def hi(i):
 @task
 def main():
     futures = []
-    for i in legion.IndexLaunch(10):
-        futures.append(hi(i))
+    for i in range(10):
+        # When calling a task, it's possible to assign a task to a
+        # specific point using the `point` keyword argument:
+        futures.append(hi(i, point=i))
     for i, future in enumerate(futures):
         print("got %s" % future.get())
-        assert int(future.get()) == i
-
-    # Same in 2 dimensions.
-    futures = []
-    for point in legion.IndexLaunch([3, 3]):
-        futures.append(hi(point))
-    for i, point in enumerate(legion.Domain.create([3, 3])):
-        assert futures[i].get() == point
+        assert future.get() == i
 
 if __name__ == '__legion_main__':
     main()

@@ -621,6 +621,21 @@ legion_index_space_intersection(legion_runtime_t runtime_,
   return CObjectWrapper::wrap(is);
 }
 
+legion_index_space_t
+legion_index_space_subtraction(legion_runtime_t runtime_,
+                               legion_context_t ctx_,
+                               legion_index_space_t left_,
+                               legion_index_space_t right_)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+  IndexSpace left = CObjectWrapper::unwrap(left_);
+  IndexSpace right = CObjectWrapper::unwrap(right_);
+
+  return CObjectWrapper::wrap(
+      runtime->subtract_index_spaces(ctx, left, right));
+}
+
 void
 legion_index_space_destroy(legion_runtime_t runtime_,
                            legion_context_t ctx_,

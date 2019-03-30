@@ -892,6 +892,17 @@ extern "C" {
                                   size_t num_spaces);
 
   /**
+   * @return Caller takes ownership of return value.
+   *
+   * @see Legion::Runtime::subtract_index_spaces
+   */
+  legion_index_space_t
+  legion_index_space_subtraction(legion_runtime_t runtime,
+                                 legion_context_t ctx,
+                                 legion_index_space_t left,
+                                 legion_index_space_t right);
+
+  /**
    * @see Legion::Runtime::has_multiple_domains().
    */
   bool
