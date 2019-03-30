@@ -338,6 +338,7 @@ namespace Legion {
       LG_DEFER_SUBSET_REQUEST_TASK_ID,
       LG_DEFER_MAKE_OWNER_TASK_ID,
       LG_DEFER_MERGE_OR_FORWARD_TASK_ID,
+      LG_DEFER_EQ_RESPONSE_TASK_ID,
       LG_DEFER_REMOTE_DECREMENT_TASK_ID,
       LG_COPY_FILL_AGGREGATION_TASK_ID,
       LG_COPY_FILL_DELETION_TASK_ID,
@@ -443,6 +444,7 @@ namespace Legion {
         "Defer Subset Request",                                   \
         "Defer Make Owner",                                       \
         "Defer Merge or Forward",                                 \
+        "Defer Equivalence Set Response",                         \
         "Defer Remote Decrement",                                 \
         "Copy Fill Aggregation",                                  \
         "Copy Fill Deletion",                                     \

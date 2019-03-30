@@ -2497,6 +2497,8 @@ function codegen.expr_index_access(cx, node)
       return values.value(node, expr.just(actions, list), list_type)
     end
   elseif std.is_region(value_type) then
+    -- We still need to do codegen for the value to get the metadata correct
+    local value = codegen.expr(cx, node.value)
     local index = codegen.expr(cx, node.index):read(cx, index_type)
 
     local pointer_type = node.expr_type.pointer_type
@@ -7701,10 +7703,12 @@ function codegen.expr_import_partition(cx, node)
         " is not a disjoint partition"])
     end
   end
+  local dim = math.max(colors_type.dim, 1)
   check_actions = quote
     [check_actions];
     do
       var parent = std.c.legion_logical_partition_get_parent_logical_region([cx.runtime], [lp])
+      parent = get_root_of_tree([cx.runtime], parent)
       std.assert_error([eq_struct(c.legion_logical_region_t, `([region.value].impl), parent)],
         [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
         " is not a logical partition of " .. pretty.entry_expr(node.region)])
@@ -7712,9 +7716,9 @@ function codegen.expr_import_partition(cx, node)
     do
       var cs = std.c.legion_index_partition_get_color_space([cx.runtime], [lp].index_partition)
       var domain = std.c.legion_index_space_get_domain([cx.runtime], cs)
-      std.assert_error(domain.dim == [colors_type.dim],
+      std.assert_error(domain.dim == [dim],
         [get_source_location(node) .. ": " .. pretty.entry_expr(node.value) ..
-        " does not have a " .. tostring(colors_type.dim) .. "D color space"])
+        " does not have a " .. tostring(dim) .. "D color space"])
     end
   end
 

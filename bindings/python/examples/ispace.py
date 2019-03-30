@@ -18,28 +18,23 @@
 from __future__ import print_function
 
 import legion
-from legion import task
-
-@task
-def hi(i):
-    print("hello %s" % i)
-    return i
+from legion import task, RW
 
 @task
 def main():
-    futures = []
-    for i in legion.IndexLaunch(10):
-        futures.append(hi(i))
-    for i, future in enumerate(futures):
-        print("got %s" % future.get())
-        assert int(future.get()) == i
+    d = legion.Ispace.create(10)
+    t = 0
+    for x in d:
+        print(x)
+        t += int(x)
+    assert t == 45
 
-    # Same in 2 dimensions.
-    futures = []
-    for point in legion.IndexLaunch([3, 3]):
-        futures.append(hi(point))
-    for i, point in enumerate(legion.Domain.create([3, 3])):
-        assert futures[i].get() == point
+    d2 = legion.Ispace.create([3, 3], [1, 1])
+    t2 = 0
+    for x in d2:
+        print(x)
+        t2 += x[0] * x[1]
+    assert t2 == 36
 
 if __name__ == '__legion_main__':
     main()

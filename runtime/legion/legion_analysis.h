@@ -1584,6 +1584,25 @@ namespace Legion {
         LegionMap<VersionID,FieldMask>::aligned *const versions;
         const RtUserEvent done;
       };
+      struct DeferResponseArgs : public LgTaskArgs<DeferResponseArgs> {
+      public:
+        static const LgTaskID TASK_ID = LG_DEFER_EQ_RESPONSE_TASK_ID;
+      public:
+        DeferResponseArgs(DistributedID id, AddressSpaceID src, 
+                          AddressSpaceID log, IndexSpaceExpression *ex, 
+                          bool local, bool is_space, IndexSpace expr_h, 
+                          IndexSpaceExprID xid, IndexSpace h);
+      public:
+        const DistributedID did;
+        const AddressSpaceID source;
+        const AddressSpaceID logical_owner;
+        IndexSpaceExpression *const expr;
+        const bool is_local;
+        const bool is_index_space;
+        const IndexSpace expr_handle;
+        const IndexSpaceExprID expr_id;
+        const IndexSpace handle;
+      };
     protected:
       enum EqState {
         // Owner starts in the mapping state, goes to pending refinement
@@ -1806,6 +1825,7 @@ namespace Legion {
       static void handle_subset_request(const void *args);
       static void handle_make_owner(const void *args);
       static void handle_merge_or_forward(const void *args);
+      static void handle_deferred_response(const void *args, Runtime *runtime);
       static void handle_equivalence_set_request(Deserializer &derez,
                             Runtime *runtime, AddressSpaceID source);
       static void handle_equivalence_set_response(Deserializer &derez,
