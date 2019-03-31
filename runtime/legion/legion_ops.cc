@@ -15502,13 +15502,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime)
+    void RemoteOp::unpack_remote_base(Deserializer &derez, Runtime *runtime,
+                                      std::set<RtEvent> &ready_events)
     //--------------------------------------------------------------------------
     {
       derez.deserialize(unique_op_id);
       UniqueID parent_uid;
       derez.deserialize(parent_uid);
-      parent_ctx = runtime->find_context(parent_uid);
+      RtEvent ready;
+      parent_ctx = runtime->find_context(parent_uid, false, &ready);
+      if (ready.exists())
+        ready_events.insert(ready);
       derez.deserialize<bool>(tracing);
     }
 
@@ -15708,7 +15712,7 @@ namespace Legion {
           assert(false);
       }
       // Do the rest of the unpack
-      result->unpack_remote_base(derez, runtime);
+      result->unpack_remote_base(derez, runtime, ready_events);
       WrapperReferenceMutator mutator(ready_events);
       result->unpack(derez, mutator);
       return result;

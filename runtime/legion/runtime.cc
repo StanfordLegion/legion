@@ -18139,13 +18139,13 @@ namespace Legion {
       RtUserEvent to_trigger;
       {
         AutoLock ctx_lock(context_lock);
-        std::map<UniqueID,RtUserEvent>::iterator finder = 
-          pending_remote_contexts.find(context_uid);
+        std::map<UniqueID,std::pair<RtUserEvent,RemoteContext*> >::iterator 
+          finder = pending_remote_contexts.find(context_uid);
 #ifdef DEBUG_LEGION
         assert(remote_contexts.find(context_uid) == remote_contexts.end());
         assert(finder != pending_remote_contexts.end());
 #endif
-        to_trigger = finder->second;
+        to_trigger = finder->second.first;
         pending_remote_contexts.erase(finder);
         remote_contexts[context_uid] = context; 
       }
@@ -18180,14 +18180,16 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     InnerContext* Runtime::find_context(UniqueID context_uid,
-                                      bool return_null_if_not_found /*=false*/)
+                                      bool return_null_if_not_found /*=false*/,
+                                      RtEvent *wait_for /*=NULL*/)
     //--------------------------------------------------------------------------
     {
       RtEvent wait_on;
       RtUserEvent ready_event;
+      RemoteContext *result = NULL;
       {
         // Need exclusive permission since we might mutate stuff
-        AutoLock ctx_lock(context_lock);
+        AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
         // See if it is local first
         std::map<UniqueID,InnerContext*>::const_iterator
           local_finder = local_contexts.find(context_uid);
@@ -18199,20 +18201,98 @@ namespace Legion {
         if (remote_finder != remote_contexts.end())
           return remote_finder->second;
         // If we don't have it, see if we should send the response or not
-        std::map<UniqueID,RtUserEvent>::const_iterator pending_finder = 
-          pending_remote_contexts.find(context_uid);
-        if (pending_finder == pending_remote_contexts.end())
+        std::map<UniqueID,
+                 std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
+          pending_finder = pending_remote_contexts.find(context_uid);
+        if (pending_finder != pending_remote_contexts.end())
         {
+          if (wait_for != NULL)
+          {
+            *wait_for = pending_finder->second.first;
+            return pending_finder->second.second;
+          }
+          else
+          {
+            wait_on = pending_finder->second.first;
+            result = pending_finder->second.second;
+          }
+        } else if (return_null_if_not_found)
           // If its not here and we are supposed to return null do that
-          if (return_null_if_not_found)
-            return NULL;
-          // Make an event to trigger for when we are done
-          ready_event = Runtime::create_rt_user_event();
-          pending_remote_contexts[context_uid] = ready_event; 
-        }
-        else // if we're going to have it we might as well wait
-          wait_on = pending_finder->second;
+          return NULL;
       }
+      if (result == NULL)
+      {
+        // Make a remote context here in case we need to request it, 
+        // we can't make it while holding the lock
+        RemoteContext *temp = new RemoteContext(this, context_uid);
+        // Add a reference to the newly created context
+        temp->add_reference();
+        InnerContext *local_result = NULL;
+        // Use a do while (false) loop here for easy breaks
+        do 
+        { 
+          // Retake the lock in exclusive mode and see if we lost the race
+          AutoLock ctx_lock(context_lock);
+          // See if it is local first
+          std::map<UniqueID,InnerContext*>::const_iterator
+            local_finder = local_contexts.find(context_uid);
+          if (local_finder != local_contexts.end())
+          {
+            // Need to jump to end to avoid leaking memory with temp
+            local_result = local_finder->second;
+            break;
+          }
+          // Now see if it is remote
+          std::map<UniqueID,RemoteContext*>::const_iterator
+            remote_finder = remote_contexts.find(context_uid);
+          if (remote_finder != remote_contexts.end())
+          {
+            // Need to jump to end to avoid leaking memory with temp
+            local_result = remote_finder->second;
+            break;
+          }
+          // If we don't have it, see if we should send the response or not
+          std::map<UniqueID,
+                   std::pair<RtUserEvent,RemoteContext*> >::const_iterator 
+            pending_finder = pending_remote_contexts.find(context_uid);
+          if (pending_finder == pending_remote_contexts.end())
+          {
+#ifdef DEBUG_LEGION
+            assert(!return_null_if_not_found);
+#endif
+            // Make an event to trigger for when we are done
+            ready_event = Runtime::create_rt_user_event();
+            pending_remote_contexts[context_uid] = 
+              std::pair<RtUserEvent,RemoteContext*>(ready_event, temp); 
+            result = temp;
+            // Add a result that will be removed when the response
+            // message comes back from the owner, this also prevents
+            // temp from being deleted at the end of this block
+            result->add_reference();
+          }
+          else // if we're going to have it we might as well wait
+          {
+            if (wait_for != NULL)
+            {
+              *wait_for = pending_finder->second.first;
+              local_result = pending_finder->second.second;
+              // Need to continue to end to avoid leaking memory with temp
+            }
+            else
+            {
+              wait_on = pending_finder->second.first;
+              result = pending_finder->second.second;
+            }
+          }
+        } while (false); // only go through this block once
+        if (temp->remove_reference())
+          delete temp;
+        if (local_result != NULL)
+          return local_result;
+      }
+#ifdef DEBUG_LEGION
+      assert(result != NULL);
+#endif
       // If there is no wait event, we have to send the message
       if (!wait_on.exists())
       {
@@ -18221,12 +18301,10 @@ namespace Legion {
 #endif
         // We have to send the message
         // Figure out the target
-        AddressSpaceID target = get_runtime_owner(context_uid);
+        const AddressSpaceID target = get_runtime_owner(context_uid);
 #ifdef DEBUG_LEGION
         assert(target != address_space);
 #endif
-        // Make the result
-        RemoteContext *result = new RemoteContext(this, context_uid);
         // Send the message
         Serializer rez;
         {
@@ -18234,27 +18312,29 @@ namespace Legion {
           rez.serialize(context_uid);
           rez.serialize(result);
         }
-        send_remote_context_request(target, rez);
-        // Add a reference to the newly created context
-        result->add_reference();
-        // Wait for it to be ready
-        ready_event.wait();
-        // We already know the answer cause we sent the message
+        send_remote_context_request(target, rez); 
+        if (wait_for != NULL)
+        {
+          *wait_for = ready_event;
+          return result;
+        }
+        else
+        {
+          // Wait for it to be ready
+          ready_event.wait();
+          // We already know the answer cause we sent the message
+          return result;
+        }
+      }
+      else
+      {
+        // Can't wait in some cases
+        if (return_null_if_not_found && !wait_on.has_triggered())
+          return NULL;
+        // We wait for the results to be ready
+        wait_on.wait();
         return result;
       }
-      // Can't wait in some cases
-      if (return_null_if_not_found && !wait_on.has_triggered())
-        return NULL;
-      // We wait for the results to be ready
-      wait_on.wait();
-      // When we wake up the context should be here
-      AutoLock ctx_lock(context_lock,1,false/*exclusive*/);
-      std::map<UniqueID,RemoteContext*>::const_iterator finder = 
-        remote_contexts.find(context_uid);
-#ifdef DEBUG_LEGION
-      assert(finder != remote_contexts.end());
-#endif
-      return finder->second;
     }
 
     //--------------------------------------------------------------------------
