@@ -20905,7 +20905,7 @@ namespace Legion {
           }
         case LG_REMOTE_PHYSICAL_REQUEST_TASK_ID:
           {
-            RemoteContext::defer_physical_request(args);
+            RemoteContext::defer_physical_request(args, runtime);
             break;
           }
         case LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID:

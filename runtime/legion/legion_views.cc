@@ -4114,7 +4114,12 @@ namespace Legion {
       derez.deserialize(false_guard);
       UniqueID owner_uid;
       derez.deserialize(owner_uid);
-      InnerContext *owner_context = runtime->find_context(owner_uid);
+      std::set<RtEvent> ready_events;
+      RtEvent ctx_ready;
+      InnerContext *owner_context = 
+        runtime->find_context(owner_uid, false, &ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Make the phi view but don't register it yet
       void *location;
       PhiView *view = NULL;
@@ -4126,7 +4131,6 @@ namespace Legion {
         view = new PhiView(runtime->forest, did, owner, true_guard, 
                            false_guard, owner_context, false/*register now*/);
       // Unpack all the internal data structures
-      std::set<RtEvent> ready_events;
       view->unpack_phi_view(derez, ready_events);
       if (!ready_events.empty())
       {
