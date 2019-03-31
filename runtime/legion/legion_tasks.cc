@@ -6836,7 +6836,10 @@ namespace Legion {
       unpack_single_task(derez, ready_events);
       derez.deserialize(remote_owner_uid);
       // Figure out what our parent context is
-      parent_ctx = runtime->find_context(remote_owner_uid);
+      RtEvent ctx_ready;
+      parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       return false;
@@ -6859,7 +6862,10 @@ namespace Legion {
       unpack_single_task(derez, ready_events);
       derez.deserialize(remote_owner_uid);
       // Figure out our parent context
-      parent_ctx = runtime->find_context(remote_owner_uid);
+      RtEvent ctx_ready;
+      parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Set our parent task
       parent_task = parent_ctx->get_task();
       if (!ready_events.empty())
