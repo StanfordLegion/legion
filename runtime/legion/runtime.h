@@ -3076,7 +3076,8 @@ namespace Legion {
                                    std::set<RtEvent> &preconditions);
       void unregister_remote_context(UniqueID context_uid);
       InnerContext* find_context(UniqueID context_uid, 
-                                 bool return_null_if_not_found = false);
+                                 bool return_null_if_not_found = false,
+                                 RtEvent *wait_for = NULL);
       inline AddressSpaceID get_runtime_owner(UniqueID uid) const
         { return (uid % total_address_spaces); }
     public:
@@ -3310,7 +3311,8 @@ namespace Legion {
       std::map<UniqueID,InnerContext*> local_contexts;
       LegionMap<UniqueID,RemoteContext*,
                 RUNTIME_REMOTE_ALLOC>::tracked remote_contexts;
-      std::map<UniqueID,RtUserEvent> pending_remote_contexts;
+      std::map<UniqueID,
+        std::pair<RtUserEvent,RemoteContext*> > pending_remote_contexts;
       unsigned total_contexts;
       std::deque<RegionTreeContext> available_contexts;
     protected:

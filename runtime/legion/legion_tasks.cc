@@ -5717,7 +5717,10 @@ namespace Legion {
         derez.deserialize(predicate_false_result, predicate_false_size);
       }
       // Figure out what our parent context is
-      parent_ctx = runtime->find_context(remote_owner_uid);
+      RtEvent ctx_ready;
+      parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+      if (ctx_ready.exists())
+        ready_events.insert(ctx_ready);
       // Set our parent task for the user
       parent_task = parent_ctx->get_task();
       // Have to do this before resolving speculation in case
@@ -8735,7 +8738,12 @@ namespace Legion {
       // Check to see if we ended up back on the original node
       // We have to do this before unpacking the points
       if (is_remote())
-        parent_ctx = runtime->find_context(remote_owner_uid);
+      {
+        RtEvent ctx_ready;
+        parent_ctx = runtime->find_context(remote_owner_uid, false, &ctx_ready);
+        if (ctx_ready.exists())
+          ready_events.insert(ctx_ready);
+      }
       else
         parent_ctx = index_owner->parent_ctx;
       // Unpack the predicate false infos

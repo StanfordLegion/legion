@@ -3146,7 +3146,8 @@ namespace Legion {
     public:
       void defer_deletion(RtEvent precondition);
       void pack_remote_base(Serializer &rez) const;
-      void unpack_remote_base(Deserializer &derez, Runtime *runtime);
+      void unpack_remote_base(Deserializer &derez, Runtime *runtime,
+                              std::set<RtEvent> &ready_events);
       void pack_profiling_requests(Serializer &rez) const;
       void unpack_profiling_requests(Deserializer &derez);
       static void handle_deferred_deletion(const void *args);
