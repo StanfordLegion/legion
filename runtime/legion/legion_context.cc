@@ -6469,7 +6469,9 @@ namespace Legion {
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
       // Get the context first
-      InnerContext *context = runtime->find_context(context_uid);
+      RtEvent ctx_ready;
+      InnerContext *context = 
+        runtime->find_context(context_uid, false, &ctx_ready);
       RtEvent ready;
       PhysicalManager *manager = 
         runtime->find_or_request_physical_manager(manager_did, ready);
@@ -6480,8 +6482,18 @@ namespace Legion {
       // the view virtual channel (paging views), so to avoid the cycle
       // we have to launch a meta-task and record when it is done
       RemoteCreateViewArgs args(context, manager, target, to_trigger, source);
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
-                                       ready);
+      if (ready.exists())
+      {
+        if (ctx_ready.exists())
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+              Runtime::merge_events(ready, ctx_ready));
+        else
+          runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+                                           ready);
+      }
+      else
+        runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY,
+                                         ctx_ready);
     }
 
     //--------------------------------------------------------------------------
@@ -6903,6 +6915,8 @@ namespace Legion {
       DerezCheck z(derez);
       UniqueID context_uid;
       derez.deserialize(context_uid);
+      // This should always be coming back to the owner node so there's no
+      // need to defer this is at should always be here
       InnerContext *local_ctx = runtime->find_context(context_uid);
       VersionManager *target_manager;
       derez.deserialize(target_manager);
@@ -11782,23 +11796,27 @@ namespace Legion {
       derez.deserialize(target);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
+      RtEvent ctx_ready;
+      InnerContext *local = 
+        runtime->find_context(context_uid, false/*can fail*/, &ctx_ready);
 
       // Always defer this in case it blocks, we can't block the virtual channel
-      RemotePhysicalRequestArgs args(context_uid, target, index, 
-                                     source, to_trigger, runtime);
-      runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
+      RemotePhysicalRequestArgs args(context_uid, target, local, 
+                                     index, source, to_trigger);
+      runtime->issue_runtime_meta_task(args, 
+          LG_LATENCY_DEFERRED_PRIORITY, ctx_ready);
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void RemoteContext::defer_physical_request(const void *args)
+    /*static*/ void RemoteContext::defer_physical_request(const void *args,
+                                                          Runtime *runtime)
     //--------------------------------------------------------------------------
     {
       const RemotePhysicalRequestArgs *rargs = 
         (const RemotePhysicalRequestArgs*)args;
-      InnerContext *local = rargs->runtime->find_context(rargs->context_uid);
       LogicalRegion handle = LogicalRegion::NO_REGION;
       InnerContext *result = 
-        local->find_parent_physical_context(rargs->index, &handle);
+        rargs->local->find_parent_physical_context(rargs->index, &handle);
       // Also need the logical region to send back so we can tell the 
       // possibly remote context the name of the top-level region
       // so it can invalidate it when it's done using it
@@ -11811,7 +11829,7 @@ namespace Legion {
         rez.serialize(handle);
         rez.serialize(rargs->to_trigger);
       }
-      rargs->runtime->send_remote_context_physical_response(rargs->source, rez);
+      runtime->send_remote_context_physical_response(rargs->source, rez);
     }
 
     //--------------------------------------------------------------------------
@@ -11851,12 +11869,14 @@ namespace Legion {
       derez.deserialize(handle);
       RtUserEvent to_trigger;
       derez.deserialize(to_trigger);
-      InnerContext *result = runtime->find_context(result_uid, true/*weak*/);
-      if (result == NULL)
+      RtEvent ctx_ready;
+      InnerContext *result = 
+        runtime->find_context(result_uid, false/*weak*/, &ctx_ready);
+      if (ctx_ready.exists())
       {
         // Launch a continuation in case we need to page in the context
         // We obviously can't block the virtual channel
-        RemotePhysicalResponseArgs args(target,index,result_uid,handle,runtime);
+        RemotePhysicalResponseArgs args(target, result, index, handle);
         RtEvent done = 
           runtime->issue_runtime_meta_task(args, LG_LATENCY_DEFERRED_PRIORITY);
         Runtime::trigger_event(to_trigger, done);
@@ -11878,13 +11898,12 @@ namespace Legion {
     {
       const RemotePhysicalResponseArgs *rargs = 
         (const RemotePhysicalResponseArgs*)args;
-      InnerContext *result = rargs->runtime->find_context(rargs->result_uid);
-      rargs->target->set_physical_context_result(rargs->index, result,
+      rargs->target->set_physical_context_result(rargs->index, rargs->result,
           rargs->handle);
       // Also have to tell the actual context someone is using it
       // in case it is also remote
       if (rargs->handle.exists())
-        result->record_using_physical_context(rargs->handle);
+        rargs->result->record_using_physical_context(rargs->handle);
     }
 
     /////////////////////////////////////////////////////////////

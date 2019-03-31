@@ -1697,34 +1697,33 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_REQUEST_TASK_ID;
       public:
         RemotePhysicalRequestArgs(UniqueID uid, RemoteContext *ctx,
-                                  unsigned idx, AddressSpaceID src,
-                                  RtUserEvent trig, Runtime *rt)
+                                  InnerContext *loc, unsigned idx, 
+                                  AddressSpaceID src, RtUserEvent trig)
           : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
-            context_uid(uid), target(ctx), index(idx), source(src), 
-            to_trigger(trig), runtime(rt) { }
+            context_uid(uid), target(ctx), local(loc), index(idx), 
+            source(src), to_trigger(trig) { }
       public:
         const UniqueID context_uid;
         RemoteContext *const target;
+        InnerContext *const local;
         const unsigned index;
         const AddressSpaceID source;
         const RtUserEvent to_trigger;
-        Runtime *const runtime;
       };
       struct RemotePhysicalResponseArgs : 
         public LgTaskArgs<RemotePhysicalResponseArgs> {
       public:
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
       public:
-        RemotePhysicalResponseArgs(RemoteContext *ctx, unsigned idx,
-                                   UniqueID uid, LogicalRegion r, Runtime *rt)
+        RemotePhysicalResponseArgs(RemoteContext *ctx, InnerContext *res, 
+                                   unsigned idx, LogicalRegion r)
           : LgTaskArgs<RemotePhysicalResponseArgs>(implicit_provenance), 
-            target(ctx), index(idx), result_uid(uid), handle(r), runtime(rt) { }
+            target(ctx), result(res), index(idx), handle(r) { }
       public:
         RemoteContext *const target;
+        InnerContext *const result;
         const unsigned index;
-        const UniqueID result_uid;
         const LogicalRegion handle;
-        Runtime *const runtime;
       };
     public:
       RemoteContext(Runtime *runtime, UniqueID context_uid);
@@ -1761,7 +1760,7 @@ namespace Legion {
     public:
       static void handle_physical_request(Deserializer &derez,
                       Runtime *runtime, AddressSpaceID source);
-      static void defer_physical_request(const void *args);
+      static void defer_physical_request(const void *args, Runtime *runtime);
       void set_physical_context_result(unsigned index, 
                                        InnerContext *result,
                                        LogicalRegion handle);
