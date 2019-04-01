@@ -85,6 +85,11 @@ namespace Realm {
       size_t last_empty = std::min(start + count - 1, last_result);
       for(size_t i = first_empty; i <= last_empty; i++)
 	results[i - first_result] = IndexSpace<N,T>::make_empty();
+      if(volume == 0) {
+	// this shouldn't happen in the recursion case, but can happen on the
+	//  initial call for an empty parent space
+	return;
+      }
       count = volume;
     }
 
@@ -172,6 +177,9 @@ namespace Realm {
 						const ProfilingRequestSet &reqs,
 						Event wait_on /*= Event::NO_EVENT*/) const
   {
+    // must always be creating at least one subspace (no "divide by zero")
+    assert(count >= 1);
+
     // record the start time of the potentially-inline operation if any
     //  profiling has been requested
     long long inline_start_time = reqs.empty() ? 0 : Clock::current_time_in_nanoseconds();
@@ -186,21 +194,28 @@ namespace Realm {
 
     // dense case is easy(er)
     if(dense()) {
-      // always split in x dimension for now
-      assert(count >= 1);
+      // split in the largest dimension available
       // avoiding over/underflow here is tricky - use unsigned math and watch
       //  out for empty subspace case
       // TODO: still not handling maximal-size input properly
+      int split_dim = 0;
       typedef typename MakeUnsigned<T>::U U;
-      U total_x = std::max(((U)bounds.hi.x -
-			    (U)bounds.lo.x + 1),
-			   U(0));
-      U rel_span_start = (total_x * index / count);
-      U rel_span_size = (total_x * (index + 1) / count) - rel_span_start;
+      U total = std::max(U(bounds.hi[0]) - U(bounds.lo[0]) + 1, U(0));
+      if(N > 1)
+	for(int i = 1; i < N; i++) {
+	  U extent = std::max(U(bounds.hi[i]) - U(bounds.lo[i]) + 1, U(0));
+	  if(extent > total) {
+	    total = extent;
+	    split_dim = i;
+	  }
+	}
+      U rel_span_start = (total * index / count);
+      U rel_span_size = (total * (index + 1) / count) - rel_span_start;
       if(rel_span_size > 0) {
 	subspace = *this;
-	subspace.bounds.lo.x = bounds.lo.x + rel_span_start;
-	subspace.bounds.hi.x = bounds.lo.x + rel_span_start + (rel_span_size - 1);
+	subspace.bounds.lo[split_dim] = bounds.lo[split_dim] + rel_span_start;
+	subspace.bounds.hi[split_dim] = (bounds.lo[split_dim] +
+					 rel_span_start + (rel_span_size - 1));
       } else {
 	subspace = IndexSpace<N,T>::make_empty();
       }
@@ -230,6 +245,8 @@ namespace Realm {
   {
     // output vector should start out empty
     assert(subspaces.empty());
+    // must always be creating at least one subspace (no "divide by zero")
+    assert(count >= 1);
 
     // record the start time of the potentially-inline operation if any
     //  profiling has been requested
@@ -237,16 +254,24 @@ namespace Realm {
 
     // dense case is easy(er)
     if(dense()) {
-      // always split in x dimension for now
-      assert(count >= 1);
-      T total_x = std::max(bounds.hi.x - bounds.lo.x + 1, T(0));
       subspaces.reserve(count);
-      T px = bounds.lo.x;
+      // split in the largest dimension available
+      int split_dim = 0;
+      T total = std::max(bounds.hi[0] - bounds.lo[0] + 1, T(0));
+      if(N > 1)
+	for(int i = 1; i < N; i++) {
+	  T extent = std::max(bounds.hi[i] - bounds.lo[i] + 1, T(0));
+	  if(extent > total) {
+	    total = extent;
+	    split_dim = i;
+	  }
+	}
+      T px = bounds.lo[split_dim];
       for(size_t i = 0; i < count; i++) {
 	IndexSpace<N,T> ss(*this);
-	T nx = bounds.lo.x + (total_x * (i + 1) / count);
-	ss.bounds.lo.x = px;
-	ss.bounds.hi.x = nx - 1;
+	T nx = bounds.lo[split_dim] + (total * (i + 1) / count);
+	ss.bounds.lo[split_dim] = px;
+	ss.bounds.hi[split_dim] = nx - 1;
 	subspaces.push_back(ss);
 	px = nx;
       }
