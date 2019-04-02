@@ -301,7 +301,7 @@ fspace side(rz : region(zone),
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
 }
-else
+else -- if not parallel
 -- Sequential version
 fspace side {
   mapsz :  ptr,          -- maps: side -> zone
@@ -341,7 +341,7 @@ fspace side {
   cqe1 :   vec2,         -- ??????????
   cqe2 :   vec2,         -- ??????????
 }
-end
+end -- if parallel
 
 
 fspace span {
@@ -1045,7 +1045,6 @@ read_input:compile()
 -- ## Distributed Mesh Generator
 -- #################
 
-if parallel then
 local terra ptr_t(x : int64)
   return c.legion_ptr_t { value = x }
 end
@@ -1376,6 +1375,8 @@ terra read_partitions(conf : config) : mesh_colorings
   return result
 end
 read_partitions:compile()
+
+if parallel then
 
 local terra get_zone_position(conf : config, pcx : int64, pcy : int64, z : int64)
   var first_zx, last_zx, stride_zx = block_zx(conf, pcx)
@@ -1774,7 +1775,6 @@ do
                 regentlib.assert(not isnull(s), "bad pointer")
                 ss[i] = s
               end
-
               for i = 0, znump do
                 var prev_i = (i + znump - 1) % znump
                 var next_i = (i + 1) % znump
@@ -1803,6 +1803,209 @@ do
     regentlib.assert(z_ == last_z, "zone underflow")
   end
 end
+
+else -- if not parallel
+
+task initialize_zones(conf : config,
+                      piece : int64,
+                      rz : region(zone))
+where
+  reads writes(rz.znump)
+do
+  regentlib.assert(
+    conf.meshtype == MESH_RECT,
+    "distributed initialization only works on rectangular meshes")
+  var znump = 4
+  var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
+
+  fill(rz.znump, znump)
+end
+
+task initialize_sides(conf : config,
+                      piece : int64,
+                      rs : region(side))
+where
+  reads writes(rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
+do
+  regentlib.assert(
+    conf.meshtype == MESH_RECT,
+    "distributed initialization only works on rectangular meshes")
+  var znump = 4
+  var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
+
+  var {first_zx = _0, last_zx = _1, stride_zx = _2} = block_zx(conf, pcx)
+  var {first_zy = _0, last_zy = _1, stride_zy = _2} = block_zy(conf, pcy)
+  var {first_z = _0, last_z = _1} = block_z(conf, pcx, pcy)
+  var {first_p = _0, last_p = _1} = block_p(conf, pcx, pcy)
+
+  var zstripsize = conf.stripsize
+  if zstripsize <= 0 then
+    zstripsize = stride_zx
+  end
+
+  var z_ = first_z
+  var passes = 1 + [int64](conf.interior)
+  for pass = 0, passes do
+    for x0 = 0, stride_zx, conf.stripsize do
+      for y = 0, stride_zy do
+        for x = x0, min(x0 + conf.stripsize, stride_zx) do
+          if not conf.interior or
+            (pass == 0) ~=
+               ((y == 0 and pcy > 0) or (x == 0 and pcx > 0) or
+                (y == stride_zy - 1 and pcy < conf.numpcy - 1) or
+                (x == stride_zx - 1 and pcx < conf.numpcx - 1))
+          then
+            var z = ptr(z_)
+
+            var top_left = ghost_top_left_p(conf, pcx, pcy)
+            var top_right = ghost_top_right_p(conf, pcx, pcy)
+            var bottom_left = ghost_bottom_left_p(conf, pcx, pcy)
+            var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+            var top = ghost_top_p(conf, pcx, pcy)
+            var bottom = ghost_bottom_p(conf, pcx, pcy)
+            var left = ghost_left_p(conf, pcx, pcy)
+            var right = ghost_right_p(conf, pcx, pcy)
+
+            var inner_x = x - [int64](pcx > 0)
+            var inner_y = y - [int64](pcy > 0)
+            var inner_stride_x = stride_zx - 1 + [int64](pcx == 0) + [int64](pcx == conf.numpcx - 1)
+            var pp : ptr[4]
+            do
+              var p_ : int64 = -1
+              if y == 0 and x == 0 and pcy > 0 and pcx > 0 then
+                p_ = top_left._0
+              elseif y == 0 and pcy > 0 then
+                p_ = top._0 + inner_x
+              elseif x == 0 and pcx > 0 then
+                p_ = left._0 + inner_y
+              else -- private
+                p_ = first_p + inner_y * inner_stride_x + inner_x
+              end
+              pp[0] = ptr(p_)
+            end
+            do
+              var p_ : int64 = -1
+              if y == 0 and x == stride_zx - 1 and pcy > 0 and pcx < conf.numpcx - 1 then
+                p_ = top_right._0
+              elseif y == 0 and pcy > 0 then
+                p_ = top._0 + (inner_x + 1)
+              elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
+                p_ = right._0 + inner_y
+              else -- private
+                p_ = first_p + inner_y * inner_stride_x + (inner_x + 1)
+              end
+              pp[1] = ptr(p_)
+            end
+            do z
+              var p_ : int64 = -1
+              if y == stride_zy - 1 and x == stride_zx - 1 and pcy < conf.numpcy - 1 and pcx < conf.numpcx - 1 then
+                p_ = bottom_right._0
+              elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
+                p_ = bottom._0 + (inner_x + 1)
+              elseif x == stride_zx - 1 and pcx < conf.numpcx - 1 then
+                p_ = right._0 + (inner_y + 1)
+              else -- private
+                p_ = first_p + (inner_y + 1) * inner_stride_x + (inner_x + 1)
+              end
+              pp[2] = ptr(p_)
+            end
+            do
+              var p_ : int64 = -1
+              if y == stride_zy - 1 and x == 0 and pcy < conf.numpcy - 1 and pcx > 0 then
+                p_ = bottom_left._0
+              elseif y == stride_zy - 1 and pcy < conf.numpcy - 1 then
+                p_ = bottom._0 + inner_x
+              elseif x == 0 and pcx > 0 then
+                p_ = left._0 + (inner_y + 1)
+              else -- private
+                p_ = first_p + (inner_y + 1) * inner_stride_x + inner_x
+              end
+              pp[3] = ptr(p_)
+            end
+
+            var ss : ptr[4]
+            for i = 0, znump do
+              var s_ = z_ * znump + i
+              ss[i] = ptr(s_)
+            end
+
+            for i = 0, znump do
+              var prev_i = (i + znump - 1) % znump
+              var next_i = (i + 1) % znump
+
+              var s = dynamic_cast(ptr(side, rs), ss[i])
+              regentlib.assert(not isnull(s), "bad pointer")
+
+              if conf.seq_init then regentlib.assert(s.mapsz == z, "bad value: mapsz") end
+              s.mapsz = z
+
+              if conf.seq_init then regentlib.assert(s.mapsp1 == pp[i], "bad value: mapsp1") end
+              if conf.seq_init then regentlib.assert(s.mapsp2 == pp[next_i], "bad value: mapsp2") end
+              s.mapsp1 = pp[i]
+              s.mapsp2 = pp[next_i]
+
+              if conf.seq_init then regentlib.assert(s.mapss3 == ss[prev_i], "bad value: mapss3") end
+              if conf.seq_init then regentlib.assert(s.mapss4 == ss[next_i], "bad value: mapss4") end
+              s.mapss3 = ss[prev_i]
+              s.mapss4 = ss[next_i]
+            end
+            z_ += 1
+          end
+        end
+      end
+    end
+  end
+  regentlib.assert(z_ == last_z, "zone underflow")
+end
+
+task initialize_points(conf : config,
+                       piece : int64,
+                       rp : region(point))
+where
+  reads writes(rp.{px, has_bcx, has_bcy})
+do
+  regentlib.assert(
+    conf.meshtype == MESH_RECT,
+    "distributed initialization only works on rectangular meshes")
+  var znump = 4
+  var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
+
+  var dx = conf.lenx / double(conf.nzx)
+  var dy = conf.leny / double(conf.nzy)
+  var eps = 1e-12
+
+  var {first_zx = _0, last_zx = _1, stride_zx = _2} = block_zx(conf, pcx)
+  var {first_zy = _0, last_zy = _1, stride_zy = _2} = block_zy(conf, pcy)
+  var {first_p = _0, last_p = _1} = block_p(conf, pcx, pcy)
+
+  var p_ = first_p
+  for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
+    for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
+
+      var p = dynamic_cast(ptr(point, rp), ptr(p_))
+      regentlib.assert(not isnull(p), "bad pointer")
+
+      var px = { x = dx*x, y = dy*y }
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
+
+      var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
+        (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
+      var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
+        (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
+
+      p.px = px
+      p.has_bcx = has_bcx
+      p.has_bcy = has_bcy
+
+      p_ += 1
+    end
+  end
+  regentlib.assert(p_ == last_p, "point underflow")
+end
+
 end -- if parallel
 
 --
