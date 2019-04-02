@@ -1059,13 +1059,27 @@ task verify_calc_volumes_full(value : int)
   regentlib.assert(value == 0, "sv negative in calc_volumes_full")
 end
 
-terra unwrap(x : mesh_colorings) return x end
+task output0(fmt : regentlib.string)
+  c.printf(fmt)
+end
 
-task toplevel()
-  c.printf("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+task output1(fmt : regentlib.string, arg0 : double)
+  c.printf(fmt, arg0)
+end
 
+task output5(fmt : regentlib.string,
+             arg0 : double,
+             arg1 : double,
+             arg2 : double,
+             arg3 : double,
+             arg4 : double)
+  c.printf(fmt, arg0, arg1, arg2, arg3, arg4)
+end
+
+-- XXX: This may not work on non-x86 machines, because we're returning a struct
+-- on the stack.
+task read_config_task()
   var conf : config = read_config()
-
   if not conf.seq_init then
     c.printf("Enabling sequential initialization\n")
   end
@@ -1074,6 +1088,14 @@ task toplevel()
   end
   conf.seq_init = true
   conf.par_init = false
+  return conf
+end
+
+__demand(__replicable, __inner)
+task test()
+  output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+
+  var conf : config = read_config_task()
 
   var rz = region(ispace(ptr, conf.nz), zone)
   var rp = region(ispace(ptr, conf.np), point)
@@ -1083,8 +1105,7 @@ task toplevel()
 
   if conf.seq_init then
     -- Hack: This had better run on the same node...
-    colorings = unwrap(read_input_sequential(
-      rz, rp, rs, conf))
+    colorings = read_input_sequential(rz, rp, rs, conf)
 
     -- c.legion_coloring_destroy(colorings.rz_all_c)
     c.legion_coloring_destroy(colorings.rz_spans_c)
@@ -1104,7 +1125,8 @@ task toplevel()
 
   var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
 
-  c.printf("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+  __fence(__execution, __block)
+  output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var start_time = c.legion_get_current_time_in_micros()/1.e6
   __parallelize_with rz_c --rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
@@ -1134,8 +1156,7 @@ task toplevel()
     init_radial_velocity(rp, uinitradial)
 
     __fence(__execution, __block)
-
-    c.printf("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
+    output1("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
     var alfa = conf.alfa
     var cfl = conf.cfl
@@ -1169,8 +1190,8 @@ task toplevel()
 
       if cycle > 0 and cycle % interval == 0 then
         var current_time = c.legion_get_current_time_in_micros()/1.e6
-        c.printf("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
-                 cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
+        output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
+                cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
         last_time = current_time
       end
 
@@ -1225,12 +1246,12 @@ task toplevel()
   end
   __fence(__execution, __block)
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
-  c.printf("Elapsed time = %.6e\n", stop_time - start_time)
+  output1("Elapsed time = %.6e\n", stop_time - start_time)
 
   if conf.seq_init then
     validate_output_sequential(rz, rp, rs, conf)
   else
-    c.printf("Warning: Skipping sequential validation\n")
+    output0("Warning: Skipping sequential validation\n")
   end
 end
 
