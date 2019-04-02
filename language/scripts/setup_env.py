@@ -113,7 +113,7 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
             [cmake_exe,
              '-DCMAKE_INSTALL_PREFIX=%s' % install_dir,
              '-DCMAKE_BUILD_TYPE=Release',
-             '-DLLVM_ENABLE_ASSERTIONS=OFF'
+             '-DLLVM_ENABLE_ASSERTIONS=OFF',
              '-DLLVM_ENABLE_ZLIB=OFF',
              '-DLLVM_ENABLE_TERMINFO=OFF',
              '-DLLVM_ENABLE_LIBEDIT=OFF',
