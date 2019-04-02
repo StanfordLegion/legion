@@ -1038,6 +1038,12 @@ where reads writes(rz, rp, rs) do
     conf)
 end
 
+-- XXX: This may not work on non-x86 machines, because we're returning a struct
+-- on the stack.
+task read_partitions_task(conf : config)
+  return read_partitions(conf)
+end
+
 task validate_output_sequential(rz : region(zone),
                                 rp : region(point),
                                 rs : region(side),
@@ -1080,14 +1086,8 @@ end
 -- on the stack.
 task read_config_task()
   var conf : config = read_config()
-  if not conf.seq_init then
-    c.printf("Enabling sequential initialization\n")
-  end
-  if conf.par_init then
-    c.printf("Disabling parallel initialization\n")
-  end
-  conf.seq_init = true
-  conf.par_init = false
+  regentlib.assert(conf.seq_init or conf.par_init,
+                   "enable one of sequential or parallel initialization")
   return conf
 end
 
@@ -1106,23 +1106,51 @@ task test()
   if conf.seq_init then
     -- Hack: This had better run on the same node...
     colorings = read_input_sequential(rz, rp, rs, conf)
-
-    -- c.legion_coloring_destroy(colorings.rz_all_c)
-    c.legion_coloring_destroy(colorings.rz_spans_c)
-    c.legion_coloring_destroy(colorings.rp_all_c)
-    c.legion_coloring_destroy(colorings.rp_all_private_c)
-    c.legion_coloring_destroy(colorings.rp_all_ghost_c)
-    c.legion_coloring_destroy(colorings.rp_all_shared_c)
-    c.legion_coloring_destroy(colorings.rp_spans_c)
-    c.legion_coloring_destroy(colorings.rs_all_c)
-    c.legion_coloring_destroy(colorings.rs_spans_c)
   end
 
+  if conf.par_init then
+    if conf.seq_init then
+      -- c.legion_coloring_destroy(colorings.rz_all_c)
+      c.legion_coloring_destroy(colorings.rz_spans_c)
+      c.legion_coloring_destroy(colorings.rp_all_c)
+      c.legion_coloring_destroy(colorings.rp_all_private_c)
+      c.legion_coloring_destroy(colorings.rp_all_ghost_c)
+      c.legion_coloring_destroy(colorings.rp_all_shared_c)
+      c.legion_coloring_destroy(colorings.rp_spans_c)
+      c.legion_coloring_destroy(colorings.rs_all_c)
+      c.legion_coloring_destroy(colorings.rs_spans_c)
+    end
+    colorings = read_partitions_task(conf)
+  end
+
+  -- Zones
   var rz_p = partition(disjoint, rz, colorings.rz_all_c)
   var rz_c = rz_p.colors
-  var rs_p = preimage(rs, rz_p, rs.mapsz)
-  var rp_p = partition(equal, rp, rz_c)
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_zones(conf, i, rz_p[i])
+    end
+  end
 
+  -- Sides
+  var rs_p_equal = partition(equal, rs, rz_c)
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_sides(conf, i, rs_p_equal[i])
+    end
+  end
+  var rs_p = preimage(rs, rz_p, rs.mapsz)
+
+  -- Points
+  var rp_p = partition(equal, rp, rz_c)
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_points(conf, i, rp_p[i])
+    end
+  end
   var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
 
   __fence(__execution, __block)
