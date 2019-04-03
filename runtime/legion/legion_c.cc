@@ -5788,6 +5788,7 @@ legion_runtime_register_task_variant_fnptr(
 legion_task_id_t
 legion_runtime_preregister_task_variant_fnptr(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
   const char *variant_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
@@ -5819,7 +5820,7 @@ legion_runtime_preregister_task_variant_fnptr(
   code_desc.add_implementation(new Realm::FunctionPointerImplementation((void(*)())wrapped_task_pointer));
 
   /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
+    registrar, code_desc, userdata, userlen, task_name, variant_id);
 
   return id;
 }
@@ -5872,6 +5873,7 @@ legion_runtime_register_task_variant_llvmir(
 legion_task_id_t
 legion_runtime_preregister_task_variant_llvmir(
   legion_task_id_t id /* = AUTO_GENERATE_ID */,
+  legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
   const char *task_name /* = NULL*/,
   legion_execution_constraint_set_t execution_constraints_,
   legion_task_layout_constraint_set_t layout_constraints_,
@@ -5903,7 +5905,7 @@ legion_runtime_preregister_task_variant_llvmir(
   code_desc.add_implementation(new Realm::LLVMIRImplementation(llvmir, strlen(llvmir), entry_symbol));
 
   /*VariantID vid =*/ Runtime::preregister_task_variant(
-    registrar, code_desc, userdata, userlen, task_name);
+    registrar, code_desc, userdata, userlen, task_name, variant_id);
   return id;
 }
 #endif
