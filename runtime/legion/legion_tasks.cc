@@ -4186,11 +4186,16 @@ namespace Legion {
       // Take all the locks in order in the proper way
       if (!atomic_locks.empty())
       {
+        const ApEvent term_event = get_task_completion();
         for (std::map<Reservation,bool>::const_iterator it = 
               atomic_locks.begin(); it != atomic_locks.end(); it++)
         {
           start_condition = Runtime::acquire_ap_reservation(it->first, 
                                           it->second, start_condition);
+          // We can also issue the release now dependent on this
+          // task being complete, this way we do it before we launch
+          // the task and the atomic_locks might be cleaned up
+          Runtime::release_reservation(it->first, term_event);
         }
       }
       // STEP 3: Finally we get to launch the task
@@ -4212,7 +4217,6 @@ namespace Legion {
       // invalidating this SingleTask object's fields.  This means
       // that we need to save any variables we need for after the task
       // launch here on the stack before they can be invalidated.
-      ApEvent term_event = get_task_completion();
 #ifdef DEBUG_LEGION
       assert(!target_processors.empty());
 #endif
@@ -4277,16 +4281,6 @@ namespace Legion {
       // Finish the chaining optimization if we're doing it
       if (perform_chaining_optimization)
         Runtime::trigger_event(chain_complete_event, task_launch_event);
-      // STEP 4: After we've launched the task, then we have to release any 
-      // locks that we took for while the task was running.  
-      if (!atomic_locks.empty())
-      {
-        for (std::map<Reservation,bool>::const_iterator it = 
-              atomic_locks.begin(); it != atomic_locks.end(); it++)
-        {
-          Runtime::release_reservation(it->first, term_event);
-        }
-      }
       // Finally if this is a predicated task and we have a speculative
       // guard then we need to launch a meta task to handle the case
       // where the task misspeculates
