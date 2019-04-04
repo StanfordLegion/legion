@@ -2096,8 +2096,7 @@ function solver_context:synthesize_partitions(color_space_symbol)
       create_difference_partition(all_shared_range, shared_range)
     stats:insert(diff_partition_stat)
 
-    local pvs_partition, partition_stats =
-      create_pvs_partition(private_range, all_shared_range)
+    local pvs_partition, partition_stats = create_pvs_partition(private_range, shared_range)
     stats:insertall(partition_stats)
 
     local private_subregion, shared_subregion, subregion_stats =
