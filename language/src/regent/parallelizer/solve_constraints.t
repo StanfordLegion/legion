@@ -745,6 +745,9 @@ local function create_union_partition(lhs, rhs, result_symbol)
   return create_partition_by_binary_op(std.aliased, lhs, rhs, "|", result_symbol)
 end
 
+local function create_disjoint_union_partition(lhs, rhs, result_symbol)
+  return create_partition_by_binary_op(std.disjoint, lhs, rhs, "|", result_symbol)
+end
 local function create_difference_partition(lhs, rhs, result_symbol)
   return create_partition_by_binary_op(lhs:gettype().disjointness, lhs, rhs, "-", result_symbol)
 end
@@ -933,7 +936,7 @@ local terra _create_pvs_partition(runtime : c.legion_runtime_t,
                                   context : c.legion_context_t,
                                   private : c.legion_logical_partition_t,
                                   shared : c.legion_logical_partition_t,
-                                  disjointness_check : bool)
+                                  check : bool)
   var private_ip = private.index_partition
   var shared_ip = shared.index_partition
   var parent_is =
@@ -949,14 +952,14 @@ local terra _create_pvs_partition(runtime : c.legion_runtime_t,
   var color_space = c.legion_index_space_create_domain(runtime, context, color_domain)
 
   var pvs_partition : c.legion_index_partition_t
-  if disjointness_check then
+  if check then
     pvs_partition =
       c.legion_index_partition_create_pending_partition(runtime, context, parent_is,
         color_space, c.COMPUTE_KIND, -1)
   else
     pvs_partition =
       c.legion_index_partition_create_pending_partition(runtime, context, parent_is,
-          color_space, c.DISJOINT_KIND, -1)
+          color_space, c.DISJOINT_COMPLETE_KIND, -1)
   end
 
   c.legion_index_partition_create_index_space_union_partition(
@@ -964,12 +967,12 @@ local terra _create_pvs_partition(runtime : c.legion_runtime_t,
   c.legion_index_partition_create_index_space_union_partition(
       runtime, context, pvs_partition, shared_color, shared_ip)
 
-  if disjointness_check then
+  if check then
     std.assert(c.legion_index_partition_is_disjoint(runtime, pvs_partition),
                "private-vs-shared partition turns out to be aliased")
+    std.assert(c.legion_index_partition_is_complete(runtime, pvs_partition),
+               "private-vs-shared partition turns out to be incomplete")
   end
-  std.assert(c.legion_index_partition_is_complete(runtime, pvs_partition),
-             "private-vs-shared partition turns out to be incomplete")
 
   return c.legion_logical_partition_create_by_tree(
       runtime, context, pvs_partition, private.field_space, private.tree_id)
@@ -2084,10 +2087,9 @@ function solver_context:synthesize_partitions(color_space_symbol)
     local complement_range, partition_stats = create_complement_partition(all_image_range)
     stats:insertall(partition_stats)
 
-    local private_range, partition_stat = create_union_partition(private_image_range, complement_range)
+    local private_range, partition_stat =
+      create_disjoint_union_partition(private_image_range, complement_range)
     stats:insert(partition_stat)
-    local private_range, casting_stat = dynamic_cast_to_disjoint_partition(private_range)
-    stats:insert(casting_stat)
 
     local shared_range, partition_stats = create_complement_partition(private_range)
     stats:insertall(partition_stats)
