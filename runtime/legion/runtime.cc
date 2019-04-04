@@ -13376,6 +13376,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardID Runtime::get_shard_id(Context ctx)
+    //--------------------------------------------------------------------------
+    {
+      if (ctx == DUMMY_CONTEXT)
+        REPORT_DUMMY_CONTEXT("Illegal dummy context get shard ID!");
+      return ctx->get_shard_id();
+    }
+
+    //--------------------------------------------------------------------------
     bool Runtime::is_MPI_interop_configured(void)
     //--------------------------------------------------------------------------
     {

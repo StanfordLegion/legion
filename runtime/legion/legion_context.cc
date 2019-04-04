@@ -140,6 +140,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    ShardID TaskContext::get_shard_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return 0;
+    }
+
+    //--------------------------------------------------------------------------
     IndexSpace TaskContext::create_index_space(RegionTreeForest *forest,
                                          const void *realm_is, TypeTag type_tag)
     //--------------------------------------------------------------------------
@@ -7416,6 +7423,13 @@ namespace Legion {
       // Deactivate all the messages except shard 0
       if (owner_shard->shard_id != 0)
         message.deactivate();
+    }
+
+    //--------------------------------------------------------------------------
+    ShardID ReplicateContext::get_shard_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return owner_shard->shard_id;
     }
 
     //--------------------------------------------------------------------------

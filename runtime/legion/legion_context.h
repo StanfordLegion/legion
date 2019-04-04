@@ -85,6 +85,7 @@ namespace Legion {
       virtual bool is_inner_context(void) const;
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
+      virtual ShardID get_shard_id(void) const;
     public:
       // Interface to operations performed by a context
       virtual IndexSpace create_index_space(RegionTreeForest *forest,
@@ -1339,6 +1340,7 @@ namespace Legion {
     public:
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
+      virtual ShardID get_shard_id(void) const;
     public:
       virtual InnerContext* find_parent_physical_context(unsigned index,
                                           LogicalRegion *handle = NULL);

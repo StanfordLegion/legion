@@ -6844,3 +6844,15 @@ legion_mapper_runtime_acquire_instances(
     instances.push_back(*CObjectWrapper::unwrap(instances_[idx]));
   return runtime->acquire_instances(ctx, instances);
 }
+
+legion_shard_id_t
+legion_context_get_shard_id(legion_runtime_t runtime_,
+                            legion_context_t ctx_,
+                            bool I_know_what_I_am_doing)
+{
+  Runtime *runtime = CObjectWrapper::unwrap(runtime_);
+  Context ctx = CObjectWrapper::unwrap(ctx_)->context();
+
+  return runtime->get_shard_id(ctx, I_know_what_I_am_doing);
+}
+

@@ -4908,6 +4908,13 @@ extern "C" {
       legion_physical_instance_t *instances,
       size_t instances_size);
 
+  // A hidden method here that hopefully nobody sees or ever needs
+  // to use but its here anyway just in case
+  legion_shard_id_t
+  legion_context_get_shard_id(legion_runtime_t /*runtime*/,
+                              legion_context_t /*context*/,
+                              bool /*I know what I am doing*/);
+
 #ifdef __cplusplus
 }
 #endif

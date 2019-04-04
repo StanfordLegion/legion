@@ -2237,6 +2237,7 @@ namespace Legion {
     public:
       void print_once(Context ctx, FILE *f, const char *message);
       void log_once(Context ctx, Realm::LoggerMessage &message);
+      ShardID get_shard_id(Context ctx);
     public:
       bool is_MPI_interop_configured(void);
       const std::map<int,AddressSpace>& find_forward_MPI_mapping(void);

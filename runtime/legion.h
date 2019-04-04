@@ -7459,6 +7459,12 @@ namespace Legion {
                                  CodeDescriptor *realm,
                                  bool has_return, const char *task_name,
                                  VariantID vid, bool check_task_id = true);
+    public:
+      // This method is hidden down here and not publicly documented because
+      // users shouldn't really need it for anything, however there are some
+      // reasonable cases where it might be utilitized for things like doing
+      // file I/O or printf that people might want it for so we've got it
+      ShardID get_shard_id(Context ctx, bool I_know_what_I_am_doing = false);
     private:
       static ReductionOpTable& get_reduction_table(void);
       static SerdezOpTable& get_serdez_table(void);
