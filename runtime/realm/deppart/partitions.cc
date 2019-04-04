@@ -227,9 +227,7 @@ namespace Realm {
 
     // TODO: sparse case where we have to wait
     SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
-    // XXX: Busy waiting until a proper fix for sparse case arrives
-    while (!impl->is_valid())
-      usleep(10);
+    impl->make_valid().wait();
     assert(impl->is_valid());
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
     // initially every subspace will be a copy of this one, and then
@@ -286,9 +284,7 @@ namespace Realm {
 
     // TODO: sparse case where we have to wait
     SparsityMapPublicImpl<N,T> *impl = sparsity.impl();
-    // XXX: Busy waiting until a proper fix for sparse case arrives
-    while (!impl->is_valid())
-      usleep(10);
+    impl->make_valid().wait();
     assert(impl->is_valid());
     const std::vector<SparsityMapEntry<N,T> >& entries = impl->get_entries();
     // initially every subspace will be a copy of this one, and then
