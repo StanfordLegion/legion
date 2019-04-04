@@ -4210,6 +4210,7 @@ extern "C" {
   legion_task_id_t
   legion_runtime_preregister_task_variant_fnptr(
     legion_task_id_t id /* = AUTO_GENERATE_ID */,
+    legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
     const char *task_name /* = NULL*/,
     const char *variant_name /* = NULL*/,
     legion_execution_constraint_set_t execution_constraints,
@@ -4242,6 +4243,7 @@ extern "C" {
   legion_task_id_t
   legion_runtime_preregister_task_variant_llvmir(
     legion_task_id_t id /* = AUTO_GENERATE_ID */,
+    legion_variant_id_t variant_id /* = AUTO_GENERATE_ID */,
     const char *task_name /* = NULL*/,
     legion_execution_constraint_set_t execution_constraints,
     legion_task_layout_constraint_set_t layout_constraints,

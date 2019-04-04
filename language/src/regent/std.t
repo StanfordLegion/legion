@@ -3926,6 +3926,8 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
+            -- Hack: cast to uint32 so it uses zero extension---VariantID is unsigned long but AUTO_GENERATE_ID is unsigned int.
+            uint32([variant:get_variant_id() or -1 --[[ AUTO_GENERATE_ID ]] ]),
             [task:get_name():concat(".")],
             [variant:get_name()],
             [execution_constraints], [layout_constraints], options,
