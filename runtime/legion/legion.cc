@@ -6713,7 +6713,8 @@ namespace Legion {
 	      const CodeDescriptor &codedesc,
 	      const void *user_data /*= NULL*/,
 	      size_t user_len /*= 0*/,
-	      const char *task_name /*= NULL*/)
+	      const char *task_name /*= NULL*/,
+              VariantID vid /*=AUTO_GENERATE_ID*/)
     //--------------------------------------------------------------------------
     {
       // if this needs to be correct, we need two versions...
@@ -6721,7 +6722,7 @@ namespace Legion {
       CodeDescriptor *realm_desc = new CodeDescriptor(codedesc);
       return preregister_variant(registrar, user_data, user_len,
 				 realm_desc, has_return, task_name,
-                                 AUTO_GENERATE_ID);
+                                 vid);
     }
 
     //--------------------------------------------------------------------------

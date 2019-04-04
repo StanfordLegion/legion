@@ -7229,7 +7229,8 @@ namespace Legion {
 	      const CodeDescriptor &codedesc,
 	      const void *user_data = NULL,
 	      size_t user_len = 0,
-	      const char *task_name = NULL);
+	      const char *task_name = NULL,
+              VariantID vid = AUTO_GENERATE_ID);
 
       /**
        * This is the necessary preamble call to use when registering a 

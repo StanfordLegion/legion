@@ -818,6 +818,14 @@ function base.variant:__newindex(field, value)
   error("variant has no field '" .. field .. "' (in assignment)", 2)
 end
 
+function base.variant:set_variant_id(variant_id)
+  self.variant_id = variant_id
+end
+
+function base.variant:get_variant_id()
+  return self.variant_id
+end
+
 function base.variant:set_is_cuda(cuda)
   self.cuda = cuda
 end
@@ -1048,6 +1056,7 @@ do
       config_options = false,
       layout_constraints = false,
       execution_constraints = false,
+      variant_id = false,
     }, base.variant)
 
     task.variants:insert(variant)
