@@ -73,8 +73,20 @@ namespace Realm {
     //  to zero, we're complete
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
 
-    if(remaining == 0)
+    if(remaining == 0) {
+      update_gpu_end();
       mark_completed();
+   }
+  }
+
+  inline void Operation::update_gpu_start()
+  {
+    timeline_gpu.record_start_time();
+  }
+
+  inline void Operation::update_gpu_end()
+  {
+    timeline_gpu.record_end_time();
   }
 
   inline bool Operation::cancellation_requested(void) const
@@ -115,5 +127,10 @@ namespace Realm {
     op->work_item_finished(this, successful);
   }
 
+  inline void Operation::AsyncWorkItem::mark_gpu_task_start()
+  {
+    op->update_gpu_start();
+    op->mark_finished(true);
+  }
 
 }; // namespace Realm

@@ -235,6 +235,9 @@ namespace Realm {
       if(measurements.wants_measurement<ProfilingMeasurements::OperationEventWaits>())
 	measurements.add_measurement(waits);
 
+      if (measurements.wants_measurement<ProfilingMeasurements::OperationTimelineGPU>())
+	measurements.add_measurement(timeline_gpu);
+
       measurements.send_responses(requests);
     }
   }

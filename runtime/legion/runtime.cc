@@ -7966,7 +7966,13 @@ namespace Legion {
 #endif
       // Add any profiling requests
       if (runtime->profiler != NULL)
-        runtime->profiler->add_task_request(requests, owner->task_id, vid,task);
+	{
+	  if (target.kind() == Processor::TOC_PROC)
+	    runtime->profiler->add_gpu_task_request(requests, owner->task_id, vid,task);
+	  else
+	    runtime->profiler->add_task_request(requests, owner->task_id, vid,task);
+	}
+
       // Increment the number of outstanding tasks
 #ifdef DEBUG_LEGION
       runtime->increment_total_outstanding_tasks(task->task_id, false/*meta*/);

@@ -154,6 +154,20 @@ namespace Legion {
          << "stop:timestamp_t:"    << sizeof(timestamp_t)
          << "}" << std::endl;
 
+      ss << "GPUTaskInfo {"
+         << "id:" << GPU_TASK_INFO_ID                       << delim
+         << "op_id:UniqueID:"        << sizeof(UniqueID)    << delim
+         << "task_id:TaskID:"        << sizeof(TaskID)      << delim
+         << "variant_id:UniqueID:"   << sizeof(UniqueID)    << delim
+         << "proc_id:ProcID:"        << sizeof(ProcID)      << delim
+         << "create:timestamp_t:"    << sizeof(timestamp_t) << delim
+         << "ready:timestamp_t:"     << sizeof(timestamp_t) << delim
+         << "start:timestamp_t:"     << sizeof(timestamp_t) << delim
+         << "stop:timestamp_t:"      << sizeof(timestamp_t) << delim
+         << "gpu_start:timestamp_t:" << sizeof(timestamp_t) << delim
+         << "gpu_stop:timestamp_t:"  << sizeof(timestamp_t)
+         << "}" << std::endl;
+
       ss << "MetaInfo {"
          << "id:" << META_INFO_ID                         << delim
          << "op_id:UniqueID:"     << sizeof(UniqueID)     << delim
@@ -424,6 +438,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                                  const LegionProfInstance::WaitInfo wait_info,
+                                  const LegionProfInstance::GPUTaskInfo& task_info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = TASK_WAIT_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(task_info.op_id),     sizeof(task_info.op_id));
+      lp_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
+      lp_fwrite(f, (char*)&(task_info.variant_id),sizeof(task_info.variant_id));
+      lp_fwrite(f, (char*)&(wait_info.wait_start),sizeof(wait_info.wait_start));
+      lp_fwrite(f, (char*)&(wait_info.wait_ready),sizeof(wait_info.wait_ready));
+      lp_fwrite(f, (char*)&(wait_info.wait_end),  sizeof(wait_info.wait_end));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                                   const LegionProfInstance::WaitInfo wait_info, 
                                   const LegionProfInstance::MetaInfo& meta_info)
     //--------------------------------------------------------------------------
@@ -452,6 +482,25 @@ namespace Legion {
       lp_fwrite(f, (char*)&(task_info.ready),     sizeof(task_info.ready));
       lp_fwrite(f, (char*)&(task_info.start),     sizeof(task_info.start));
       lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
+                               const LegionProfInstance::GPUTaskInfo& task_info)
+    //--------------------------------------------------------------------------
+    {
+      int ID = GPU_TASK_INFO_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(task_info.op_id),     sizeof(task_info.op_id));
+      lp_fwrite(f, (char*)&(task_info.task_id),   sizeof(task_info.task_id));
+      lp_fwrite(f, (char*)&(task_info.variant_id),sizeof(task_info.variant_id));
+      lp_fwrite(f, (char*)&(task_info.proc_id),   sizeof(task_info.proc_id));
+      lp_fwrite(f, (char*)&(task_info.create),    sizeof(task_info.create));
+      lp_fwrite(f, (char*)&(task_info.ready),     sizeof(task_info.ready));
+      lp_fwrite(f, (char*)&(task_info.start),     sizeof(task_info.start));
+      lp_fwrite(f, (char*)&(task_info.stop),      sizeof(task_info.stop));
+      lp_fwrite(f, (char*)&(task_info.gpu_start), sizeof(task_info.gpu_start));
+      lp_fwrite(f, (char*)&(task_info.gpu_stop),  sizeof(task_info.gpu_stop));
     }
 
     //--------------------------------------------------------------------------
@@ -777,6 +826,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
+                                  const LegionProfInstance::WaitInfo wait_info,
+                                  const LegionProfInstance::GPUTaskInfo& task_info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Task Wait Info %llu %u %lu %llu %llu %llu",
+                task_info.op_id, task_info.task_id, task_info.variant_id,
+                wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
+    }
+
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
                                   const LegionProfInstance::WaitInfo wait_info, 
                                   const LegionProfInstance::MetaInfo& meta_info)
     //--------------------------------------------------------------------------
@@ -795,6 +856,19 @@ namespace Legion {
                      task_info.op_id, task_info.task_id, task_info.variant_id, 
                      task_info.proc_id, task_info.create, task_info.ready, 
                      task_info.start, task_info.stop);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                  const LegionProfInstance::GPUTaskInfo& task_info)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof GPU Task Info %llu %u %lu " IDFMT
+		     " %llu %llu %llu %llu %llu %llu",
+                     task_info.op_id, task_info.task_id, task_info.variant_id,
+                     task_info.proc_id, task_info.create, task_info.ready,
+                     task_info.start, task_info.stop, task_info.gpu_start,
+		     task_info.gpu_stop);
     }
 
     //--------------------------------------------------------------------------
