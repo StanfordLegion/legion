@@ -143,15 +143,6 @@ do
   end
 end
 
-task make_interior_partition(points : region(ispace(int2d), point),
-                             n : int2d,
-                             radius : int64)
-  var r = region(ispace(int1d, 1), rect2d)
-  r[0] = rect2d { lo = {radius, radius}, hi = n + {radius - 1, radius - 1} }
-  var p = partition(equal, r, ispace(int1d, 1))
-  return image(points, p, r)
-end
-
 task read_config()
   return common.read_config()
 end
@@ -178,7 +169,9 @@ task main()
   var tiles = ispace(int2d, nt)
 
   var points = region(grid, point)
-  var p_interior = make_interior_partition(points, n, radius)
+  var t : transform(2, 1); t[{0, 0}] = 0; t[{1, 0}] = 0
+  var e = rect2d { lo = {radius, radius}, hi = n + {radius - 1, radius - 1} }
+  var p_interior = restrict(points, t, e, ispace(int1d, 1))
   var interior = p_interior[0]
 
   fill(points.{input, output}, init)
