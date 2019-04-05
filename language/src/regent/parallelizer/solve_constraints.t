@@ -2181,15 +2181,30 @@ function solver_context:synthesize_partitions(color_space_symbol)
         end)
 
         mapping = mappings_by_range_sets[all_ranges]
+        local function all_affine_images(ranges)
+          return data.all(unpack(secondary_ranges:map(function(range)
+            local pair = image_partitions[range]
+            if pair then
+              local info, _ = unpack(pair)
+              return info:is_affine()
+            end
+            return false
+          end)))
+        end
         if mapping == nil then
           mapping = data.newmap()
           if primary_range == nil then
             assert(not has_reduce)
-            local union_range, union_partition_stats =
-              create_union_partitions(secondary_ranges, union_partitions)
-            stats:insertall(union_partition_stats)
-            local union_range = terralib.newlist({union_range})
-            all_ranges:foreach(function(range) mapping[range] = union_range end)
+            local all_affine = all_affine_images(secondary_ranges)
+            if all_affine then
+              all_ranges:foreach(function(range) mapping[range] = range end)
+            else
+              local union_range, union_partition_stats =
+                create_union_partitions(secondary_ranges, union_partitions)
+              stats:insertall(union_partition_stats)
+              local union_range = terralib.newlist({union_range})
+              all_ranges:foreach(function(range) mapping[range] = union_range end)
+            end
           else
             local primary_partitions = nil
             if disjoint_partitions[primary_range] ~= nil then
@@ -2203,23 +2218,41 @@ function solver_context:synthesize_partitions(color_space_symbol)
               self.loop_range_partitions[primary_range] = primary_partitions
             end
 
-            local union_range, union_partition_stats =
-              create_union_partitions(secondary_ranges, union_partitions)
-            stats:insertall(union_partition_stats)
-            local ghost_range =
-              diff_partitions[data.newtuple(union_range, primary_range)]
-            if ghost_range == nil then
-              local diff_range, diff_partition_stat =
-                create_difference_partition(union_range, primary_range)
-              stats:insert(diff_partition_stat)
-              ghost_range = diff_range
-              diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
-            end
+            local all_affine = all_affine_images(secondary_ranges)
+            if all_affine then
+              secondary_ranges:map(function(range)
+                local ghost_range = diff_partitions[data.newtuple(range, primary_range)]
+                if ghost_range == nil then
+                  local diff_range, diff_partition_stat =
+                    create_difference_partition(range, primary_range)
+                  stats:insert(diff_partition_stat)
+                  diff_partitions[data.newtuple(range, primary_range)] = diff_range
+                  ghost_range = diff_range
+                end
+                local ghost_ranges = terralib.newlist()
+                ghost_ranges:insertall(primary_partitions)
+                ghost_ranges:insert(ghost_range)
+                mapping[range] = ghost_ranges
+              end)
+            else
+              local union_range, union_partition_stats =
+                create_union_partitions(secondary_ranges, union_partitions)
+              stats:insertall(union_partition_stats)
+              local ghost_range =
+                diff_partitions[data.newtuple(union_range, primary_range)]
+              if ghost_range == nil then
+                local diff_range, diff_partition_stat =
+                  create_difference_partition(union_range, primary_range)
+                stats:insert(diff_partition_stat)
+                ghost_range = diff_range
+                diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
+              end
 
-            local ghost_ranges = terralib.newlist()
-            ghost_ranges:insertall(primary_partitions)
-            ghost_ranges:insert(ghost_range)
-            secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
+              local ghost_ranges = terralib.newlist()
+              ghost_ranges:insertall(primary_partitions)
+              ghost_ranges:insert(ghost_range)
+              secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
+            end
 
             secondary_ranges:map(function(range)
               assert(ghost_to_primary[range] == nil or

@@ -456,6 +456,13 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     reindexed = reindexed or cx.reindexed_accesses:has(key)
   end)
   local region_params = region_params_set:to_list()
+  local primary_idx = 1
+  for idx, region_param in ipairs(region_params) do
+    local partition = cx.region_params_to_partitions[region_param]
+    if partition:gettype():is_disjoint() then
+      primary_idx = idx
+    end
+  end
 
   local index = nil
   if reads then
@@ -501,7 +508,7 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   end)
 
   if cx.colocation and template:is(ast.typed.stat.Assignment) then
-    return cases[1]
+    return cases[primary_idx]
   elseif #cases == 1 then
     local case = cases[1]
     if not reindexed then
