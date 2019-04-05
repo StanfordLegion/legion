@@ -83,17 +83,6 @@ fspace point {
   output : DTYPE,
 }
 
-__demand(__parallel, __cuda)
-task initialize(points : region(ispace(int2d), point), init : int64)
-where
-  reads writes(points)
-do
-  for e in points do
-    e.input = init
-    e.output = init
-  end
-end
-
 local function off(i, x, y)
   return rexpr i + { x, y } end
 end
@@ -185,13 +174,15 @@ task main()
   var p_interior = restrict(points, t, e, ispace(int1d, 1))
   var interior = p_interior[0]
 
+  fill(points.{input, output}, init)
+
   var tprune : int64 = conf.tprune
   var tsteps : int64 = conf.tsteps + 2 * tprune
 
   --__demand(__spmd)
   __parallelize_with tiles
   do
-    initialize(points, init)
+    __fence(__execution, __block)
     var ts_start = c.legion_get_current_time_in_micros()
     var ts_end = ts_start
     __demand(__spmd)
