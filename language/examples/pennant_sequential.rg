@@ -1074,7 +1074,7 @@ task output1(fmt : regentlib.string, arg0 : double)
 end
 
 task output5(fmt : regentlib.string,
-             arg0 : double,
+             arg0 : int64,
              arg1 : double,
              arg2 : double,
              arg3 : double,
@@ -1289,7 +1289,13 @@ end
 
 if os.getenv('SAVEOBJ') == '1' then
   local root_dir = arg[0]:match(".*/") or "./"
-  local link_flags = {"-L" .. root_dir, "-lpennant"}
+  local out_dir = (os.getenv('OBJNAME') and os.getenv('OBJNAME'):match('.*/')) or root_dir
+  local link_flags = {"-L" .. out_dir, "-lpennant", "-lm"}
+
+  if os.getenv('STANDALONE') == '1' then
+    os.execute('cp ' .. os.getenv('LG_RT_DIR') .. '/../bindings/regent/libregent.so ' .. out_dir)
+  end
+
   local exe = os.getenv('OBJNAME') or "pennant_sequential"
   regentlib.saveobj(toplevel, exe, "executable", cpennant.register_mappers, link_flags)
 else
