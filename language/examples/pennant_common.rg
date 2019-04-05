@@ -2037,9 +2037,12 @@ end
 
 task initialize_points(conf : config,
                        piece : int64,
-                       rp : region(point))
+                       rpp : region(point),
+                       rps : region(point))
+
 where
-  reads writes(rp.{px, has_bcx, has_bcy})
+  reads writes(rpp.{px, has_bcx, has_bcy},
+               rps.{px, has_bcx, has_bcy})
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
@@ -2047,20 +2050,56 @@ do
   var znump = 4
   var pcx, pcy = piece % conf.numpcx, piece / conf.numpcx
 
+  -- Initialize points: private.
   var dx = conf.lenx / double(conf.nzx)
   var dy = conf.leny / double(conf.nzy)
   var eps = 1e-12
+  do
+    var {first_zx = _0, last_zx = _1, stride_zx = _2} = block_zx(conf, pcx)
+    var {first_zy = _0, last_zy = _1, stride_zy = _2} = block_zy(conf, pcy)
+    var {first_p = _0, last_p = _1} = block_p(conf, pcx, pcy)
 
-  var {first_zx = _0, last_zx = _1, stride_zx = _2} = block_zx(conf, pcx)
-  var {first_zy = _0, last_zy = _1, stride_zy = _2} = block_zy(conf, pcy)
-  var {first_p = _0, last_p = _1} = block_p(conf, pcx, pcy)
+    var p_ = first_p
+    for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
+      for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
+        var p = dynamic_cast(ptr(point, rpp), ptr(p_))
+        regentlib.assert(not isnull(p), "bad pointer")
 
-  var p_ = first_p
-  for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
-    for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
+        var px = { x = dx*x, y = dy*y }
+        if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+        if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
 
-      var p = dynamic_cast(ptr(point, rp), ptr(p_))
+        var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
+          (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
+        var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
+          (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
+        if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+        if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
+
+        p.px = px
+        p.has_bcx = has_bcx
+        p.has_bcy = has_bcy
+
+        p_ += 1
+      end
+    end
+    regentlib.assert(p_ == last_p, "point underflow")
+  end
+
+  -- Initialize points: shared.
+  do
+    var {first_zx = _0, last_zx = _1, stride_zx = _2} = block_zx(conf, pcx)
+    var {first_zy = _0, last_zy = _1, stride_zy = _2} = block_zy(conf, pcy)
+
+    var right = ghost_right_p(conf, pcx, pcy)
+    var bottom = ghost_bottom_p(conf, pcx, pcy)
+    var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
+
+    for p_ = right._0, right._1 do
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
+
+      var x, y = last_zx, first_zy + (p_ - right._0 + [int64](pcy > 0))
 
       var px = { x = dx*x, y = dy*y }
       if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
@@ -2076,11 +2115,52 @@ do
       p.px = px
       p.has_bcx = has_bcx
       p.has_bcy = has_bcy
+    end
 
-      p_ += 1
+    for p_ = bottom._0, bottom._1 do
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
+      regentlib.assert(not isnull(p), "bad pointer")
+
+      var x, y = first_zx + (p_ - bottom._0 + [int64](pcx > 0)), last_zy
+
+      var px = { x = dx*x, y = dy*y }
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
+
+      var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
+        (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
+      var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
+        (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
+
+      p.px = px
+      p.has_bcx = has_bcx
+      p.has_bcy = has_bcy
+    end
+
+    for p_ = bottom_right._0, bottom_right._1 do
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
+      regentlib.assert(not isnull(p), "bad pointer")
+
+      var x, y = last_zx, last_zy
+
+      var px = { x = dx*x, y = dy*y }
+      if conf.seq_init then regentlib.assert(abs(px.x - p.px.x) < eps, "bad value: px.x") end
+      if conf.seq_init then regentlib.assert(abs(px.y - p.px.y) < eps, "bad value: px.y") end
+
+      var has_bcx = (conf.bcx_n > 0 and cmath.fabs(px.x - conf.bcx[0]) < eps) or
+        (conf.bcx_n > 1 and cmath.fabs(px.x - conf.bcx[1]) < eps)
+      var has_bcy = (conf.bcy_n > 0 and cmath.fabs(px.y - conf.bcy[0]) < eps) or
+        (conf.bcy_n > 1 and cmath.fabs(px.y - conf.bcy[1]) < eps)
+      if conf.seq_init then regentlib.assert(has_bcx == p.has_bcx, "bad value: has_bcx") end
+      if conf.seq_init then regentlib.assert(has_bcy == p.has_bcy, "bad value: has_bcy") end
+
+      p.px = px
+      p.has_bcx = has_bcx
+      p.has_bcy = has_bcy
     end
   end
-  regentlib.assert(p_ == last_p, "point underflow")
 end
 
 end -- if parallel

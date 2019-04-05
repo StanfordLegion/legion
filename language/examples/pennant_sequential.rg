@@ -1110,7 +1110,7 @@ task test()
 
   if conf.par_init then
     if conf.seq_init then
-      -- c.legion_coloring_destroy(colorings.rz_all_c)
+      c.legion_coloring_destroy(colorings.rz_all_c)
       c.legion_coloring_destroy(colorings.rz_spans_c)
       c.legion_coloring_destroy(colorings.rp_all_c)
       c.legion_coloring_destroy(colorings.rp_all_private_c)
@@ -1134,21 +1134,31 @@ task test()
   end
 
   -- Sides
-  var rs_p_equal = partition(equal, rs, rz_c)
   if conf.par_init then
+    var rs_p_0 = partition(disjoint, rs, colorings.rs_all_c)
     __demand(__parallel)
     for i = 0, conf.npieces do
-      initialize_sides(conf, i, rs_p_equal[i])
+      initialize_sides(conf, i, rs_p_0[i])
     end
   end
   var rs_p = preimage(rs, rz_p, rs.mapsz)
 
   -- Points
-  var rp_p = partition(equal, rp, rz_c)
   if conf.par_init then
+    var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
+    var rp_all_private = rp_all_p[0]
+    var rp_all_ghost = rp_all_p[1]
+    var rp_all_private_p = partition(
+      disjoint, rp_all_private, colorings.rp_all_private_c)
+    var rp_all_ghost_p = partition(
+      aliased, rp_all_ghost, colorings.rp_all_ghost_c)
+    var rp_all_shared_p = partition(
+      disjoint, rp_all_ghost, colorings.rp_all_shared_c)
     __demand(__parallel)
     for i = 0, conf.npieces do
-      initialize_points(conf, i, rp_p[i])
+      initialize_points(conf, i,
+                        rp_all_private_p[i],
+                        rp_all_shared_p[i])
     end
   end
   var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
