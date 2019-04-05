@@ -191,8 +191,12 @@ void StencilMapper::map_task(const MapperContext      ctx,
 
   PhysicalInstance result;
   bool created;
-  runtime->find_or_create_physical_instance(ctx, target_memory,
-                    constraints, target_regions, result, created);
+  if (!runtime->find_or_create_physical_instance(ctx, target_memory,
+        constraints, target_regions, result, created))
+  {
+    default_report_failed_instance_creation(task, *colocation.indexes.begin(),
+        task.target_proc, target_memory);
+  }
 
   for (std::set<unsigned>::const_iterator it = colocation.indexes.begin();
        it != colocation.indexes.end(); ++it)
@@ -225,8 +229,12 @@ void StencilMapper::map_task(const MapperContext      ctx,
     target_regions.push_back(task.regions[idx].region);
     PhysicalInstance result;
     bool created;
-    runtime->find_or_create_physical_instance(ctx, target_memory,
-                      constraints, target_regions, result, created);
+    if (!runtime->find_or_create_physical_instance(ctx, target_memory,
+          constraints, target_regions, result, created))
+    {
+      default_report_failed_instance_creation(task, idx, task.target_proc,
+          target_memory);
+    }
     output.chosen_instances[idx].push_back(result);
   }
 
