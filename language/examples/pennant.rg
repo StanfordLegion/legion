@@ -691,8 +691,8 @@ where
 do
   if not enable then return end
 
-  var vfixx = {x = 1.0, y = 0.0}
-  var vfixy = {x = 0.0, y = 1.0}
+  var vfixx = vec2 {x = 1.0, y = 0.0}
+  var vfixy = vec2 {x = 0.0, y = 1.0}
   for p in rp do
     if p.has_bcx then
       p.pu0 = project(p.pu0, vfixx)
