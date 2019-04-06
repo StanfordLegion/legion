@@ -82,6 +82,7 @@ local default_options = {
   ["parallelize-debug"] = false,
   ["parallelize-cache-incl-check"] = true,
   ["parallelize-time-deppart"] = false,
+  ["parallelize-tight-pvs"] = false,
 
   -- Miscellaneous, internal or special-purpose flags:
   ["aligned-instances"] = false,
