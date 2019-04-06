@@ -1542,8 +1542,7 @@ task initialize_topology(conf : config,
 where reads writes(rz.znump,
                    rpp.{px, has_bcx, has_bcy},
                    rps.{px, has_bcx, has_bcy},
-                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4}),
-  reads(rpg.{px0}) -- Hack: Work around runtime bug with no-acccess regions.
+                   rs.{mapsz, mapsp1, mapsp2, mapss3, mapss4})
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
