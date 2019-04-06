@@ -54,6 +54,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_mesh_zones(rz : region(zone))
 where
   writes(rz.{zx, zarea, zvol})
@@ -68,6 +69,7 @@ end
 -- Call calc_centers_full.
 -- Call calc_volumes_full.
 
+__demand(__cuda)
 task init_side_fracs(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)))
 where
@@ -81,6 +83,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_hydro(rz : region(zone), rinit : double, einit : double,
                 rinitsub : double, einitsub : double,
                 subregion_x0 : double, subregion_x1 : double,
@@ -113,6 +116,7 @@ do
   end
 end
 
+__demand(__cuda)
 task init_radial_velocity(rp : region(point), vel : double)
 where
   reads(rp.px),
@@ -133,6 +137,7 @@ end
 -- #################
 
 -- Save off point variable values from previous cycle.
+__demand(__cuda)
 task init_step_points(rp : region(point),
                       enable : bool)
 where
@@ -158,6 +163,7 @@ end
 --
 -- 1. Advance mesh to center of time step.
 --
+__demand(__cuda)
 task adv_pos_half(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -188,6 +194,7 @@ do
 end
 
 -- Save off zone variable value from previous cycle.
+__demand(__cuda)
 task init_step_zones(rz : region(zone), enable : bool)
 where
   reads(rz.zvol),
@@ -207,6 +214,7 @@ end
 --
 
 -- Compute centers of zones and edges.
+__demand(__cuda)
 task calc_centers(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   enable : bool)
@@ -240,6 +248,7 @@ end
 
 -- Compute volumes of zones and sides.
 -- Compute edge lengths.
+__demand(__cuda)
 task calc_volumes(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   enable : bool)
@@ -280,6 +289,7 @@ do
 end
 
 -- Compute zone characteristic lengths.
+__demand(__cuda)
 task calc_char_len(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    enable : bool)
@@ -317,6 +327,7 @@ end
 --
 
 -- Compute zone densities.
+__demand(__cuda)
 task calc_rho_half(rz : region(zone), enable : bool)
 where
   reads(rz.{zvolp, zm}),
@@ -331,6 +342,7 @@ do
 end
 
 -- Reduce masses into points.
+__demand(__cuda)
 task sum_point_mass(rz : region(zone), rpp : region(point), rpg : region(point),
                     rs : region(side(rz, rpp, rpg, rs)),
                     enable : bool)
@@ -355,6 +367,7 @@ end
 -- 3. Compute material state (half-advanced).
 --
 
+__demand(__cuda)
 task calc_state_at_half(rz : region(zone),
                         gamma : double, ssmin : double, dt : double,
                         enable : bool)
@@ -393,6 +406,7 @@ end
 --
 
 -- Compute PolyGas and TTS forces.
+__demand(__cuda)
 task calc_force_pgas_tts(rz : region(zone), rpp : region(point),
                          rpg : region(point),
                          rs : region(side(rz, rpp, rpg, rs)),
@@ -425,6 +439,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_zone_center_velocity(rz : region(zone), rpp : region(point), rpg : region(point),
                               rs : region(side(rz, rpp, rpg, rs)),
                               enable : bool)
@@ -449,6 +464,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_corner_divergence(rz : region(zone), rpp : region(point), rpg : region(point),
                            rs : region(side(rz, rpp, rpg, rs)),
                            enable : bool)
@@ -542,6 +558,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_qcn_force(rz : region(zone), rpp : region(point), rpg : region(point),
                    rs : region(side(rz, rpp, rpg, rs)),
                    gamma : double, q1 : double, q2 : double,
@@ -579,6 +596,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_force(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                enable : bool)
@@ -615,6 +633,7 @@ do
   end
 end
 
+__demand(__cuda)
 task qcs_vel_diff(rz : region(zone), rpp : region(point), rpg : region(point),
                   rs : region(side(rz, rpp, rpg, rs)),
                   q1 : double, q2 : double,
@@ -652,6 +671,7 @@ do
 end
 
 -- Reduce forces into points.
+__demand(__cuda)
 task sum_point_force(rz : region(zone), rpp : region(point), rpg : region(point),
                      rs : region(side(rz, rpp, rpg, rs)),
                      enable : bool)
@@ -676,6 +696,7 @@ end
 -- 4a. Apply boundary conditions.
 --
 
+__demand(__cuda)
 task apply_boundary_conditions(rp : region(point),
                                enable : bool)
 where
@@ -708,6 +729,7 @@ end
 -- 6. Advance mesh to end of time step.
 --
 
+__demand(__cuda)
 task adv_pos_full(rp : region(point), dt : double,
                   enable : bool)
 where
@@ -741,6 +763,7 @@ end
 -- FIXME: This is a duplicate of calc_centers but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_centers_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
                        enable : bool)
@@ -773,6 +796,7 @@ end
 -- FIXME: This is a duplicate of calc_volumes but with different
 -- code. Struct slicing ought to make it possible to use the same code
 -- in both cases.
+__demand(__cuda)
 task calc_volumes_full(rz : region(zone), rpp : region(point), rpg : region(point),
                        rs : region(side(rz, rpp, rpg, rs)),
                        enable : bool)
@@ -816,6 +840,7 @@ end
 -- 7. Compute work
 --
 
+__demand(__cuda)
 task calc_work(rz : region(zone), rpp : region(point), rpg : region(point),
                rs : region(side(rz, rpp, rpg, rs)),
                dt : double,
@@ -852,6 +877,7 @@ end
 -- 8. Update state variables.
 --
 
+__demand(__cuda)
 task calc_work_rate_energy_rho_full(rz : region(zone), dt : double,
                                     enable : bool)
 where
@@ -908,6 +934,7 @@ do
 end
 ]]
 
+__demand(__cuda)
 task calc_dt_hydro(rz : region(zone), dtlast : double, dtmax : double,
                    cfl : double, cflv : double, enable : bool) : double
 where
@@ -1391,7 +1418,7 @@ __demand(__inner, __replicable)
 task toplevel()
   output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
-  var conf : config = read_config()
+  var conf : config = read_config_task()
 
   var rz_all = region(ispace(ptr, conf.nz), zone)
   var rp_all = region(ispace(ptr, conf.np), point)

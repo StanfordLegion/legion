@@ -1221,10 +1221,12 @@ task toplevel()
     __fence(__execution, __block)
     output1("Starting simulation (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
+    var prune = conf.prune
+
     var alfa = conf.alfa
     var cfl = conf.cfl
     var cflv = conf.cflv
-    var cstop = conf.cstop
+    var cstop = conf.cstop + 2*prune
     var dtfac = conf.dtfac
     var dtinit = conf.dtinit
     var dtmax = conf.dtmax
@@ -1244,6 +1246,9 @@ task toplevel()
     var cycle : int64 = 0
     var dt = dtmax
     var dthydro = dtmax
+
+    var ts_start = c.legion_get_current_time_in_micros()
+    var ts_end = ts_start
     while continue_simulation(cycle, cstop, time, tstop) do
       init_step_points(rp)
 
@@ -1256,6 +1261,11 @@ task toplevel()
         output5("cycle %4ld    sim time %.3e    dt %.3e    time %.3e (per iteration) %.3e (total)\n",
                 cycle, time, dt, (current_time - last_time)/interval, current_time - start_time)
         last_time = current_time
+      end
+      if cycle == prune then
+        ts_start = c.legion_get_current_time_in_micros()
+      elseif cycle == cstop - prune then
+        ts_end = c.legion_get_current_time_in_micros()
       end
 
       adv_pos_half(rp, dt)
@@ -1306,10 +1316,14 @@ task toplevel()
       cycle += 1
       time += dt
     end
+    if prune == 0 then
+      ts_end = c.legion_get_current_time_in_micros()
+    end
+    output1("ELAPSED TIME = %7.3f s\n", 1e-6 * (ts_end - ts_start))
   end
-  __fence(__execution, __block)
+  --__fence(__execution, __block)
   var stop_time = c.legion_get_current_time_in_micros()/1.e6
-  output1("Elapsed time = %.6e\n", stop_time - start_time)
+  output1("Elapsed time = %.6e (total)\n", stop_time - start_time)
 
   if conf.seq_init then
     validate_output_sequential(rz, rp, rs, conf)
