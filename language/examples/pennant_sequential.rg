@@ -1040,9 +1040,11 @@ end
 
 -- XXX: This may not work on non-x86 machines, because we're returning a struct
 -- on the stack.
+__demand(__inline)
 task read_partitions_task(conf : config)
   return read_partitions(conf)
 end
+read_partitions.replicable = true
 
 task validate_output_sequential(rz : region(zone),
                                 rp : region(point),
@@ -1091,8 +1093,29 @@ task read_config_task()
   return conf
 end
 
+terra create_disjoint_union(runtime : c.legion_runtime_t,
+                            context : c.legion_context_t,
+                            parent  : c.legion_logical_region_t,
+                            colors  : c.legion_index_space_t,
+                            lhs     : c.legion_logical_partition_t,
+                            rhs     : c.legion_logical_partition_t)
+  var ip = c.legion_index_partition_create_by_union(
+    runtime,
+    context,
+    parent.index_space,
+    lhs.index_partition,
+    rhs.index_partition,
+    colors,
+    c.DISJOINT_COMPLETE_KIND, -1)
+  return c.legion_logical_partition_create(runtime, context, parent, ip)
+end
+create_disjoint_union.replicable = true
+
+-- FIXME: Inline the whole test crashes the type checker
+--__demand(__replicable, __inner, __inline)
+--task test()
 __demand(__replicable, __inner)
-task test()
+task toplevel()
   output1("Running test (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var conf : config = read_config_task()
@@ -1143,17 +1166,18 @@ task test()
   end
   var rs_p = preimage(rs, rz_p, rs.mapsz)
 
+  var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
+  var rp_all_private = rp_all_p[0]
+  var rp_all_ghost = rp_all_p[1]
+  var rp_all_private_p = partition(
+    disjoint, rp_all_private, colorings.rp_all_private_c)
+  var rp_all_ghost_p = partition(
+    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
+  var rp_all_shared_p = partition(
+    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
+
   -- Points
   if conf.par_init then
-    var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
-    var rp_all_private = rp_all_p[0]
-    var rp_all_ghost = rp_all_p[1]
-    var rp_all_private_p = partition(
-      disjoint, rp_all_private, colorings.rp_all_private_c)
-    var rp_all_ghost_p = partition(
-      aliased, rp_all_ghost, colorings.rp_all_ghost_c)
-    var rp_all_shared_p = partition(
-      disjoint, rp_all_ghost, colorings.rp_all_shared_c)
     __demand(__parallel)
     for i = 0, conf.npieces do
       initialize_points(conf, i,
@@ -1161,16 +1185,17 @@ task test()
                         rp_all_shared_p[i])
     end
   end
-  var rp_p_img = image(rp, rs_p, rs.mapsp1) | image(rp, rs_p, rs.mapsp2)
+  var raw_rp_p = create_disjoint_union(__runtime(), __context(),
+                                       __raw(rp), __raw(rz_c),
+                                       __raw(rp_all_private_p),
+                                       __raw(rp_all_shared_p))
+  var rp_p = __import_partition(disjoint, rp, rz_c, raw_rp_p)
 
   __fence(__execution, __block)
   output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  __parallelize_with rz_c --rz_p, rz_c, rs_p, rp_p, image(rz, rs_p, rs.mapsz) <= rz_p,
-                          --image(rp, rs_p, rs.mapsp1) <= rp_p_img,
-                          --image(rp, rs_p, rs.mapsp2) <= rp_p_img
-  do
+  __parallelize_with rz_c, rp_p do
     var einit = conf.einit
     var einitsub = conf.einitsub
     var rinit = conf.rinit
