@@ -4365,6 +4365,21 @@ function codegen.expr_partition_equal(cx, node)
       var [lp] = c.legion_logical_partition_create(
         [cx.runtime], [cx.context], [region.value].impl, [ip])
     end
+  elseif region_type:ispace().dim ~= colors_type.dim then
+    actions = quote
+      [actions]
+      var region_domain = c.legion_index_space_get_domain(
+        [cx.runtime], [region.value].impl.index_space)
+      var color_domain = c.legion_index_space_get_domain(
+        [cx.runtime], [colors.value].impl)
+      var [ip] = c.legion_index_partition_create_equal(
+        [cx.runtime], [cx.context], [region.value].impl.index_space,
+        [colors.value].impl, 1,
+        -1 --[[ AUTO_GENERATE_ID ]])
+      var [lp] = c.legion_logical_partition_create(
+        [cx.runtime], [cx.context], [region.value].impl, [ip])
+      [tag_imported(cx, lp)]
+    end
   else
     local dim = region_type:ispace().dim
     local transform = terralib.newsymbol(
