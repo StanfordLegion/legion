@@ -68,6 +68,12 @@ WIRE_SEGMENTS = 10
 STEPS = 10000
 DELTAT = 1e-6
 
+struct Colorings {
+  privacy_map : c.legion_point_coloring_t,
+  private_node_map : c.legion_point_coloring_t,
+  shared_node_map : c.legion_point_coloring_t,
+}
+
 struct Config {
   num_loops : uint,
   num_pieces : uint,
@@ -461,6 +467,42 @@ do
   end
 end
 
+__demand(__inline)
+task create_colorings(conf : Config)
+  var coloring : Colorings
+  coloring.privacy_map = c.legion_point_coloring_create()
+  coloring.private_node_map = c.legion_point_coloring_create()
+  coloring.shared_node_map = c.legion_point_coloring_create()
+  var num_circuit_nodes : uint64 = conf.num_pieces * conf.nodes_per_piece
+  var num_shared_nodes = conf.num_pieces * conf.shared_nodes_per_piece
+
+  regentlib.assert(
+    (num_circuit_nodes - num_shared_nodes) % conf.num_pieces == 0,
+    "something went wrong in the arithmetic")
+
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(1),
+    c.legion_ptr_t { value = 0 },
+    c.legion_ptr_t { value = num_shared_nodes - 1})
+
+  c.legion_point_coloring_add_range(coloring.privacy_map, ptr(0),
+    c.legion_ptr_t { value = num_shared_nodes },
+    c.legion_ptr_t { value = num_circuit_nodes - 1})
+
+  var pps = conf.pieces_per_superpiece
+  var num_superpieces = conf.num_pieces / pps
+  var snpp = conf.shared_nodes_per_piece
+  var pnpp = conf.nodes_per_piece - snpp
+  for spiece_id = 0, num_superpieces do
+    c.legion_point_coloring_add_range(coloring.shared_node_map, ptr(spiece_id),
+      c.legion_ptr_t { value = spiece_id * snpp * pps },
+      c.legion_ptr_t { value = (spiece_id + 1) * snpp * pps - 1})
+    c.legion_point_coloring_add_range(coloring.private_node_map, ptr(spiece_id),
+      c.legion_ptr_t { value = num_shared_nodes + spiece_id * pnpp * pps},
+      c.legion_ptr_t { value = num_shared_nodes + (spiece_id + 1) * pnpp * pps - 1})
+  end
+  return coloring
+end
+
 task parse_input(conf : Config)
   return parse_input_args(conf)
 end
@@ -486,6 +528,24 @@ task print_summary(color : int, sim_time : double, conf : Config)
     c.printf("GFLOPS = %7.3f GFLOPS\n", gflops)
   end
 end
+
+terra create_disjoint_union(runtime : c.legion_runtime_t,
+                            context : c.legion_context_t,
+                            parent  : c.legion_logical_region_t,
+                            colors  : c.legion_index_space_t,
+                            lhs     : c.legion_logical_partition_t,
+                            rhs     : c.legion_logical_partition_t)
+  var ip = c.legion_index_partition_create_by_union(
+    runtime,
+    context,
+    parent.index_space,
+    lhs.index_partition,
+    rhs.index_partition,
+    colors,
+    c.DISJOINT_COMPLETE_KIND, -1)
+  return c.legion_logical_partition_create(runtime, context, parent, ip)
+end
+create_disjoint_union.replicable = true
 
 __demand(__inner, __replicable)
 task toplevel()
@@ -541,6 +601,20 @@ task toplevel()
     init_wires([int](color), conf, p_rw[color])
   end
 
+  var colorings = create_colorings(conf)
+  var rp_all_nodes = partition(disjoint, rn, colorings.privacy_map, ispace(ptr, 2))
+  var all_private = rp_all_nodes[0]
+  var all_shared = rp_all_nodes[1]
+
+  var rp_private = partition(disjoint, all_private, colorings.private_node_map, color_space)
+  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, color_space)
+
+  var raw_p_rn = create_disjoint_union(__runtime(), __context(),
+                                       __raw(rn), __raw(color_space),
+                                       __raw(rp_private),
+                                       __raw(rp_shared))
+  var p_rn = __import_partition(disjoint, rn, color_space, raw_p_rn)
+
   var simulation_success = true
   var steps = conf.steps
   var prune = conf.prune
@@ -549,7 +623,7 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
 
-  __parallelize_with color_space do
+  __parallelize_with color_space, p_rw, p_rn do
     init_nodes(rn)
 
     __demand(__spmd)
