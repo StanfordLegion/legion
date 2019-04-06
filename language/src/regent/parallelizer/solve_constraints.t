@@ -327,32 +327,52 @@ function solver_context:unify(name, new_constraints, region_mapping)
   return range_mapping
 end
 
-local function create_equal_partition(variable, region_symbol, color_space_symbol)
-  local partition_type = std.partition(std.disjoint, region_symbol, color_space_symbol)
-  variable:settype(partition_type)
-  return ast.typed.stat.Var {
-    symbol = variable,
-    type = partition_type,
-    value = ast.typed.expr.PartitionEqual {
-      region = ast.typed.expr.ID {
-        value = region_symbol,
-        expr_type = std.rawref(&region_symbol:gettype()),
+local function create_equal_partition(variable, region_symbol, color_space_symbol,
+    existing_disjoint_partitions)
+  -- TODO: Here we should also check if the existing partition is complete
+  --       once completeness of partitions is tracked
+  if existing_disjoint_partitions[region_symbol] ~= nil then
+    local partition = existing_disjoint_partitions[region_symbol]
+    variable:settype(partition:gettype())
+    return ast.typed.stat.Var {
+      symbol = variable,
+      type = variable:gettype(),
+      value = ast.typed.expr.ID {
+        value = partition,
+        expr_type = std.rawref(&partition:gettype()),
         span = ast.trivial_span(),
         annotations = ast.default_annotations(),
       },
-      colors = ast.typed.expr.ID {
-        value = color_space_symbol,
-        expr_type = std.rawref(&color_space_symbol:gettype()),
-        span = ast.trivial_span(),
-        annotations = ast.default_annotations(),
-      },
-      expr_type = partition_type,
       span = ast.trivial_span(),
       annotations = ast.default_annotations(),
-    },
-    span = ast.trivial_span(),
-    annotations = ast.default_annotations(),
-  }
+    }
+  else
+    local partition_type = std.partition(std.disjoint, region_symbol, color_space_symbol)
+    variable:settype(partition_type)
+    return ast.typed.stat.Var {
+      symbol = variable,
+      type = partition_type,
+      value = ast.typed.expr.PartitionEqual {
+        region = ast.typed.expr.ID {
+          value = region_symbol,
+          expr_type = std.rawref(&region_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        colors = ast.typed.expr.ID {
+          value = color_space_symbol,
+          expr_type = std.rawref(&color_space_symbol:gettype()),
+          span = ast.trivial_span(),
+          annotations = ast.default_annotations(),
+        },
+        expr_type = partition_type,
+        span = ast.trivial_span(),
+        annotations = ast.default_annotations(),
+      },
+      span = ast.trivial_span(),
+      annotations = ast.default_annotations(),
+    }
+  end
 end
 
 local function create_preimage_partition(variable, region_symbol, src_partition, info)
@@ -1468,7 +1488,7 @@ local function combine_mapping(m1, m2)
   return m
 end
 
-function solver_context:synthesize_partitions(color_space_symbol)
+function solver_context:synthesize_partitions(existing_disjoint_partitions, color_space_symbol)
   local stats = terralib.newlist()
 
   local ts_start, ts_end
@@ -1605,7 +1625,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
       find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
       if info == nil then
         assert(parent == nil)
-        stats:insert(create_equal_partition(range, partition.region, color_space_symbol))
+        stats:insert(create_equal_partition(range, partition.region, color_space_symbol,
+            existing_disjoint_partitions))
       else
         if info:is_image() then
           assert(parent ~= nil)
@@ -1769,7 +1790,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
           if not created:has(src_range) then
             local src_partition = self.constraints:get_partition(src_range)
             stats:insert(
-              create_equal_partition(src_range, src_partition.region, color_space_symbol))
+              create_equal_partition(src_range, src_partition.region, color_space_symbol,
+                existing_disjoint_partitions))
             created:insert(src_range)
           end
           if not created:has(dst_range) then
@@ -1882,7 +1904,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
             stats:insert(create_assignment(src_range, union_range))
           else
             stats:insert(
-              create_equal_partition(src_range, src_partition.region, color_space_symbol))
+              create_equal_partition(src_range, src_partition.region, color_space_symbol,
+                existing_disjoint_partitions))
           end
           created:insert(src_range)
           find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
@@ -1913,7 +1936,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
         if not created:has(src_range) then
           local src_partition = self.constraints:get_partition(src_range)
           stats:insert(
-            create_equal_partition(src_range, src_partition.region, color_space_symbol))
+            create_equal_partition(src_range, src_partition.region, color_space_symbol,
+              existing_disjoint_partitions))
           created:insert(src_range)
           find_or_create(disjoint_partitions, src_range, hash_set.new):insert(src_range)
         end
@@ -2030,9 +2054,24 @@ function solver_context:synthesize_partitions(color_space_symbol)
     -- TODO: Handle when no disjoint range exists
     assert(disjoint_range ~= nil)
 
+    if not std.config["parallelize-tight-pvs"] then
+      if not created:has(disjoint_range) then
+        local partition = self.constraints:get_partition(disjoint_range)
+        stats:insert(
+          create_equal_partition(disjoint_range, partition.region, color_space_symbol,
+            existing_disjoint_partitions))
+        created:insert(disjoint_range)
+      end
+    end
+
     -- Now we gather all shared parts
     local shared_ranges = image_ranges:map(function(image_range)
-      local prev_preimage_range = image_range
+      local prev_preimage_range = nil
+      if std.config["parallelize-tight-pvs"] then
+        prev_preimage_range = image_range
+      else
+        prev_preimage_range = disjoint_range
+      end
       local preimage_range = nil
       local dst_range = image_range
       local image_infos = terralib.newlist()
@@ -2080,23 +2119,46 @@ function solver_context:synthesize_partitions(color_space_symbol)
       create_union_partitions(shared_ranges, union_partitions)
     stats:insertall(union_partition_stats)
 
-    local private_image_range, diff_partition_stat =
-      create_difference_partition(all_image_range, all_shared_range)
-    stats:insert(diff_partition_stat)
+    local private_range = nil
+    local shared_range = nil
+    local ghost_range = nil
+    if std.config["parallelize-tight-pvs"] then
+      local private_image_range, diff_partition_stat =
+        create_difference_partition(all_image_range, all_shared_range)
+      local complement_range, partition_stats = create_complement_partition(all_image_range)
+      stats:insertall(partition_stats)
 
-    local complement_range, partition_stats = create_complement_partition(all_image_range)
-    stats:insertall(partition_stats)
+      local range, partition_stat =
+        create_disjoint_union_partition(private_image_range, complement_range)
+      stats:insert(partition_stat)
+      private_range = range
 
-    local private_range, partition_stat =
-      create_disjoint_union_partition(private_image_range, complement_range)
-    stats:insert(partition_stat)
+      local range, partition_stats = create_complement_partition(private_range)
+      stats:insertall(partition_stats)
+      shared_range = range
 
-    local shared_range, partition_stats = create_complement_partition(private_range)
-    stats:insertall(partition_stats)
+      local range, diff_partition_stat =
+        create_difference_partition(all_shared_range, shared_range)
+      ghost_range = range
 
-    local ghost_range, diff_partition_stat =
-      create_difference_partition(all_shared_range, shared_range)
-    stats:insert(diff_partition_stat)
+    else
+      local range, diff_partition_stat =
+        create_difference_partition(disjoint_range, all_shared_range)
+      private_range = range
+      stats:insert(diff_partition_stat)
+      diff_partitions[data.newtuple(disjoint_range, all_shared_range)] = private_range
+
+      local range, diff_partition_stat =
+        create_difference_partition(disjoint_range, private_range)
+      shared_range = range
+      stats:insert(diff_partition_stat)
+      diff_partitions[data.newtuple(disjoint_range, private_range)] = shared_range
+
+      local range, diff_partition_stat =
+        create_difference_partition(all_image_range, disjoint_range)
+      ghost_range = range
+      stats:insert(diff_partition_stat)
+    end
 
     local pvs_partition, partition_stats = create_pvs_partition(private_range, shared_range)
     stats:insertall(partition_stats)
@@ -2126,7 +2188,8 @@ function solver_context:synthesize_partitions(color_space_symbol)
     if not created:has(source) then
       local partition = self.constraints:get_partition(source)
       stats:insert(
-        create_equal_partition(source, partition.region, color_space_symbol))
+        create_equal_partition(source, partition.region, color_space_symbol,
+          existing_disjoint_partitions))
       created:insert(source)
     end
   end)
@@ -2498,12 +2561,16 @@ function solve_constraints.solve(cx, stat)
   --          partition must be provided
   --       2) We need to handle hints other than color space
   local color_space_symbol = nil
+  local existing_disjoint_partitions = data.newmap()
   for idx = 1, #stat.hints do
     local hint = stat.hints[idx]
-    if hint:is(ast.typed.expr.ID) and
-       std.is_ispace(std.as_read(hint.expr_type))
-    then
-      color_space_symbol = hint.value
+    if hint:is(ast.typed.expr.ID) then
+      local expr_type = std.as_read(hint.expr_type)
+      if std.is_ispace(expr_type) then
+        color_space_symbol = hint.value
+      elseif std.is_partition(expr_type) and expr_type:is_disjoint() then
+        existing_disjoint_partitions[expr_type.parent_region_symbol] = hint.value
+      end
     end
   end
   assert(color_space_symbol ~= nil)
@@ -2517,7 +2584,7 @@ function solve_constraints.solve(cx, stat)
   end)
 
   local partition_stats, unified_ranges, reindexed_ranges =
-    solver_cx:synthesize_partitions(color_space_symbol)
+    solver_cx:synthesize_partitions(existing_disjoint_partitions, color_space_symbol)
 
   if not unified_ranges:is_empty() then
     mappings = mappings:map(function(pair)
