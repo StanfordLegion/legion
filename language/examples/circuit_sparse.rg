@@ -492,7 +492,8 @@ task distribute_charge(rpn : region(node),
                        rw : region(wire(rpn, rsn, rgn)))
 where
   reads(rw.{in_ptr, out_ptr, current._0, current._9}),
-  reduces +(rpn.charge, rsn.charge, rgn.charge)
+  reads writes(rpn.charge),
+  reduces +(rsn.charge, rgn.charge)
 do
   var dt = DELTAT
   for w in rw do
