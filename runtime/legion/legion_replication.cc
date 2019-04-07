@@ -2150,7 +2150,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid,
+      if (!runtime->forest->check_partition_by_field_size(proj,
             handle.get_field_space(), fid, false/*range*/))
       {
         log_run.error("ERROR: Field size of field %d does not match the size "
@@ -2189,7 +2189,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      if (!runtime->forest->check_partition_by_field_size(pid,
+      if (!runtime->forest->check_partition_by_field_size(proj,
             handle.get_field_space(), fid, true/*range*/))
       {
         log_run.error("ERROR: Field size of field %d does not match the size "
