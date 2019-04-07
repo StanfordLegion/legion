@@ -982,10 +982,11 @@ local terra _create_pvs_partition(runtime : c.legion_runtime_t,
           color_space, c.DISJOINT_COMPLETE_KIND, -1)
   end
 
-  c.legion_index_partition_create_index_space_union_partition(
+  var union_is : c.legion_index_space_t[1]
+  union_is[0] = c.legion_index_partition_create_index_space_union_partition(
       runtime, context, pvs_partition, private_color, private_ip)
-  c.legion_index_partition_create_index_space_union_partition(
-      runtime, context, pvs_partition, shared_color, shared_ip)
+  c.legion_index_partition_create_index_space_difference(
+      runtime, context, pvs_partition, shared_color, parent_is, union_is, 1)
 
   if check then
     std.assert(c.legion_index_partition_is_disjoint(runtime, pvs_partition),
