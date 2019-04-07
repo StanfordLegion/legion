@@ -1156,15 +1156,14 @@ task toplevel()
     end
   end
 
+  var rs_p = partition(disjoint, rs, colorings.rs_all_c)
   -- Sides
   if conf.par_init then
-    var rs_p_0 = partition(disjoint, rs, colorings.rs_all_c)
     __demand(__parallel)
     for i = 0, conf.npieces do
-      initialize_sides(conf, i, rs_p_0[i])
+      initialize_sides(conf, i, rs_p[i])
     end
   end
-  var rs_p = preimage(rs, rz_p, rs.mapsz)
 
   var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
   var rp_all_private = rp_all_p[0]
@@ -1195,7 +1194,11 @@ task toplevel()
   output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  __parallelize_with rz_c, rp_p do
+  __parallelize_with rz_c, rp_p,
+                     image(rz, rs_p, rs.mapsz) <= rz_p,
+                     image(rs, rs_p, rs.mapss3) <= rs_p,
+                     image(rs, rs_p, rs.mapss4) <= rs_p
+  do
     var einit = conf.einit
     var einitsub = conf.einitsub
     var rinit = conf.rinit
