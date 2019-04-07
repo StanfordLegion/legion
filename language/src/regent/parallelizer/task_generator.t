@@ -953,7 +953,8 @@ function task_generator.new(node)
             local all_privileges = find_or_create(privileges_by_region_params, region_param)
             local field_privileges = find_or_create(all_privileges, field_path, hash_set.new)
             local privilege = my_privilege
-            if std.is_reduce(privilege) and partition:gettype():is_disjoint() and
+            if std.config["parallelize-use-pvs"] and std.is_reduce(privilege) and
+               partition:gettype():is_disjoint() and
                data.all(unpack(partitions:map(function(other_partition)
                  if partition == other_partition then return true end
                  local partition_type = partition:gettype()
