@@ -2058,6 +2058,26 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
         ranges_need_pvs[region_symbol] = all_region_ranges
       end
     end
+    --for region_symbol, accesses_summary in self.field_accesses:items() do
+    --  for field_path, summary in accesses_summary:items() do
+    --    local has_any = false
+    --    for privilege, range_set in summary:items() do
+    --      range_set:foreach(function(range)
+    --        has_any = has_any or
+    --          (ranges_need_pvs[region_symbol] and
+    --           ranges_need_pvs[region_symbol]:has(range))
+    --      end)
+    --    end
+    --    if has_any then
+    --      for privilege, range_set in summary:items() do
+    --        ranges_need_pvs[region_symbol]:insert_all(range_set)
+    --      end
+    --    end
+    --  end
+    --end
+    --for region_symbol, ranges in ranges_need_pvs:items() do
+    --  print(region_symbol, tostring(ranges))
+    --end
   end
 
   for region_symbol, ranges in ranges_need_pvs:items() do
@@ -2698,6 +2718,7 @@ function solve_constraints.solve(cx, stat)
 
   local partition_stats, unified_ranges, reindexed_ranges =
     solver_cx:synthesize_partitions(existing_disjoint_partitions, color_space_symbol)
+  solver_cx:print_all_constraints()
 
   if not (unified_ranges:is_empty() and user_mapping:is_empty()) then
     mappings = mappings:map(function(pair)
@@ -2714,6 +2735,18 @@ function solve_constraints.solve(cx, stat)
     all_mappings[all_tasks[idx]] = mappings[idx]
   end
 
+  local transitively_closed = data.newmap()
+  for src_range, constraints in user_constraints.constraints:items() do
+    for info, dst_range in constraints:items() do
+      if src_range == dst_range then
+        assert(info:is_image())
+        local _, field_path = unpack(info.info)
+        find_or_create(transitively_closed, src_range,
+            hash_set.new):insert(field_path)
+      end
+    end
+  end
+
   return {
     all_tasks                = all_tasks,
     all_mappings             = all_mappings,
@@ -2723,6 +2756,7 @@ function solve_constraints.solve(cx, stat)
     color_space_symbol       = color_space_symbol,
     partition_stats          = partition_stats,
     reindexed_ranges         = reindexed_ranges,
+    transitively_closed      = transitively_closed,
   }
 end
 
