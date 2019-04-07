@@ -2014,27 +2014,29 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
   --       sets of fields that are concurrently accesed are not yet tracked.
 
   local ranges_need_pvs = data.newmap()
-  for region_symbol, accesses_summary in self.field_accesses:items() do
-    local all_region_ranges = hash_set.new()
-    for field_path, summary in accesses_summary:items() do
-      local all_field_ranges = hash_set.new()
-      local has_reduce = false
-      for privilege, range_set in summary:items() do
-        all_field_ranges:insert_all(range_set)
-        has_reduce = has_reduce or std.is_reduce(privilege)
+  if std.config["parallelize-use-pvs"] then
+    for region_symbol, accesses_summary in self.field_accesses:items() do
+      local all_region_ranges = hash_set.new()
+      for field_path, summary in accesses_summary:items() do
+        local all_field_ranges = hash_set.new()
+        local has_reduce = false
+        for privilege, range_set in summary:items() do
+          all_field_ranges:insert_all(range_set)
+          has_reduce = has_reduce or std.is_reduce(privilege)
+        end
+        local all_field_ranges_list = all_field_ranges:to_list()
+        -- If the reduction is made with a single range constrained by some constraint,
+        -- we still need a private-vs-shared partitioning.
+        if has_reduce and
+           (#all_field_ranges_list > 1 or
+            image_partitions[all_field_ranges_list[1]] ~= nil)
+        then
+          all_region_ranges:insert_all(all_field_ranges)
+        end
       end
-      local all_field_ranges_list = all_field_ranges:to_list()
-      -- If the reduction is made with a single range constrained by some constraint,
-      -- we still need a private-vs-shared partitioning.
-      if has_reduce and
-         (#all_field_ranges_list > 1 or
-          image_partitions[all_field_ranges_list[1]] ~= nil)
-      then
-        all_region_ranges:insert_all(all_field_ranges)
+      if not all_region_ranges:is_empty() then
+        ranges_need_pvs[region_symbol] = all_region_ranges
       end
-    end
-    if not all_region_ranges:is_empty() then
-      ranges_need_pvs[region_symbol] = all_region_ranges
     end
   end
 
