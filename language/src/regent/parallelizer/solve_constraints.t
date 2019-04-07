@@ -2199,138 +2199,139 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
 
   -- Finally, we create union partitions for accesses with multiple ranges
   for region_symbol, accesses_summary in self.field_accesses:items() do
+    local all_ranges = hash_set.new()
+    local has_reduce = false
     for field_path, summary in accesses_summary:items() do
-      local all_ranges = hash_set.new()
-      local has_reduce = false
-
       -- TODO: We can remove any range R from all_ranges if it is subsumed by
       --       another range R' (i.e., R <=^+ R')
       for privilege, range_set in summary:items() do
         all_ranges:insert_all(range_set)
         has_reduce = has_reduce or std.is_reduce(privilege)
       end
+    end
 
-      local mapping = nil
+    local mapping = nil
 
-      if all_ranges:size() == 1 then
-        local range = all_ranges:to_list()[1]
-        mapping = data.newmap()
+    if all_ranges:size() == 1 then
+      local range = all_ranges:to_list()[1]
+      mapping = data.newmap()
 
-        assert(created:has(range))
-        if disjoint_partitions[range] ~= nil then
-          mapping[range] = disjoint_partitions[range]:to_list()
-        else
-          local singleton = hash_set.new()
-          singleton:insert(range)
-          disjoint_partitions[range] = singleton
-          mapping[range] = terralib.newlist({range})
-        end
-
-        local partition_type = range:gettype()
-        if partition_type:is_disjoint() and self.loop_ranges:has(range) then
-          self.loop_range_partitions[range] = mapping[range]
-        end
-
+      assert(created:has(range))
+      if disjoint_partitions[range] ~= nil then
+        mapping[range] = disjoint_partitions[range]:to_list()
       else
-        all_ranges:canonicalize()
+        local singleton = hash_set.new()
+        singleton:insert(range)
+        disjoint_partitions[range] = singleton
+        mapping[range] = terralib.newlist({range})
+      end
 
-        local primary_range = nil
-        local secondary_ranges = terralib.newlist()
-        all_ranges:foreach(function(range)
-          local partition_type = range:gettype()
-          if partition_type:is_disjoint() then
-            assert(primary_range == nil)
-            primary_range = range
-          else
-            secondary_ranges:insert(range)
-          end
-        end)
+      local partition_type = range:gettype()
+      if partition_type:is_disjoint() and self.loop_ranges:has(range) then
+        self.loop_range_partitions[range] = mapping[range]
+      end
 
-        mapping = mappings_by_range_sets[all_ranges]
-        local function all_affine_images(ranges)
-          return data.all(unpack(secondary_ranges:map(function(range)
-            local pair = image_partitions[range]
-            if pair then
-              local info, _ = unpack(pair)
-              return info:is_affine()
-            end
-            return false
-          end)))
+    else
+      all_ranges:canonicalize()
+
+      local primary_range = nil
+      local secondary_ranges = terralib.newlist()
+      all_ranges:foreach(function(range)
+        local partition_type = range:gettype()
+        if partition_type:is_disjoint() then
+          assert(primary_range == nil)
+          primary_range = range
+        else
+          secondary_ranges:insert(range)
         end
-        if mapping == nil then
-          mapping = data.newmap()
-          if primary_range == nil then
-            assert(not has_reduce)
-            local all_affine = all_affine_images(secondary_ranges)
-            if all_affine then
-              all_ranges:foreach(function(range) mapping[range] = range end)
-            else
-              local union_range, union_partition_stats =
-                create_union_partitions(secondary_ranges, union_partitions)
-              stats:insertall(union_partition_stats)
-              local union_range = terralib.newlist({union_range})
-              all_ranges:foreach(function(range) mapping[range] = union_range end)
-            end
+      end)
+
+      mapping = mappings_by_range_sets[all_ranges]
+      local function all_affine_images(ranges)
+        return data.all(unpack(secondary_ranges:map(function(range)
+          local pair = image_partitions[range]
+          if pair then
+            local info, _ = unpack(pair)
+            return info:is_affine()
+          end
+          return false
+        end)))
+      end
+      if mapping == nil then
+        mapping = data.newmap()
+        if primary_range == nil then
+          assert(not has_reduce)
+          local all_affine = all_affine_images(secondary_ranges)
+          if all_affine then
+            all_ranges:foreach(function(range) mapping[range] = range end)
           else
-            local primary_partitions = nil
-            if disjoint_partitions[primary_range] ~= nil then
-              primary_partitions = disjoint_partitions[primary_range]:to_list()
-            else
-              primary_partitions = terralib.newlist({primary_range})
-            end
+            local union_range, union_partition_stats =
+              create_union_partitions(secondary_ranges, union_partitions)
+            stats:insertall(union_partition_stats)
+            local union_range = terralib.newlist({union_range})
+            all_ranges:foreach(function(range) mapping[range] = union_range end)
+          end
+        else
+          local primary_partitions = nil
+          if disjoint_partitions[primary_range] ~= nil then
+            primary_partitions = disjoint_partitions[primary_range]:to_list()
+          else
+            primary_partitions = terralib.newlist({primary_range})
+          end
 
-            mapping[primary_range] = primary_partitions
-            if self.loop_ranges:has(primary_range) then
-              self.loop_range_partitions[primary_range] = primary_partitions
-            end
+          mapping[primary_range] = primary_partitions
+          if self.loop_ranges:has(primary_range) then
+            self.loop_range_partitions[primary_range] = primary_partitions
+          end
 
-            local all_affine = all_affine_images(secondary_ranges)
-            if all_affine then
-              secondary_ranges:map(function(range)
-                local ghost_range = diff_partitions[data.newtuple(range, primary_range)]
-                if ghost_range == nil then
-                  local diff_range, diff_partition_stat =
-                    create_difference_partition(range, primary_range)
-                  stats:insert(diff_partition_stat)
-                  diff_partitions[data.newtuple(range, primary_range)] = diff_range
-                  ghost_range = diff_range
-                end
-                local ghost_ranges = terralib.newlist()
-                ghost_ranges:insertall(primary_partitions)
-                ghost_ranges:insert(ghost_range)
-                mapping[range] = ghost_ranges
-              end)
-            else
-              local union_range, union_partition_stats =
-                create_union_partitions(secondary_ranges, union_partitions)
-              stats:insertall(union_partition_stats)
-              local ghost_range =
-                diff_partitions[data.newtuple(union_range, primary_range)]
+          local all_affine = all_affine_images(secondary_ranges)
+          if all_affine then
+            secondary_ranges:map(function(range)
+              local ghost_range = diff_partitions[data.newtuple(range, primary_range)]
               if ghost_range == nil then
                 local diff_range, diff_partition_stat =
-                  create_difference_partition(union_range, primary_range)
+                  create_difference_partition(range, primary_range)
                 stats:insert(diff_partition_stat)
+                diff_partitions[data.newtuple(range, primary_range)] = diff_range
                 ghost_range = diff_range
-                diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
               end
-
               local ghost_ranges = terralib.newlist()
               ghost_ranges:insertall(primary_partitions)
               ghost_ranges:insert(ghost_range)
-              secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
+              mapping[range] = ghost_ranges
+            end)
+          else
+            local union_range, union_partition_stats =
+              create_union_partitions(secondary_ranges, union_partitions)
+            stats:insertall(union_partition_stats)
+            local ghost_range =
+              diff_partitions[data.newtuple(union_range, primary_range)]
+            if ghost_range == nil then
+              local diff_range, diff_partition_stat =
+                create_difference_partition(union_range, primary_range)
+              stats:insert(diff_partition_stat)
+              ghost_range = diff_range
+              diff_partitions[data.newtuple(union_range, primary_range)] = diff_range
             end
 
-            secondary_ranges:map(function(range)
-              assert(ghost_to_primary[range] == nil or
-                     ghost_to_primary[range] == primary_range)
-              ghost_to_primary[range] = primary_range
-            end)
+            local ghost_ranges = terralib.newlist()
+            ghost_ranges:insertall(primary_partitions)
+            ghost_ranges:insert(ghost_range)
+            secondary_ranges:map(function(range) mapping[range] = ghost_ranges end)
           end
-          mappings_by_range_sets[all_ranges] = mapping
-        end
-      end
 
-      assert(mapping ~= nil)
+          secondary_ranges:map(function(range)
+            assert(ghost_to_primary[range] == nil or
+                   ghost_to_primary[range] == primary_range)
+            ghost_to_primary[range] = primary_range
+          end)
+        end
+        mappings_by_range_sets[all_ranges] = mapping
+      end
+    end
+
+    assert(mapping ~= nil)
+    for field_path, summary in accesses_summary:items() do
       local key = data.newtuple(region_symbol, field_path)
       self.mappings_by_access_paths[key] = mapping
     end
