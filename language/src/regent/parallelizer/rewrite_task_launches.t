@@ -27,6 +27,7 @@ function rewriter_context.new(mappings,
                               loop_range_partitions,
                               incl_check_caches,
                               reindexed_ranges,
+                              transitively_closed,
                               color_space_symbol,
                               constraints)
   local cx = {
@@ -35,6 +36,7 @@ function rewriter_context.new(mappings,
     loop_range_partitions    = loop_range_partitions,
     incl_check_caches        = incl_check_caches,
     reindexed_ranges         = reindexed_ranges,
+    transitively_closed      = transitively_closed,
     color_space_symbol       = color_space_symbol,
     constraints              = constraints,
   }
@@ -292,6 +294,7 @@ function rewrite_task_launches.rewrite(solution, caller_constraints, stat)
       solution.loop_range_partitions,
       solution.incl_check_caches,
       solution.reindexed_ranges,
+      solution.transitively_closed,
       solution.color_space_symbol,
       caller_constraints)
   local block = rewrite_task_launches.block(cx, stat.block)
