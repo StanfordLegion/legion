@@ -44,6 +44,7 @@ function rewriter_context.new(accesses_to_region_params,
                               loop_var_to_regions,
                               param_mapping,
                               incl_check_caches,
+                              transitively_closed,
                               demand_cuda,
                               task_color_symbol,
                               options)
@@ -54,8 +55,11 @@ function rewriter_context.new(accesses_to_region_params,
     loop_var_to_regions         = loop_var_to_regions,
     symbol_mapping              = param_mapping:copy(),
     incl_check_caches           = incl_check_caches,
+    transitively_closed         = transitively_closed,
     demand_cuda                 = demand_cuda,
     task_color_symbol           = task_color_symbol,
+    cache_keys                  = hash_set.new(),
+    cache_users                 = data.newmap(),
     loop_range                  = false,
     loop_var                    = false,
     disjoint_loop_range         = true,
@@ -78,6 +82,30 @@ end
 
 function rewriter_context:rewrite_type(type)
   return std.type_sub(type, self.symbol_mapping)
+end
+
+function rewriter_context:add_cache_key(variable)
+  self.cache_keys:insert(variable)
+end
+
+function rewriter_context:is_cache_key(variable)
+  return self.cache_keys:has(variable)
+end
+
+function rewriter_context:add_cache_user(variable, key)
+  self.cache_users[variable] = key
+end
+
+function rewriter_context:find_cache_key_for_user(variable)
+  return self.cache_users[variable]
+          -- TODO: Here we need to return the last cache key used in the
+          --       sequence of pointer chasings instead of the loop variable
+         or self.loop_var
+end
+
+function rewriter_context:is_transitively_closed(region_symbol, field_path)
+  return self.transitively_closed[region_symbol] and
+         self.transitively_closed[region_symbol]:has(field_path)
 end
 
 function rewriter_context:set_loop_context(loop_range, loop_var)
@@ -515,7 +543,7 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
       return case
     else
       if std.config["parallelize-cache-incl-check"] then
-        local loop_var = cx:get_loop_var()
+        local cache_key = cx:find_cache_key_for_user(index.value)
         local cache_region, cases, num_cases, is_disjoint = unpack(cache)
         local rhs = ast.typed.expr.Constant {
           value = 1,
@@ -542,8 +570,8 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
                 annotations = ast.default_annotations(),
               },
               index = ast.typed.expr.ID {
-                value = loop_var,
-                expr_type = std.rawref(&loop_var:gettype()),
+                value = cache_key,
+                expr_type = std.rawref(&cache_key:gettype()),
                 span = template.span,
                 annotations = ast.default_annotations(),
               },
@@ -609,7 +637,7 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   else
     local conds = nil
     if std.config["parallelize-cache-incl-check"] then
-      local loop_var = cx:get_loop_var()
+      local cache_key = cx:find_cache_key_for_user(index.value)
       assert(cache)
       local cache_region, cases, num_cases, is_disjoint = unpack(cache)
       conds = region_params:map(function(region_param)
@@ -651,8 +679,8 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
               annotations = ast.default_annotations(),
             },
             index = ast.typed.expr.ID {
-              value = loop_var,
-              expr_type = std.rawref(&loop_var:gettype()),
+              value = cache_key,
+              expr_type = std.rawref(&cache_key:gettype()),
               span = template.span,
               annotations = ast.default_annotations(),
             },
@@ -777,6 +805,20 @@ function rewrite_accesses.stat_var(cx, stat)
         metadata = false,
       }
       stats:insert(split_region_access(cx, lhs, value, ref_type, true, template))
+
+      if stats[#stats]:is(ast.typed.stat.Assignment) then
+        local stat = stats[#stats]
+        local ref_type = stat.rhs.expr_type
+        if #ref_type.bounds_symbols == 1 and
+           cx:is_transitively_closed(ref_type.bounds_symbols[1], ref_type.field_path)
+        then
+          cx:add_cache_key(symbol)
+        end
+        local index = find_index(stat.rhs)
+        if cx:is_cache_key(index.value) then
+          cx:add_cache_user(symbol, index.value)
+        end
+      end
       return stats
     end
     value = rewrite_accesses.expr(cx, value)
@@ -895,6 +937,7 @@ function task_generator.new(node)
     local loop_range_partitions = caller_cx.loop_range_partitions
     local incl_check_caches = caller_cx.incl_check_caches
     local reindexed_ranges = caller_cx.reindexed_ranges
+    local transitively_closed = caller_cx.transitively_closed
     local my_ranges_to_caller_ranges, my_regions_to_caller_regions =
       unpack(pair_of_mappings)
 
@@ -1077,6 +1120,15 @@ function task_generator.new(node)
       end
     end
 
+    local my_transitively_closed = data.newmap()
+    for partition, field_paths in transitively_closed:items() do
+      local my_region_param = partitions_to_region_params[partition]
+      if my_region_param ~= nil then
+        find_or_create(my_transitively_closed, my_region_param,
+            hash_set.new):insert_all(field_paths)
+      end
+    end
+
     local serial_task_ast = node
     local parallel_task_name = serial_task_ast.name .. data.newtuple("parallel")
 
@@ -1215,6 +1267,7 @@ function task_generator.new(node)
                              loop_var_to_regions,
                              param_mapping,
                              my_incl_check_caches,
+                             my_transitively_closed,
                              serial_task_ast.annotations.cuda:is(ast.annotation.Demand),
                              task_color_symbol,
                              options)
