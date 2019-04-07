@@ -203,8 +203,16 @@ function partitioning_constraints:find_or_create_preimage_constraint(src_range, 
 end
 
 function partitioning_constraints:remove_constraint(src_range, key)
-  local constraints = find_or_create(self.constraints, src_range)
+  local constraints = self.constraints[src_range]
+  assert(constraints ~= nil)
   constraints[key] = nil
+  if constraints:is_empty() then constraints[src_range] = nil end
+end
+
+function partitioning_constraints:add_image_constraint(src_range, region_symbol, field_path, dst_range)
+  local constraints = find_or_create(self.constraints, src_range)
+  local key = constraint_info.new(constraint_type.image, data.newtuple(region_symbol, field_path))
+  constraints[key] = dst_range
 end
 
 local function lift(tbl)
@@ -217,6 +225,7 @@ end
 
 function partitioning_constraints:join(to_join, mapping)
   local mapping = lift(mapping)
+  local unified = data.newmap()
 
   for range, partition in to_join.ranges:items() do
     local new_range = mapping(range)
@@ -239,10 +248,30 @@ function partitioning_constraints:join(to_join, mapping)
     for info, dst in constraints:items() do
       local new_info = info:clone(mapping)
       local new_dst = mapping(dst)
-      assert(my_constraints[new_info] == nil or my_constraints[new_info] == new_dst)
-      my_constraints[new_info] = new_dst
+      local curr_dst = my_constraints[new_info]
+      if curr_dst == nil then
+        my_constraints[new_info] = new_dst
+      elseif curr_dst ~= new_dst then
+        assert(dst == new_dst)
+        unified[new_dst] = curr_dst
+      end
     end
   end
+
+  if not unified:is_empty() then
+    for range, new_range in unified:items() do
+      local partition = self.ranges[range]
+      local new_partition = self.ranges[new_range]
+      partition:meet_disjointness(new_partition.disjoint)
+      partition:meet_completeness(new_partition.complete)
+    end
+
+    for from, _ in unified:items() do
+      self.ranges[from] = nil
+    end
+  end
+
+  return unified
 end
 
 function partitioning_constraints:clone(mapping)
@@ -329,19 +358,22 @@ function partitioning_constraints:get_complexity()
   return complexity
 end
 
-function partitioning_constraints:find_path_to_disjoint_child(range)
+function partitioning_constraints:find_path_to_disjoint_child(range, visited)
   local found_any = false
   local found_path = nil
 
+  visited:insert(range)
   local edges = self.constraints[range]
   if edges ~= nil then
     for info, child in edges:items() do
-      local found, path = self:find_path_to_disjoint_child(child)
-      assert(not (found_any and found))
-      if found then
-        found_any = found
-        found_path = path
-        found_path:insert({info, range})
+      if not visited:has(child) then
+        local found, path = self:find_path_to_disjoint_child(child, visited)
+        assert(not (found_any and found))
+        if found then
+          found_any = found
+          found_path = path
+          found_path:insert({info, range})
+        end
       end
     end
   end
@@ -358,7 +390,8 @@ end
 function partitioning_constraints:find_paths_to_disjoint_children(sources)
   local paths = terralib.newlist()
   sources:foreach(function(source)
-    local found, path = self:find_path_to_disjoint_child(source)
+    local visited = hash_set.new()
+    local found, path = self:find_path_to_disjoint_child(source, visited)
     if found then
       assert(path ~= nil)
       paths:insert(path)

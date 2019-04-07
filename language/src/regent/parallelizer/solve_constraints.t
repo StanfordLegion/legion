@@ -1524,6 +1524,9 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
   end
 
   local created = hash_set.new()
+  for region, partition in existing_disjoint_partitions:items() do
+    created:insert(partition)
+  end
   local disjoint_partitions = data.newmap()
   local preimage_partitions = data.newmap()
   local image_partitions = data.newmap()
@@ -1612,27 +1615,35 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
   -- in reverse topological order, as they cannot be partitioned otherwise.
   -- We create equal partitions for the children and derive partitions
   -- for their ancestors.
-  local paths = data.filter(function(path) return #path > 1 end,
-      self.constraints:find_paths_to_disjoint_children(self.sources))
+  local paths = data.filter(function(path)
+    return #path > 1 and
+           data.any(unpack(path:map(function(range)
+             return not created:has(range)
+           end)))
+  end,
+  self.constraints:find_paths_to_disjoint_children(self.sources))
 
   paths:map(function(path)
     local parent = nil
     for idx = 1, #path do
       local info, range = unpack(path[idx])
       local partition = self.constraints:get_partition(range)
-      assert(not created:has(range))
       assert(disjoint_partitions[range] == nil)
       created:insert(range)
       find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
       if info == nil then
-        assert(parent == nil)
-        stats:insert(create_equal_partition(range, partition.region, color_space_symbol,
-            existing_disjoint_partitions))
+        if not created:has(range) then
+          assert(parent == nil)
+          stats:insert(create_equal_partition(range, partition.region, color_space_symbol,
+              existing_disjoint_partitions))
+        end
       else
         if info:is_image() then
-          assert(parent ~= nil)
-          stats:insert(
-            create_preimage_partition(range, partition.region, parent, info))
+          if not created:has(range) then
+            assert(parent ~= nil)
+            stats:insert(
+              create_preimage_partition(range, partition.region, parent, info))
+          end
         elseif info:is_subset() then
           local range, partition_stat =
             create_intersection_partition_region(partition.region, parent, range)
@@ -1781,8 +1792,10 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
   -- Synthesize all preimage partitions
   local worklist = self.sources:to_list()
   local idx = 1
+  local visited = hash_set.new()
   while idx <= #worklist do
     local src_range = worklist[idx]
+    visited:insert(src_range)
     idx = idx + 1
     local constraints = self.constraints.constraints[src_range]
     if constraints ~= nil then
@@ -1805,7 +1818,9 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
             if preimage_partitions[key] == nil then preimage_partitions[key] = dst_range end
           end
         end
-        worklist:insert(dst_range)
+        if not visited:has(dst_range) then
+          worklist:insert(dst_range)
+        end
       end
     end
   end
@@ -1928,8 +1943,10 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
   -- Now we synthesize image partitions
   local worklist = self.sources:to_list()
   local idx = 1
+  local visited = hash_set.new()
   while idx <= #worklist do
     local src_range = worklist[idx]
+    visited:insert(src_range)
     idx = idx + 1
     local constraints = self.constraints.constraints[src_range]
     if constraints ~= nil then
@@ -1956,7 +1973,9 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
           created:insert(dst_range)
           image_partitions[dst_range] = {info, src_range}
         end
-        worklist:insert(dst_range)
+        if not visited:has(dst_range) then
+          worklist:insert(dst_range)
+        end
       end
     end
   end
@@ -2565,6 +2584,7 @@ function solve_constraints.solve(cx, stat)
   --       2) We need to handle hints other than color space
   local color_space_symbol = nil
   local existing_disjoint_partitions = data.newmap()
+  local user_constraints = partitioning_constraints.new()
   for idx = 1, #stat.hints do
     local hint = stat.hints[idx]
     if hint:is(ast.typed.expr.ID) then
@@ -2573,6 +2593,31 @@ function solve_constraints.solve(cx, stat)
         color_space_symbol = hint.value
       elseif std.is_partition(expr_type) and expr_type:is_disjoint() then
         existing_disjoint_partitions[expr_type.parent_region_symbol] = hint.value
+      end
+    elseif hint:is(ast.typed.expr.ParallelizerConstraint) then
+      if hint.op == "<=" and hint.lhs:is(ast.typed.expr.Image) and
+         hint.rhs:is(ast.typed.expr.ID)
+      then
+        local src_range = hint.lhs.partition.value
+        local mapping_region = hint.lhs.region.region.value
+        local field_path = hint.lhs.region.fields[1]
+        local dst_range = hint.rhs.value
+        user_constraints:add_image_constraint(src_range, mapping_region, field_path, dst_range)
+
+        local function add_partition_info(range)
+          local partition = partition_info.new(
+              range:gettype().parent_region_symbol,
+              range:gettype():is_disjoint(),
+              range:gettype():is_disjoint())
+          if user_constraints:get_partition(range) == nil then
+            user_constraints:set_partition(range, partition)
+          end
+          if partition.disjoint then
+            existing_disjoint_partitions[partition.region] = range
+          end
+        end
+        add_partition_info(src_range)
+        add_partition_info(dst_range)
       end
     end
   end
@@ -2586,13 +2631,81 @@ function solve_constraints.solve(cx, stat)
     return {range_mapping, region_mapping}
   end)
 
+  local user_mapping = data.newmap()
+  if not user_constraints:is_empty() then
+    local user_sources = hash_set.new()
+    for range, _ in user_constraints.ranges:items() do
+      user_sources:insert(range)
+    end
+    for src_range, constraints in user_constraints.constraints:items() do
+      for info, dst_range in constraints:items() do
+        if src_range ~= dst_range then
+          user_sources:remove(dst_range)
+        end
+      end
+    end
+    user_sources:foreach(function(source)
+      local my_source =
+        solver_cx.sources_by_regions[source:gettype().parent_region_symbol]
+      local unifiable, mapping =
+        find_unifiable_ranges(solver_cx.constraints, user_constraints, my_source, source)
+      if unifiable then
+        local unified = user_constraints:join(solver_cx.constraints, mapping)
+        for from, to in unified:items() do
+          mapping[from] = to
+        end
+        solver_cx.constraints = user_constraints
+
+        local new_sources = solver_cx.sources:map(function(range)
+          return mapping[range] or range
+        end)
+        solver_cx.sources = new_sources
+
+        local new_sources_by_regions = data.newmap()
+        for region, source in solver_cx.sources_by_regions:items() do
+          new_sources_by_regions[region] = mapping[source] or source
+        end
+        solver_cx.sources_by_regions = new_sources_by_regions
+
+        local new_loop_ranges = solver_cx.loop_ranges:map(function(range)
+          return mapping[range] or range
+        end)
+        solver_cx.loop_ranges = new_loop_ranges
+
+        local function mapping_fn(range) return mapping[range] or range end
+        local field_accesses = data.newmap()
+        for region_symbol, accesses_summary in solver_cx.field_accesses:items() do
+          local new_access_summary = data.newmap()
+          for field_path, summary in accesses_summary:items() do
+            local new_summary = data.newmap()
+            for privilege, ranges_set in summary:items() do
+              local unified = ranges_set:map(mapping_fn)
+              unified:canonicalize()
+              new_summary[privilege] = unified
+            end
+            new_access_summary[field_path] = new_summary
+          end
+          field_accesses[region_symbol] = new_access_summary
+        end
+        solver_cx.field_accesses = field_accesses
+
+        for from, to in mapping:items() do
+          user_mapping[from] = to
+        end
+      end
+    end)
+  end
+
   local partition_stats, unified_ranges, reindexed_ranges =
     solver_cx:synthesize_partitions(existing_disjoint_partitions, color_space_symbol)
 
-  if not unified_ranges:is_empty() then
+  if not (unified_ranges:is_empty() and user_mapping:is_empty()) then
     mappings = mappings:map(function(pair)
       local range_mapping, region_mapping = unpack(pair)
-      return {combine_mapping(unified_ranges, range_mapping), region_mapping}
+      return {
+        combine_mapping(unified_ranges, combine_mapping(user_mapping, range_mapping)),
+        region_mapping
+      }
     end)
   end
 
