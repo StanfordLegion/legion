@@ -1629,7 +1629,6 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
       local info, range = unpack(path[idx])
       local partition = self.constraints:get_partition(range)
       assert(disjoint_partitions[range] == nil)
-      created:insert(range)
       find_or_create(disjoint_partitions, range, hash_set.new):insert(range)
       if info == nil then
         if not created:has(range) then
@@ -1652,6 +1651,7 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions, colo
           assert(false)
         end
       end
+      created:insert(range)
       parent = range
     end
   end)
