@@ -1165,30 +1165,21 @@ task toplevel()
     end
   end
 
-  var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
-  var rp_all_private = rp_all_p[0]
-  var rp_all_ghost = rp_all_p[1]
-  var rp_all_private_p = partition(
-    disjoint, rp_all_private, colorings.rp_all_private_c)
-  var rp_all_ghost_p = partition(
-    aliased, rp_all_ghost, colorings.rp_all_ghost_c)
-  var rp_all_shared_p = partition(
-    disjoint, rp_all_ghost, colorings.rp_all_shared_c)
-
-  -- Points
-  if conf.par_init then
-    __demand(__parallel)
-    for i = 0, conf.npieces do
-      initialize_points(conf, i,
-                        rp_all_private_p[i],
-                        rp_all_shared_p[i])
-    end
-  end
+  var rp_all_private_p = partition(disjoint, rp, colorings.rp_all_private_c)
+  var rp_all_shared_p = partition(disjoint, rp, colorings.rp_all_shared_c)
   var raw_rp_p = create_disjoint_union(__runtime(), __context(),
                                        __raw(rp), __raw(rz_c),
                                        __raw(rp_all_private_p),
                                        __raw(rp_all_shared_p))
   var rp_p = __import_partition(disjoint, rp, rz_c, raw_rp_p)
+
+  -- Points
+  if conf.par_init then
+    __demand(__parallel)
+    for i = 0, conf.npieces do
+      initialize_points(conf, i, rp_p[i])
+    end
+  end
 
   __fence(__execution, __block)
   output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
