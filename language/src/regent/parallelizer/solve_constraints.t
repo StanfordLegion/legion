@@ -2718,7 +2718,6 @@ function solve_constraints.solve(cx, stat)
 
   local partition_stats, unified_ranges, reindexed_ranges =
     solver_cx:synthesize_partitions(existing_disjoint_partitions, color_space_symbol)
-  solver_cx:print_all_constraints()
 
   if not (unified_ranges:is_empty() and user_mapping:is_empty()) then
     mappings = mappings:map(function(pair)
