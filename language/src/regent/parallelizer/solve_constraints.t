@@ -723,11 +723,11 @@ local op_name = {
   ["&"] = "&",
 }
 
-local function create_partition_by_binary_op(disjointness, lhs, rhs, op, result_symbol)
+local function create_partition_by_binary_op(disjointness, lhs, rhs, op, result_symbol, parent_region_symbol)
   if rhs == nil then return lhs, nil end
   local lhs_type = lhs:gettype()
   local partition_type = std.partition(disjointness,
-      lhs_type.parent_region_symbol, lhs_type.colors_symbol)
+      parent_region_symbol or lhs_type.parent_region_symbol, lhs_type.colors_symbol)
   local variable = result_symbol
   if variable == nil then
     if std.config["parallelize-debug"] then
@@ -737,6 +737,9 @@ local function create_partition_by_binary_op(disjointness, lhs, rhs, op, result_
       variable = new_range()
       variable:settype(partition_type)
     end
+  else
+    assert(not variable:hastype())
+    variable:settype(partition_type)
   end
   return variable, ast.typed.stat.Var {
     symbol = variable,
@@ -768,8 +771,8 @@ local function create_union_partition(lhs, rhs, result_symbol)
   return create_partition_by_binary_op(std.aliased, lhs, rhs, "|", result_symbol)
 end
 
-local function create_disjoint_union_partition(lhs, rhs, result_symbol)
-  return create_partition_by_binary_op(std.disjoint, lhs, rhs, "|", result_symbol)
+local function create_disjoint_union_partition(lhs, rhs, result_symbol, parent_region_symbol)
+  return create_partition_by_binary_op(std.disjoint, lhs, rhs, "|", result_symbol, parent_region_symbol)
 end
 local function create_difference_partition(lhs, rhs, result_symbol)
   return create_partition_by_binary_op(lhs:gettype().disjointness, lhs, rhs, "-", result_symbol)
@@ -2142,8 +2145,20 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
           end
         end
         if not has_private_subpartition then
-          stats:insert(
-            create_equal_partition(disjoint_range, partition.region, color_space_symbol))
+          if existing_disjoint_partitions[partition.region] ~= nil then
+            local disjoint_range_subpartitions =
+              existing_disjoint_partitions[partition.region]:to_list()
+            -- TODO: This can be a union of more than two partitions
+            assert(#disjoint_range_subpartitions == 2)
+            local union_range, stat =
+              create_disjoint_union_partition(
+                disjoint_range_subpartitions[1], disjoint_range_subpartitions[2],
+                disjoint_range, partition.region)
+            stats:insert(stat)
+          else
+            stats:insert(
+              create_equal_partition(disjoint_range, partition.region, color_space_symbol))
+          end
         end
         created:insert(disjoint_range)
       end
