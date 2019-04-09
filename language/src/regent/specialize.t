@@ -1712,10 +1712,12 @@ function specialize.stat_parallelize_with(cx, node)
   local hints = data.flatmap(function(expr)
     return specialize.expr(cx, expr, true) end, node.hints)
   hints = hints:map(function(hint)
-    if not (hint:is(ast.specialized.expr.ID) or hint:is(ast.specialized.expr.Binary)) then
+    if not (hint:is(ast.specialized.expr.ID) or
+            hint:is(ast.specialized.expr.Unary) or
+            hint:is(ast.specialized.expr.Binary)) then
       report.error(hint, "parallelizer hint should be a partition or constraint on two partitions")
     elseif hint:is(ast.specialized.expr.Binary) then
-      if not (hint.op == "<=" or hint.op == ">=") then
+      if not (hint.op == "<=" or hint.op == ">=" or hint.op == "==" or hint.op == "complete") then
         report.error(hint, "operator '" .. hint.op .."' is not supported in parallelizer hints")
       end
       if hint.op == ">=" then
@@ -1725,9 +1727,9 @@ function specialize.stat_parallelize_with(cx, node)
           op = "<="
         }
       end
-      if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID))) then
-        report.error(node, "unsupported constraint for parallelizer hints")
-      end
+      --if not ((hint.lhs:is(ast.specialized.expr.Image) and hint.rhs:is(ast.specialized.expr.ID))) then
+      --  report.error(node, "unsupported constraint for parallelizer hints")
+      --end
     end
     return hint
   end)

@@ -1959,10 +1959,12 @@ end
 
 task initialize_points(conf : config,
                        piece : int64,
-                       rp : region(point))
+                       rpp : region(point),
+                       rps : region(point))
 
 where
-  reads writes(rp.{px, has_bcx, has_bcy})
+  reads writes(rpp.{px, has_bcx, has_bcy}),
+  reads writes(rps.{px, has_bcx, has_bcy})
 do
   regentlib.assert(
     conf.meshtype == MESH_RECT,
@@ -1982,7 +1984,7 @@ do
     var p_ = first_p
     for y = first_zy + [int64](pcy > 0), last_zy + [int64](pcy == conf.numpcy - 1) do
       for x = first_zx + [int64](pcx > 0), last_zx + [int64](pcx == conf.numpcx - 1) do
-        var p = dynamic_cast(ptr(point, rp), ptr(p_))
+        var p = dynamic_cast(ptr(point, rpp), ptr(p_))
         regentlib.assert(not isnull(p), "bad pointer")
 
         var px = { x = dx*x, y = dy*y }
@@ -2016,7 +2018,7 @@ do
     var bottom_right = ghost_bottom_right_p(conf, pcx, pcy)
 
     for p_ = right._0, right._1 do
-      var p = dynamic_cast(ptr(point, rp), ptr(p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, first_zy + (p_ - right._0 + [int64](pcy > 0))
@@ -2038,7 +2040,7 @@ do
     end
 
     for p_ = bottom._0, bottom._1 do
-      var p = dynamic_cast(ptr(point, rp), ptr(p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = first_zx + (p_ - bottom._0 + [int64](pcx > 0)), last_zy
@@ -2060,7 +2062,7 @@ do
     end
 
     for p_ = bottom_right._0, bottom_right._1 do
-      var p = dynamic_cast(ptr(point, rp), ptr(p_))
+      var p = dynamic_cast(ptr(point, rps), ptr(p_))
       regentlib.assert(not isnull(p), "bad pointer")
 
       var x, y = last_zx, last_zy
