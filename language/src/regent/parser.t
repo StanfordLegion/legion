@@ -1234,6 +1234,33 @@ function parser.expr_prefix(p)
       span = ast.span(start, p),
     }
 
+  elseif p:nextif("disjoint") then
+    local start = ast.save(p)
+    p:expect("(")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Unary {
+      op = "disjoint",
+      rhs = rhs,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
+  elseif p:nextif("complete") then
+    local start = ast.save(p)
+    p:expect("(")
+    local lhs = p:expr()
+    p:expect(",")
+    local rhs = p:expr()
+    p:expect(")")
+    return ast.unspecialized.expr.Binary {
+      op = "complete",
+      lhs = lhs,
+      rhs = rhs,
+      annotations = ast.default_annotations(),
+      span = ast.span(start, p),
+    }
+
   else
     p:error("unexpected token in expression")
   end
