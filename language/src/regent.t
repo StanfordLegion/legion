@@ -97,6 +97,7 @@ local language = {
     "attach",
     "awaits",
     "atomic",
+    "complete",
     "copy",
     "cross_product",
     "cross_product_array",

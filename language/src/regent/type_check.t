@@ -3728,16 +3728,16 @@ function type_check.expr_projection(cx, node)
 end
 
 function type_check.expr_parallelizer_constraint(cx, node)
-  local lhs = type_check.expr(cx, node.lhs)
-  local lhs_type = std.as_read(lhs.expr_type)
+  local lhs = node:is(ast.specialized.expr.Binary) and type_check.expr(cx, node.lhs)
+  local lhs_type = lhs and std.as_read(lhs.expr_type)
   local rhs = type_check.expr(cx, node.rhs)
   local rhs_type = std.as_read(rhs.expr_type)
-  if not std.is_partition(lhs_type) then
+  if lhs and not std.is_partition(lhs_type) then
     report.error(lhs,
       "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
       tostring(lhs_type))
   end
-  if not std.is_partition(rhs_type) then
+  if node.op ~= "complete" and not std.is_partition(rhs_type) then
     report.error(rhs,
       "type mismatch in __parallelize_with: expected a partition or constraint on partitions but got " ..
       tostring(rhs_type))
@@ -4284,7 +4284,9 @@ function type_check.stat_parallelize_with(cx, node)
           tostring(value_type))
       end
       return value
-    elseif expr:is(ast.specialized.expr.Binary) then
+    elseif expr:is(ast.specialized.expr.Unary) or
+           expr:is(ast.specialized.expr.Binary)
+    then
       return type_check.expr_parallelizer_constraint(cx, expr)
     else
       assert(false, "unexpected node type " .. tostring(node:type()))
