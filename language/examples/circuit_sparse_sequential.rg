@@ -529,24 +529,6 @@ task print_summary(color : int, sim_time : double, conf : Config)
   end
 end
 
-terra create_disjoint_union(runtime : c.legion_runtime_t,
-                            context : c.legion_context_t,
-                            parent  : c.legion_logical_region_t,
-                            colors  : c.legion_index_space_t,
-                            lhs     : c.legion_logical_partition_t,
-                            rhs     : c.legion_logical_partition_t)
-  var ip = c.legion_index_partition_create_by_union(
-    runtime,
-    context,
-    parent.index_space,
-    lhs.index_partition,
-    rhs.index_partition,
-    colors,
-    c.DISJOINT_COMPLETE_KIND, -1)
-  return c.legion_logical_partition_create(runtime, context, parent, ip)
-end
-create_disjoint_union.replicable = true
-
 __demand(__inner, __replicable)
 task toplevel()
   var conf : Config
@@ -597,10 +579,6 @@ task toplevel()
 
   var color_space = ispace(ptr, num_superpieces)
   var p_rw = partition(equal, rw, color_space)
-  for color in color_space do
-    init_wires([int](color), conf, p_rw[color])
-  end
-
   var colorings = create_colorings(conf)
   var rp_all_nodes = partition(disjoint, rn, colorings.privacy_map, ispace(ptr, 2))
   var all_private = rp_all_nodes[0]
@@ -609,11 +587,9 @@ task toplevel()
   var rp_private = partition(disjoint, all_private, colorings.private_node_map, color_space)
   var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, color_space)
 
-  var raw_p_rn = create_disjoint_union(__runtime(), __context(),
-                                       __raw(rn), __raw(color_space),
-                                       __raw(rp_private),
-                                       __raw(rp_shared))
-  var p_rn = __import_partition(disjoint, rn, color_space, raw_p_rn)
+  for color in color_space do
+    init_piece([int](color), conf, rp_private[color], rp_shared[color], p_rw[color])
+  end
 
   var simulation_success = true
   var steps = conf.steps
@@ -623,9 +599,12 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
 
-  __parallelize_with color_space, p_rw, p_rn do
-    init_nodes(rn)
-
+  __parallelize_with color_space, p_rw,
+                     complete(rp_private | rp_shared, rn),
+                     disjoint(rp_private | rp_shared),
+                     image(rn, preimage(rw, rp_private, rw.inN), rw.inN) <= rp_private,
+                     image(rn, preimage(rw, rp_private, rw.outN), rw.outN) <= rp_private
+  do
     __demand(__spmd)
     for j = 0, num_loops do
       if j == prune then
