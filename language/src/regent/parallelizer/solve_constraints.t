@@ -2120,15 +2120,11 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
             local private_idx = 0
             for idx, partition in ipairs(subpartitions) do
               if roundtrip_constraints[partition] ~= nil then
-                local region_symbol, field_path =
-                  unpack(roundtrip_constraints[partition])
                 local all_contained = true
                 image_ranges:foreach(function(image_range)
                   local info, src_range = unpack(image_partitions[image_range])
-                  local region_symbol_used, field_path_used = unpack(info.info)
                   if not (image_partitions[src_range] == nil and
-                          region_symbol == region_symbol_used and
-                          field_path == field_path_used)
+                          roundtrip_constraints[partition]:has(data.newtuple(unpack(info.info))))
                   then
                     all_contained = false
                   end
@@ -2700,9 +2696,6 @@ function solve_constraints.solve(cx, stat)
 
   table.sort(all_tasks, cmp_tasks)
 
-  -- TODO: 1) We need to enforce that either a color space or at least one
-  --          partition must be provided
-  --       2) We need to handle hints other than color space
   local color_space_symbol = nil
   local existing_disjoint_partitions = data.newmap()
   local user_constraints = partitioning_constraints.new()
@@ -2726,45 +2719,46 @@ function solve_constraints.solve(cx, stat)
         color_space_symbol = hint.value
       elseif std.is_partition(expr_type) and expr_type:is_disjoint() then
         find_or_create(existing_disjoint_partitions, expr_type.parent_region_symbol,
-            hash_new.new):insert(hint.value)
+            hash_set.new):insert(hint.value)
       end
     elseif hint:is(ast.typed.expr.ParallelizerConstraint) then
       if hint.op == "<=" and hint.lhs:is(ast.typed.expr.Image) and
          hint.rhs:is(ast.typed.expr.ID)
       then
-        local src_range = hint.lhs.partition.value
-        local mapping_region = hint.lhs.region.region.value
-        local field_path = hint.lhs.region.fields[1]
-        local dst_range = hint.rhs.value
-        user_constraints:add_image_constraint(src_range, mapping_region, field_path, dst_range)
+        if hint.lhs.partition:is(ast.typed.expr.ID) then
+          local src_range = hint.lhs.partition.value
+          local mapping_region = hint.lhs.region.region.value
+          local field_path = hint.lhs.region.fields[1]
+          local dst_range = hint.rhs.value
+          user_constraints:add_image_constraint(src_range, mapping_region, field_path, dst_range)
 
-        local function add_partition_info(range)
-          local partition = partition_info.new(
-              range:gettype().parent_region_symbol,
-              range:gettype():is_disjoint(),
-              range:gettype():is_disjoint())
-          if user_constraints:get_partition(range) == nil then
-            user_constraints:set_partition(range, partition)
+          local function add_partition_info(range)
+            local partition = partition_info.new(
+                range:gettype().parent_region_symbol,
+                range:gettype():is_disjoint(),
+                range:gettype():is_disjoint())
+            if user_constraints:get_partition(range) == nil then
+              user_constraints:set_partition(range, partition)
+            end
+            if partition.disjoint then
+              find_or_create(existing_disjoint_partitions, partition.region,
+                  hash_set.new):insert(range)
+            end
           end
-          if partition.disjoint then
-            find_or_create(existing_disjoint_partitions, partition.region,
-                hash_set.new):insert(range)
-          end
-        end
-        add_partition_info(src_range)
-        add_partition_info(dst_range)
-      elseif hint.op == "==" and hint.rhs:is(ast.typed.expr.ID) then
-        if hint.lhs:is(ast.typed.expr.Image) and
-           hint.lhs.partition:is(ast.typed.expr.Preimage) and
-           hint.lhs.partition.partition:is(ast.typed.expr.ID) and
-           hint.lhs.partition.partition.value == hint.rhs.value
+          add_partition_info(src_range)
+          add_partition_info(dst_range)
+        elseif hint.lhs:is(ast.typed.expr.Image) and
+               hint.lhs.partition:is(ast.typed.expr.Preimage) and
+               hint.lhs.partition.partition:is(ast.typed.expr.ID) and
+               hint.lhs.partition.partition.value == hint.rhs.value
         then
           local region_symbol = hint.lhs.region.region.value
           local field_path = hint.lhs.region.fields[1]
           if hint.lhs.partition.region.region.value == region_symbol and
              hint.lhs.partition.region.fields[1] == field_path
           then
-            roundtrip_constraints[hint.rhs.value] = {region_symbol, field_path}
+            find_or_create(roundtrip_constraints, hint.rhs.value, hash_set.new):insert(
+                data.newtuple(region_symbol, field_path))
           end
         end
 

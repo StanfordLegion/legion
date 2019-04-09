@@ -1093,24 +1093,6 @@ task read_config_task()
   return conf
 end
 
-terra create_disjoint_union(runtime : c.legion_runtime_t,
-                            context : c.legion_context_t,
-                            parent  : c.legion_logical_region_t,
-                            colors  : c.legion_index_space_t,
-                            lhs     : c.legion_logical_partition_t,
-                            rhs     : c.legion_logical_partition_t)
-  var ip = c.legion_index_partition_create_by_union(
-    runtime,
-    context,
-    parent.index_space,
-    lhs.index_partition,
-    rhs.index_partition,
-    colors,
-    c.DISJOINT_COMPLETE_KIND, -1)
-  return c.legion_logical_partition_create(runtime, context, parent, ip)
-end
-create_disjoint_union.replicable = true
-
 -- FIXME: Inline the whole test crashes the type checker
 --__demand(__replicable, __inner, __inline)
 --task test()
@@ -1188,7 +1170,7 @@ task toplevel()
   __parallelize_with rz_c,
                      complete(rp_all_private_p | rp_all_shared_p, rp),
                      disjoint(rp_all_private_p | rp_all_shared_p),
-                     image(rp, preimage(rs, rp_all_private_p, rs.mapsp1), rs.mapsp1) == rp_all_private_p,
+                     image(rp, preimage(rs, rp_all_private_p, rs.mapsp1), rs.mapsp1) <= rp_all_private_p,
                      image(rz, rs_p, rs.mapsz) <= rz_p,
                      image(rs, rs_p, rs.mapss3) <= rs_p,
                      image(rs, rs_p, rs.mapss4) <= rs_p
