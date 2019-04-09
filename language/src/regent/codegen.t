@@ -7479,10 +7479,10 @@ function codegen.expr_binary(cx, node)
         [tag_imported(cx, lp)]
       end
     else
+      local parent_region = cx:region(expr_type:parent_region()).logical_region
       actions = quote
         [actions]
-        var is = c.legion_index_partition_get_parent_index_space(
-          [cx.runtime], [lhs.value].impl.index_partition)
+        var is = [parent_region].impl.index_space
         var lhs_colors = c.legion_index_partition_get_color_space(
           [cx.runtime], [lhs.value].impl.index_partition)
         var rhs_colors = c.legion_index_partition_get_color_space(

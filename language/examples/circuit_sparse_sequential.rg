@@ -601,9 +601,7 @@ task toplevel()
 
   __parallelize_with color_space, p_rw,
                      complete(rp_private | rp_shared, rn),
-                     disjoint(rp_private | rp_shared),
-                     image(rn, preimage(rw, rp_private, rw.inN), rw.inN) <= rp_private,
-                     image(rn, preimage(rw, rp_private, rw.outN), rw.outN) <= rp_private
+                     disjoint(rp_private | rp_shared)
   do
     __demand(__spmd)
     for j = 0, num_loops do
