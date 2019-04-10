@@ -599,9 +599,12 @@ task toplevel()
   var ts_start = c.legion_get_current_time_in_micros()
   var ts_end = ts_start
 
-  __parallelize_with color_space, p_rw,
-                     complete(pn_private | pn_shared, rn),
-                     disjoint(pn_private | pn_shared)
+  __parallelize_with
+    -- XXX: Comment out the first two lines to reproduce the result Auto in Section 5.3:
+    complete(pn_private | pn_shared, rn),
+    disjoint(pn_private | pn_shared),
+
+    color_space, p_rw
   do
     __demand(__spmd)
     for j = 0, num_loops do
