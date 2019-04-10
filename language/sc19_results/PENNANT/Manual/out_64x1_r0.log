@@ -1,0 +1,75 @@
+cycle   10    sim time 6.480e-05    dt 1.175e-05    time 4.762e-02 (per iteration) 4.762e-01 (total)
+cycle   30    sim time 2.427e-04    dt 7.246e-06    time 2.105e-02 (per iteration) 9.066e-01 (total)
+Elapsed time = 2.175579e+00 (total)
+cycle   50    sim time 3.832e-04    dt 6.732e-06    time 2.122e-02 (per iteration) 1.334e+00 (total)
+Reading "/users/wclee/legion/language/pennant/pennant.tests/leblanc_long64x30/leblanc.pnt"...
+Config meshtype = "rect"
+Config alfa = 5.00e-01
+Config bcx = 0.00e+00 7.81e-03
+Config bcx_n = 2
+Config bcy = 0.00e+00 9.00e+00
+Config bcy_n = 2
+Config cfl = 6.00e-01
+Config cflv = 1.00e-01
+Config chunksize = 512
+Config cstop = 30
+Config dtfac = 1.20e+00
+Config dtinit = 2.50e-06
+Config dtmax = 1.00e+99
+Config dtreport = 1.00e+02
+Config einit = 1.00e-01
+Config einitsub = 1.00e-07
+Config gamma = 1.67e+00
+Config meshscale = 1.00e+00
+Config q1 = 3.00e-01
+Config q2 = 2.00e+00
+Config qgamma = 1.67e+00
+Config rinit = 1.00e+00
+Config rinitsub = 1.00e-03
+Config ssmin = 1.00e-01
+Config subregion = 0.00e+00 7.81e-03 3.00e+00 9.00e+00
+Config subregion_n = 4
+Config tstop = 6.00e+00
+Config uinitradial = 0.00e+00
+Config meshparams = 3.20e+02 3.69e+05 7.81e-03 9.00e+00
+Config meshparams_n = 4
+Config meshtype = 1
+Config nzx = 320
+Config nzy = 368640
+Config numpcx = 1
+Config numpcy = 64
+Config lenx = 7.81e-03
+Config leny = 9.00e+00
+cycle   70    sim time 5.128e-04    dt 6.256e-06    time 2.131e-02 (per iteration) 1.759e+00 (total)
+Config nz = 117964800
+Config np = 118333761
+Config ns = 471859200
+Config maxznump = 4
+Config npieces = 64
+Config par_init = 1
+Config seq_init = 0
+Config print_ts = 0
+Config enable = 1
+Config warmup = 0
+Config prune = 30
+Config compact = 1
+Config internal = 1
+Config interior = 1
+Config stripsize = 128
+Config spansize = 2048
+Config nspans_zones = 0
+Config nspans_points = 0
+Mesh memory usage:
+  Zones  : 117964800 *  192 bytes = 22649241600 bytes
+  Points : 118333761 *  128 bytes = 15146721408 bytes
+  Sides  : 471859200 *  272 bytes = 128345702400 bytes
+  Total                             166141665408 bytes
+Running test (t=16.6)...
+ELAPSED TIME =   0.639 s
+cycle   80    sim time 5.746e-04    dt 6.099e-06    time 2.088e-02 (per iteration) 1.968e+00 (total)
+Initializing (t=17.1)...
+cycle   40    sim time 3.145e-04    dt 6.992e-06    time 2.156e-02 (per iteration) 1.122e+00 (total)
+Warning: Skipping sequential validation
+cycle   20    sim time 1.636e-04    dt 8.485e-06    time 2.199e-02 (per iteration) 6.961e-01 (total)
+cycle   60    sim time 4.491e-04    dt 6.459e-06    time 2.113e-02 (per iteration) 1.546e+00 (total)
+Starting simulation (t=18.9)...

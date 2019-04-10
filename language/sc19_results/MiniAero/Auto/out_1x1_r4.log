@@ -1,0 +1,20 @@
+problem_type = SOD
+num_blocks = 1
+interval_x = 64
+interval_y = 64
+interval_z = 512
+output_frequency = 101
+time_steps = 50
+length_x = 1.000000
+length_y = 0.200000
+length_z = 2.000000
+ramp_angle = 0.000000
+dt = 1e-08
+wait = false
+viscous = true
+second_order_space = true
+output_results = false
+
+Setup Time =  57.192157 s
+
+ELAPSED TIME =  11.476 s
