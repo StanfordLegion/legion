@@ -584,11 +584,11 @@ task toplevel()
   var all_private = rp_all_nodes[0]
   var all_shared = rp_all_nodes[1]
 
-  var rp_private = partition(disjoint, all_private, colorings.private_node_map, color_space)
-  var rp_shared = partition(disjoint, all_shared, colorings.shared_node_map, color_space)
+  var pn_private = partition(disjoint, all_private, colorings.private_node_map, color_space)
+  var pn_shared = partition(disjoint, all_shared, colorings.shared_node_map, color_space)
 
   for color in color_space do
-    init_piece([int](color), conf, rp_private[color], rp_shared[color], p_rw[color])
+    init_piece([int](color), conf, pn_private[color], pn_shared[color], p_rw[color])
   end
 
   var simulation_success = true
@@ -600,8 +600,8 @@ task toplevel()
   var ts_end = ts_start
 
   __parallelize_with color_space, p_rw,
-                     complete(rp_private | rp_shared, rn),
-                     disjoint(rp_private | rp_shared)
+                     complete(pn_private | pn_shared, rn),
+                     disjoint(pn_private | pn_shared)
   do
     __demand(__spmd)
     for j = 0, num_loops do
