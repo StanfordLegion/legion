@@ -1170,7 +1170,7 @@ task toplevel()
   __parallelize_with rz_c,
                      complete(rp_all_private_p | rp_all_shared_p, rp),
                      disjoint(rp_all_private_p | rp_all_shared_p),
-                     image(rp, preimage(rs, rp_all_private_p, rs.mapsp1), rs.mapsp1) <= rp_all_private_p,
+                     preimage(rs, rp_all_private_p, rs.mapsp1) <= rs_p,
                      image(rz, rs_p, rs.mapsz) <= rz_p,
                      image(rs, rs_p, rs.mapss3) <= rs_p,
                      image(rs, rs_p, rs.mapss4) <= rs_p
