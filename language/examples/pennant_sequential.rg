@@ -1150,16 +1150,16 @@ task toplevel()
   var rp_all_p = partition(disjoint, rp, colorings.rp_all_c)
   var rp_all_private = rp_all_p[0]
   var rp_all_ghost = rp_all_p[1]
-  var rp_all_private_p = partition(
+  var rp_p_private = partition(
     disjoint, rp_all_private, colorings.rp_all_private_c)
-  var rp_all_shared_p = partition(
+  var rp_p_shared = partition(
     disjoint, rp_all_ghost, colorings.rp_all_shared_c)
 
   -- Points
   if conf.par_init then
     __demand(__parallel)
     for i = 0, conf.npieces do
-      initialize_points(conf, i, rp_all_private_p[i], rp_all_shared_p[i])
+      initialize_points(conf, i, rp_p_private[i], rp_p_shared[i])
     end
   end
 
@@ -1168,12 +1168,10 @@ task toplevel()
 
   var start_time = c.legion_get_current_time_in_micros()/1.e6
   __parallelize_with rz_c,
-                     complete(rp_all_private_p | rp_all_shared_p, rp),
-                     disjoint(rp_all_private_p | rp_all_shared_p),
-                     preimage(rs, rp_all_private_p, rs.mapsp1) <= rs_p,
-                     image(rz, rs_p, rs.mapsz) <= rz_p,
-                     image(rs, rs_p, rs.mapss3) <= rs_p,
-                     image(rs, rs_p, rs.mapss4) <= rs_p
+                     complete(rp_p_private | rp_p_shared, rp),
+                     disjoint(rp_p_private | rp_p_shared),
+                     preimage(rs, rp_p_private, rs.mapsp1) <= rs_p,
+                     image(rz, rs_p, rs.mapsz) <= rz_p
   do
     var einit = conf.einit
     var einitsub = conf.einitsub
