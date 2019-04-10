@@ -544,7 +544,7 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     else
       if std.config["parallelize-cache-incl-check"] then
         local cache_key = cx:find_cache_key_for_user(index.value)
-        local cache_region, cases, num_cases, is_disjoint = unpack(cache)
+        local cache_region, _, _, is_disjoint = unpack(cache)
         local rhs = ast.typed.expr.Constant {
           value = 1,
           expr_type = uint8,
@@ -639,9 +639,18 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
     if std.config["parallelize-cache-incl-check"] then
       local cache_key = cx:find_cache_key_for_user(index.value)
       assert(cache)
-      local cache_region, cases, num_cases, is_disjoint = unpack(cache)
+      local cache_region, case_ids, num_cases, is_disjoint = unpack(cache)
+      if not is_disjoint then
+        -- Make sure the true case is reached last
+        local rearranged_indices = data.filteri(function(region_param)
+          return case_ids[region_param] ~= nil end, region_params)
+        rearranged_indices:insertall(data.filteri(function(region_param)
+          return case_ids[region_param] == nil end, region_params))
+        region_params = rearranged_indices:map(function(idx) return region_params[idx] end)
+        cases = rearranged_indices:map(function(idx) return cases[idx] end)
+      end
       conds = region_params:map(function(region_param)
-        local case_id = cases[region_param]
+        local case_id = case_ids[region_param]
         if case_id == nil then
           if not is_disjoint then
             -- TODO: This case better be checked in the parallelizer itself,
@@ -1085,7 +1094,7 @@ function task_generator.new(node)
         if incl_check_caches[range] ~= nil then
           local my_incl_check_cache = data.newmap()
           for loop_range_partition, tuple in incl_check_caches[range]:items() do
-            local cache_partition, cases, num_cases, is_disjoint = unpack(tuple)
+            local cache_partition, case_ids, num_cases, is_disjoint = unpack(tuple)
             local my_cache_param = find_or_create(cache_params_map, range,
               function()
                 local region_symbol = cache_partition:gettype().parent_region_symbol
@@ -1104,12 +1113,12 @@ function task_generator.new(node)
             local loop_range_region_param =
               partitions_to_region_params[loop_range_partition]
             if loop_range_region_param ~= nil then
-              local my_cases = data.newmap()
-              cases:map(function(partition, case_id)
-                my_cases[partitions_to_region_params[partition]] = case_id
+              local my_case_ids = data.newmap()
+              case_ids:map(function(partition, case_id)
+                my_case_ids[partitions_to_region_params[partition]] = case_id
               end)
               my_incl_check_cache[loop_range_region_param] =
-                { my_cache_param, my_cases, num_cases, is_disjoint }
+                { my_cache_param, my_case_ids, num_cases, is_disjoint }
             end
           end
           local indices = cx:find_indices_of_range(my_range)

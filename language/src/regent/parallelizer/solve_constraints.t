@@ -2538,7 +2538,7 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
         stats:insert(fill_loop)
       end
 
-      local cases = data.newmap()
+      local case_ids = data.newmap()
       for case_id, primary_partition in ipairs(primary_partitions) do
         local preimage_partition = primary_partition
         for i = 1, #paths do
@@ -2559,7 +2559,7 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
         local fill_loop = create_index_fill(self.task_constraints, cache_subpartition,
             color_space_symbol, cache_value_type, loop_range_type:is_disjoint() and case_id)
         stats:insert(fill_loop)
-        cases[primary_partition] = case_id
+        case_ids[primary_partition] = case_id
       end
 
       -- We can use the same cache for any partition of a subset of the loop range
@@ -2580,7 +2580,7 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
         local all_caches = find_or_create(self.incl_check_caches, ghost_range)
         assert(all_caches[loop_range_partition] == nil)
         all_caches[loop_range_partition] =
-          { cache_partition, cases, num_cases, loop_range_type:is_disjoint() }
+          { cache_partition, case_ids, num_cases, loop_range_type:is_disjoint() }
       end
     end
   end
