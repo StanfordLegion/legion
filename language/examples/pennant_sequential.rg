@@ -1167,11 +1167,18 @@ task toplevel()
   output1("Initializing (t=%.1f)...\n", c.legion_get_current_time_in_micros()/1.e6)
 
   var start_time = c.legion_get_current_time_in_micros()/1.e6
-  __parallelize_with rz_c,
-                     complete(rp_p_private | rp_p_shared, rp),
-                     disjoint(rp_p_private | rp_p_shared),
-                     preimage(rs, rp_p_private, rs.mapsp1) <= rs_p,
-                     image(rz, rs_p, rs.mapsz) <= rz_p
+  __parallelize_with
+    -- XXX: Comment out the first four lines to reproduce the result Auto+Hint1 in Section 5.4:
+    --      and all but the last line to reproduce the result Auto:
+    image(rz, rs_p, rs.mapsz) <= rz_p,
+    image(rs, rs_p, rs.mapss3) <= rs_p,
+    image(rs, rs_p, rs.mapss4) <= rs_p,
+    preimage(rs, rp_p_private, rs.mapsp1) <= rs_p,
+
+    complete(rp_p_private | rp_p_shared, rp),
+    disjoint(rp_p_private | rp_p_shared),
+
+    rz_c
   do
     var einit = conf.einit
     var einitsub = conf.einitsub
