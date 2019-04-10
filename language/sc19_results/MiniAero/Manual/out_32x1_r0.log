@@ -1,0 +1,52 @@
+problem_type = SOD
+num_blocks = 32
+interval_x = 64
+interval_y = 64
+interval_z = 16384
+output_frequency = 101
+time_steps = 50
+length_x = 1.000000
+length_y = 0.200000
+length_z = 2.000000
+ramp_angle = 0.000000
+dt = 1e-08
+wait = false
+viscous = true
+second_order_space = true
+output_results = false
+codegen: cross_product_array 1.752120e-01
+
+Setup Time =   1.942703 s
+
+ELAPSED TIME =  11.308 s
+codegen: cross_product_array 1.748620e-01
+codegen: cross_product_array 1.748620e-01
+codegen: cross_product_array 1.748630e-01
+codegen: cross_product_array 1.748070e-01
+codegen: cross_product_array 1.751500e-01
+codegen: cross_product_array 1.748520e-01
+codegen: cross_product_array 1.741790e-01
+codegen: cross_product_array 1.748270e-01
+codegen: cross_product_array 1.741750e-01
+codegen: cross_product_array 1.747390e-01
+codegen: cross_product_array 1.743050e-01
+codegen: cross_product_array 1.741780e-01
+codegen: cross_product_array 1.747810e-01
+codegen: cross_product_array 1.748630e-01
+codegen: cross_product_array 1.742090e-01
+codegen: cross_product_array 1.751690e-01
+codegen: cross_product_array 1.747820e-01
+codegen: cross_product_array 1.749350e-01
+codegen: cross_product_array 1.741690e-01
+codegen: cross_product_array 1.741090e-01
+codegen: cross_product_array 1.748500e-01
+codegen: cross_product_array 1.748500e-01
+codegen: cross_product_array 1.747740e-01
+codegen: cross_product_array 1.748360e-01
+codegen: cross_product_array 1.749520e-01
+codegen: cross_product_array 1.743920e-01
+codegen: cross_product_array 1.741140e-01
+codegen: cross_product_array 1.741580e-01
+codegen: cross_product_array 1.741010e-01
+codegen: cross_product_array 1.748130e-01
+codegen: cross_product_array 1.748090e-01
