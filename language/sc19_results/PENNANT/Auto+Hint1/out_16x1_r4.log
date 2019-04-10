@@ -1,0 +1,75 @@
+Running test (t=16.7)...
+cycle   50    sim time 1.533e-03    dt 2.693e-05    time 2.158e-02 (per iteration) 1.177e+00 (total)
+cycle   30    sim time 9.709e-04    dt 2.898e-05    time 2.152e-02 (per iteration) 7.435e-01 (total)
+cycle   70    sim time 2.051e-03    dt 2.502e-05    time 2.153e-02 (per iteration) 1.607e+00 (total)
+cycle   10    sim time 2.592e-04    dt 4.702e-05    time 3.126e-02 (per iteration) 3.126e-01 (total)
+Elapsed time = 2.038132e+00 (total)
+Starting simulation (t=22.4)...
+Reading "/users/wclee/legion/language/scratch/pennant_run1_04-05-2019/pennant.tests/leblanc_long16x30/leblanc.pnt"...
+Config meshtype = "rect"
+Config alfa = 5.00e-01
+Config bcx = 0.00e+00 3.12e-02
+Config bcx_n = 2
+Config bcy = 0.00e+00 9.00e+00
+Config bcy_n = 2
+Config cfl = 6.00e-01
+Config cflv = 1.00e-01
+Config chunksize = 512
+Config cstop = 30
+Config dtfac = 1.20e+00
+Config dtinit = 1.00e-05
+Config dtmax = 1.00e+99
+Config dtreport = 1.00e+02
+Config einit = 1.00e-01
+Config einitsub = 1.00e-07
+Config gamma = 1.67e+00
+Config meshscale = 1.00e+00
+Config q1 = 3.00e-01
+Config q2 = 2.00e+00
+Config qgamma = 1.67e+00
+Config rinit = 1.00e+00
+Config rinitsub = 1.00e-03
+Config ssmin = 1.00e-01
+Config subregion = 0.00e+00 3.12e-02 3.00e+00 9.00e+00
+Config subregion_n = 4
+Config tstop = 6.00e+00
+Config uinitradial = 0.00e+00
+Config meshparams = 3.20e+02 9.22e+04 3.12e-02 9.00e+00
+Config meshparams_n = 4
+Config meshtype = 1
+Config nzx = 320
+Config nzy = 92160
+Config numpcx = 1
+Config numpcy = 16
+Config lenx = 3.12e-02
+cycle   20    sim time 6.543e-04    dt 3.394e-05    time 2.157e-02 (per iteration) 5.283e-01 (total)
+Warning: Skipping sequential validation
+Initializing (t=17.5)...
+cycle   60    sim time 1.796e-03    dt 2.583e-05    time 2.155e-02 (per iteration) 1.392e+00 (total)
+ELAPSED TIME =   0.649 s
+cycle   40    sim time 1.258e-03    dt 2.797e-05    time 2.173e-02 (per iteration) 9.608e-01 (total)
+Config leny = 9.00e+00
+Config nz = 29491200
+Config np = 29583681
+Config ns = 117964800
+Config maxznump = 4
+Config npieces = 16
+Config par_init = 1
+Config seq_init = 0
+Config print_ts = 0
+Config enable = 1
+Config warmup = 0
+Config prune = 30
+Config compact = 1
+Config internal = 1
+Config interior = 1
+Config stripsize = 128
+Config spansize = 2048
+Config nspans_zones = 0
+Config nspans_points = 0
+Mesh memory usage:
+  Zones  :  29491200 *  192 bytes =  5662310400 bytes
+  Points :  29583681 *  128 bytes =  3786711168 bytes
+  Sides  : 117964800 *  256 bytes = 30198988800 bytes
+  Total                             39648010368 bytes
+cycle   80    sim time 2.298e-03    dt 2.439e-05    time 2.158e-02 (per iteration) 1.823e+00 (total)

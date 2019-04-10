@@ -1,0 +1,75 @@
+Running test (t=16.4)...
+Reading "/users/wclee/legion/language/pennant/pennant.tests/leblanc_long1x30/leblanc.pnt"...
+Config meshtype = "rect"
+Config alfa = 5.00e-01
+Config bcx = 0.00e+00 5.00e-01
+Config bcx_n = 2
+Config bcy = 0.00e+00 9.00e+00
+Config bcy_n = 2
+Config cfl = 6.00e-01
+Config cflv = 1.00e-01
+Config chunksize = 512
+Config cstop = 30
+Config dtfac = 1.20e+00
+Config dtinit = 2.50e-04
+Config dtmax = 1.00e+99
+Config dtreport = 1.00e+02
+Config einit = 1.00e-01
+Config einitsub = 1.00e-07
+Config gamma = 1.67e+00
+Config meshscale = 1.00e+00
+Config q1 = 3.00e-01
+Config q2 = 2.00e+00
+Config qgamma = 1.67e+00
+Config rinit = 1.00e+00
+Config rinitsub = 1.00e-03
+Config ssmin = 1.00e-01
+Config subregion = 0.00e+00 5.00e-01 3.00e+00 9.00e+00
+Config subregion_n = 4
+Config tstop = 6.00e+00
+Config uinitradial = 0.00e+00
+Config meshparams = 3.20e+02 5.76e+03 5.00e-01 9.00e+00
+Config meshparams_n = 4
+Config meshtype = 1
+Config nzx = 320
+Config nzy = 5760
+Config numpcx = 1
+Config numpcy = 1
+Config lenx = 5.00e-01
+Config leny = 9.00e+00
+Config nz = 1843200
+Config np = 1849281
+Config ns = 7372800
+Config maxznump = 4
+Config npieces = 1
+Config par_init = 1
+Config seq_init = 0
+Config print_ts = 0
+Config enable = 1
+Config warmup = 0
+Config prune = 30
+Config compact = 1
+Config internal = 1
+Config interior = 1
+Config stripsize = 128
+Config spansize = 2048
+Config nspans_zones = 0
+Config nspans_points = 0
+Mesh memory usage:
+  Zones  :   1843200 *  192 bytes =   353894400 bytes
+  Points :   1849281 *  128 bytes =   236707968 bytes
+  Sides  :   7372800 *  272 bytes =  2005401600 bytes
+  Total                              2596003968 bytes
+Initializing (t=16.4)...
+Starting simulation (t=18.0)...
+cycle   10    sim time 5.524e-03    dt 6.567e-04    time 1.812e-02 (per iteration) 1.812e-01 (total)
+cycle   20    sim time 1.149e-02    dt 5.425e-04    time 1.937e-02 (per iteration) 3.749e-01 (total)
+cycle   30    sim time 1.642e-02    dt 4.791e-04    time 1.933e-02 (per iteration) 5.682e-01 (total)
+cycle   40    sim time 2.098e-02    dt 4.505e-04    time 1.934e-02 (per iteration) 7.616e-01 (total)
+cycle   50    sim time 2.534e-02    dt 4.270e-04    time 1.933e-02 (per iteration) 9.549e-01 (total)
+cycle   60    sim time 2.953e-02    dt 4.111e-04    time 1.938e-02 (per iteration) 1.149e+00 (total)
+cycle   70    sim time 3.358e-02    dt 3.984e-04    time 1.937e-02 (per iteration) 1.342e+00 (total)
+cycle   80    sim time 3.752e-02    dt 3.890e-04    time 1.935e-02 (per iteration) 1.536e+00 (total)
+ELAPSED TIME =   0.580 s
+Elapsed time = 1.729561e+00 (total)
+Warning: Skipping sequential validation

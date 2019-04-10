@@ -1,0 +1,36 @@
+problem_type = SOD
+num_blocks = 16
+interval_x = 64
+interval_y = 64
+interval_z = 8192
+output_frequency = 101
+time_steps = 50
+length_x = 1.000000
+length_y = 0.200000
+length_z = 2.000000
+ramp_angle = 0.000000
+dt = 1e-08
+wait = false
+viscous = true
+second_order_space = true
+output_results = false
+codegen: cross_product_array 5.683000e-02
+
+Setup Time =   1.900261 s
+
+ELAPSED TIME =  11.302 s
+codegen: cross_product_array 5.664100e-02
+codegen: cross_product_array 5.668100e-02
+codegen: cross_product_array 5.661200e-02
+codegen: cross_product_array 5.627200e-02
+codegen: cross_product_array 5.674200e-02
+codegen: cross_product_array 5.662500e-02
+codegen: cross_product_array 5.666500e-02
+codegen: cross_product_array 5.670900e-02
+codegen: cross_product_array 5.673900e-02
+codegen: cross_product_array 5.675400e-02
+codegen: cross_product_array 5.665200e-02
+codegen: cross_product_array 5.670000e-02
+codegen: cross_product_array 5.665400e-02
+codegen: cross_product_array 5.686600e-02
+codegen: cross_product_array 5.670600e-02

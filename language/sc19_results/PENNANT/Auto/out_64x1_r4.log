@@ -1,0 +1,139 @@
+Running test (t=16.6)...
+partitioning took 6252170 us
+partitioning took 6252075 us
+partitioning took 6252150 us
+partitioning took 6252138 us
+partitioning took 6252148 us
+partitioning took 6252122 us
+partitioning took 6252109 us
+partitioning took 6252145 us
+partitioning took 6252164 us
+partitioning took 6252153 us
+partitioning took 6252047 us
+partitioning took 6252186 us
+partitioning took 6252123 us
+partitioning took 6252093 us
+cycle   70    sim time -5.723e+185    dt -1.145e+185    time 1.221e-01 (per iteration) 2.938e+01 (total)
+partitioning took 6252146 us
+partitioning took 6252111 us
+partitioning took 6252070 us
+partitioning took 6252143 us
+partitioning took 6252127 us
+partitioning took 6252134 us
+partitioning took 6252135 us
+partitioning took 6252133 us
+partitioning took 6252130 us
+partitioning took 6252125 us
+cycle   30    sim time -3.792e+182    dt -7.788e+181    time 1.333e-01 (per iteration) 2.444e+01 (total)
+partitioning took 6252153 us
+cycle   10    sim time 5.200e-05    dt -2.031e+180    time 1.968e+00 (per iteration) 1.968e+01 (total)
+partitioning took 6252138 us
+cycle   50    sim time -1.492e+184    dt -2.986e+183    time 1.229e-01 (per iteration) 2.694e+01 (total)
+partitioning took 6252117 us
+partitioning took 6252149 us
+partitioning took 6252167 us
+partitioning took 6252131 us
+Elapsed time = 3.211746e+01 (total)
+partitioning took 6252089 us
+partitioning took 6252142 us
+partitioning took 6252171 us
+cycle   80    sim time -3.544e+186    dt -7.087e+185    time 1.232e-01 (per iteration) 3.062e+01 (total)
+partitioning took 6252128 us
+partitioning took 6252139 us
+partitioning took 6252124 us
+cycle   60    sim time -9.242e+184    dt -1.849e+184    time 1.227e-01 (per iteration) 2.816e+01 (total)
+partitioning took 6252160 us
+Reading "/users/wclee/legion/language/scratch/pennant_run7_no-hint_04-07-2019/pennant.tests/leblanc_long64x30/leblanc.pnt"...
+Config meshtype = "rect"
+Config alfa = 5.00e-01
+Config bcx = 0.00e+00 7.81e-03
+Config bcx_n = 2
+Config bcy = 0.00e+00 9.00e+00
+Config bcy_n = 2
+Config cfl = 6.00e-01
+Config cflv = 1.00e-01
+Config chunksize = 512
+Config cstop = 30
+Config dtfac = 1.20e+00
+Config dtinit = 2.50e-06
+Config dtmax = 1.00e+99
+Config dtreport = 1.00e+02
+Config einit = 1.00e-01
+Config einitsub = 1.00e-07
+Config gamma = 1.67e+00
+Config meshscale = 1.00e+00
+Config q1 = 3.00e-01
+Config q2 = 2.00e+00
+Config qgamma = 1.67e+00
+Config rinit = 1.00e+00
+Config rinitsub = 1.00e-03
+Config ssmin = 1.00e-01
+Config subregion = 0.00e+00 7.81e-03 3.00e+00 9.00e+00
+Config subregion_n = 4
+Config tstop = 6.00e+00
+Config uinitradial = 0.00e+00
+Config meshparams = 3.20e+02 3.69e+05 7.81e-03 9.00e+00
+Config meshparams_n = 4
+Config meshtype = 1
+Config nzx = 320
+Config nzy = 368640
+Config numpcx = 1
+Config numpcy = 64
+partitioning took 6252171 us
+partitioning took 6252090 us
+partitioning took 6252130 us
+Starting simulation (t=24.4)...
+partitioning took 6252132 us
+partitioning took 6252151 us
+partitioning took 6252176 us
+partitioning took 6252128 us
+partitioning took 6252134 us
+Initializing (t=17.7)...
+partitioning took 6252126 us
+partitioning took 6252119 us
+partitioning took 6252151 us
+partitioning took 6252138 us
+partitioning took 6252137 us
+partitioning took 6252119 us
+partitioning took 6252099 us
+partitioning took 6252118 us
+partitioning took 6252133 us
+ELAPSED TIME =   3.721 s
+partitioning took 6252132 us
+partitioning took 6252125 us
+partitioning took 6252182 us
+cycle   40    sim time -2.401e+183    dt -4.822e+182    time 1.264e-01 (per iteration) 2.571e+01 (total)
+partitioning took 6252151 us
+partitioning took 6252158 us
+partitioning took 6252100 us
+Warning: Skipping sequential validation
+partitioning took 6252157 us
+partitioning took 6252141 us
+partitioning took 6252146 us
+Config lenx = 7.81e-03
+Config leny = 9.00e+00
+Config nz = 117964800
+Config np = 118333761
+Config ns = 471859200
+Config maxznump = 4
+Config npieces = 64
+Config par_init = 1
+Config seq_init = 0
+Config print_ts = 0
+Config enable = 1
+Config warmup = 0
+Config prune = 30
+Config compact = 1
+Config internal = 1
+Config interior = 1
+Config stripsize = 128
+Config spansize = 2048
+Config nspans_zones = 0
+Config nspans_points = 0
+Mesh memory usage:
+  Zones  : 117964800 *  192 bytes = 22649241600 bytes
+  Points : 118333761 *  128 bytes = 15146721408 bytes
+  Sides  : 471859200 *  256 bytes = 120795955200 bytes
+  Total                             158591918208 bytes
+partitioning took 6252138 us
+cycle   20    sim time -5.273e+181    dt -1.258e+181    time 3.432e-01 (per iteration) 2.311e+01 (total)
