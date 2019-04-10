@@ -1496,7 +1496,7 @@ local function combine_mapping(m1, m2)
 end
 
 function solver_context:synthesize_partitions(existing_disjoint_partitions,
-                                              roundtrip_constraints,
+                                              preimage_containments,
                                               color_space_symbol)
   local stats = terralib.newlist()
 
@@ -2122,13 +2122,20 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
           then
             local private_idx = 0
             for idx, partition in ipairs(subpartitions) do
-              if roundtrip_constraints[partition] ~= nil then
+              if preimage_containments[partition] ~= nil then
+                local containments = preimage_containments[partition]
                 local all_contained = true
                 image_ranges:foreach(function(image_range)
-                  local info, src_range = unpack(image_partitions[image_range])
-                  if not (image_partitions[src_range] == nil and
-                          roundtrip_constraints[partition]:has(data.newtuple(unpack(info.info))))
-                  then
+                  local dst_range = image_range
+                  -- TODO: Need to handle a chain of images here
+                  if image_partitions[dst_range] ~= nil then
+                    local info, src_range = unpack(image_partitions[dst_range])
+                    if not (containments[info.info] and
+                            containments[info.info]:has(src_range))
+                    then
+                      all_contained = false
+                    end
+                  else
                     all_contained = false
                   end
                 end)
@@ -2714,7 +2721,7 @@ function solve_constraints.solve(cx, stat)
   local color_space_symbol = nil
   local existing_disjoint_partitions = data.newmap()
   local user_constraints = partitioning_constraints.new()
-  local roundtrip_constraints = data.newmap()
+  local preimage_containments = data.newmap()
   local complete_range_sets = data.newmap()
   local disjoint_range_sets = hash_set.new()
   for idx = 1, #stat.hints do
@@ -2738,44 +2745,44 @@ function solve_constraints.solve(cx, stat)
       end
     elseif hint:is(ast.typed.expr.ParallelizerConstraint) then
       if hint.op == "<=" and hint.lhs:is(ast.typed.expr.Image) and
+         hint.lhs.partition:is(ast.typed.expr.ID) and
          hint.rhs:is(ast.typed.expr.ID)
       then
-        if hint.lhs.partition:is(ast.typed.expr.ID) then
-          local src_range = hint.lhs.partition.value
-          local mapping_region = hint.lhs.region.region.value
-          local field_path = hint.lhs.region.fields[1]
-          local dst_range = hint.rhs.value
-          user_constraints:add_image_constraint(src_range, mapping_region, field_path, dst_range)
+        local src_range = hint.lhs.partition.value
+        local mapping_region = hint.lhs.region.region.value
+        local field_path = hint.lhs.region.fields[1]
+        local dst_range = hint.rhs.value
+        user_constraints:add_image_constraint(src_range, mapping_region, field_path, dst_range)
 
-          local function add_partition_info(range)
-            local partition = partition_info.new(
-                range:gettype().parent_region_symbol,
-                range:gettype():is_disjoint(),
-                range:gettype():is_disjoint())
-            if user_constraints:get_partition(range) == nil then
-              user_constraints:set_partition(range, partition)
-            end
-            if partition.disjoint then
-              find_or_create(existing_disjoint_partitions, partition.region,
-                  hash_set.new):insert(range)
-            end
+        local function add_partition_info(range)
+          local partition = partition_info.new(
+              range:gettype().parent_region_symbol,
+              range:gettype():is_disjoint(),
+              range:gettype():is_disjoint())
+          if user_constraints:get_partition(range) == nil then
+            user_constraints:set_partition(range, partition)
           end
-          add_partition_info(src_range)
-          add_partition_info(dst_range)
-        elseif hint.lhs:is(ast.typed.expr.Image) and
-               hint.lhs.partition:is(ast.typed.expr.Preimage) and
-               hint.lhs.partition.partition:is(ast.typed.expr.ID) and
-               hint.lhs.partition.partition.value == hint.rhs.value
-        then
-          local region_symbol = hint.lhs.region.region.value
-          local field_path = hint.lhs.region.fields[1]
-          if hint.lhs.partition.region.region.value == region_symbol and
-             hint.lhs.partition.region.fields[1] == field_path
-          then
-            find_or_create(roundtrip_constraints, hint.rhs.value, hash_set.new):insert(
-                data.newtuple(region_symbol, field_path))
+          if partition.disjoint then
+            find_or_create(existing_disjoint_partitions, partition.region,
+                hash_set.new):insert(range)
           end
         end
+        add_partition_info(src_range)
+        add_partition_info(dst_range)
+
+      -- TODO: Users should be able to specify subset constraints on
+      --       nested preimages (e.g., preimage(preimage(P, f), g) <= Q).
+      --       User constraints might need to have quantifiers
+      elseif hint.op == "<=" and hint.lhs:is(ast.typed.expr.Preimage) and
+             hint.lhs.partition:is(ast.typed.expr.ID) and
+             hint.rhs:is(ast.typed.expr.ID)
+      then
+        local region_symbol = hint.lhs.region.region.value
+        local field_path = hint.lhs.region.fields[1]
+        local containments =
+          find_or_create(preimage_containments, hint.lhs.partition.value)
+        find_or_create(containments, data.newtuple(region_symbol, field_path),
+            hash_set.new):insert(hint.rhs.value)
 
       elseif hint.op == "disjoint" then
         local range_set = hash_set.new()
@@ -2874,7 +2881,7 @@ function solve_constraints.solve(cx, stat)
 
   local partition_stats, unified_ranges, reindexed_ranges =
     solver_cx:synthesize_partitions(existing_disjoint_partitions,
-                                    roundtrip_constraints,
+                                    preimage_containments,
                                     color_space_symbol)
 
   if not (unified_ranges:is_empty() and user_mapping:is_empty()) then
