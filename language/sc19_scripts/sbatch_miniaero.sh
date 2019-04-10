@@ -1,7 +1,7 @@
 #!/bin/sh
 #SBATCH --nodes=256
 #SBATCH --constraint=gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=02:00:00
 
 root_dir="$PWD"
 
