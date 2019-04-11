@@ -734,7 +734,7 @@ namespace Legion {
                             const LegionProfInstance::TaskVariant& task_variant)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Variant %u %lu %s", task_variant.task_id,
+      log_prof.print("Prof Task Variant %u %u %s", task_variant.task_id,
          task_variant.variant_id, task_variant.name);
     }
 
@@ -770,7 +770,7 @@ namespace Legion {
                                   const LegionProfInstance::TaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Wait Info %llu %u %lu %llu %llu %llu",
+      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu",
                 task_info.op_id, task_info.task_id, task_info.variant_id, 
                 wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
     }
@@ -791,7 +791,7 @@ namespace Legion {
                                   const LegionProfInstance::TaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Info %llu %u %lu " IDFMT " %llu %llu %llu %llu",
+      log_prof.print("Prof Task Info %llu %u %u " IDFMT " %llu %llu %llu %llu",
                      task_info.op_id, task_info.task_id, task_info.variant_id, 
                      task_info.proc_id, task_info.create, task_info.ready, 
                      task_info.start, task_info.stop);

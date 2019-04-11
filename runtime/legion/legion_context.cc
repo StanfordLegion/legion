@@ -6902,7 +6902,7 @@ namespace Legion {
         REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
           "Invalid mapper output from invoction of "
                       "'select_task_variant' on mapper %s. Mapper selected "
-                      "an invalidate variant ID %ld for inlining of task %s "
+                      "an invalidate variant ID %d for inlining of task %s "
                       "(UID %lld).", child_mapper->get_mapper_name(),
                       output.chosen_variant, child->get_task_name(), 
                       child->get_unique_id())
