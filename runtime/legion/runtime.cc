@@ -7300,6 +7300,11 @@ namespace Legion {
         has_return_type = impl->returns_value();
         all_idempotent  = impl->is_idempotent();
       }
+      // Check to see if this variant has already been registered
+      if (variants.find(impl->vid) != variants.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_VARIANT_REGISTRATION,
+                      "Duplicate variant ID %ld registered for task %s (ID %d)",
+                      impl->vid, get_name(false/*need lock*/), task_id)
       variants[impl->vid] = impl;
       // Erase the outstanding request if there is one
       outstanding_requests.erase(impl->vid);
