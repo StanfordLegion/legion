@@ -2630,17 +2630,6 @@ function type_check.expr_fill(cx, node)
   end
 
   for _, field_path in ipairs(dst.fields) do
-    if not std.check_privilege(cx, std.reads, dst_type, field_path) then
-      local dst_symbol
-      if node.dst.region:is(ast.specialized.expr.ID) then
-        dst_symbol = node.dst.region.value
-      else
-        dst_symbol = sdt.newsymbol()
-      end
-      report.error(
-        node, "invalid privileges in fill: " .. tostring(std.reads) ..
-          "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") .. ")")
-    end
     if not std.check_privilege(cx, std.writes, dst_type, field_path) then
       local dst_symbol
       if node.dst.region:is(ast.specialized.expr.ID) then
