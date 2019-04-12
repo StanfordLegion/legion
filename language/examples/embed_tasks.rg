@@ -29,6 +29,12 @@ where reads writes(r.{x, y}), reads(r.z) do
   regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
 end
 
+
+task other_regent_task(r : region(ispace(int1d), fs), s : region(ispace(int1d), fs))
+where reads writes(r.{x, y}, s.z), reads(r.z, s.x), reduces+(s.y) do
+  regentlib.c.printf("Task with two region requirements\n")
+end
+
 -- Save tasks to libembed_tasks.so
 local embed_tasks_h = root_dir .. "embed_tasks.h"
 local embed_tasks_so = root_dir .. "libembed_tasks.so"

@@ -48,10 +48,15 @@ void top_level_task(const Task *task,
     falloc.allocate_field(sizeof(int), FID_Z);
   }
   LogicalRegion region = runtime->create_logical_region(ctx, ispace, fspace);
+  LogicalRegion other_region = runtime->create_logical_region(ctx, ispace, fspace);
 
   runtime->fill_field<int>(ctx, region, region, FID_X, 0);
   runtime->fill_field<int>(ctx, region, region, FID_Y, 0);
   runtime->fill_field<int>(ctx, region, region, FID_Z, 0);
+
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_X, 0);
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_Y, 0);
+  runtime->fill_field<int>(ctx, other_region, other_region, FID_Z, 0);
 
   legion_field_id_t c_fields[3] = {FID_X, FID_Y, FID_Z};
   std::vector<FieldID> fields(c_fields, c_fields+3);
@@ -84,6 +89,24 @@ void top_level_task(const Task *task,
     my_regent_task_launcher_destroy(launcher);
     legion_future_destroy(f);
   }
+
+
+  // Arguments can be passed in any order
+
+  {
+    other_regent_task_launcher launcher;
+    launcher.add_argument_r(region, region, fields);
+    launcher.add_argument_s(other_region, other_region, fields);
+    launcher.execute(runtime, ctx);
+  }
+
+  {
+    other_regent_task_launcher launcher;
+    launcher.add_argument_s(other_region, other_region, fields);
+    launcher.add_argument_r(region, region, fields);
+    launcher.execute(runtime, ctx);
+  }
+
 }
 
 int main(int argc, char **argv)
