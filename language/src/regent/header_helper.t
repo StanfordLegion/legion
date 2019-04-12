@@ -78,6 +78,12 @@ local function get_task_params(task)
         terra_type, c_type, cxx_type = uint32, "uint32_t", "uint32_t"
       elseif param_type == uint64 then
         terra_type, c_type, cxx_type = uint64, "uint64_t", "uint64_t"
+      elseif param_type == float then
+        terra_type, c_type, cxx_type = float, "float", "float"
+      elseif param_type == double then
+        terra_type, c_type, cxx_type = double, "double", "double"
+      elseif param_type == bool then
+        terra_type, c_type, cxx_type = bool, "bool", "bool"
       else
         assert(false, "unknown type " .. tostring(param_type))
       end
@@ -386,7 +392,7 @@ end
 
 local function make_add_argument(launcher_name, wrapper_type, state_type,
                                  task, params_struct_type,
-                                 param_i, param_list, task_param_symbol,
+                                 param_i, first_req_i, param_list, task_param_symbol,
                                  param_field_id_array)
   local param_name = header_helper.normalize_name(param_list[1][4])
 
@@ -426,6 +432,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     end)
 
   -- Pack secondary values
+  local n_reqs = 0
   if base.types.is_region(param_type) then
     -- Pack region fields
     local parent_region = param_symbol[2]
@@ -451,6 +458,8 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     local privilege_modes = privileges:map(base.privilege_mode)
     local coherence_modes = coherences:map(base.coherence_mode)
 
+    n_reqs = #privileges
+
     for i, privilege in ipairs(privileges) do
       local field_paths = privilege_field_paths[i]
       local field_types = privilege_field_types[i]
@@ -470,22 +479,24 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
         assert(reduction_op)
       end
 
-      local add_requirement
+      local set_requirement
       if reduction_op then
-        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region_reduction
+        set_requirement = c.legion_task_launcher_set_region_requirement_logical_region_reduction
       else
-        add_requirement = c.legion_task_launcher_add_region_requirement_logical_region
+        set_requirement = c.legion_task_launcher_set_region_requirement_logical_region
       end
-      assert(add_requirement)
+      assert(set_requirement)
 
       local add_field = c.legion_task_launcher_add_field
 
       local add_flags = c.legion_task_launcher_add_flags
 
+      -- FIXME: the requirement number is *NOT* just the param number, it depends on how many requirements each region gets split into
+      local req_i = first_req_i + (i - 1)
 
       local requirement = terralib.newsymbol(uint, "requirement")
       local requirement_args = terralib.newlist({
-          `([launcher_state].launcher), arg_value})
+          `([launcher_state].launcher), `([uint32](req_i)), arg_value})
       if reduction_op then
         requirement_args:insert(reduction_op)
       else
@@ -496,16 +507,16 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
 
       arg_setup:insert(
         quote
-          var [requirement] = [add_requirement]([requirement_args])
+          [set_requirement]([requirement_args])
           [field_paths:map(
              function(field_path)
                local field_id = field_id_by_path[field_path]
                return quote
                  add_field(
-                   [launcher_state].launcher, [requirement], [field_id], true)
+                   [launcher_state].launcher, [req_i], [field_id], true)
                end
              end)]
-          [add_flags]([launcher_state].launcher, [requirement], [flag])
+          [add_flags]([launcher_state].launcher, [req_i], [flag])
         end)
     end
   end
@@ -532,7 +543,7 @@ local function make_add_argument(launcher_name, wrapper_type, state_type,
     [arg_setup]
   end
   helper:setname(helper_name)
-  return { helper_name, helper }
+  return { helper_name, helper, n_reqs }
 end
 
 function header_helper.generate_task_implementation(task)
@@ -554,14 +565,17 @@ function header_helper.generate_task_implementation(task)
 
   local task_param_symbols = task:get_param_symbols()
   local param_field_ids = task:get_field_id_param_labels()
+  local req_i = 0
   for i, param_list in ipairs(params) do
     local task_param_symbol = task_param_symbols[i]
     local param_field_id_array = param_field_ids[i]
-    result:insert(
-      make_add_argument(
+    local helper_name, helper, n_reqs =
+      unpack(make_add_argument(
         launcher_name, wrapper_type, state_type,
         task, params_struct_type,
-        i, param_list, task_param_symbol, param_field_id_array))
+        i, req_i, param_list, task_param_symbol, param_field_id_array))
+    result:insert({helper_name, helper})
+    req_i = req_i + n_reqs
   end
 
   return result
