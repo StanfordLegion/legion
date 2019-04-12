@@ -2385,6 +2385,34 @@ extern "C" {
     bool verified /* = false*/);
 
   /**
+   * @see Legion::TaskLauncher::region_requirements
+   */
+  void
+  legion_task_launcher_set_region_requirement_logical_region(
+    legion_task_launcher_t launcher,
+    unsigned idx,
+    legion_logical_region_t handle,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::TaskLauncher::region_requirements
+   */
+  void
+  legion_task_launcher_set_region_requirement_logical_region_reduction(
+    legion_task_launcher_t launcher,
+    unsigned idx,
+    legion_logical_region_t handle,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
    * @see Legion::TaskLauncher::add_field()
    */
   void
@@ -2559,6 +2587,62 @@ extern "C" {
    */
   unsigned
   legion_index_launcher_add_region_requirement_logical_partition_reduction(
+    legion_index_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexTaskLauncher::region_requirements
+   */
+  unsigned
+  legion_index_launcher_set_region_requirement_logical_region(
+    legion_index_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexTaskLauncher::region_requirements
+   */
+  unsigned
+  legion_index_launcher_set_region_requirement_logical_partition(
+    legion_index_launcher_t launcher,
+    legion_logical_partition_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_privilege_mode_t priv,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexTaskLauncher::region_requirements
+   */
+  unsigned
+  legion_index_launcher_set_region_requirement_logical_region_reduction(
+    legion_index_launcher_t launcher,
+    legion_logical_region_t handle,
+    legion_projection_id_t proj /* = 0 */,
+    legion_reduction_op_id_t redop,
+    legion_coherence_property_t prop,
+    legion_logical_region_t parent,
+    legion_mapping_tag_id_t tag /* = 0 */,
+    bool verified /* = false*/);
+
+  /**
+   * @see Legion::IndexTaskLauncher::region_requirements
+   */
+  unsigned
+  legion_index_launcher_set_region_requirement_logical_partition_reduction(
     legion_index_launcher_t launcher,
     legion_logical_partition_t handle,
     legion_projection_id_t proj /* = 0 */,
