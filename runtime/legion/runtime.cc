@@ -10220,8 +10220,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ApEvent Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
-                                        Processor::TaskFuncID tid,
-                                        const TaskArgument &arg,MapperID map_id)
+                                        TaskID tid, const TaskArgument &arg,
+                                        MapperID map_id)
     //--------------------------------------------------------------------------
     {
       // Get an individual task to be the top-level task
@@ -19020,7 +19020,7 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
+    /*static*/ TaskID Runtime::legion_main_id = 0;
     /*static*/ std::vector<RegistrationCallbackFnptr> 
                                              Runtime::registration_callbacks;
     /*static*/ bool Runtime::runtime_initialized = false;
@@ -19710,8 +19710,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(
-                                                  Processor::TaskFuncID top_id)
+    /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;
