@@ -378,8 +378,14 @@ local function analyze_is_simple_index_expression_node(cx)
       -- than the loop variable, because that's the only variable that
       -- gets supplied through the projection functor API.
       return cx:is_loop_index(node.value)
-    elseif node:is(ast.typed.expr.FieldAccess) or
-      node:is(ast.typed.expr.IndexAccess) or
+
+    elseif node:is(ast.typed.expr.FieldAccess) then
+      -- Field access gets desugared in the type checker, just sanity
+      -- check here that we're not doing a region access.
+      local value_type = std.as_read(node.value.expr_type)
+      assert(not std.is_bounded_type(value_type) or std.get_field(value_type.index_type.base_type, node.field_name))
+
+    elseif node:is(ast.typed.expr.IndexAccess) or
       node:is(ast.typed.expr.MethodCall) or
       node:is(ast.typed.expr.Call) or
       node:is(ast.typed.expr.RawContext) or

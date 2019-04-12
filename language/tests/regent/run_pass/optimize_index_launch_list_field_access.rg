@@ -12,14 +12,26 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- fails-with:
--- privilege_fill2.rg:24: invalid privileges in fill: reads($r)
---   fill(r, 0)
---      ^
-
 import "regent"
 
-task k(r : region(int))
-where writes(r) do
-  fill(r, 0)
+-- This tests the various loop optimizations supported by the
+-- compiler.
+
+task g(r : region(int)) : int
+where reads(r) do
+  return 5
 end
+
+task main()
+  var n = 5
+  var r = region(ispace(ptr, n), int)
+  var p = partition(equal, r, ispace(int1d, 5))
+
+  var s = ispace(int2d, {2, 2})
+
+  __demand(__parallel)
+  for i in s do
+    g(p[i.x + i.y * 2])
+  end
+end
+regentlib.start(main)
