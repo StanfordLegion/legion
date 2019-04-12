@@ -8048,6 +8048,8 @@ namespace Legion {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
         rez.serialize(vid);
+        // Extra padding to fix a realm bug for now
+        rez.serialize(vid);
         rez.serialize(done);
         rez.serialize(has_return_value);
         // pack the code descriptors 
@@ -8156,6 +8158,8 @@ namespace Legion {
       TaskVariantRegistrar registrar(task_id, false/*global*/);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
       RtUserEvent done;
       derez.deserialize(done);
       bool has_return;
