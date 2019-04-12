@@ -127,7 +127,7 @@ namespace Legion {
          << "id:" << TASK_WAIT_INFO_ID                       << delim
          << "op_id:UniqueID:"         << sizeof(UniqueID)    << delim
          << "task_id:TaskID:"         << sizeof(TaskID)      << delim
-         << "variant_id:UniqueID:"    << sizeof(UniqueID)    << delim
+         << "variant_id:VariantID:"   << sizeof(VariantID)   << delim
          << "wait_start:timestamp_t:" << sizeof(timestamp_t) << delim
          << "wait_ready:timestamp_t:" << sizeof(timestamp_t) << delim
          << "wait_end:timestamp_t:"   << sizeof(timestamp_t)
@@ -146,7 +146,7 @@ namespace Legion {
          << "id:" << TASK_INFO_ID                         << delim
          << "op_id:UniqueID:"      << sizeof(UniqueID)    << delim
          << "task_id:TaskID:"      << sizeof(TaskID)      << delim
-         << "variant_id:UniqueID:" << sizeof(UniqueID)    << delim
+         << "variant_id:VariantID:"<< sizeof(VariantID)   << delim
          << "proc_id:ProcID:"      << sizeof(ProcID)      << delim
          << "create:timestamp_t:"  << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"   << sizeof(timestamp_t) << delim
