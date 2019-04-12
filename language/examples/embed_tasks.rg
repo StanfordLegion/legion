@@ -24,9 +24,9 @@ local c = terralib.includec("embed.h", {"-I", root_dir})
 
 local fs = c.fs -- Get the field space from C header
 
-task my_regent_task(r : region(ispace(int1d), fs), x : int)
+task my_regent_task(r : region(ispace(int1d), fs), x : int, y : double, z : bool)
 where reads writes(r.{x, y}), reads(r.z) do
-  regentlib.c.printf("Hello from Regent! (value %d)\n", x)
+  regentlib.c.printf("Hello from Regent! (values %d %e %d)\n", x, y, z)
 end
 
 -- Save tasks to libembed_tasks.so

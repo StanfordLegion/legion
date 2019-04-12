@@ -62,6 +62,8 @@ void top_level_task(const Task *task,
     my_regent_task_launcher launcher;
     launcher.add_argument_r(region, region, fields);
     launcher.add_argument_x(12345);
+    launcher.add_argument_y(3.14);
+    launcher.add_argument_z(true);
     launcher.execute(runtime, ctx);
   }
 
@@ -76,6 +78,8 @@ void top_level_task(const Task *task,
     my_regent_task_launcher_t launcher = my_regent_task_launcher_create(legion_predicate_true(), 0, 0);
     my_regent_task_launcher_add_argument_r(launcher, c_region, c_region, c_fields, 3, false);
     my_regent_task_launcher_add_argument_x(launcher, 67890, false);
+    my_regent_task_launcher_add_argument_y(launcher, 4.56, false);
+    my_regent_task_launcher_add_argument_z(launcher, false, false);
     legion_future_t f = my_regent_task_launcher_execute(c_runtime, c_context, launcher);
     my_regent_task_launcher_destroy(launcher);
     legion_future_destroy(f);
