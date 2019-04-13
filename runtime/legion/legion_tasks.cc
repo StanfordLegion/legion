@@ -3542,7 +3542,7 @@ namespace Legion {
                 REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                               "Invalid mapper output from invocation of '%s' "
                               "on mapper %s. Mapper picked different variants "
-                              "%ld and %ld for task %s (UID %lld) that was "
+                              "%d and %d for task %s (UID %lld) that was "
                               "designated to be control replicated.", 
                               "map_replicate_task", mapper->get_mapper_name(),
                               chosen_variant, 
