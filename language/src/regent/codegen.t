@@ -10337,7 +10337,7 @@ local function setup_regent_calling_convention_metadata(node, task)
 end
 
 function codegen.top_task(cx, node)
-  log_codegen:info("Starting codegen for task " .. tostring(node.name))
+  log_codegen:info("%s", "Starting codegen for task " .. tostring(node.name))
 
   local task = node.prototype
   local variant = cx.variant

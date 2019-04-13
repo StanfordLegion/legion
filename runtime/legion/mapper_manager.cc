@@ -1366,7 +1366,7 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested execution "
-                      "constraints for variant %ld in mapper call %s, but "
+                      "constraints for variant %d in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const ExecutionConstraintSet &result = impl->get_execution_constraints();
@@ -1385,7 +1385,7 @@ namespace Legion {
       if (impl == NULL)
         REPORT_LEGION_ERROR(ERROR_INVALID_ARGUMENTS_TO_MAPPER_RUNTIME,
                       "Invalid mapper request: mapper %s requested task layout "
-                      "constraints for variant %ld in mapper call %s, but "
+                      "constraints for variant %d in mapper call %s, but "
                       "that variant does not exist.", mapper->get_mapper_name(),
                       vid, get_mapper_call_name(ctx->kind))
       const TaskLayoutConstraintSet& result = impl->get_layout_constraints();

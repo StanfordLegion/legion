@@ -2776,6 +2776,51 @@ legion_task_launcher_add_region_requirement_logical_region_reduction(
 }
 
 void
+legion_task_launcher_set_region_requirement_logical_region(
+  legion_task_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, priv, prop, parent, tag, verified);
+}
+
+void
+legion_task_launcher_set_region_requirement_logical_region_reduction(
+  legion_task_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  TaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, redop, prop, parent, tag, verified);
+}
+
+void
 legion_task_launcher_add_field(legion_task_launcher_t launcher_,
                                unsigned idx,
                                legion_field_id_t fid,
@@ -3028,6 +3073,98 @@ legion_index_launcher_add_region_requirement_logical_partition_reduction(
   launcher->add_region_requirement(
     RegionRequirement(handle, proj, redop, prop, parent, tag, verified));
   return idx;
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_region(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_partition(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_privilege_mode_t priv,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, priv, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_region_reduction(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_region_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalRegion handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified);
+}
+
+void
+legion_index_launcher_set_region_requirement_logical_partition_reduction(
+  legion_index_launcher_t launcher_,
+  unsigned idx,
+  legion_logical_partition_t handle_,
+  legion_projection_id_t proj /* = 0 */,
+  legion_reduction_op_id_t redop,
+  legion_coherence_property_t prop,
+  legion_logical_region_t parent_,
+  legion_mapping_tag_id_t tag /* = 0 */,
+  bool verified /* = false*/)
+{
+  IndexTaskLauncher *launcher = CObjectWrapper::unwrap(launcher_);
+  LogicalPartition handle = CObjectWrapper::unwrap(handle_);
+  LogicalRegion parent = CObjectWrapper::unwrap(parent_);
+
+  if (idx >= launcher->region_requirements.size()) {
+    launcher->region_requirements.resize(idx + 1);
+  }
+  launcher->region_requirements[idx] =
+    RegionRequirement(handle, proj, redop, prop, parent, tag, verified);
 }
 
 void

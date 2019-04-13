@@ -1690,7 +1690,7 @@ namespace Legion {
       void startup_runtime(RtEvent top_level_precondition);
       void finalize_runtime(void);
       ApEvent launch_mapper_task(Mapper *mapper, Processor proc, 
-                                 Processor::TaskFuncID tid,
+                                 TaskID tid,
                                  const TaskArgument &arg, MapperID map_id);
       void process_mapper_task_result(const MapperTaskArgs *args); 
     public:
@@ -3154,7 +3154,7 @@ namespace Legion {
           const LegionConfiguration &config, RealmRuntime &realm,
           Processor::Kind &startup_kind);
       static int wait_for_shutdown(void);
-      static void set_top_level_task_id(Processor::TaskFuncID top_id);
+      static void set_top_level_task_id(TaskID top_id);
       static void configure_MPI_interoperability(int rank);
       static void register_handshake(MPILegionHandshake &handshake);
       static const ReductionOp* get_reduction_op(ReductionOpID redop_id);
@@ -3201,7 +3201,7 @@ namespace Legion {
 #endif
     public:
       // Static member variables
-      static Processor::TaskFuncID legion_main_id;
+      static TaskID legion_main_id;
       static std::vector<RegistrationCallbackFnptr> registration_callbacks;
       static bool runtime_initialized;
       static bool runtime_started;

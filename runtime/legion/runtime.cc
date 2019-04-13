@@ -7476,6 +7476,11 @@ namespace Legion {
         has_return_type = impl->returns_value();
         all_idempotent  = impl->is_idempotent();
       }
+      // Check to see if this variant has already been registered
+      if (variants.find(impl->vid) != variants.end())
+        REPORT_LEGION_ERROR(ERROR_DUPLICATE_VARIANT_REGISTRATION,
+                      "Duplicate variant ID %d registered for task %s (ID %d)",
+                      impl->vid, get_name(false/*need lock*/), task_id)
       variants[impl->vid] = impl;
       // Erase the outstanding request if there is one
       outstanding_requests.erase(impl->vid);
@@ -7503,7 +7508,7 @@ namespace Legion {
         if (can_fail)
           return NULL;
         REPORT_LEGION_ERROR(ERROR_UNREGISTERED_VARIANT, 
-                            "Unable to find variant %ld of task %s!",
+                            "Unable to find variant %d of task %s!",
                             variant_id, get_name())
       }
       // Retake the lock and see if we can send a request
@@ -8003,7 +8008,7 @@ namespace Legion {
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
                      "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
-                     " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                     " %s (ID %d) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                      variant_name, vid, owner->get_name(false), owner->task_id)
           ready_event = ApEvent(Processor::register_task_by_kind(
                 Processor::LOC_PROC, false/*global*/, descriptor_id, 
@@ -8052,7 +8057,7 @@ namespace Legion {
       if (registrar.task_variant_name == NULL)
       {
         variant_name = (char*)malloc(64*sizeof(char));
-        snprintf(variant_name,64,"unnamed_variant_%ld", vid);
+        snprintf(variant_name,64,"unnamed_variant_%d", vid);
       }
       else
         variant_name = strdup(registrar.task_variant_name);
@@ -8067,7 +8072,7 @@ namespace Legion {
                          "a portable implementation.", variant_name)
       if (leaf_variant && inner_variant)
         REPORT_LEGION_ERROR(ERROR_INNER_LEAF_MISMATCH, 
-                      "Task variant %s (ID %ld) of task %s (ID %d) is not "
+                      "Task variant %s (ID %d) of task %s (ID %d) is not "
                       "permitted to be both inner and leaf tasks "
                       "simultaneously.", variant_name, vid,
                       owner->get_name(), owner->task_id)
@@ -8198,7 +8203,7 @@ namespace Legion {
       if (warn)
         REPORT_LEGION_WARNING(LEGION_WARNING_MISSING_PROC_CONSTRAINT, 
            "NO PROCESSOR CONSTRAINT SPECIFIED FOR VARIANT"
-                        " %s (ID %ld) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
+                        " %s (ID %d) OF TASK %s (ID %d)! ASSUMING LOC_PROC!",
                       variant_name, vid, owner->get_name(false),owner->task_id)
       return (Processor::LOC_PROC == kind);
     }
@@ -8218,6 +8223,8 @@ namespace Legion {
       {
         RezCheck z(rez);
         rez.serialize(owner->task_id);
+        rez.serialize(vid);
+        // Extra padding to fix a realm bug for now
         rez.serialize(vid);
         rez.serialize(done);
         rez.serialize(has_return_value);
@@ -8327,6 +8334,8 @@ namespace Legion {
       TaskVariantRegistrar registrar(task_id, false/*global*/);
       VariantID variant_id;
       derez.deserialize(variant_id);
+      // Extra padding to fix a realm bug for now
+      derez.deserialize(variant_id); 
       RtUserEvent done;
       derez.deserialize(done);
       bool has_return;
@@ -10364,8 +10373,8 @@ namespace Legion {
     
     //--------------------------------------------------------------------------
     ApEvent Runtime::launch_mapper_task(Mapper *mapper, Processor proc, 
-                                        Processor::TaskFuncID tid,
-                                        const TaskArgument &arg,MapperID map_id)
+                                        TaskID tid, const TaskArgument &arg,
+                                        MapperID map_id)
     //--------------------------------------------------------------------------
     {
       // Get an individual task to be the top-level task
@@ -19330,7 +19339,7 @@ namespace Legion {
       return finder->second;
     }
 
-    /*static*/ Processor::TaskFuncID Runtime::legion_main_id = 0;
+    /*static*/ TaskID Runtime::legion_main_id = 0;
     /*static*/ std::vector<RegistrationCallbackFnptr> 
                                              Runtime::registration_callbacks;
     /*static*/ bool Runtime::runtime_initialized = false;
@@ -20020,8 +20029,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(
-                                                  Processor::TaskFuncID top_id)
+    /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {
       legion_main_id = top_id;

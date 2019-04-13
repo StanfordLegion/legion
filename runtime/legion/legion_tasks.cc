@@ -3153,7 +3153,7 @@ namespace Legion {
         if (conflict_constraint != NULL)
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
-                        "%ld for task %s (ID %lld). But instance selected "
+                        "%d for task %s (ID %lld). But instance selected "
                         "for region requirement %d fails to satisfy the "
                         "corresponding constraints.", 
                         local_mapper->get_mapper_name(), impl->vid,
@@ -3170,7 +3170,7 @@ namespace Legion {
         if (!execution_constraints.processor_constraint.can_use(
                                       this->target_proc.kind()))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output. Mapper %s selected variant %ld "
+                      "Invalid mapper output. Mapper %s selected variant %d "
                       "for task %s (ID %lld). However, this variant does not "
                       "permit running on processor " IDFMT " of kind %s.",
                       local_mapper->get_mapper_name(),
@@ -3223,7 +3223,7 @@ namespace Legion {
             if (regions[*it].region.get_field_space() != handle)
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output. Mapper %s selected variant "
-                            "%ld for task %s (ID %lld). However, this variant "
+                            "%d for task %s (ID %lld). However, this variant "
                             "has colocation constraints for indexes %d and %d "
                             "which have region requirements with different "
                             "field spaces which is illegal.",
@@ -3243,7 +3243,7 @@ namespace Legion {
                                             con_it->indexes.end());
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
-                        "%ld for task %s (ID %lld). However, this variant "
+                        "%d for task %s (ID %lld). However, this variant "
                         "requires that region requirements %d and %d be "
                         "co-located for some set of field, but they are not.",
                         local_mapper->get_mapper_name(), impl->vid, 

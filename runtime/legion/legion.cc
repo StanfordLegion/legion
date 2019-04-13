@@ -1692,7 +1692,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    TaskLauncher::TaskLauncher(Processor::TaskFuncID tid, TaskArgument arg,
+    TaskLauncher::TaskLauncher(TaskID tid, TaskArgument arg,
                                Predicate pred /*= Predicate::TRUE_PRED*/,
                                MapperID mid /*=0*/, MappingTagID t /*=0*/)
       : task_id(tid), argument(arg), predicate(pred), map_id(mid), tag(t), 
@@ -1719,7 +1719,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, Domain dom,
+    IndexTaskLauncher::IndexTaskLauncher(TaskID tid, Domain dom,
                                      TaskArgument global,
                                      ArgumentMap map,
                                      Predicate pred /*= Predicate::TRUE_PRED*/,
@@ -1735,7 +1735,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexTaskLauncher::IndexTaskLauncher(Processor::TaskFuncID tid, 
+    IndexTaskLauncher::IndexTaskLauncher(TaskID tid, 
                                      IndexSpace space,
                                      TaskArgument global,
                                      ArgumentMap map,
@@ -5398,7 +5398,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_task(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
                         const std::vector<RegionRequirement> &regions,
@@ -5416,7 +5416,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap Runtime::execute_index_space(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -5439,7 +5439,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     Future Runtime::execute_index_space(Context ctx, 
-                        Processor::TaskFuncID task_id,
+                        TaskID task_id,
                         const Domain domain,
                         const std::vector<IndexSpaceRequirement> &indexes,
                         const std::vector<FieldSpaceRequirement> &fields,
@@ -6526,7 +6526,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void Runtime::set_top_level_task_id(Processor::TaskFuncID top_id)
+    /*static*/ void Runtime::set_top_level_task_id(TaskID top_id)
     //--------------------------------------------------------------------------
     {
       Internal::Runtime::set_top_level_task_id(top_id);
