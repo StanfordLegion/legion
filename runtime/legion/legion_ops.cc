@@ -12562,27 +12562,56 @@ namespace Legion {
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
       for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
       {
-        if (!mapped_instances[idx].get_manager()->meets_regions(
-                                                        regions_to_check))
+        PhysicalManager *manager = mapped_instances[idx].get_manager();
+        if (!manager->meets_regions(regions_to_check))
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper specified an "
                         "instance that does not meet the logical region "
-                        "requirement. The inline mapping operation was issued "
-                        "in task %s (ID %lld).", mapper->get_mapper_name(), 
+                        "requirement. The dependent partition operation was "
+                        "issued in task %s (ID %lld).", 
+                        mapper->get_mapper_name(),
                         parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
-      }
-      for (unsigned idx = 0; idx < mapped_instances.size(); idx++)
-      {
-        if (!mapped_instances[idx].get_manager()->is_instance_manager())
+        if (!manager->is_instance_manager())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of "
                         "'map_partition' on mapper %s. Mapper selected an "
-                        "illegal specialized reduction instance for "
+                        "illegal specialized reduction instance for dependent "
                         "partition operation in task %s (ID %lld).",
                         mapper->get_mapper_name(),parent_ctx->get_task_name(),
                         parent_ctx->get_unique_id())
+        // This is a temporary check to guarantee that instances for 
+        // dependent partitioning operations are in memories that 
+        // Realm supports for now. In the future this should be fixed
+        // so that realm supports all kinds of memories for dependent
+        // partitioning operations (see issue #516)
+        const Memory mem = manager->get_memory();
+        const Memory::Kind mem_kind = mem.kind();
+        if ((mem_kind != Memory::GLOBAL_MEM) && 
+            (mem_kind != Memory::SYSTEM_MEM) &&
+            (mem_kind != Memory::REGDMA_MEM) && 
+            (mem_kind != Memory::SOCKET_MEM) &&
+            (mem_kind != Memory::Z_COPY_MEM))
+        {
+          const char *mem_names[] = {
+#define MEM_NAMES(name, desc) desc,
+            REALM_MEMORY_KINDS(MEM_NAMES) 
+#undef MEM_NAMES
+          };
+          REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
+                        "Invalid mapper output from invocation of "
+                        "'map_partition' on mapper %s for dependent partition "
+                        "operation %lld in task %s (UID %lld). Mapper specified"
+                        " an instance in memory " IDFMT " with kind %s which is"
+                        " not supported for dependent partition operations "
+                        "currently (see Legion issue #516). Please pick an "
+                        "instance in a CPU-visible memory for now.",
+                        mapper->get_mapper_name(), get_unique_op_id(),
+                        parent_ctx->get_task_name(), 
+                        parent_ctx->get_unique_id(), 
+                        mem.id, mem_names[mem_kind])
+        }
       }
     }
 

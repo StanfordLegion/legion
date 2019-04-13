@@ -1389,7 +1389,7 @@ namespace Legion {
     struct TaskLauncher {
     public:
       TaskLauncher(void);
-      TaskLauncher(Processor::TaskFuncID tid, 
+      TaskLauncher(TaskID tid, 
                    TaskArgument arg,
                    Predicate pred = Predicate::TRUE_PRED,
                    MapperID id = 0,
@@ -1413,7 +1413,7 @@ namespace Legion {
     public:
       inline void set_independent_requirements(bool independent);
     public:
-      Processor::TaskFuncID              task_id;
+      TaskID                             task_id;
       std::vector<IndexSpaceRequirement> index_requirements;
       std::vector<RegionRequirement>     region_requirements;
       std::vector<Future>                futures;
@@ -1472,7 +1472,7 @@ namespace Legion {
     struct IndexTaskLauncher {
     public:
       IndexTaskLauncher(void);
-      IndexTaskLauncher(Processor::TaskFuncID tid,
+      IndexTaskLauncher(TaskID tid,
                         Domain domain,
                         TaskArgument global_arg,
                         ArgumentMap map,
@@ -1480,7 +1480,7 @@ namespace Legion {
                         bool must = false,
                         MapperID id = 0,
                         MappingTagID tag = 0);
-      IndexTaskLauncher(Processor::TaskFuncID tid,
+      IndexTaskLauncher(TaskID tid,
                         IndexSpace launch_space,
                         TaskArgument global_arg,
                         ArgumentMap map,
@@ -1507,7 +1507,7 @@ namespace Legion {
     public:
       inline void set_independent_requirements(bool independent);
     public:
-      Processor::TaskFuncID              task_id;
+      TaskID                             task_id;
       Domain                             launch_domain;
       IndexSpace                         launch_space;
       // Will only be used in control replication context. If left
@@ -2719,7 +2719,7 @@ namespace Legion {
       virtual const MustEpoch* as_must_epoch(void) const { return NULL; }
     public:
       // Task argument information
-      Processor::TaskFuncID task_id; 
+      TaskID                              task_id; 
       std::vector<IndexSpaceRequirement>  indexes;
       std::vector<RegionRequirement>      regions;
       std::vector<Future>                 futures;
@@ -5192,8 +5192,7 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Launching tasks should be done with the new task "
                         "launcher interface.")
-      Future execute_task(Context ctx, 
-                          Processor::TaskFuncID task_id,
+      Future execute_task(Context ctx, TaskID task_id,
                           const std::vector<IndexSpaceRequirement> &indexes,
                           const std::vector<FieldSpaceRequirement> &fields,
                           const std::vector<RegionRequirement> &regions,
@@ -5222,8 +5221,7 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Launching tasks should be done with the new task "
                         "launcher interface.")
-      FutureMap execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
+      FutureMap execute_index_space(Context ctx, TaskID task_id,
                           const Domain domain,
                           const std::vector<IndexSpaceRequirement> &indexes,
                           const std::vector<FieldSpaceRequirement> &fields,
@@ -5258,8 +5256,7 @@ namespace Legion {
        */
       LEGION_DEPRECATED("Launching tasks should be done with the new task "
                         "launcher interface.")
-      Future execute_index_space(Context ctx, 
-                          Processor::TaskFuncID task_id,
+      Future execute_index_space(Context ctx, TaskID task_id,
                           const Domain domain,
                           const std::vector<IndexSpaceRequirement> &indexes,
                           const std::vector<FieldSpaceRequirement> &fields,
@@ -6816,7 +6813,7 @@ namespace Legion {
        * task must be a single task and not an index space task.
        * @param top_id ID of the top level task to be run
        */
-      static void set_top_level_task_id(Processor::TaskFuncID top_id);
+      static void set_top_level_task_id(TaskID top_id);
 
       /**
        * Return the maximum number of dimensions that Legion was

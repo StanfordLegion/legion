@@ -1130,6 +1130,7 @@ typedef enum legion_error_t {
   ERROR_COPY_GATHER_REQUIREMENT = 553,
   ERROR_COPY_SCATTER_REQUIREMENT = 554,
   ERROR_MAPPER_SYNCHRONIZATION = 555,
+  ERROR_DUPLICATE_VARIANT_REGISTRATION = 556,
   ERROR_RESERVED_SHARDING_ID = 601,
   ERROR_DUPLICATE_SHARDING_ID = 602,
   ERROR_INVALID_SHARDING_ID = 603,
@@ -1475,9 +1476,9 @@ typedef unsigned int legion_tunable_id_t;
 typedef unsigned int legion_local_variable_id_t;
 typedef unsigned int legion_replication_id_t;
 typedef unsigned int legion_shard_id_t;
+typedef unsigned int legion_variant_id_t;
 typedef unsigned long long legion_distributed_id_t;
 typedef unsigned long legion_mapping_tag_id_t;
-typedef unsigned long legion_variant_id_t;
 typedef unsigned long legion_code_descriptor_id_t;
 typedef unsigned long legion_semantic_tag_t;
 typedef unsigned long long legion_unique_id_t;

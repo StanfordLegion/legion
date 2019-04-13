@@ -3328,7 +3328,7 @@ namespace Legion {
             local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
-                        "%ld for task %s (ID %lld). But instance selected "
+                        "%d for task %s (ID %lld). But instance selected "
                         "for region requirement %d fails to satisfy the "
                         "corresponding constraints.", 
                         local_mapper->get_mapper_name(), impl->vid,
@@ -3349,7 +3349,7 @@ namespace Legion {
           if (local_mapper == NULL)
             local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
-                      "Invalid mapper output. Mapper %s selected variant %ld "
+                      "Invalid mapper output. Mapper %s selected variant %d "
                       "for task %s (ID %lld). However, this variant does not "
                       "permit running on processor " IDFMT " of kind %s.",
                       local_mapper->get_mapper_name(),
@@ -3406,7 +3406,7 @@ namespace Legion {
                 local_mapper = runtime->find_mapper(current_proc, map_id);
               REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                             "Invalid mapper output. Mapper %s selected variant "
-                            "%ld for task %s (ID %lld). However, this variant "
+                            "%d for task %s (ID %lld). However, this variant "
                             "has colocation constraints for indexes %d and %d "
                             "which have region requirements with different "
                             "field spaces which is illegal.",
@@ -3429,7 +3429,7 @@ namespace Legion {
             local_mapper = runtime->find_mapper(current_proc, map_id);
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
-                        "%ld for task %s (ID %lld). However, this variant "
+                        "%d for task %s (ID %lld). However, this variant "
                         "requires that region requirements %d and %d be "
                         "co-located for some set of field, but they are not.",
                         local_mapper->get_mapper_name(), impl->vid, 
