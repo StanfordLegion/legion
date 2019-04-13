@@ -18,7 +18,7 @@ import "regent"
 -- compiler.
 
 task g(r : region(int)) : int
-where reads writes(r) do
+where reads (r) do
   return 5
 end
 
@@ -28,6 +28,8 @@ task main()
   var p = partition(equal, r, ispace(int1d, 5))
 
   var s = ispace(int2d, {2, 2})
+
+  fill(r, 0)
 
   __demand(__parallel)
   for i in s do
