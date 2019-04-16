@@ -826,7 +826,7 @@ local function tag_imported(cx, handle)
   end
   return quote
     do
-      var result = [IMPORT_SEMANTIC_VALUE]
+      var result : uint32 = [IMPORT_SEMANTIC_VALUE]
       var result_size : uint64 = [sizeof(uint32)]
       [attach]([cx.runtime], [handle], [IMPORT_SEMANTIC_TAG],
         [&opaque](&result), result_size, false)
