@@ -1217,6 +1217,20 @@ function std.get_absolute_field_paths(fspace_type, prefixes)
     end, prefixes)
 end
 
+function std.check_field_sliced(value_type, field_path)
+  local field_type = value_type
+  if field_type:isstruct() and field_type.__no_field_slicing then
+    return false, field_type
+  end
+  for idx = 1, #field_path do
+    field_type = std.get_field(field_type, field_path[idx])
+    if field_type:isstruct() and field_type.__no_field_slicing then
+      return false, field_type
+    end
+  end
+  return true
+end
+
 local function type_requires_force_cast(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or

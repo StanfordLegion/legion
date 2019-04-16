@@ -2646,6 +2646,14 @@ function type_check.expr_fill(cx, node)
     end
   end
 
+  for _, field_path in ipairs(dst.fields) do
+    local sliced, field_type = std.check_field_sliced(dst_type:fspace(), field_path)
+    if not sliced then
+      report.error(
+        node, "partial fill with type " .. tostring(field_type) .. " is not allowed")
+    end
+  end
+
   return ast.typed.expr.Fill {
     dst = dst,
     value = value,
