@@ -4078,7 +4078,16 @@ function type_check.top_task(cx, node)
         local _, field_types =
           std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
         field_types:map(function(field_type)
-          std.update_reduction_op(privilege_type.op, field_type)
+          if field_type:isprimitive() or
+             (field_type:isarray() and field_type.type:isprimitive())
+          then
+            std.update_reduction_op(privilege_type.op, field_type)
+          else
+            report.error(node, "invalid field type for " ..
+              tostring(privilege.privilege) .. "(" ..
+              terralib.newlist({privilege.region:hasname(), unpack(privilege.region)}):concat(".") ..
+              "): " .. tostring(field_type))
+          end
         end)
       end
       std.add_privilege(cx, privilege_type, region_type, field_path)
