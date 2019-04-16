@@ -2693,6 +2693,8 @@ do
   std.complex = st
   std.complex32 = st
 
+  st.__no_field_slicing = true
+
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }
   end
@@ -2726,6 +2728,8 @@ do
   })
   std.complex = st
   std.complex64 = st
+
+  st.__no_field_slicing = true
 
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }
