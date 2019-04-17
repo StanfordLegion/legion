@@ -21,6 +21,7 @@
 
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurementID);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimeline);
+TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationTimelineGPU);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationEventWaits::WaitInterval);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationMemoryUsage);
 TYPE_IS_SERIALIZABLE(Realm::ProfilingMeasurements::OperationProcessorUsage);
@@ -74,6 +75,24 @@ namespace Realm {
 
     ////////////////////////////////////////////////////////////////////////
     //
+    // struct OperationTimeLineGPU
+    //
+    inline void OperationTimelineGPU::record_start_time(void)
+    {
+      start_time = Clock::current_time_in_nanoseconds();
+    }
+    inline void OperationTimelineGPU::record_end_time(void)
+    {
+      end_time = Clock::current_time_in_nanoseconds();
+    }
+    inline bool OperationTimelineGPU::is_valid(void) const
+    {
+      return ((start_time != INVALID_TIMESTAMP) &&
+	      (end_time != INVALID_TIMESTAMP));
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    //
     // struct OperationTimeLine
     //
 
@@ -110,7 +129,6 @@ namespace Realm {
 	      (end_time != INVALID_TIMESTAMP) &&
 	      (complete_time != INVALID_TIMESTAMP));
     }
-
 
     ////////////////////////////////////////////////////////////////////////
     //

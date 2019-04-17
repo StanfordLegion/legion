@@ -54,6 +54,14 @@ def log_task_info(op_id, task_id, variant_id, proc_id, create, ready, start, sto
         task_spans[task_name] = []
     task_spans[task_name].append(time_range)
 
+def log_gpu_task_info(op_id, task_id, variant_id, proc_id, create, ready, start, stop, gpu_start, gpu_stop):
+    assert variant_id in task_names
+    task_name = task_names[variant_id]
+    time_range = (gpu_start, gpu_stop)
+    if task_name not in task_spans:
+        task_spans[task_name] = []
+    task_spans[task_name].append(time_range)
+
 def log_meta_info(op_id, lg_id, proc_id, create, ready, start, stop):
     assert lg_id in meta_task_names
     task_name = meta_task_names[lg_id]

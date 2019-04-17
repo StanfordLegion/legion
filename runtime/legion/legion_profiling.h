@@ -142,6 +142,16 @@ namespace Legion {
         timestamp_t create, ready, start, stop;
         std::deque<WaitInfo> wait_intervals;
       };
+      struct GPUTaskInfo {
+      public:
+        UniqueID op_id;
+        TaskID task_id;
+        VariantID variant_id;
+        ProcID proc_id;
+        timestamp_t create, ready, start, stop;
+        timestamp_t gpu_start, gpu_stop;
+        std::deque<WaitInfo> wait_intervals;
+      };
       struct MetaInfo {
       public:
         UniqueID op_id;
@@ -234,6 +244,11 @@ namespace Legion {
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
             const Realm::ProfilingMeasurements::OperationEventWaits &waits);
+      void process_gpu_task(TaskID task_id, VariantID variant_id, UniqueID op_id,
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits,
+            const Realm::ProfilingMeasurements::OperationTimelineGPU &timeline_gpu);
       void process_meta(size_t id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
@@ -281,6 +296,7 @@ namespace Legion {
       std::deque<SliceOwner>        slice_owners;
     private:
       std::deque<TaskInfo> task_infos;
+      std::deque<GPUTaskInfo> gpu_task_infos;
       std::deque<MetaInfo> meta_infos;
       std::deque<CopyInfo> copy_infos;
       std::deque<FillInfo> fill_infos;
@@ -308,6 +324,7 @@ namespace Legion {
         LEGION_PROF_FILL,
         LEGION_PROF_INST,
         LEGION_PROF_PARTITION,
+        LEGION_PROF_GPU_TASK,
         LEGION_PROF_LAST,
       };
       struct ProfilingInfo : public ProfilingResponseBase {
@@ -351,6 +368,8 @@ namespace Legion {
     public:
       void add_task_request(Realm::ProfilingRequestSet &requests, 
                             TaskID tid, VariantID vid, SingleTask *task);
+      void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
+                            TaskID tid, VariantID vid, SingleTask *task);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, Operation *op);
       void add_copy_request(Realm::ProfilingRequestSet &requests, 
@@ -368,6 +387,8 @@ namespace Legion {
     public:
       // Alternate versions of the one above with op ids
       void add_task_request(Realm::ProfilingRequestSet &requests, 
+                            TaskID tid, VariantID vid, UniqueID uid);
+      void add_gpu_task_request(Realm::ProfilingRequestSet &requests,
                             TaskID tid, VariantID vid, UniqueID uid);
       void add_meta_request(Realm::ProfilingRequestSet &requests,
                             LgTaskID tid, UniqueID uid);
