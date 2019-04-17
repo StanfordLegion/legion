@@ -1154,7 +1154,7 @@ function check_vectorizability.type(ty)
     return ty.dim == 0
   elseif ty:isprimitive() then
     return true
-  elseif ty:isstruct() then
+  elseif ty:isstruct() and not ty.__no_field_slicing then
     for _, entry in pairs(ty.entries) do
       local entry_type = entry[2] or entry.type
       if not check_vectorizability.type(entry_type) then
