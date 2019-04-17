@@ -166,7 +166,7 @@ namespace Realm {
 	   (prev == Status::CANCELLED));
 
     timeline.record_complete_time();
-
+    timeline_gpu.record_end_time();
     send_profiling_data();
 
     // trigger the finish event last - the OperationTable will delete us shortly after we do

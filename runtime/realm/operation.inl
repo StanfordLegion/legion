@@ -74,7 +74,6 @@ namespace Realm {
     int remaining = __sync_sub_and_fetch(&pending_work_items, 1);
 
     if(remaining == 0) {
-      update_gpu_end();
       mark_completed();
    }
   }

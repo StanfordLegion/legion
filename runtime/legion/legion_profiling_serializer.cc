@@ -158,7 +158,7 @@ namespace Legion {
          << "id:" << GPU_TASK_INFO_ID                       << delim
          << "op_id:UniqueID:"        << sizeof(UniqueID)    << delim
          << "task_id:TaskID:"        << sizeof(TaskID)      << delim
-         << "variant_id:UniqueID:"   << sizeof(UniqueID)    << delim
+         << "variant_id:VariantID:"   << sizeof(VariantID)    << delim
          << "proc_id:ProcID:"        << sizeof(ProcID)      << delim
          << "create:timestamp_t:"    << sizeof(timestamp_t) << delim
          << "ready:timestamp_t:"     << sizeof(timestamp_t) << delim
@@ -830,7 +830,7 @@ namespace Legion {
                                   const LegionProfInstance::GPUTaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof Task Wait Info %llu %u %lu %llu %llu %llu",
+      log_prof.print("Prof Task Wait Info %llu %u %u %llu %llu %llu",
                 task_info.op_id, task_info.task_id, task_info.variant_id,
                 wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
     }
@@ -863,7 +863,7 @@ namespace Legion {
                                   const LegionProfInstance::GPUTaskInfo& task_info)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Prof GPU Task Info %llu %u %lu " IDFMT
+      log_prof.print("Prof GPU Task Info %llu %u %u " IDFMT
 		     " %llu %llu %llu %llu %llu %llu",
                      task_info.op_id, task_info.task_id, task_info.variant_id,
                      task_info.proc_id, task_info.create, task_info.ready,
