@@ -283,6 +283,14 @@ endif()
 #------------------------------------------------------------------------------#
 # Miscelaneous other options
 #------------------------------------------------------------------------------#
+set(Legion_MAX_DIM 3 CACHE STRING "Maximum number of dimensions")
+set_property(CACHE Legion_MAX_DIM PROPERTY STRINGS 1 2 3 4 5 6 7 8 9)
+mark_as_advanced(Legion_MAX_DIM)
+
+# define variable for legion_defines.h
+set(LEGION_MAX_DIM ${Legion_MAX_DIM})
+set(REALM_MAX_DIM ${Legion_MAX_DIM})
+
 set(Legion_MAX_FIELDS 512 CACHE STRING "Maximum number of fields allocated to a single field space")
 set_property(CACHE Legion_MAX_FIELDS PROPERTY STRINGS 32 64 128 256 512 1024)
 mark_as_advanced(Legion_MAX_FIELDS)
