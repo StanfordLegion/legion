@@ -12,22 +12,25 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- invalid_fill2.rg:35: partial fill with type fs2 is not allowed
+--   fill(r.val.real, 0)
+--      ^
+
 import "regent"
 
-task main()
-  var r = region(ispace(int1d, 32), complex)
+struct fs2
+{
+  real : double,
+}
+fs2.__no_field_slicing = true
 
-  fill(r, complex {1.0, 2.0})
+struct fs1
+{
+  val : fs2,
+}
 
-  -- __demand(__vectorize)
-  for x in r do
-    var y = @x + 1
-    @x = @x * y - 4
-  end
-
-  for x in r do
-    regentlib.assert(x.real == -6.0, "test failed")
-    regentlib.assert(x.imag ==  6.0, "test failed")
-  end
+task k(r : region(fs1))
+where writes(r) do
+  fill(r.val.real, 0)
 end
-regentlib.start(main)

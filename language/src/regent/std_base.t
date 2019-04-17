@@ -679,7 +679,9 @@ function base.types.flatten_struct_fields(struct_type)
   end
 
   if (struct_type:isstruct() or base.types.is_fspace_instance(struct_type)) and
-     not (is_geometric_type(struct_type) or base.types.is_regent_array(struct_type)) then
+     not (is_geometric_type(struct_type) or
+          base.types.is_regent_array(struct_type) or
+          struct_type.__no_field_slicing) then
     local entries = struct_type:getentries()
     for _, entry in ipairs(entries) do
       local entry_name = entry[1] or entry.field

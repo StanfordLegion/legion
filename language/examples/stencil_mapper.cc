@@ -273,7 +273,7 @@ void StencilMapper::stencil_create_copy_instance(MapperContext ctx,
   }
 }
 
-static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std::set<Processor> &local_procs)
+static void create_mappers(Machine machine, Runtime *runtime, const std::set<Processor> &local_procs)
 {
   std::vector<Processor>* procs_list = new std::vector<Processor>();
 
@@ -295,5 +295,5 @@ static void create_mappers(Machine machine, HighLevelRuntime *runtime, const std
 
 void register_mappers()
 {
-  HighLevelRuntime::add_registration_callback(create_mappers);
+  Runtime::add_registration_callback(create_mappers);
 }

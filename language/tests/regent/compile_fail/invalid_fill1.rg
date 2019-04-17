@@ -12,22 +12,14 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
+-- fails-with:
+-- invalid_fill1.rg:24: partial fill with type complex64 is not allowed
+--   fill(r.real, 0)
+--      ^
+
 import "regent"
 
-task main()
-  var r = region(ispace(int1d, 32), complex)
-
-  fill(r, complex {1.0, 2.0})
-
-  -- __demand(__vectorize)
-  for x in r do
-    var y = @x + 1
-    @x = @x * y - 4
-  end
-
-  for x in r do
-    regentlib.assert(x.real == -6.0, "test failed")
-    regentlib.assert(x.imag ==  6.0, "test failed")
-  end
+task k(r : region(complex))
+where writes(r) do
+  fill(r.real, 0)
 end
-regentlib.start(main)

@@ -543,6 +543,7 @@ def build_cmake(root_dir, tmp_dir, env, thread_count,
     cmdline = ['cmake', '-DCMAKE_INSTALL_PREFIX=%s' % install_dir ]
     cmdline.append('-DCMAKE_BUILD_TYPE=%s' % ('Debug' if env['DEBUG'] == '1' else
                                               'Release'))
+    cmdline.append('-DLegion_MAX_DIM=%s' % env['MAX_DIM'])
     cmdline.append('-DLegion_USE_GASNet=%s' % ('ON' if env['USE_GASNET'] == '1' else
                                                'OFF'))
     cmdline.append('-DLegion_USE_CUDA=%s' % ('ON' if env['USE_CUDA'] == '1' else 'OFF'))
@@ -617,7 +618,7 @@ class Stage(object):
         print()
         sys.stdout.flush()
 
-def report_mode(debug, launcher,
+def report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest, use_gasnet,
                 use_cuda, use_openmp, use_python, use_llvm, use_hdf, use_spy, use_prof,
@@ -651,12 +652,14 @@ def report_mode(debug, launcher,
     print('###   * Gcov:       %s' % use_gcov)
     print('###   * CMake:      %s' % use_cmake)
     print('###   * RDIR:       %s' % use_rdir)
+    print('###   * Max DIM:    %s' % max_dim)
     print('#'*60)
     print()
     sys.stdout.flush()
 
 def run_tests(test_modules=None,
               debug=True,
+              max_dim=3,
               use_features=None,
               launcher=None,
               thread_count=None,
@@ -722,7 +725,7 @@ def run_tests(test_modules=None,
         check_test_legion_cxx(root_dir)
         return
 
-    report_mode(debug, launcher,
+    report_mode(debug, max_dim, launcher,
                 test_regent, test_legion_cxx, test_fuzzer, test_realm,
                 test_external, test_private, test_perf, test_ctest,
                 use_gasnet,
@@ -755,6 +758,7 @@ def run_tests(test_modules=None,
         ('TEST_PROF', '1' if use_prof else '0'),
         ('TEST_GCOV', '1' if use_gcov else '0'),
         ('USE_RDIR', '1' if use_rdir else '0'),
+        ('MAX_DIM', str(max_dim)),
         ('LG_RT_DIR', os.path.join(root_dir, 'runtime')),
         ('CMAKE_BUILD_DIR', os.path.join(tmp_dir, 'build'))] + (
 
@@ -881,6 +885,10 @@ def driver():
     parser.add_argument(
         '--no-debug', dest='debug', action='store_false',
         help='Disable debug mode (equivalent to DEBUG=0).')
+    parser.add_argument(
+        '--max-dim', dest='max_dim', type=int,
+        default=int(os.environ['MAX_DIM']) if 'MAX_DIM' in os.environ else 3,
+        help='Maximum number of dimensions (also via MAX_DIM).')
     parser.add_argument(
         '--use', dest='use_features', action=ExtendAction,
         choices=MultipleChoiceList('gasnet', 'cuda', 'openmp',

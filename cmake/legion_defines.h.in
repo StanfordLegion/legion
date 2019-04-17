@@ -22,12 +22,16 @@
 #cmakedefine BOUNDS_CHECKS
 #endif
 
-#ifndef ENABLE_LEGION_TLS
-#cmakedefine ENABLE_LEGION_TLS
+#ifndef LEGION_MAX_DIM
+#cmakedefine LEGION_MAX_DIM @LEGION_MAX_DIM@
 #endif
 
 #ifndef MAX_FIELDS
-#cmakedefine MAX_FIELDS @Legion_MAX_FIELDS@
+#cmakedefine MAX_FIELDS @MAX_FIELDS@
+#endif
+
+#ifndef ENABLE_LEGION_TLS
+#cmakedefine ENABLE_LEGION_TLS
 #endif
 
 #ifndef __STDC_FORMAT_MACROS

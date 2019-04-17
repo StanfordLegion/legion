@@ -2461,16 +2461,10 @@ namespace Realm {
 #define SPECIALIZE_FILL(TYPE, N)                                   \
     {                                                              \
       TYPE *ptr = (TYPE *)rep_buffer;                              \
-      TYPE fill_value = *(TYPE*)fill_buffer;                       \
       for(size_t ofs = 0; ofs < rep_size; ofs += N * sizeof(TYPE)) \
-      {                                                            \
-        ASSIGN_##N;                                                \
-      }                                                            \
+        for (size_t i = 0; i < N; ++i)                             \
+          *ptr++ = ((TYPE*)fill_buffer)[i];                        \
     }                                                              \
-
-#define ASSIGN_1 *ptr++ = fill_value
-#define ASSIGN_2 ASSIGN_1; ASSIGN_1
-#define ASSIGN_4 ASSIGN_2; ASSIGN_2
 
     void FillRequest::perform_dma(void)
     {

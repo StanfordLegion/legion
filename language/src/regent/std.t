@@ -1217,6 +1217,17 @@ function std.get_absolute_field_paths(fspace_type, prefixes)
     end, prefixes)
 end
 
+function std.check_field_sliced(value_type, field_path)
+  local field_type = value_type
+  for idx = 1, #field_path do
+    if field_type:isstruct() and field_type.__no_field_slicing then
+      return false, field_type
+    end
+    field_type = std.get_field(field_type, field_path[idx])
+  end
+  return true
+end
+
 local function type_requires_force_cast(a, b)
   return (std.is_ispace(a) and std.is_ispace(b)) or
     (std.is_region(a) and std.is_region(b)) or
@@ -2693,6 +2704,8 @@ do
   std.complex = st
   std.complex32 = st
 
+  st.__no_field_slicing = true
+
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }
   end
@@ -2726,6 +2739,8 @@ do
   })
   std.complex = st
   std.complex64 = st
+
+  st.__no_field_slicing = true
 
   terra st.metamethods.__add(a : st, b : st)
     return st { real = a.real + b.real, imag = a.imag + b.imag }

@@ -14,20 +14,23 @@
 
 import "regent"
 
-task main()
-  var r = region(ispace(int1d, 32), complex)
+local c = regentlib.c
 
-  fill(r, complex {1.0, 2.0})
+-- This tests that complex values can be used as fields in regions.
 
-  -- __demand(__vectorize)
-  for x in r do
-    var y = @x + 1
-    @x = @x * y - 4
+task f()
+  var r = region(ispace(int1d, 5), complex)
+
+  var sum : complex = complex { 0.0, 0.0 }
+  for i = 0, 5 do
+    r[i].real = double(i + 1)
+    r[i].imag = double(i + 2)
+  end
+  for e in r do
+    sum += @e
   end
 
-  for x in r do
-    regentlib.assert(x.real == -6.0, "test failed")
-    regentlib.assert(x.imag ==  6.0, "test failed")
-  end
+  regentlib.assert(sum.real == 15.0, "test failed")
+  regentlib.assert(sum.imag == 20.0, "test failed")
 end
-regentlib.start(main)
+regentlib.start(f)
