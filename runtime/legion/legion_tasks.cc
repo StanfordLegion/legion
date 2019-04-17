@@ -3151,13 +3151,23 @@ namespace Legion {
             break;
         }
         if (conflict_constraint != NULL)
+        {
+          const char *constraint_names[] = {
+#define CONSTRAINT_NAMES(name, desc) desc,
+            LEGION_LAYOUT_CONSTRAINT_KINDS(CONSTRAINT_NAMES)
+#undef CONSTRAINT_NAMES
+          };
+          const char *constraint_name = 
+            constraint_names[conflict_constraint->get_constraint_kind()];
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output. Mapper %s selected variant "
                         "%d for task %s (ID %lld). But instance selected "
                         "for region requirement %d fails to satisfy the "
-                        "corresponding constraints.", 
+                        "corresponding %s layout constraint.", 
                         local_mapper->get_mapper_name(), impl->vid,
-                        get_task_name(), get_unique_id(), it->first)
+                        get_task_name(), get_unique_id(), it->first,
+                        constraint_name)
+        }
       }
       // Now we can test against the execution constraints
       const ExecutionConstraintSet &execution_constraints = 

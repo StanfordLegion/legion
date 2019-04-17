@@ -239,6 +239,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool PhysicalInstance::entails(const LayoutConstraintSet &constraint_set,
+                               const LayoutConstraint **failed_constraint) const 
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return false;
+      return impl->entails(constraint_set, failed_constraint);
+    }
+
+    //--------------------------------------------------------------------------
     /*friend*/ std::ostream& operator<<(std::ostream& os,
 					const PhysicalInstance& p)
     //--------------------------------------------------------------------------

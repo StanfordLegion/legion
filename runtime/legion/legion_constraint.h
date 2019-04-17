@@ -24,6 +24,24 @@
 
 namespace Legion {
 
+#define LEGION_EXECUTION_CONSTRAINT_KINDS(__op__) \
+  __op__(ISA_CONSTRAINT, "ISA") \
+  __op__(PROCESSOR_CONSTRAINT, "Processor") \
+  __op__(RESOURCE_CONSTRAINT, "Resource") \
+  __op__(LAUNCH_CONSTRAINT, "Launch") \
+  __op__(COLOCATION_CONSTRAINT, "Co-Location")
+
+#define LEGION_LAYOUT_CONSTRAINT_KINDS(__op__) \
+  __op__(SPECIALIZED_CONSTRAINT, "Specialized") \
+  __op__(MEMORY CONSTRAINT, "Memory") \
+  __op__(FIELD_CONSTRAINT, "Field") \
+  __op__(ORDERING_CONSTRAINT, "Ordering") \
+  __op__(SPLITTING_CONSTRAINT, "Splitting") \
+  __op__(DIMENSION_CONSTRAINT, "Dimension") \
+  __op__(ALIGNMENT_CONSTRAINT, "Alignment") \
+  __op__(OFFSET_CONSTRAINT, "Offset") \
+  __op__(POINTER_CONSTRAINT, "Pointer")
+
     /**
      * \class ISAConstraint
      * ISA constraints specify the kind of instruction constraints

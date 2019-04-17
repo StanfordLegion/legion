@@ -85,17 +85,8 @@ namespace Legion {
       void add_use_fields(const std::set<FieldID> &fids);
     public:
       // Check to see if a whole set of constraints are satisfied
-      bool entails(const LayoutConstraintSet &constraint_set) const;
-      // Check to see if individual constraints are satisfied
-      bool entails(const SpecializedConstraint &constraint) const;   
-      bool entails(const MemoryConstraint &constraint) const;
-      bool entails(const OrderingConstraint &constraint) const;
-      bool entails(const SplittingConstraint &constraint) const;
-      bool entails(const FieldConstraint &constraint) const;
-      bool entails(const DimensionConstraint &constraint) const;
-      bool entails(const AlignmentConstraint &constraint) const;
-      bool entails(const OffsetConstraint &constraint) const;
-      bool entails(const PointerConstraint &constraint) const;
+      bool entails(const LayoutConstraintSet &constraint_set,
+                   const LayoutConstraint **failed_constraint = NULL) const;
     public:
       static PhysicalInstance get_virtual_instance(void);
     protected:
