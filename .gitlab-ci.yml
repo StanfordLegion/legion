@@ -38,6 +38,9 @@ variables:
 .release: &release
   DEBUG: "0"
 
+.max_dim4: &max_dim4
+  MAX_DIM: "4"
+
 .cxx98_normal: &cxx98_normal
   CC_FLAGS: "-std=c++98"
 .cxx98_checks: &cxx98_checks
