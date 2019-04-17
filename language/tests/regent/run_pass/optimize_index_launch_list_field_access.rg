@@ -14,20 +14,26 @@
 
 import "regent"
 
+-- This tests the various loop optimizations supported by the
+-- compiler.
+
+task g(r : region(int)) : int
+where reads (r) do
+  return 5
+end
+
 task main()
-  var r = region(ispace(int1d, 32), complex)
+  var n = 5
+  var r = region(ispace(ptr, n), int)
+  var p = partition(equal, r, ispace(int1d, 5))
 
-  fill(r, complex {1.0, 2.0})
+  var s = ispace(int2d, {2, 2})
 
-  -- __demand(__vectorize)
-  for x in r do
-    var y = @x + 1
-    @x = @x * y - 4
-  end
+  fill(r, 0)
 
-  for x in r do
-    regentlib.assert(x.real == -6.0, "test failed")
-    regentlib.assert(x.imag ==  6.0, "test failed")
+  __demand(__parallel)
+  for i in s do
+    g(p[i.x + i.y * 2])
   end
 end
 regentlib.start(main)

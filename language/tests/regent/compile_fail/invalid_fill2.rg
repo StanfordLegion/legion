@@ -13,13 +13,24 @@
 -- limitations under the License.
 
 -- fails-with:
--- privilege_fill2.rg:24: invalid privileges in fill: reads($r)
---   fill(r, 0)
+-- invalid_fill2.rg:35: partial fill with type fs2 is not allowed
+--   fill(r.val.real, 0)
 --      ^
 
 import "regent"
 
-task k(r : region(int))
+struct fs2
+{
+  real : double,
+}
+fs2.__no_field_slicing = true
+
+struct fs1
+{
+  val : fs2,
+}
+
+task k(r : region(fs1))
 where writes(r) do
-  fill(r, 0)
+  fill(r.val.real, 0)
 end

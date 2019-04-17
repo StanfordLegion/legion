@@ -20,6 +20,11 @@ struct t {
   c : uint8,
 }
 
+task k2(r : region(t))
+where writes(r.{a, b}) do
+  fill(r.{a, b}, 25)
+end
+
 task k() : int
   var r = region(ispace(ptr, 5), t)
   var x = dynamic_cast(ptr(t, r), 0)
@@ -28,7 +33,8 @@ task k() : int
   x.b = 3.14
   x.c = 48
 
-  fill(r.{a, b, c}, 25)
+  fill(r.c, 25)
+  k2(r)
 
   return x.a + x.b + x.c
 end

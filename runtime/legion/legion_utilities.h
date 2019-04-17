@@ -7364,7 +7364,7 @@ namespace Legion {
                                                        const PPCTLBitMask &rhs)
     //-------------------------------------------------------------------------
     {
-      __vector unsigned long long temp_sum = 0;
+      __vector unsigned long long temp_sum = vec_splats(0ULL);
       for (unsigned idx = 0; idx < PPC_ELMTS; idx++)
       {
         bits.ppc_vector[idx] = vec_xor(bits.ppc_vector[idx], rhs(idx));

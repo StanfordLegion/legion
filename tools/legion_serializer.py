@@ -199,7 +199,7 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "UniqueID":           "Q", # unsigned long long
         "TaskID":             "I", # unsigned int
         "bool":               "?", # bool
-        "VariantID":          "L", # unsigned long
+        "VariantID":          "I", # unsigned int
         "unsigned":           "I", # unsigned int
         "timestamp_t":        "Q", # unsigned long long
         "unsigned long long": "Q", # unsigned long long

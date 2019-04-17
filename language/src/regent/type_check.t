@@ -577,6 +577,9 @@ function type_check.expr_field_access(cx, node)
                 tostring(std.as_read(value_type)))
   else
     field_type = std.get_field(unpack_type, node.field_name)
+    if std.as_read(unpack_type):isstruct() and std.as_read(unpack_type).__no_field_slicing then
+      field_type = std.rawref(&std.as_read(field_type))
+    end
 
     if not field_type then
       report.error(node, "no field '" .. node.field_name .. "' in type " ..
@@ -2630,17 +2633,6 @@ function type_check.expr_fill(cx, node)
   end
 
   for _, field_path in ipairs(dst.fields) do
-    if not std.check_privilege(cx, std.reads, dst_type, field_path) then
-      local dst_symbol
-      if node.dst.region:is(ast.specialized.expr.ID) then
-        dst_symbol = node.dst.region.value
-      else
-        dst_symbol = sdt.newsymbol()
-      end
-      report.error(
-        node, "invalid privileges in fill: " .. tostring(std.reads) ..
-          "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") .. ")")
-    end
     if not std.check_privilege(cx, std.writes, dst_type, field_path) then
       local dst_symbol
       if node.dst.region:is(ast.specialized.expr.ID) then
@@ -2651,6 +2643,14 @@ function type_check.expr_fill(cx, node)
       report.error(
         node, "invalid privileges in fill: " .. tostring(std.writes) ..
           "(" .. (data.newtuple(dst_symbol) .. field_path):mkstring(".") .. ")")
+    end
+  end
+
+  for _, field_path in ipairs(dst.fields) do
+    local sliced, field_type = std.check_field_sliced(dst_type:fspace(), field_path)
+    if not sliced then
+      report.error(
+        node, "partial fill with type " .. tostring(field_type) .. " is not allowed")
     end
   end
 
@@ -4086,7 +4086,16 @@ function type_check.top_task(cx, node)
         local _, field_types =
           std.flatten_struct_fields(std.get_field_path(region_type:fspace(), field_path))
         field_types:map(function(field_type)
-          std.update_reduction_op(privilege_type.op, field_type)
+          if field_type:isprimitive() or
+             (field_type:isarray() and field_type.type:isprimitive())
+          then
+            std.update_reduction_op(privilege_type.op, field_type)
+          else
+            report.error(node, "invalid field type for " ..
+              tostring(privilege.privilege) .. "(" ..
+              terralib.newlist({privilege.region:hasname(), unpack(privilege.region)}):concat(".") ..
+              "): " .. tostring(field_type))
+          end
         end)
       end
       std.add_privilege(cx, privilege_type, region_type, field_path)
