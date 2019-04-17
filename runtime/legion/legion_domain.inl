@@ -465,7 +465,7 @@ namespace Legion {
   }
 
   //----------------------------------------------------------------------------
-  template<int M, int N, typename T>
+  template<int M, int N, typename T> __CUDA_HD__
   inline bool ScaleTransform<M,N,T>::is_identity(void) const
   //----------------------------------------------------------------------------
   {
