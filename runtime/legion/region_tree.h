@@ -1671,6 +1671,8 @@ namespace Legion {
       virtual Domain get_color_space_domain(void) = 0;
       virtual DomainPoint get_domain_point_color(void) const = 0;
       virtual DomainPoint delinearize_color_to_point(LegionColor c) = 0;
+      // Caller takes ownership for the iterator
+      virtual ColorSpaceIterator* create_color_space_iterator(void) = 0;
     public:
       bool intersects_with(IndexSpaceNode *rhs,bool compute = true);
       bool intersects_with(IndexPartNode *rhs, bool compute = true);
@@ -1827,6 +1829,7 @@ namespace Legion {
       virtual LegionColor get_max_linearized_color(void);
       virtual LegionColor linearize_color(const void *realm_color,
                                           TypeTag type_tag);
+      LegionColor linearize_color(Point<DIM,T> color); 
       virtual void delinearize_color(LegionColor color, 
                                      void *realm_color, TypeTag type_tag);
       virtual bool contains_color(LegionColor color,
@@ -1835,6 +1838,8 @@ namespace Legion {
       virtual Domain get_color_space_domain(void);
       virtual DomainPoint get_domain_point_color(void) const;
       virtual DomainPoint delinearize_color_to_point(LegionColor c);
+      // Caller takes ownership for the iterator
+      virtual ColorSpaceIterator* create_color_space_iterator(void);
     public:
       virtual void pack_index_space(Serializer &rez, bool include_size) const;
       virtual void unpack_index_space(Deserializer &derez,
@@ -2144,6 +2149,34 @@ namespace Legion {
         const std::vector<FieldDataDescriptor> &instances;
         ApEvent ready, result;
       };
+    };
+
+    /**
+     * \class ColorSpaceIterator
+     * A helper class for iterating over sparse color spaces
+     * It can be used for non-sparse spaces as well, but we
+     * usually have more efficient ways of iterating over those
+     */
+    class ColorSpaceIterator {
+    public:
+      virtual ~ColorSpaceIterator(void) { }
+    public:
+      virtual bool is_valid(void) const = 0;
+      virtual LegionColor yield_color(void) = 0;
+    };
+
+    template<int DIM, typename T>
+    class ColorSpaceIteratorT : public ColorSpaceIterator, 
+                                public PointInDomainIterator<DIM,T> {
+    public:
+      ColorSpaceIteratorT(const DomainT<DIM,T> &d,
+                          IndexSpaceNodeT<DIM,T> *color_space);
+      virtual ~ColorSpaceIteratorT(void) { }
+    public:
+      virtual bool is_valid(void) const;
+      virtual LegionColor yield_color(void);
+    public:
+      IndexSpaceNodeT<DIM,T> *const color_space;
     };
 
     /**
