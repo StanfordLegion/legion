@@ -1219,14 +1219,11 @@ end
 
 function std.check_field_sliced(value_type, field_path)
   local field_type = value_type
-  if field_type:isstruct() and field_type.__no_field_slicing then
-    return false, field_type
-  end
   for idx = 1, #field_path do
-    field_type = std.get_field(field_type, field_path[idx])
     if field_type:isstruct() and field_type.__no_field_slicing then
       return false, field_type
     end
+    field_type = std.get_field(field_type, field_path[idx])
   end
   return true
 end
