@@ -6,7 +6,11 @@ Version ??.??.? (??????? ??, ????)
     - Support for dimensions > 3. Set MAX_DIM at build time
         (or -DLegion_MAX_DIM in CMake) to build with any number of
         dimensions up to 9.
+    - Change VariantID to 32 bits to match AUTO_GENERATE_ID
   * Regent
+    - Support for index fills
+    - Support for disabling structure-slicing on structs by setting
+        __no_field_slicing on the struc type
     - Substantial improvements to the auto-parallelizer, CUDA and
       OpenMP code generators
     - Substantial improvements in compile time for tasks with large
