@@ -513,6 +513,7 @@ def test_driver(argv):
                         dest='debug')
     parser.add_argument('--max-dim',
                         type=int,
+                        default=3,
                         help='maximum number of dimensions',
                         dest='max_dim')
     parser.add_argument('--run_pass',
