@@ -447,48 +447,60 @@ namespace Legion {
        * ----------------------------------------------------------------------
        * The map task call is performed on every task which is eagerly
        * (as opposed to lazily) executed and has all its input already
-       * eagerly executed. The call provides a set of physical instances
-       * which can be used for each of the different region requirements
-       * for the task. The mapper has the repsonsibility of filling in a
-       * ranking of physical instances to re-use for each region requirement
-       * in 'chosen_ranking'. The mapper can also specify what layout
-       * constraints to use in creating a new physical instance in the 
-       * 'layout_constraints' set for each region requirement. Finally,
-       * the mapper can see if the write-after-read optimization should
-       * be enforced on each individual region requirement by using the
-       * 'enable_WAR_optimization' vector.
+       * eagerly executed. The input to map_task consists of the names
+       * of any valid instances that the runtime knows about for each
+       * of the individual region requirements stored in 'valid_instances'
+       * (if the user requested them by setting 'valid_instances' to 'true'
+       * in the select_task_options mapper call), and the indexes of any
+       * regions which were premapped in 'premapped_regions'.
        *
-       * The runtime will then attempt to map physical regions for each
-       * region requirement based on these constraints. If the runtime
-       * succeeds it will progress through the ranking of task variant
-       * IDs in 'variant_ranking' in order to find a variant of the task
-       * to run. If no variant can be found in the 'target_ranking'
-       * that has all its constraints satisfied, the runtime will also
-       * proceed ot check any other variants for the given task kind.
-       * If none succeed the mapping will fail. The mapper can also
-       * request that it be notified of the ultimate mapping results
-       * of the task by setting the 'report_mapping' flag to true.
+       * The mapper must first select a set of 'chosen_instances' to use
+       * for each region requirement of the task. Multiple instances can
+       * be chosen for each region requirement (hence the vector of vectors)
+       * but the runtime will use the first instance that has space for each
+       * field in the vector of instances for all the fields in the region
+       * requirement. For read-only region requirements, the mapper can 
+       * optionally request that the runtime not track the instances used
+       * for read-only region requirements with the 'skip_valid_indexes'.
+       * This will ensure that read-only instances are not considered a 
+       * long-term valid copy of the data and make them immediately eligible
+       * for garbage collection after the task is done mapping. Only the
+       * indexes of read-only region requirements should be specified.
        *
-       * The 'additional_procs' field allows the mapper to indicate that
-       * this task can actually be executed on one of a set of processors
-       * in addition to the target processor. All the processors in 
-       * 'additional_procs' must be of the same kind as the target
-       * processor as the target processor and be capable of seeing the
-       * memories where the physical instances of the mapped task are
-       * located or the runtime will silently omit these processors
-       * from consideration. The task will be run on the first of these
-       * processors or the target processor that become available.
-       * The mapper can influence the priority of the task by setting
-       * the 'task_priority' field. Negative priorities are lower and
-       * positive priorities are higher.
+       * The mapper must also select a set of 'target_procs'
+       * that specifies the target processor(s) on which the task can run.
+       * If a single processor is chosen then the task is guaranteed to 
+       * run on that processor. If multiple processors are specified, 
+       * the runtime will run the task on the first procoessor that becomes
+       * available. All of the processors must be on the same node and of 
+       * the same kind for now. 
        *
-       * The mapper can also request profiling information about this
+       * The mapper must further select a task variant to use to execute
+       * the task and specify its VariantID in 'chosen_variant'. This variant
+       * must have execution constraints consistent with all the 'target_procs'.
+       * All of the instances specified by 'chosen_instances' must be in 
+       * memories visible to all the target processors or the variant must speicfy
+       * 'no_access' specialized constraints for such region requirements.
+       * The mapper can specify a priority for the task with the 'task_priority'
+       * field. This will allow the task to be re-ordered ahead of lower
+       * priority tasks and behind higher priority tasks by the runtime
+       * as it's being dynamically scheduled. Negative priorities are lower
+       * and positive priorities are higher.
+       *
+       * The mapper can request profiling information about this
        * task as part of its execution. The mapper can specify a task
        * profiling request set in 'task_prof_requests' for profiling
        * statistics about the execution of the task. The mapper can
        * also ask for profiling information for the copies generated
        * as part of the mapping of the task through the 
-       * 'copy_prof_requests' field.
+       * 'copy_prof_requests' field. The 'profiling_priority' field
+       * indicates with which priority the profiling results should
+       * be send back to the mapper.
+       *
+       * Finally, the mapper can requrest a postmap_task mapper call be
+       * performed to make additional copies of any output regions of the
+       * task for resilience purposes by setting the 'postmap_task' flag
+       * to true.
        */
       struct MapTaskInput {
         std::vector<std::vector<PhysicalInstance> >     valid_instances;
@@ -496,12 +508,13 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
+        std::set<unsigned>                              skip_valid_indexes;
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
+        TaskPriority                                    task_priority;  // = 0
+        TaskPriority                                    profiling_priority;
         ProfilingRequest                                task_prof_requests;
         ProfilingRequest                                copy_prof_requests;
-        TaskPriority                                    profiling_priority;
-        TaskPriority                                    task_priority;  // = 0
         bool                                            postmap_task; // = false
       };
       //------------------------------------------------------------------------
