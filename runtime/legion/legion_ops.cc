@@ -252,7 +252,7 @@ namespace Legion {
       // inside our task since it is safe to read what we wrote
       if (HAS_WRITE_DISCARD(r))
       {
-        r.privilege |= READ_PRIV;
+        r.privilege |= (READ_PRIV | REDUCE_PRIV);
         // Then remove any discard masks from the privileges
         r.privilege &= ~DISCARD_MASK;
       }
