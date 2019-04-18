@@ -4395,6 +4395,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       flags:insert(flag)
     end
     flags:insert("-ludreg")
+    for flag in os.getenv('CRAY_XPMEM_POST_LINK_OPTS'):gmatch("%S+") do
+      flags:insert(flag)
+    end
+    flags:insert("-lxpmem")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
