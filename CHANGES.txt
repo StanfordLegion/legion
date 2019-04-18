@@ -1,6 +1,19 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
+Version ??.??.? (??????? ??, ????)
+  * Legion
+    - Support for dimensions > 3. Set MAX_DIM at build time
+        (or -DLegion_MAX_DIM in CMake) to build with any number of
+        dimensions up to 9.
+  * Regent
+    - Substantial improvements to the auto-parallelizer, CUDA and
+      OpenMP code generators
+    - Substantial improvements in compile time for tasks with large
+      numbers of fields
+    - Build fixes for macOS
+    - setup_env.py now works on macOS
+
 Version 18.12.0 (December 27, 2018)
   * Realm
     - More assorted bug fixes

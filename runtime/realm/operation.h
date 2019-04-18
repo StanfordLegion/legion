@@ -72,7 +72,7 @@ namespace Realm {
       virtual ~AsyncWorkItem(void);
 
       void mark_finished(bool successful);
-
+      void mark_gpu_task_start(void);
       virtual void request_cancellation(void) = 0;
 
       virtual void print(std::ostream& os) const = 0;
@@ -92,7 +92,8 @@ namespace Realm {
   protected:
     // called by AsyncWorkItem::mark_finished from an arbitrary thread
     void work_item_finished(AsyncWorkItem *item, bool successful);
-
+    void update_gpu_start();
+    void update_gpu_end();
     virtual void mark_completed(void);
 
     void clear_profiling(void);
@@ -110,6 +111,7 @@ namespace Realm {
     typedef ProfilingMeasurements::OperationStatus Status;
     ProfilingMeasurements::OperationStatus status;
     ProfilingMeasurements::OperationTimeline timeline;
+    ProfilingMeasurements::OperationTimelineGPU timeline_gpu; // gpu start/end times
     bool wants_event_waits;
     ProfilingMeasurements::OperationEventWaits waits;
     ProfilingRequestSet requests; 

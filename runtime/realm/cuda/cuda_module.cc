@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 
+
 namespace Realm {
   namespace Cuda {
 
@@ -100,9 +101,21 @@ namespace Realm {
 
       CHECK_CU( cuEventRecord(e, stream) );
 
-      log_stream.debug() << "CUDA event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
+      log_stream.debug() << "CUDA fence event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
 
       add_event(e, fence, 0);
+    }
+
+    void GPUStream::add_start_event(GPUWorkStart *start)
+    {
+      CUevent e = gpu->event_pool.get_event();
+
+      CHECK_CU( cuEventRecord(e, stream) );
+
+      log_stream.debug() << "CUDA start event " << e << " recorded on stream " << stream << " (GPU " << gpu << ")";
+
+      // record this as a start event
+      add_event(e, 0, 0, start);
     }
 
     void GPUStream::add_notification(GPUCompletionNotification *notification)
@@ -115,7 +128,7 @@ namespace Realm {
     }
 
     void GPUStream::add_event(CUevent event, GPUWorkFence *fence, 
-			      GPUCompletionNotification *notification)
+			      GPUCompletionNotification *notification, GPUWorkStart *start)
     {
       bool add_to_worker = false;
       {
@@ -127,6 +140,7 @@ namespace Realm {
 	PendingEvent e;
 	e.event = event;
 	e.fence = fence;
+	e.start = start;
 	e.notification = notification;
 
 	pending_events.push_back(e);
@@ -204,6 +218,7 @@ namespace Realm {
 	// this event has triggered, so figure out the fence/notification to trigger
 	//  and also peek at the next event
 	GPUWorkFence *fence = 0;
+        GPUWorkStart *start = 0;
 	GPUCompletionNotification *notification = 0;
 
 	{
@@ -212,6 +227,7 @@ namespace Realm {
 	  const PendingEvent &e = pending_events.front();
 	  assert(e.event == event);
 	  fence = e.fence;
+          start = e.start;
 	  notification = e.notification;
 	  pending_events.pop_front();
 
@@ -221,6 +237,9 @@ namespace Realm {
 	    event = pending_events.front().event;
 	}
 
+        if (start) {
+          start->mark_gpu_task_start();
+        }
 	if(fence)
 	  fence->mark_finished(true /*successful*/);
 
@@ -1164,6 +1183,35 @@ namespace Realm {
       me->mark_finished(true /*succesful*/);
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    //
+    // class GPUWorkStart
+    GPUWorkStart::GPUWorkStart(Realm::Operation *op)
+      : Realm::Operation::AsyncWorkItem(op)
+    {
+    }
+
+    void GPUWorkStart::print(std::ostream& os) const
+    {
+      os << "GPUWorkStart";
+    }
+
+    void GPUWorkStart::enqueue_on_stream(GPUStream *stream)
+    {
+      if(stream->get_gpu()->module->cfg_fences_use_callbacks) {
+	CHECK_CU( cuStreamAddCallback(stream->get_stream(), &cuda_start_callback, (void *)this, 0) );
+      } else {
+	stream->add_start_event(this);
+      }
+    }
+
+    /*static*/ void GPUWorkStart::cuda_start_callback(CUstream stream, CUresult res, void *data)
+    {
+      GPUWorkStart *me = (GPUWorkStart *)data;
+      assert(res == CUDA_SUCCESS);
+      // record the real start time for the operation
+      me->mark_gpu_task_start();
+    }
 
     ////////////////////////////////////////////////////////////////////////
     //
@@ -1336,6 +1384,12 @@ namespace Realm {
       GPUWorkFence *fence = new GPUWorkFence(task);
       task->add_async_work_item(fence);
 
+      // event to record the GPU start time for the task
+      GPUWorkStart *start = new GPUWorkStart(task);
+      task->add_async_work_item(start);
+      // enqueue start event
+      start->enqueue_on_stream(s);
+
       bool ok = T::execute_task(task);
 
       // now enqueue the fence on the local stream
@@ -1360,7 +1414,6 @@ namespace Realm {
 	}
 	CHECK_CU( cuCtxSynchronize() );
       }
-
       // pop the CUDA context for this GPU back off
       gpu_proc->gpu->pop_context();
 
@@ -2536,6 +2589,7 @@ namespace Realm {
     /*static*/ Module *CudaModule::create_module(RuntimeImpl *runtime,
 						 std::vector<std::string>& cmdline)
     {
+
       // before we do anything, make sure there's a CUDA driver and GPUs to talk to
       std::vector<GPUInfo *> infos;
       {

@@ -1405,7 +1405,7 @@ namespace Legion {
 #ifdef __CUDA_ARCH__
           if (gpu_warning)
             check_gpu_warning();
-          if (!has_transfrom)
+          if (!has_transform)
             return reinterpret_cast<const DomainT<N,T>*>(bounds)->
               bounds.contains(p);
           switch (M)

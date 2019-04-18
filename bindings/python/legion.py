@@ -56,6 +56,8 @@ except:
 
 _pickle_version = pickle.HIGHEST_PROTOCOL # Use latest Pickle protocol
 
+_max_dim = int(os.environ.get('MAX_DIM', 3))
+
 def find_legion_header():
     def try_prefix(prefix_dir):
         legion_h_path = os.path.join(prefix_dir, 'legion.h')
@@ -89,7 +91,7 @@ def find_legion_header():
     raise Exception('Unable to locate legion.h header file')
 
 prefix_dir, legion_h_path = find_legion_header()
-header = subprocess.check_output(['gcc', '-I', prefix_dir, '-E', '-P', legion_h_path]).decode('utf-8')
+header = subprocess.check_output(['gcc', '-I', prefix_dir, '-DLEGION_MAX_DIM=%s' % _max_dim, '-DREALM_MAX_DIM=%s' % _max_dim, '-E', '-P', legion_h_path]).decode('utf-8')
 
 # Hack: Fix for Ubuntu 16.04 versions of standard library headers:
 header = re.sub(r'typedef struct {.+?} max_align_t;', '', header, flags=re.DOTALL)
@@ -236,7 +238,7 @@ class DomainPoint(object):
             len(values)
         except TypeError:
             values = [values]
-        assert 1 <= len(values) <= 3
+        assert 1 <= len(values) <= _max_dim
         handle = ffi.new('legion_domain_point_t *')
         handle[0].dim = len(values)
         for i, value in enumerate(values):
@@ -278,7 +280,7 @@ class Domain(object):
             assert len(start) == len(extent)
         else:
             start = [0 for _ in extent]
-        assert 1 <= len(extent) <= 3
+        assert 1 <= len(extent) <= _max_dim
         rect = ffi.new('legion_rect_{}d_t *'.format(len(extent)))
         for i in xrange(len(extent)):
             rect[0].lo.x[i] = start[i]
