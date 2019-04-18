@@ -7431,7 +7431,8 @@ namespace Legion {
       // Handle any region requirements that interfere with itself
       for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        if (!IS_WRITE(regions[idx]))
+        const RegionRequirement &req = regions[idx];
+        if (!IS_WRITE(req) || (req.must_premap() && !IS_EXCLUSIVE(req)))
           continue;
         local_interfering.insert(std::pair<unsigned,unsigned>(idx,idx));
       }
