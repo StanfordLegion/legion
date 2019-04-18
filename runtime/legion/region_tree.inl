@@ -3423,7 +3423,6 @@ namespace Legion {
       }
       else
       {
-        unsigned index = 0;
         // Always use the partitions color space
         ColorSpaceIterator *itr = 
           partition->color_space->create_color_space_iterator();
@@ -3588,7 +3587,6 @@ namespace Legion {
       }
       else
       {
-        unsigned index = 0;
         ColorSpaceIterator *itr = 
           partition->color_space->create_color_space_iterator();
         // Skip ahead if necessary for our shard
