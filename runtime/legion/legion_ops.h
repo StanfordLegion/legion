@@ -921,7 +921,7 @@ namespace Legion {
     protected:
       void check_privilege(void);
       void compute_parent_index(void);
-      void invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances);
       virtual void add_copy_profiling_request(
                             Realm::ProfilingRequestSet &reqeusts);
       virtual void handle_profiling_response(
@@ -2652,7 +2652,7 @@ namespace Legion {
     protected:
       void compute_parent_index(void);
       void select_partition_projection(void);
-      void invoke_mapper(InstanceSet &mapped_instances);
+      bool invoke_mapper(InstanceSet &mapped_instances);
       void activate_dependent_op(void);
       void deactivate_dependent_op(void);
     public:

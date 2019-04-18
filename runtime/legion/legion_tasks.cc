@@ -2275,6 +2275,7 @@ namespace Legion {
       map_applied_conditions.clear();
       task_profiling_requests.clear();
       copy_profiling_requests.clear();
+      untracked_valid_regions.clear();
       if ((execution_context != NULL) && execution_context->remove_reference())
         delete execution_context;
 #ifdef DEBUG_LEGION
@@ -3040,6 +3041,29 @@ namespace Legion {
       selected_variant = output.chosen_variant;
       task_priority = output.task_priority;
       perform_postmap = output.postmap_task;
+      if (!output.untracked_valid_regions.empty())
+      {
+        untracked_valid_regions.swap(output.untracked_valid_regions);
+        for (std::set<unsigned>::iterator it = untracked_valid_regions.begin();
+              it != untracked_valid_regions.end(); /*nothing*/)
+        {
+          // Remove it if it is too big or 
+          if ((*it >= regions.size()) || !IS_READ_ONLY(regions[*it]))
+          {
+            std::set<unsigned>::iterator to_remove = it++;
+            if (*to_remove < regions.size())
+              REPORT_LEGION_WARNING(LEGION_WARNING_NON_READ_ONLY_UNTRACK_VALID,
+                  "Ignoring request by mapper %s to not track valid instances "
+                  "for region requirement %d of task %s (UID %lld) because "
+                  "region requirement does not have read-only privileges.",
+                  mapper->get_mapper_name(), *to_remove, 
+                  get_task_name(), unique_op_id)
+            untracked_valid_regions.erase(to_remove);
+          }
+          else
+            it++;
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -3418,6 +3442,8 @@ namespace Legion {
             // Set the current mapping index before doing anything
             // that sould result in a copy
             set_current_mapping_index(0);
+            const bool record_valid = (untracked_valid_regions.find(0) == 
+                                       untracked_valid_regions.end());
             const ApEvent effects = 
               runtime->forest->physical_perform_updates_and_registration(
                   regions[0], version_infos[0], this, 0, 
@@ -3427,7 +3453,7 @@ namespace Legion {
                                         get_logging_name(),
                                         unique_op_id,
 #endif
-                                        track_effects);
+                                        track_effects, record_valid);
             if (effects.exists())
               effects_postconditions.insert(effects);
 #ifdef DEBUG_LEGION
@@ -3460,6 +3486,8 @@ namespace Legion {
             // Set the current mapping index before doing anything
             // that sould result in a copy
             set_current_mapping_index(idx);
+            const bool record_valid = (untracked_valid_regions.find(idx) ==
+                                       untracked_valid_regions.end());
             // apply the results of the mapping to the tree
             reg_pre[idx] = runtime->forest->physical_perform_updates(
                                         regions[idx], local_info, 
@@ -3473,7 +3501,7 @@ namespace Legion {
                                         get_logging_name(),
                                         unique_op_id,
 #endif
-                                        track_effects);
+                                        track_effects, record_valid);
           }
           for (std::vector<unsigned>::const_iterator it = 
                 performed_regions.begin(); it != performed_regions.end(); it++)
