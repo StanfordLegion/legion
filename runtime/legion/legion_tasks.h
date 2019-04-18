@@ -564,6 +564,7 @@ namespace Legion {
       // Hold the result of the mapping 
       std::deque<InstanceSet>               physical_instances;
     protected: // Mapper choices 
+      std::set<unsigned>                    untracked_valid_regions;
       VariantID                             selected_variant;
       TaskPriority                          task_priority;
       bool                                  perform_postmap;

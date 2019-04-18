@@ -436,6 +436,7 @@ namespace Legion {
                                 UniqueID uid,
 #endif
                                 const bool track_effects,
+                                const bool record_valid = true,
                                 const bool check_initialized = true,
                                 const bool defer_copies = true,
                                 const bool skip_output = false);
@@ -459,6 +460,7 @@ namespace Legion {
                                    UniqueID uid,
 #endif
                                    const bool track_effects,
+                                   const bool record_valid = true,
                                    const bool check_initialized = true);
       // A helper method for deferring the computation of registration
       RtEvent defer_physical_perform_registration(RtEvent register_pre,

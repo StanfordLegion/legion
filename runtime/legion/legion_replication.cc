@@ -3712,10 +3712,11 @@ namespace Legion {
       InstanceSet mapped_instances;
       // If we are remapping then we know the answer
       // so we don't need to do any premapping
+      bool record_valid = true;
       if (remap_region)
         region.impl->get_references(mapped_instances);
       else
-        invoke_mapper(mapped_instances);
+        record_valid = invoke_mapper(mapped_instances);
       // First kick off the exchange to get that in flight
       std::vector<InstanceView*> mapped_views;
       {
@@ -3747,7 +3748,7 @@ namespace Legion {
                                       requirement, node, mapped_instances,
                                       mapped_views, init_precondition,
                                       termination_event, true/*track effects*/,
-                                      false/*check initialized*/,
+                                      false/*check initialized*/, record_valid,
                                       false/*skip output*/);
           analysis->add_reference();
           // Note that this call will clean up the analysis allocation
@@ -3773,6 +3774,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         assert(sharded_view != NULL);
         assert(exchange != NULL);
+        assert(record_valid);
 #endif
         // All the users just need to do their registration
         RegionNode *node = runtime->forest->get_node(requirement.region);
@@ -3781,7 +3783,7 @@ namespace Legion {
                                       requirement, node, mapped_instances,
                                       mapped_views, init_precondition,
                                       termination_event, true/*track effects*/,
-                                      false/*check initialized*/,
+                                      false/*check initialized*/, record_valid,
                                       false/*skip output*/);
         analysis->add_reference();
         // Note that this call will clean up the analysis allocation
@@ -3832,7 +3834,8 @@ namespace Legion {
               // restricted in a control replicated context
               // Can't track initialized here because it might not be
               // correct with our altered privileges
-              false/*track effects*/, false/*check initialized*/,
+              false/*track effects*/, record_valid/*record valid*/,
+              false/*check initialized*/,
               // We can skip output for the same reason we don't 
               // need to track any effects
               true/*defer copies*/, true/*skip output*/); 
@@ -4254,9 +4257,9 @@ namespace Legion {
         memory_manager->attach_external_instance(external_manager);
         RegionNode *node = runtime->forest->get_node(requirement.region);
         UpdateAnalysis *analysis = new UpdateAnalysis(runtime, this, 0/*index*/,
-            &version_info, requirement, node, attach_instances, attach_views,
-            ApEvent::NO_AP_EVENT, completion_event, false/*track effects*/,
-            false/*check initialized*/, true/*skip output*/);
+          &version_info, requirement, node, attach_instances, attach_views,
+          ApEvent::NO_AP_EVENT, completion_event, false/*track effects*/,
+          false/*check initialized*/, true/*record valid*/,true/*skip output*/);
         analysis->add_reference();
         const PhysicalTraceInfo trace_info(this);
         // Have each operation do its own registration

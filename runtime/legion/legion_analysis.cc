@@ -4196,12 +4196,13 @@ namespace Legion {
                      RegionNode *rn, const InstanceSet &target_insts,
                      std::vector<InstanceView*> &target_vws,
                      const ApEvent pre, const ApEvent term,
-                     const bool track, const bool check, const bool skip)
+                     const bool track, const bool check, 
+                     const bool record, const bool skip)
       : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
         check_initialized(check && !IS_DISCARD(usage) && !IS_SIMULT(usage)), 
-        skip_output(skip), output_aggregator(NULL)
+        record_valid(record), skip_output(skip), output_aggregator(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -4214,12 +4215,12 @@ namespace Legion {
                      std::vector<InstanceView*> &target_vws,
                      const RtEvent user_reg, const ApEvent pre, 
                      const ApEvent term, const bool track, 
-                     const bool check, const bool skip)
+                     const bool check, const bool record, const bool skip)
       : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), usage(use), 
         node(rn), target_instances(target_insts), target_views(target_vws), 
         precondition(pre), term_event(term), track_effects(track), 
-        check_initialized(check), skip_output(skip), output_aggregator(NULL),
-        remote_user_registered(user_reg)
+        check_initialized(check), record_valid(record), skip_output(skip), 
+        output_aggregator(NULL), remote_user_registered(user_reg)
     //--------------------------------------------------------------------------
     {
     }
@@ -4230,7 +4231,8 @@ namespace Legion {
         target_instances(rhs.target_instances), target_views(rhs.target_views),
         precondition(rhs.precondition), term_event(rhs.term_event), 
         track_effects(rhs.track_effects), 
-        check_initialized(rhs.check_initialized), skip_output(rhs.skip_output)
+        check_initialized(rhs.check_initialized),record_valid(rhs.record_valid),
+        skip_output(rhs.skip_output)
     //--------------------------------------------------------------------------
     {
       // should never be called
@@ -4355,6 +4357,7 @@ namespace Legion {
           rez.serialize(applied);
           rez.serialize(effects);
           rez.serialize<bool>(check_initialized);
+          rez.serialize<bool>(record_valid);
           rez.serialize<bool>(skip_output);
         }
         runtime->send_equivalence_set_remote_updates(rit->first, rez);
@@ -4531,6 +4534,8 @@ namespace Legion {
       const bool track_effects = effects_done.exists();
       bool check_initialized;
       derez.deserialize(check_initialized);
+      bool record_valid;
+      derez.deserialize(record_valid);
       bool skip_output;
       derez.deserialize(skip_output);
 
@@ -4539,7 +4544,7 @@ namespace Legion {
       UpdateAnalysis *analysis = new UpdateAnalysis(runtime, original_source,
           previous, op, index, usage, node, targets, target_views, 
           remote_user_registered, precondition, term_event, track_effects, 
-          check_initialized, skip_output);
+          check_initialized, record_valid, skip_output);
       analysis->add_reference();
       std::set<RtEvent> deferral_events, applied_events; 
       // Make sure that all our pointers are ready
@@ -8260,7 +8265,8 @@ namespace Legion {
                               analysis.op, analysis.index,
                               analysis.usage, guard_mask, 
                               analysis.target_instances, 
-                              analysis.target_views, applied_events);
+                              analysis.target_views, applied_events,
+                              analysis.record_valid);
           // If we did any updates record ourselves as the new guard here
           if ((input_aggregator != NULL) && 
               ((finder == analysis.input_aggregators.end()) ||
@@ -8317,7 +8323,8 @@ namespace Legion {
                               analysis.op, analysis.index,
                               analysis.usage, remainder_mask, 
                               analysis.target_instances, 
-                              analysis.target_views, applied_events);
+                              analysis.target_views, applied_events,
+                              analysis.record_valid);
           // If we made the input aggregator then store it
           if ((input_aggregator != NULL) && 
               ((finder == analysis.input_aggregators.end()) ||
@@ -8351,7 +8358,8 @@ namespace Legion {
         update_set_internal(input_aggregator, RtEvent::NO_RT_EVENT, 
                             analysis.op, analysis.index, analysis.usage,
                             user_mask, analysis.target_instances, 
-                            analysis.target_views, applied_events);
+                            analysis.target_views, applied_events,
+                            analysis.record_valid);
         if (IS_WRITE(analysis.usage))
         {
           advance_version_numbers(user_mask);
@@ -8403,7 +8411,8 @@ namespace Legion {
                                  const FieldMask &user_mask,
                                  const InstanceSet &target_instances,
                                  const std::vector<InstanceView*> &target_views,
-                                 std::set<RtEvent> &applied_events)
+                                 std::set<RtEvent> &applied_events,
+                                 const bool record_valid)
     //--------------------------------------------------------------------------
     {
       // Read-write or read-only
@@ -8433,8 +8442,14 @@ namespace Legion {
           record_instances(non_restricted, target_instances, 
                            target_views, mutator); 
       }
-      else
+      else if (record_valid)
         record_instances(user_mask, target_instances,
+                         target_views, mutator);
+      // Read-only instances that perform reductions still need to be
+      // tracked for these fields because it is where the reductions 
+      // are to be applied
+      else if (!!reduce_mask)
+        record_instances(reduce_mask, target_instances,
                          target_views, mutator);
       // Next check for any reductions that need to be applied
       if (!!reduce_mask)

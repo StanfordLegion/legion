@@ -88,7 +88,7 @@ def root_dir():
 def regent(args, env = {}, **kwargs):
     terra_exe = os.path.join(terra_dir, 'terra')
     if not os.path.exists(terra_exe):
-        terra_exe = os.path.join(terra_dir, 'bin', 'terra')
+        terra_exe = os.path.join(terra_dir, 'release', 'bin', 'terra')
 
     if 'TERRA_PATH' in os.environ:
         terra_path = os.environ['TERRA_PATH'].split(';')

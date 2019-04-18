@@ -2550,7 +2550,7 @@ namespace Legion {
       else
       { 
         // Now we've got the valid instances so invoke the mapper
-        invoke_mapper(mapped_instances);
+        const bool record_valid = invoke_mapper(mapped_instances); 
         // Then we can register our mapped instances
         effects_done = 
           runtime->forest->physical_perform_updates_and_registration(
@@ -2565,7 +2565,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                track_effects);
+                                                track_effects, record_valid);
       }
 #ifdef DEBUG_LEGION
       if (!IS_NO_ACCESS(requirement) && !requirement.privilege_fields.empty())
@@ -2946,12 +2946,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::invoke_mapper(InstanceSet &chosen_instances)
+    bool MapOp::invoke_mapper(InstanceSet &chosen_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY; 
+      output.track_valid_region = true;
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -3059,9 +3060,19 @@ namespace Legion {
                       "instance for inline mapping in task %s (ID %lld).",
                       mapper->get_mapper_name(), parent_ctx->get_task_name(),
                       parent_ctx->get_unique_id())
+      if (!output.track_valid_region && !IS_READ_ONLY(requirement))
+      {
+        REPORT_LEGION_WARNING(LEGION_WARNING_NON_READ_ONLY_UNTRACK_VALID,
+            "Ignoring request by mapper %s to not track valid instances "
+            "for inline mapping %lld in parent task %s (UID %lld) because "
+            "the region requirement does not have read-only privileges.",
+            mapper->get_mapper_name(), unique_op_id, 
+            parent_ctx->get_task_name(), parent_ctx->get_unique_id())
+        output.track_valid_region = true;
+      }
       // If we are doing unsafe mapping, then we can return
       if (runtime->unsafe_mapper)
-        return;
+        return output.track_valid_region;
       // If this requirement doesn't have a no access flag then we
       // need to check to make sure that the instances are visible
       if (!requirement.is_no_access())
@@ -3167,6 +3178,7 @@ namespace Legion {
                           parent_ctx->get_unique_id())
         }
       }
+      return output.track_valid_region;
     }
 
     //--------------------------------------------------------------------------
@@ -4308,6 +4320,8 @@ namespace Legion {
         {
           // Now do the registration
           set_mapping_state(idx);
+          const bool record_valid = (output.untracked_valid_srcs.find(idx) ==
+                                     output.untracked_valid_srcs.end());
           runtime->forest->physical_perform_updates_and_registration(
                                                   src_requirements[idx],
                                                   src_versions[idx],
@@ -4321,7 +4335,8 @@ namespace Legion {
                                                   get_logging_name(),
                                                   unique_op_id,
 #endif
-                                                  false/*track effects*/);
+                                                  false/*track effects*/,
+                                                  record_valid);
         }
         // Little bit of a hack here, if we are going to do a reduction
         // explicit copy, switch the privileges to read-write when doing
@@ -4370,6 +4385,8 @@ namespace Legion {
           const size_t gather_idx = src_requirements.size() + 
             dst_requirements.size() + idx;
           set_mapping_state(gather_idx);
+          const bool record_valid = (output.untracked_valid_ind_srcs.find(idx) 
+                                    == output.untracked_valid_ind_srcs.end());
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
                                                 src_indirect_requirements[idx],
@@ -4384,7 +4401,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                track_effects);
+                                                track_effects, record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -4403,6 +4420,8 @@ namespace Legion {
           // Now do the registration
           const size_t scatter_idx = src_requirements.size() + 
             dst_requirements.size() + src_indirect_requirements.size() + idx;
+          const bool record_valid = (output.untracked_valid_ind_dsts.find(idx) 
+                                    == output.untracked_valid_ind_dsts.end());
           set_mapping_state(scatter_idx);
           ApEvent effects_done = 
             runtime->forest->physical_perform_updates_and_registration(
@@ -4418,7 +4437,7 @@ namespace Legion {
                                                 get_logging_name(),
                                                 unique_op_id,
 #endif
-                                                track_effects);
+                                                track_effects, record_valid);
           if (effects_done.exists())
             copy_complete_events.insert(effects_done);
           if (runtime->legion_spy_enabled)
@@ -12345,7 +12364,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(this);
       // Perform the mapping call to get the physical isntances 
       InstanceSet mapped_instances;
-      invoke_mapper(mapped_instances);
+      const bool record_valid = invoke_mapper(mapped_instances);
       if (runtime->legion_spy_enabled)
         runtime->forest->log_mapping_decision(unique_op_id, 0/*idx*/,
                                               requirement,
@@ -12366,7 +12385,8 @@ namespace Legion {
                                               get_logging_name(),
                                               unique_op_id,
 #endif
-                                              false/*track effects*/);
+                                              false/*track effects*/,
+                                              record_valid);
       ApEvent done_event = trigger_thunk(requirement.region.get_index_space(),
                                          mapped_instances, trace_info);
       // Once we are done running these routines, we can mark
@@ -12450,11 +12470,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances)
+    bool DependentPartitionOp::invoke_mapper(InstanceSet &mapped_instances)
     //--------------------------------------------------------------------------
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.track_valid_region = true;
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -12556,7 +12578,7 @@ namespace Legion {
       } 
       // If we are doing unsafe mapping, then we can return
       if (runtime->unsafe_mapper)
-        return;
+        return output.track_valid_region;
       // Iterate over the instances and make sure they are all valid
       // for the given logical region which we are mapping
       std::vector<LogicalRegion> regions_to_check(1, requirement.region);
@@ -12613,6 +12635,7 @@ namespace Legion {
                         mem.id, mem_names[mem_kind])
         }
       }
+      return output.track_valid_region;
     }
 
     //--------------------------------------------------------------------------
@@ -15265,6 +15288,7 @@ namespace Legion {
                                                   unique_op_id,
 #endif
                                                   true/*track effects*/,
+                                                  false/*record valid*/,
                                                   false/*check initialized*/);
         requirement.privilege = READ_WRITE;
       }

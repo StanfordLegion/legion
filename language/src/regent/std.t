@@ -3941,8 +3941,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
-            -- Hack: cast to uint32 so it uses zero extension---VariantID is unsigned long but AUTO_GENERATE_ID is unsigned int.
-            uint32([variant:get_variant_id() or -1 --[[ AUTO_GENERATE_ID ]] ]),
+            [variant:get_variant_id() or -1 --[[ AUTO_GENERATE_ID ]] ],
             [task:get_name():concat(".")],
             [variant:get_name()],
             [execution_constraints], [layout_constraints], options,
@@ -4396,6 +4395,10 @@ function std.saveobj(main_task, filename, filetype, extra_setup_thunk, link_flag
       flags:insert(flag)
     end
     flags:insert("-ludreg")
+    for flag in os.getenv('CRAY_XPMEM_POST_LINK_OPTS'):gmatch("%S+") do
+      flags:insert(flag)
+    end
+    flags:insert("-lxpmem")
   end
   flags:insertall({"-L" .. lib_dir, "-lregent"})
   if use_cmake then
