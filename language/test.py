@@ -384,7 +384,7 @@ def get_test_specs(legion_dir, use_run, use_spy, use_prof, use_hdf5, use_openmp,
         result.extend(cuda)
     if use_python:
         result.extend(python)
-    for dim in range(3, min(max_dim, 4) + 1):
+    for dim in range(4, min(max_dim, 4) + 1):
         result.extend(max_dim_tests(dim))
     return result
 
