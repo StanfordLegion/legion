@@ -2679,6 +2679,7 @@ namespace Legion {
 #endif
     protected:
       std::vector<ProfilingMeasurementID> profiling_requests;
+      int                                 profiling_priority;
       int                     outstanding_profiling_requests;
       RtUserEvent                         profiling_reported;
     };
