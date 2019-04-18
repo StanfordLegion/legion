@@ -1866,6 +1866,7 @@ class State(object):
             "TaskWaitInfo": self.log_task_wait_info,
             "MetaWaitInfo": self.log_meta_wait_info,
             "TaskInfo": self.log_task_info,
+            "GPUTaskInfo": self.log_gpu_task_info,
             "MetaInfo": self.log_meta_info,
             "CopyInfo": self.log_copy_info,
             "FillInfo": self.log_fill_info,
@@ -1884,6 +1885,15 @@ class State(object):
                       create, ready, start, stop):
         variant = self.find_variant(task_id, variant_id)
         task = self.find_task(op_id, variant, create, ready, start, stop)
+        if stop > self.last_time:
+            self.last_time = stop
+        proc = self.find_processor(proc_id)
+        proc.add_task(task)
+
+    def log_gpu_task_info(self, op_id, task_id, variant_id, proc_id,
+                          create, ready, start, stop, gpu_start, gpu_stop):
+        variant = self.find_variant(task_id, variant_id)
+        task = self.find_task(op_id, variant, create, ready, gpu_start, gpu_stop)
         if stop > self.last_time:
             self.last_time = stop
         proc = self.find_processor(proc_id)

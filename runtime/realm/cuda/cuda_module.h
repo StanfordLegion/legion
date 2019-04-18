@@ -199,6 +199,20 @@ namespace Realm {
       static void cuda_callback(CUstream stream, CUresult res, void *data);
     };
 
+    class GPUWorkStart : public Realm::Operation::AsyncWorkItem {
+    public:
+      GPUWorkStart(Realm::Operation *op);
+
+      virtual void request_cancellation(void) { return; };
+
+      void enqueue_on_stream(GPUStream *stream);
+
+      virtual void print(std::ostream& os) const;
+
+    protected:
+      static void cuda_start_callback(CUstream stream, CUresult res, void *data);
+    };
+
     class GPUMemcpyFence : public GPUMemcpy {
     public:
       GPUMemcpyFence(GPU *_gpu, GPUMemcpyKind _kind,
@@ -337,6 +351,7 @@ namespace Realm {
       // may be called by anybody to enqueue a copy or an event
       void add_copy(GPUMemcpy *copy);
       void add_fence(GPUWorkFence *fence);
+      void add_start_event(GPUWorkStart *start);
       void add_notification(GPUCompletionNotification *notification);
 
       // to be called by a worker (that should already have the GPU context
@@ -346,7 +361,7 @@ namespace Realm {
 
     protected:
       void add_event(CUevent event, GPUWorkFence *fence, 
-		     GPUCompletionNotification *notification);
+		     GPUCompletionNotification *notification=NULL, GPUWorkStart *start=NULL);
 
       GPU *gpu;
       GPUWorker *worker;
@@ -365,6 +380,7 @@ namespace Realm {
       struct PendingEvent {
 	CUevent event;
 	GPUWorkFence *fence;
+	GPUWorkStart *start;
 	GPUCompletionNotification* notification;
       };
 #ifdef USE_CQ

@@ -191,6 +191,51 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::process_gpu_task(
+            TaskID task_id, VariantID variant_id, UniqueID op_id,
+            const Realm::ProfilingMeasurements::OperationTimeline &timeline,
+            const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
+            const Realm::ProfilingMeasurements::OperationEventWaits &waits,
+            const Realm::ProfilingMeasurements::OperationTimelineGPU &timeline_gpu)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(timeline.is_valid());
+      assert(timeline_gpu.is_valid());
+#endif
+      gpu_task_infos.push_back(GPUTaskInfo());
+      GPUTaskInfo &info = gpu_task_infos.back();
+      info.op_id = op_id;
+      info.task_id = task_id;
+      info.variant_id = variant_id;
+      info.proc_id = usage.proc.id;
+      info.create = timeline.create_time;
+      info.ready = timeline.ready_time;
+      info.start = timeline.start_time;
+      // use complete_time instead of end_time to include async work
+      info.stop = timeline.complete_time;
+
+      // record gpu time
+      info.gpu_start = timeline_gpu.start_time;
+      info.gpu_stop = timeline_gpu.end_time;
+
+      unsigned num_intervals = waits.intervals.size();
+      if (num_intervals > 0)
+      {
+        for (unsigned idx = 0; idx < num_intervals; ++idx)
+        {
+          info.wait_intervals.push_back(WaitInfo());
+          WaitInfo& wait_info = info.wait_intervals.back();
+          wait_info.wait_start = waits.intervals[idx].wait_start;
+          wait_info.wait_ready = waits.intervals[idx].wait_ready;
+          wait_info.wait_end = waits.intervals[idx].wait_end;
+        }
+      }
+      const size_t diff = sizeof(GPUTaskInfo) + num_intervals * sizeof(WaitInfo);
+      owner->update_footprint(diff, this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_meta(size_t id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
             const Realm::ProfilingMeasurements::OperationProcessorUsage &usage,
@@ -468,6 +513,16 @@ namespace Legion {
           serializer->serialize(*wit, *it);
         }
       }
+      for (std::deque<GPUTaskInfo>::const_iterator it = gpu_task_infos.begin();
+            it != gpu_task_infos.end(); it++)
+      {
+        serializer->serialize(*it);
+        for (std::deque<WaitInfo>::const_iterator wit =
+             it->wait_intervals.begin(); wit != it->wait_intervals.end(); wit++)
+        {
+          serializer->serialize(*wit, *it);
+        }
+      }
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
@@ -535,6 +590,7 @@ namespace Legion {
       operation_instances.clear();
       multi_tasks.clear();
       task_infos.clear();
+      gpu_task_infos.clear();
       meta_infos.clear();
       copy_infos.clear();
       inst_create_infos.clear();
@@ -945,6 +1001,32 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfiler::add_gpu_task_request(Realm::ProfilingRequestSet &requests,
+				      TaskID tid, VariantID vid, SingleTask *task)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      increment_total_outstanding_requests(LEGION_PROF_GPU_TASK);
+#else
+      increment_total_outstanding_requests();
+#endif
+      ProfilingInfo info(this, LEGION_PROF_GPU_TASK);
+      info.id = tid;
+      info.id2 = vid;
+      info.op_id = task->get_unique_id();
+      Realm::ProfilingRequest &req = requests.add_request(target_proc,
+                LG_LEGION_PROFILING_ID, &info, sizeof(info), LG_MIN_PRIORITY);
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationTimeline>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>();
+      req.add_measurement<
+                Realm::ProfilingMeasurements::OperationEventWaits>();
+      req.add_measurement<
+	        Realm::ProfilingMeasurements::OperationTimelineGPU>();
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfiler::add_meta_request(Realm::ProfilingRequestSet &requests,
                                           LgTaskID tid, Operation *op)
     //--------------------------------------------------------------------------
@@ -1228,6 +1310,36 @@ namespace Legion {
       const ProfilingInfo *info = (const ProfilingInfo*)response.user_data();
       switch (info->kind)
       {
+
+      case LEGION_PROF_GPU_TASK:
+        {
+#ifdef DEBUG_LEGION
+	    assert(response.has_measurement<
+	       Realm::ProfilingMeasurements::OperationTimeline>());
+            assert(response.has_measurement<
+		   Realm::ProfilingMeasurements::OperationTimelineGPU>());
+            assert(response.has_measurement<
+                Realm::ProfilingMeasurements::OperationProcessorUsage>());
+#endif
+            Realm::ProfilingMeasurements::OperationTimeline timeline;
+            response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationTimeline>(timeline);
+            Realm::ProfilingMeasurements::OperationProcessorUsage usage;
+            const bool has_usage = response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationProcessorUsage>(usage);
+            Realm::ProfilingMeasurements::OperationEventWaits waits;
+            response.get_measurement<
+                  Realm::ProfilingMeasurements::OperationEventWaits>(waits);
+            Realm::ProfilingMeasurements::OperationTimelineGPU timeline_gpu;
+            response.get_measurement<
+	      Realm::ProfilingMeasurements::OperationTimelineGPU>(timeline_gpu);
+            // Ignore anything that was predicated false for now
+            if (has_usage)
+              thread_local_profiling_instance->process_gpu_task(info->id,
+		    info->id2, info->op_id, timeline, usage, waits, timeline_gpu);
+            break;
+          }
+
         case LEGION_PROF_TASK:
           {
 #ifdef DEBUG_LEGION

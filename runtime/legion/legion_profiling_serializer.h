@@ -57,6 +57,8 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::SliceOwner&) = 0;
       virtual void serialize(const LegionProfInstance::WaitInfo, 
                              const LegionProfInstance::TaskInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::WaitInfo,
+                             const LegionProfInstance::GPUTaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::WaitInfo, 
                              const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
@@ -70,6 +72,7 @@ namespace Legion {
       virtual void serialize(const LegionProfInstance::MessageInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MapperCallInfo&) = 0;
       virtual void serialize(const LegionProfInstance::RuntimeCallInfo&) = 0;
+      virtual void serialize(const LegionProfInstance::GPUTaskInfo&) = 0;
 #ifdef LEGION_PROF_SELF_PROFILE
       virtual void serialize(const LegionProfInstance::ProfTaskInfo&) = 0;
 #endif
@@ -100,6 +103,8 @@ namespace Legion {
       void serialize(const LegionProfInstance::WaitInfo, 
                      const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo, 
+                     const LegionProfInstance::GPUTaskInfo&);
+      void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
@@ -112,6 +117,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
+      void serialize(const LegionProfInstance::GPUTaskInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif
@@ -147,6 +153,7 @@ namespace Legion {
         MESSAGE_INFO_ID,
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
+        GPU_TASK_INFO_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -175,7 +182,9 @@ namespace Legion {
       void serialize(const LegionProfInstance::SliceOwner&);
       void serialize(const LegionProfInstance::WaitInfo, 
                      const LegionProfInstance::TaskInfo&);
-      void serialize(const LegionProfInstance::WaitInfo, 
+      void serialize(const LegionProfInstance::WaitInfo,
+                     const LegionProfInstance::GPUTaskInfo&);
+      void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
       void serialize(const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::MetaInfo&);
@@ -188,6 +197,7 @@ namespace Legion {
       void serialize(const LegionProfInstance::MessageInfo&);
       void serialize(const LegionProfInstance::MapperCallInfo&);
       void serialize(const LegionProfInstance::RuntimeCallInfo&);
+      void serialize(const LegionProfInstance::GPUTaskInfo&);
 #ifdef LEGION_PROF_SELF_PROFILE
       void serialize(const LegionProfInstance::ProfTaskInfo&);
 #endif

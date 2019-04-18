@@ -51,6 +51,7 @@ namespace Realm {
     PMID_PCTRS_IPC,  // instructions/clocks performance counters
     PMID_PCTRS_TLB,  // TLB miss counters
     PMID_PCTRS_BP,   // branch predictor performance counters
+    PMID_OP_TIMELINE_GPU, // when a task was started and completed on the GPU
 
     // as the name suggests, this should always be last, allowing apps/runtimes
     // sitting on top of Realm to use some of the ID space
@@ -112,6 +113,28 @@ namespace Realm {
       inline void record_start_time(void);
       inline void record_end_time(void);
       inline void record_complete_time(void);
+      inline bool is_valid(void) const;
+    };
+
+    struct OperationTimelineGPU {
+      static const ProfilingMeasurementID ID = PMID_OP_TIMELINE_GPU;
+
+      // all times reported in nanoseconds from the start of program execution
+      // on some node. This is necessary because clients can't know where the
+      // measurement times were recorded and therefore have no reference. There
+      // may be skews between the start times of different nodes.
+      typedef long long timestamp_t;
+      static const timestamp_t INVALID_TIMESTAMP = LLONG_MIN;
+
+      OperationTimelineGPU() :
+        start_time(INVALID_TIMESTAMP),
+        end_time(INVALID_TIMESTAMP)
+      { }
+      timestamp_t start_time; // when was the GPU started?
+      timestamp_t end_time; // when was the GPU completed?
+
+      inline void record_start_time(void);
+      inline void record_end_time(void);
       inline bool is_valid(void) const;
     };
 
