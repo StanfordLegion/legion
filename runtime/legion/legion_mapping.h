@@ -478,7 +478,7 @@ namespace Legion {
        * field in the vector of instances for all the fields in the region
        * requirement. For read-only region requirements, the mapper can 
        * optionally request that the runtime not track the instances used
-       * for read-only region requirements with the 'skip_valid_indexes'.
+       * for read-only region requirements with the 'untracked_valid_regions'.
        * This will ensure that read-only instances are not considered a 
        * long-term valid copy of the data and make them immediately eligible
        * for garbage collection after the task is done mapping. Only the
@@ -525,7 +525,7 @@ namespace Legion {
       };
       struct MapTaskOutput {
         std::vector<std::vector<PhysicalInstance> >     chosen_instances; 
-        std::set<unsigned>                              skip_valid_indexes;
+        std::set<unsigned>                              untracked_valid_regions;
         std::vector<Processor>                          target_procs;
         VariantID                                       chosen_variant; // = 0 
         TaskPriority                                    task_priority;  // = 0
@@ -691,14 +691,19 @@ namespace Legion {
        * The map inline mapper call is responsible for handling the mapping
        * of an inline mapping operation to a specific physical region. The
        * mapper is given a set of valid physical instances in the 
-       * 'valid_instances' field. The mapper has the option of either ranking
-       * specifying a physical instance from the set of valid instances to 
-       * use in the 'chosen_ranking' field , or providing layout constraints 
-       * for creating a physical instance in 'layout_constraints'. The mapper
-       * can also request profiling information for any copies issued by 
-       * filling in the 'profiling_requests' set. The mapper can also ask
-       * to be notified of the chosen mapping by setting the 'report_mappint'
-       * field to true.
+       * 'valid_instances' field. The mapper must then specify a set of chosen
+       * instances to use for the inline mapping operation in 
+       * 'chosen_instances'. Multiple instances can be selected for different
+       * fields but the runtime will use the first instance that it finds that
+       * in the vector that has space for each field. If this is a read-only 
+       * inline mapping, the mapper can request that the runtime not track the 
+       * validity of the instance(s) used for the inline mapping by setting 
+       * 'track_valid_region' to 'false'. 
+       *
+       * The mapper can also request profiling information for any copies 
+       * issued by filling in the 'profiling_requests' set. The mapper can 
+       * control the priority with which this profiling information is 
+       * returned to the mapper with 'profiling priority'.
        */
       struct MapInlineInput {
         std::vector<PhysicalInstance>           valid_instances; 
@@ -707,6 +712,7 @@ namespace Legion {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
+        bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
       virtual void map_inline(const MapperContext        ctx,
@@ -779,24 +785,45 @@ namespace Legion {
        * instances for the copy. The mapper is provided with a set of valid
        * instances to be used for both the source and destination region
        * requirements in the 'src_instances' and 'dst_instances' fields.
-       * The mapper can specify a ranking for both the source and destination
-       * instances to use by ranking instances in the 'src_ranking' and 
-       * 'dst_ranking' fields. The mapper can also set constraints on the 
-       * layouts of the physical instances to be used in the 
+       * The mapper then picks the chosen instances for the source and
+       * destination region requirements and puts them in the corresponding
+       * vectors of the output structure. The mapper can specify multiple
+       * instances for different fields. For each field the runtime will select
+       * the instance that first has space for that field that it finds in
+       * the vector of instances. For source region requirements the mapper
+       * can optionally select to use a virtual mapping if the copy is not
+       * a reduction copy. If the copy is a gather or a scatter copy then 
+       * the mapper must also create instances for the source and/or destination
+       * indirection region requirements as well.
+       *
+       * The mapper can optionally choose not to have the runtime track any
+       * of the instances made for the copy as valid for the source or 
+       * indirection region requirements by specifying indexes of the valid
+       * region requirements in 'untracked_valid_srcs', 
+       * 'untracked_valid_ind_srcs', or 'untracked_valid_ind_dsts' respectively.
+       *
+       * The mapper can request profiling feedback on any copies performed by
+       * this copy operation by filling in the 'profiling_requests' data 
+       * structure with the kind of measurements desired. The priority
+       * with which this information is sent back to the mapper can be 
+       * set with 'profiling_priority'.
        */
       struct MapCopyInput {
-        std::vector<std::vector<PhysicalInstance> >     src_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_instances;
-        std::vector<std::vector<PhysicalInstance> >     src_indirect_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_instances;
+        std::vector<std::vector<PhysicalInstance> >   src_indirect_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_indirect_instances;
       };
       struct MapCopyOutput {
-        std::vector<std::vector<PhysicalInstance> >     src_instances;
-        std::vector<std::vector<PhysicalInstance> >     dst_instances;
-        std::vector<PhysicalInstance>                   src_indirect_instances;
-        std::vector<PhysicalInstance>                   dst_indirect_instances;
-        ProfilingRequest                                profiling_requests;
-        TaskPriority                                    profiling_priority;
+        std::vector<std::vector<PhysicalInstance> >   src_instances;
+        std::vector<std::vector<PhysicalInstance> >   dst_instances;
+        std::vector<PhysicalInstance>                 src_indirect_instances;
+        std::vector<PhysicalInstance>                 dst_indirect_instances;
+        std::set<unsigned>                            untracked_valid_srcs;
+        std::set<unsigned>                            untracked_valid_ind_srcs;
+        std::set<unsigned>                            untracked_valid_ind_dsts;
+        ProfilingRequest                              profiling_requests;
+        TaskPriority                                  profiling_priority;
       };
       //------------------------------------------------------------------------
       virtual void map_copy(const MapperContext      ctx,
@@ -1132,14 +1159,22 @@ namespace Legion {
        *  Map Projection 
        * ----------------------------------------------------------------------
        * The map partition mapper call is responsible for handling the mapping
-       * of a dependent partition operation to a specific physical region. The
-       * mapper is given a set of valid physical instances in the 
-       * 'valid_instances' field. The mapper has the option of either ranking
-       * specifying a physical instance from the set of valid instances to 
-       * use in the 'chosen_ranking' field , or providing layout constraints 
-       * for creating a physical instance in 'layout_constraints'. The mapper
-       * can also request profiling information for any copies issued by 
-       * filling in the 'profiling_requests' set.
+       * of a dependent partitioning operation to a specific physical region. 
+       * The mapper is given a set of valid physical instances in the 
+       * 'valid_instances' field. The mapper must then specify a set of chosen
+       * instances to use for the inline mapping operation in 
+       * 'chosen_instances'. Multiple instances can be selected for different
+       * fields but the runtime will use the first instance that it finds that
+       * in the vector that has space for each field. Since all dependent
+       * partitioning operations have read-only privileges on their input
+       * regions, the mapper can request that the runtime not track the 
+       * validity of the instance(s) used for the dependent parititoning
+       * operation by setting 'track_valid_region' to 'false'. 
+       *
+       * The mapper can also request profiling information for any copies 
+       * issued by filling in the 'profiling_requests' set. The mapper can 
+       * control the priority with which this profiling information is 
+       * returned to the mapper with 'profiling priority'.
        */
       struct MapPartitionInput {
         std::vector<PhysicalInstance>           valid_instances; 
@@ -1148,6 +1183,7 @@ namespace Legion {
         std::vector<PhysicalInstance>           chosen_instances;
         ProfilingRequest                        profiling_requests;
         TaskPriority                            profiling_priority;
+        bool                                    track_valid_region; /*=true*/
       };
       //------------------------------------------------------------------------
       virtual void map_partition(const MapperContext        ctx,

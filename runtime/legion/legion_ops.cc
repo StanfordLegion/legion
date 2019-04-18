@@ -2947,6 +2947,7 @@ namespace Legion {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY; 
+      output.track_valid_region = true;
       // Invoke the mapper
       if (mapper == NULL)
       {
@@ -12436,6 +12437,8 @@ namespace Legion {
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.track_valid_region = true;
       // Invoke the mapper
       if (mapper == NULL)
       {
