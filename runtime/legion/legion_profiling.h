@@ -162,11 +162,7 @@ namespace Legion {
       public:
 	IDType unique_id;
 	unsigned dim;
-#define DIMFUNC(DIM) point##DIM,
-        long long 
-        LEGION_FOREACH_N(DIMFUNC)
-        dummy_last;
-#undef DIMFUNC
+        long long points[LEGION_MAX_DIM];
       };
       struct IndexSpaceEmptyDesc {
       public:
@@ -175,11 +171,8 @@ namespace Legion {
       struct IndexSpaceRectDesc {
       public:
 	IDType unique_id;
-#define DIMFUNC(DIM) rect_lo##DIM, rect_hi##DIM,
-        long long 
-        LEGION_FOREACH_N(DIMFUNC)
-        dummy_last;
-#undef DIMFUNC
+        long long rect_lo[LEGION_MAX_DIM];
+        long long rect_hi[LEGION_MAX_DIM];
 	unsigned dim;
       };
       struct FieldDesc {
@@ -658,7 +651,7 @@ namespace Legion {
       ispace_point_desc.unique_id = handle;
       ispace_point_desc.dim = (unsigned)DIM;
 #define DIMFUNC(D2) \
-      ispace_point_desc.point##D2 = (D2 <= DIM) ? (long long)point[D2-1] : 0;
+      ispace_point_desc.points[D2-1] = (D2<=DIM) ? (long long)point[D2-1] : 0;
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
       record_index_space_point_desc(ispace_point_desc);
@@ -674,8 +667,8 @@ namespace Legion {
       ispace_rect_desc.unique_id = handle;
       ispace_rect_desc.dim = DIM;
 #define DIMFUNC(D2) \
-      ispace_rect_desc.rect_lo##D2 = (D2<=DIM) ? (long long)rect.lo[D2-1] : 0; \
-      ispace_rect_desc.rect_hi##D2 = (D2<=DIM) ? (long long)rect.hi[D2-1] : 0;
+      ispace_rect_desc.rect_lo[D2-1] = (D2<=DIM) ? (long long)rect.lo[D2-1]:0; \
+      ispace_rect_desc.rect_hi[D2-1] = (D2<=DIM) ? (long long)rect.hi[D2-1]:0;
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
       record_index_space_rect_desc(ispace_rect_desc);

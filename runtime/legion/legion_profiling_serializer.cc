@@ -481,8 +481,8 @@ namespace Legion {
       lp_fwrite(f, (char*) &(ispace_point_desc.dim), 
                 sizeof(ispace_point_desc.dim));
 #define DIMFUNC(DIM) \
-      lp_fwrite(f, (char*) &(ispace_point_desc.point##DIM), \
-                sizeof(ispace_point_desc.point##DIM));
+      lp_fwrite(f, (char*) &(ispace_point_desc.points[DIM-1]), \
+                sizeof(ispace_point_desc.points[DIM-1]));
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
     }
@@ -497,13 +497,13 @@ namespace Legion {
       lp_fwrite(f, (char*) &(ispace_rect_desc.unique_id), 
                 sizeof(ispace_rect_desc.unique_id));
 #define DIMFUNC(DIM) \
-      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo##DIM), \
-                sizeof(ispace_rect_desc.rect_lo##DIM));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo[DIM-1]), \
+                sizeof(ispace_rect_desc.rect_lo[DIM-1]));
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
 #define DIMFUNC(DIM) \
-      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_hi##DIM), \
-                sizeof(ispace_rect_desc.rect_hi##DIM));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_hi[DIM-1]), \
+                sizeof(ispace_rect_desc.rect_hi[DIM-1]));
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
       lp_fwrite(f, (char*) &(ispace_rect_desc.dim), 
@@ -994,83 +994,83 @@ namespace Legion {
       log_prof.print("Index Space Point Desc  %llu %d %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1);
+		     (long long)ispace_point_desc.points[0]);
 #elif LEGION_MAX_DIM == 2
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1]);
 #elif LEGION_MAX_DIM == 3
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2]);
 #elif LEGION_MAX_DIM == 4
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3]);
 #elif LEGION_MAX_DIM == 5
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4,
-                     (long long)ispace_point_desc.point5);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3],
+                     (long long)ispace_point_desc.points[4]);
 #elif LEGION_MAX_DIM == 6
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
                      "%lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4,
-                     (long long)ispace_point_desc.point5,
-                     (long long)ispace_point_desc.point6);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3],
+                     (long long)ispace_point_desc.points[4],
+                     (long long)ispace_point_desc.points[5]);
 #elif LEGION_MAX_DIM == 7
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
                      "%lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4,
-                     (long long)ispace_point_desc.point5,
-                     (long long)ispace_point_desc.point6,
-                     (long long)ispace_point_desc.point7);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3],
+                     (long long)ispace_point_desc.points[4],
+                     (long long)ispace_point_desc.points[5],
+                     (long long)ispace_point_desc.points[6]);
 #elif LEGION_MAX_DIM == 8
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
                      "%lld %lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4,
-                     (long long)ispace_point_desc.point5,
-                     (long long)ispace_point_desc.point6,
-                     (long long)ispace_point_desc.point7,
-                     (long long)ispace_point_desc.point8);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3],
+                     (long long)ispace_point_desc.points[4],
+                     (long long)ispace_point_desc.points[5],
+                     (long long)ispace_point_desc.points[6],
+                     (long long)ispace_point_desc.points[7]);
 #elif LEGION_MAX_DIM == 9
       log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
-		     (long long)ispace_point_desc.point1,
-		     (long long)ispace_point_desc.point2,
-		     (long long)ispace_point_desc.point3,
-                     (long long)ispace_point_desc.point4,
-                     (long long)ispace_point_desc.point5,
-                     (long long)ispace_point_desc.point6,
-                     (long long)ispace_point_desc.point7,
-                     (long long)ispace_point_desc.point8,
-                     (long long)ispace_point_desc.point9);
+		     (long long)ispace_point_desc.points[0],
+		     (long long)ispace_point_desc.points[1],
+		     (long long)ispace_point_desc.points[2],
+                     (long long)ispace_point_desc.points[3],
+                     (long long)ispace_point_desc.points[4],
+                     (long long)ispace_point_desc.points[5],
+                     (long long)ispace_point_desc.points[6],
+                     (long long)ispace_point_desc.points[7],
+                     (long long)ispace_point_desc.points[8]);
 #else
 #error "Illegal LEGION_MAX_DIM"
 #endif
@@ -1093,135 +1093,135 @@ namespace Legion {
 #if LEGION_MAX_DIM == 1
       log_prof.print("Index Space Rect Desc %llu %lld "
                      "%lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_hi1),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 2
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld "
                      "%lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 3
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 4
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 5
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %d", 
                      ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-                     (long long)(ispace_rect_desc.rect_lo5),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
-                     (long long)(ispace_rect_desc.rect_hi5),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+                     (long long)(ispace_rect_desc.rect_lo[4]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
+                     (long long)(ispace_rect_desc.rect_hi[4]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 6
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %d", 
                      ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-                     (long long)(ispace_rect_desc.rect_lo5),
-                     (long long)(ispace_rect_desc.rect_lo6),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
-                     (long long)(ispace_rect_desc.rect_hi5),
-                     (long long)(ispace_rect_desc.rect_hi6),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+                     (long long)(ispace_rect_desc.rect_lo[4]),
+                     (long long)(ispace_rect_desc.rect_lo[5]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
+                     (long long)(ispace_rect_desc.rect_hi[4]),
+                     (long long)(ispace_rect_desc.rect_hi[5]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 7
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %d", 
                      ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-                     (long long)(ispace_rect_desc.rect_lo5),
-                     (long long)(ispace_rect_desc.rect_lo6),
-                     (long long)(ispace_rect_desc.rect_lo7),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
-                     (long long)(ispace_rect_desc.rect_hi5),
-                     (long long)(ispace_rect_desc.rect_hi6),
-                     (long long)(ispace_rect_desc.rect_hi7),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+                     (long long)(ispace_rect_desc.rect_lo[4]),
+                     (long long)(ispace_rect_desc.rect_lo[5]),
+                     (long long)(ispace_rect_desc.rect_lo[6]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
+                     (long long)(ispace_rect_desc.rect_hi[4]),
+                     (long long)(ispace_rect_desc.rect_hi[5]),
+                     (long long)(ispace_rect_desc.rect_hi[6]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 8
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
                      "%lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-                     (long long)(ispace_rect_desc.rect_lo5),
-                     (long long)(ispace_rect_desc.rect_lo6),
-                     (long long)(ispace_rect_desc.rect_lo7),
-                     (long long)(ispace_rect_desc.rect_lo8),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
-                     (long long)(ispace_rect_desc.rect_hi5),
-                     (long long)(ispace_rect_desc.rect_hi6),
-                     (long long)(ispace_rect_desc.rect_hi7),
-                     (long long)(ispace_rect_desc.rect_hi8),
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+                     (long long)(ispace_rect_desc.rect_lo[4]),
+                     (long long)(ispace_rect_desc.rect_lo[5]),
+                     (long long)(ispace_rect_desc.rect_lo[6]),
+                     (long long)(ispace_rect_desc.rect_lo[7]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
+                     (long long)(ispace_rect_desc.rect_hi[4]),
+                     (long long)(ispace_rect_desc.rect_hi[5]),
+                     (long long)(ispace_rect_desc.rect_hi[6]),
+                     (long long)(ispace_rect_desc.rect_hi[7]),
 		     ispace_rect_desc.dim);
 #elif LEGION_MAX_DIM == 9
       log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %d", ispace_rect_desc.unique_id,
-		     (long long)(ispace_rect_desc.rect_lo1),
-		     (long long)(ispace_rect_desc.rect_lo2),
-		     (long long)(ispace_rect_desc.rect_lo3),
-                     (long long)(ispace_rect_desc.rect_lo4),
-                     (long long)(ispace_rect_desc.rect_lo5),
-                     (long long)(ispace_rect_desc.rect_lo6),
-                     (long long)(ispace_rect_desc.rect_lo7),
-                     (long long)(ispace_rect_desc.rect_lo8),
-                     (long long)(ispace_rect_desc.rect_lo9),
-		     (long long)(ispace_rect_desc.rect_hi1),
-		     (long long)(ispace_rect_desc.rect_hi2),
-		     (long long)(ispace_rect_desc.rect_hi3),
-                     (long long)(ispace_rect_desc.rect_hi4),
-                     (long long)(ispace_rect_desc.rect_hi5),
-                     (long long)(ispace_rect_desc.rect_hi6),
-                     (long long)(ispace_rect_desc.rect_hi7),
-                     (long long)(ispace_rect_desc.rect_hi8),
-                     (long long)(ispace_rect_desc.rect_hi9),
-		     ispace_rect_desc.dim);
-#else
+		     (long long)(ispace_rect_desc.rect_lo[0]),
+		     (long long)(ispace_rect_desc.rect_lo[1]),
+		     (long long)(ispace_rect_desc.rect_lo[2]),
+                     (long long)(ispace_rect_desc.rect_lo[3]),
+                     (long long)(ispace_rect_desc.rect_lo[4]),
+                     (long long)(ispace_rect_desc.rect_lo[5]),
+                     (long long)(ispace_rect_desc.rect_lo[6]),
+                     (long long)(ispace_rect_desc.rect_lo[7]),
+                     (long long)(ispace_rect_desc.rect_lo[8]),
+		     (long long)(ispace_rect_desc.rect_hi[0]),
+		     (long long)(ispace_rect_desc.rect_hi[1]),
+		     (long long)(ispace_rect_desc.rect_hi[2]),
+                     (long long)(ispace_rect_desc.rect_hi[3]),
+                     (long long)(ispace_rect_desc.rect_hi[4]),
+                     (long long)(ispace_rect_desc.rect_hi[5]),
+                     (long long)(ispace_rect_desc.rect_hi[6]),
+                     (long long)(ispace_rect_desc.rect_hi[7]),
+                     (long long)(ispace_rect_desc.rect_hi[8]),
+		     ispace_rect_desc.dim[0])
+#el[0]s
 #error "Illegal LEGION_MAX_DIM"
 #endif
     }
