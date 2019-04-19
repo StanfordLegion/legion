@@ -8629,8 +8629,7 @@ index_part_pat           = re.compile(
 index_part_name_pat      = re.compile(
     prefix+"Index Partition Name (?P<uid>[0-9a-f]+) (?P<name>[-$()\w. ]+)")
 index_subspace_pat       = re.compile(
-    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Index Subspace (?P<pid>[0-9a-f]+) (?P<uid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 field_space_pat          = re.compile(
     prefix+"Field Space (?P<uid>[0-9]+)")
 field_space_name_pat     = re.compile(
@@ -8724,13 +8723,11 @@ index_slice_pat          = re.compile(
 slice_slice_pat          = re.compile(
     prefix+"Slice Slice (?P<slice1>[0-9]+) (?P<slice2>[0-9]+)")
 slice_point_pat          = re.compile(
-    prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Slice Point (?P<slice>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 point_point_pat          = re.compile(
     prefix+"Point Point (?P<point1>[0-9]+) (?P<point2>[0-9]+)")
 index_point_pat          = re.compile(
-    prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) "+
-           "(?P<val1>\-?[0-9]+) (?P<val2>\-?[0-9]+) (?P<val3>\-?[0-9]+)")
+    prefix+"Index Point (?P<index>[0-9]+) (?P<point>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 op_index_pat             = re.compile(
     prefix+"Operation Index (?P<parent>[0-9]+) (?P<index>[0-9]+) (?P<child>[0-9]+)")
 close_index_pat          = re.compile(
@@ -9419,11 +9416,9 @@ def parse_legion_spy_line(line, state):
         point = state.get_task(int(m.group('point')))
         dim = int(m.group('dim'))
         index_point = Point(dim)
-        index_point.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            index_point.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                index_point.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            index_point.vals[index] = int(values[index])
         point.set_point(index_point)
         state.point_slice[point] = int(m.group('slice'))
         return True
@@ -9441,11 +9436,9 @@ def parse_legion_spy_line(line, state):
         point = state.get_operation(int(m.group('point')))
         dim = int(m.group('dim'))
         index_point = Point(dim)
-        index_point.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            index_point.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                index_point.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            index_point.vals[index] = int(values[index])
         index = state.get_operation(int(m.group('index')))
         index.add_point_op(point, index_point) 
         return True
@@ -9496,11 +9489,9 @@ def parse_legion_spy_line(line, state):
         parent = state.get_index_partition(int(m.group('pid'),16))
         dim = int(m.group('dim'))
         color= Point(dim)
-        color.vals[0] = int(m.group('val1'))
-        if dim > 1:
-            color.vals[1] = int(m.group('val2'))
-            if dim > 2:
-                color.vals[2] = int(m.group('val3'))
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            color.vals[index] = int(values[index])
         ispace.set_parent(parent, color)
         return True
     m = field_space_pat.match(line)

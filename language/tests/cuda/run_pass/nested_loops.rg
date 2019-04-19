@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fcuda", "1"]]
+-- [["-fcuda", "1", "-ll:gpu", "1"]]
 
 import "regent"
 
