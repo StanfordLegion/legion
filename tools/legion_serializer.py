@@ -69,6 +69,19 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "OpDesc": re.compile(prefix + r'Prof Op Desc (?P<kind>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
+        "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+)'),
+        "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<point0>[0-9]+) (?P<point1>[0-9]+) (?P<point2>[0-9]+)'),
+        "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<rect_lo0>[0-9]+) (?P<rect_lo1>[0-9]+) (?P<rect_lo2>[0-9]+) (?P<rect_hi0>[0-9]+) (?P<rect_hi1>[0-9]+) (?P<rect_hi2>[0-9]+) (?P<dim>[0-9]+)'),
+        "IndexSpaceEmptyDesc": re.compile(prefix + r'Index Space Empty Desc (?P<unique_id>[0-9]+)'),
+        "FieldDesc": re.compile(prefix + r'Field Name Desc (?P<unique_id>[0-9]+) (?P<field_id>[0-9]+) (?P<size>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "FieldSpaceDesc": re.compile(prefix + r'Field Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "IndexSpaceDesc": re.compile(prefix + r'Index Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
+        "PartDesc": re.compile(prefix + r'Index Part Name Desc (?P<unique_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "IndexPartitionDesc": re.compile(prefix + r'Index Partition Desc (?P<parent_id>[0-9]+) (?P<unique_id>[0-9]+) (?P<disjoint>[0-1]+) (?P<point>[0-9]+)'),
+        "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+) (?P<point0>[0-9]+) (?P<point1>[0-9]+) (?P<point2>[0-9]+)'),
+        "LogicalRegionDesc": re.compile(prefix + r'Logical Region Desc (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
+        "PhysicalInstRegionDesc": re.compile(prefix + r'Physical Inst Region Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+)'),
+        "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+)'),
         "TaskKind": re.compile(prefix + r'Prof Task Kind (?P<task_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+) (?P<overwrite>[0-1])'),
         "TaskVariant": re.compile(prefix + r'Prof Task Variant (?P<task_id>[0-9]+) (?P<variant_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
         "OperationInstance": re.compile(prefix + r'Prof Operation (?P<op_id>[0-9]+) (?P<kind>[0-9]+)'),
@@ -104,6 +117,23 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "kind": int,
         "opkind": int,
         "part_op": int,
+        "point": int,
+        "point0": long,
+        "point1": long,
+        "point2": long,
+        "dim": int,
+        "rect_lo0":long,
+        "rect_lo1":long,
+        "rect_lo2":long,
+        "rect_hi0":long,
+        "rect_hi1":long,
+        "rect_hi2":long,
+        "field_id": int,
+        "fspace_id": int,
+        "ispace_id": long,
+        "unique_id": long,
+        "disjoint": bool,
+        "tree_id": int,
         "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
         "src": lambda x: int(x, 16),
@@ -126,9 +156,7 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
 
     def __init__(self, state, callbacks):
         LegionDeserializer.__init__(self, state, callbacks)
-
         assert len(callbacks) == len(LegionProfASCIIDeserializer.patterns)
-
         callbacks_valid = True
         for callback_name, callback in callbacks.iteritems():
             cur_valid = callback_name in LegionProfASCIIDeserializer.patterns and \
@@ -197,12 +225,15 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "MemID":              "Q", # unsigned long long
         "InstID":             "Q", # unsigned long long
         "UniqueID":           "Q", # unsigned long long
+        "IDType":             "Q", # unsigned long long
         "TaskID":             "I", # unsigned int
         "bool":               "?", # bool
         "VariantID":          "I", # unsigned int
         "unsigned":           "I", # unsigned int
         "timestamp_t":        "Q", # unsigned long long
         "unsigned long long": "Q", # unsigned long long
+        "long long":          "q", # long long
+        "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
         "MessageKind":        "i", # int (really an enum so this depends)

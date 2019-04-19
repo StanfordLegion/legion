@@ -91,6 +91,105 @@ namespace Legion {
          << "capacity:unsigned long long:" << sizeof(unsigned long long)
          << "}" << std::endl;
 
+      ss << "ProcMDesc {"
+         << "id:" << PROC_MEM_DESC_ID                          << delim
+         << "proc_id:ProcID:"              << sizeof(ProcID)   << delim
+         << "mem_id:MemID:"                << sizeof(MemID)
+         << "}" << std::endl;
+
+      ss << "IndexSpacePointDesc {"
+         << "id:" << INDEX_SPACE_POINT_ID                    << delim
+         << "unique_id:IDType:"          << sizeof(IDType)   << delim
+         << "dim:unsigned:"             << sizeof(unsigned)  << delim
+         << "point0:long long:"         << sizeof(long long) << delim
+         << "point1:long long:"         << sizeof(long long) << delim
+         << "point2:long long:"         << sizeof(long long)
+         << "}" << std::endl;
+
+      ss << "IndexSpaceRectDesc {"
+         << "id:" << INDEX_SPACE_RECT_ID                       << delim
+         << "unique_id:IDType:"            << sizeof(IDType)   << delim
+         << "rect_lo0:long long:"         << sizeof(long long) << delim
+         << "rect_lo1:long long:"         << sizeof(long long) << delim
+         << "rect_lo2:long long:"         << sizeof(long long) << delim
+         << "rect_hi0:long long:"         << sizeof(long long) << delim
+         << "rect_hi1:long long:"         << sizeof(long long) << delim
+         << "rect_hi2:long long:"         << sizeof(long long) << delim
+         << "dim:unsigned:"               << sizeof(unsigned)
+         << "}" << std::endl;
+
+      ss << "IndexSpaceEmptyDesc {"
+         << "id:" << INDEX_SPACE_EMPTY_ID                      << delim
+         << "unique_id:IDType:"           << sizeof(unsigned long long)
+	 << "}" << std::endl;
+
+      ss << "FieldDesc {"
+         << "id:" << FIELD_ID                                   << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "field_id:unsigned:"           << sizeof(unsigned)  << delim
+	 << "size:unsigned long long:"     << sizeof(unsigned long long) << delim
+	 << "name:string:"                 << "-1"
+         << "}" << std::endl;
+
+      ss << "FieldSpaceDesc {"
+         << "id:" << FIELD_SPACE_ID                             << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "name:string:"                 << "-1"
+         << "}" << std::endl;
+
+      ss << "PartDesc {"
+         << "id:" << INDEX_PART_ID                              << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "name:string:"                 << "-1"
+         << "}" << std::endl;
+
+      ss << "IndexSpaceDesc {"
+         << "id:" << INDEX_SPACE_ID                             << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "name:string:"                 << "-1"
+         << "}" << std::endl;
+
+      ss << "IndexSubSpaceDesc {"
+         << "id:" << INDEX_SUBSPACE_ID                          << delim
+	 << "parent_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "point0:long long:"            << sizeof(long long) << delim
+	 << "point1:long long:"            << sizeof(long long) << delim
+	 << "point2:long long:"            << sizeof(long long)
+         << "}" << std::endl;
+
+      ss << "IndexPartitionDesc {"
+         << "id:" << INDEX_PARTITION_ID                         << delim
+	 << "parent_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
+	 << "disjoint:bool:"               << sizeof(bool)      << delim
+	 << "point:unsigned long long:"    << sizeof(unsigned long long)
+         << "}" << std::endl;
+
+      ss << "LogicalRegionDesc {"
+         << "id:" << LOGICAL_REGION_ID                          << delim
+	 << "ispace_id:IDType:"            << sizeof(IDType)    << delim
+	 << "fspace_id:unsigned:"          << sizeof(unsigned)  << delim
+	 << "tree_id:unsigned:"            << sizeof(unsigned)  << delim
+	 << "name:string:"                 << "-1"
+         << "}" << std::endl;
+
+      ss << "PhysicalInstRegionDesc {"
+         << "id:" << PHYSICAL_INST_REGION_ID                      << delim
+	 << "op_id:UniqueID:"              << sizeof(UniqueID)    << delim
+	 << "inst_id:InstID:"              << sizeof(InstID)      << delim
+	 << "ispace_id:IDType:"            << sizeof(IDType)      << delim
+	 << "fspace_id:unsigned:"          << sizeof(unsigned)    << delim
+	 << "tree_id:unsigned:"            << sizeof(unsigned)
+         << "}" << std::endl;
+
+      ss << "PhysicalInstLayoutDesc {"
+         << "id:" << PHYSICAL_INST_LAYOUT_ID                  << delim
+         << "op_id:UniqueID:"           << sizeof(InstID)     << delim
+         << "inst_id:InstID:"           << sizeof(InstID)     << delim
+	 << "field_id:unsigned:"        << sizeof(unsigned)
+         << "}" << std::endl;
+
       ss << "TaskKind {" 
          << "id:" << TASK_KIND_ID                 << delim
          << "task_id:TaskID:"   << sizeof(TaskID) << delim
@@ -358,6 +457,171 @@ namespace Legion {
     }
 
     // Serialize Methods
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfDesc::ProcMemDesc &pm)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = PROC_MEM_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(pm.proc_id), sizeof(pm.proc_id));
+      lp_fwrite(f, (char*) &(pm.mem_id), sizeof(pm.mem_id));
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const
+					       LegionProfInstance::IndexSpacePointDesc
+					       &ispace_point_desc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = INDEX_SPACE_POINT_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(ispace_point_desc.unique_id), sizeof(ispace_point_desc.unique_id));
+      lp_fwrite(f, (char*) &(ispace_point_desc.dim), sizeof(ispace_point_desc.dim));
+      lp_fwrite(f, (char*) &(ispace_point_desc.point0), sizeof(ispace_point_desc.point0));
+      lp_fwrite(f, (char*) &(ispace_point_desc.point1), sizeof(ispace_point_desc.point1));
+      lp_fwrite(f, (char*) &(ispace_point_desc.point2), sizeof(ispace_point_desc.point2));
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const
+					       LegionProfInstance::IndexSpaceRectDesc
+					       &ispace_rect_desc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = INDEX_SPACE_RECT_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.unique_id), sizeof(ispace_rect_desc.unique_id));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo0), sizeof(ispace_rect_desc.rect_lo0));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo1), sizeof(ispace_rect_desc.rect_lo1));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo2), sizeof(ispace_rect_desc.rect_lo2));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_hi0), sizeof(ispace_rect_desc.rect_hi0));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_hi1), sizeof(ispace_rect_desc.rect_hi1));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.rect_hi2), sizeof(ispace_rect_desc.rect_hi2));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.dim), sizeof(ispace_rect_desc.dim));
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const
+					       LegionProfInstance::IndexSpaceEmptyDesc
+					       &ispace_empty_desc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = INDEX_SPACE_EMPTY_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(ispace_empty_desc.unique_id), sizeof(ispace_empty_desc.unique_id));
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::FieldDesc
+					       &field_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = FIELD_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(field_desc.unique_id), sizeof(field_desc.unique_id));
+      lp_fwrite(f, (char*) &(field_desc.field_id), sizeof(field_desc.field_id));
+      lp_fwrite(f, (char*) &(field_desc.size), sizeof(field_desc.size));
+      lp_fwrite(f, field_desc.name, strlen(field_desc.name)+1);
+    }
+
+    //------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::FieldSpaceDesc
+					       &field_space_desc)
+    //------------------------------------------------------------------------------
+    {
+      int ID = FIELD_SPACE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(field_space_desc.unique_id), sizeof(field_space_desc.unique_id));
+      lp_fwrite(f, field_space_desc.name, strlen(field_space_desc.name)+1);
+    }
+
+    //-----------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::IndexPartDesc
+                                               &index_part_desc)
+    //-----------------------------------------------------------------------------
+    {
+      int ID = INDEX_PART_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(index_part_desc.unique_id), sizeof(UniqueID));
+      lp_fwrite(f, index_part_desc.name, strlen(index_part_desc.name)+1);
+    }
+
+    //------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::IndexSpaceDesc
+					       &index_space_desc)
+    //------------------------------------------------------------------------------
+    {
+      int ID = INDEX_SPACE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*) &(index_space_desc.unique_id), sizeof(UniqueID));
+      lp_fwrite(f, index_space_desc.name, strlen(index_space_desc.name)+1);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::IndexSubSpaceDesc
+					       &index_subspace_desc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = INDEX_SUBSPACE_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(index_subspace_desc.parent_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(index_subspace_desc.unique_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(index_subspace_desc.point0), sizeof(long long));
+      lp_fwrite(f, (char*)&(index_subspace_desc.point1), sizeof(long long));
+      lp_fwrite(f, (char*)&(index_subspace_desc.point2), sizeof(long long));
+    }
+
+    //---------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::IndexPartitionDesc
+                                               &index_part_desc)
+    //---------------------------------------------------------------------------------
+    {
+      int ID = INDEX_PARTITION_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(index_part_desc.parent_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(index_part_desc.unique_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(index_part_desc.disjoint), sizeof(bool));
+      lp_fwrite(f, (char*)&(index_part_desc.point), sizeof(LegionColor));
+    }
+
+
+    //-----------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::LogicalRegionDesc
+					       &lr_desc)
+    //-----------------------------------------------------------------------------------
+    {
+      int ID = LOGICAL_REGION_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(lr_desc.ispace_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(lr_desc.fspace_id), sizeof(unsigned));
+      lp_fwrite(f, (char*)&(lr_desc.tree_id), sizeof(unsigned));
+      lp_fwrite(f, lr_desc.name, strlen(lr_desc.name)+1);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::PhysicalInstRegionDesc
+					       &phy_instance_rdesc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = PHYSICAL_INST_REGION_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.op_id), sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.inst_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.ispace_id), sizeof(IDType));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.fspace_id), sizeof(unsigned));
+      lp_fwrite(f, (char*)&(phy_instance_rdesc.tree_id), sizeof(unsigned));
+    }
+    //------------------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(const LegionProfInstance::PhysicalInstLayoutDesc
+					       &phy_instance_layout_rdesc)
+    //------------------------------------------------------------------------------------
+    {
+      int ID = PHYSICAL_INST_LAYOUT_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.op_id),sizeof(UniqueID));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.inst_id),sizeof(InstID));
+      lp_fwrite(f, (char*)&(phy_instance_layout_rdesc.field_id),sizeof(unsigned));
+    }
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
@@ -707,6 +971,149 @@ namespace Legion {
     }
 
     // Serialize Methods
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const
+					      LegionProfInstance::IndexSpacePointDesc
+					      &ispace_point_desc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld",
+		     ispace_point_desc.unique_id,
+		     ispace_point_desc.dim,
+		     ispace_point_desc.point0,
+		     ispace_point_desc.point1,
+		     ispace_point_desc.point2);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const
+					       LegionProfInstance::IndexSpaceEmptyDesc
+					       &ispace_empty_desc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Index Space Empty Desc %llu",
+		     ispace_empty_desc.unique_id);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const
+					       LegionProfInstance::IndexSpaceRectDesc
+					       &ispace_rect_desc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld %lld %d",
+		     ispace_rect_desc.unique_id,
+		     (long long)(ispace_rect_desc.rect_lo0),
+		     (long long)(ispace_rect_desc.rect_lo1),
+		     (long long)(ispace_rect_desc.rect_lo2),
+		     (long long)(ispace_rect_desc.rect_hi0),
+		     (long long)(ispace_rect_desc.rect_hi1),
+		     (long long)(ispace_rect_desc.rect_hi2),
+		     ispace_rect_desc.dim
+		     );
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::FieldDesc
+					       &field_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Field Name Desc %llu %u %llu %s",
+		     field_desc.unique_id, field_desc.field_id,
+		     field_desc.size, field_desc.name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::FieldSpaceDesc
+					       &field_space_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Field Space Name Desc %llu %s",
+		     field_space_desc.unique_id,
+		     field_space_desc.name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::IndexPartDesc
+					      &index_part_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Index Part Name Desc %llu %s",
+                     index_part_desc.unique_id,
+                     index_part_desc.name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::IndexSpaceDesc
+					       &index_space_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Index Space Name Desc %llu %s",
+		     index_space_desc.unique_id,
+		     index_space_desc.name);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::IndexSubSpaceDesc
+					       &index_subspace_desc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Index Sub Space Desc %llu %llu %lld %lld %lld",
+		     index_subspace_desc.parent_id,
+		     index_subspace_desc.unique_id,
+		     index_subspace_desc.point0,
+		     index_subspace_desc.point1,
+		     index_subspace_desc.point2);
+    }
+
+    //--------------------------------------------------------------------------------
+     void LegionProfASCIISerializer::serialize(const LegionProfInstance::IndexPartitionDesc
+					       &index_part_desc)
+    //--------------------------------------------------------------------------------
+    {
+      log_prof.print("Index Partition Desc %llu %llu %d %llu",
+                     index_part_desc.parent_id,
+                     index_part_desc.unique_id,
+                     index_part_desc.disjoint,
+                     index_part_desc.point);
+    }
+
+
+    //-----------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::LogicalRegionDesc
+					       &lr_desc)
+    //-----------------------------------------------------------------------------------
+    {
+      log_prof.print("Logical Region Desc %llu %u %u %s",
+		     lr_desc.ispace_id,
+		     lr_desc.fspace_id,
+		     lr_desc.tree_id,
+		     lr_desc.name);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::PhysicalInstRegionDesc
+					      &phy_instance_rdesc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Physical Inst Region Desc " "%llu "  IDFMT " %llu %u %u",
+		     phy_instance_rdesc.op_id,
+		     phy_instance_rdesc.inst_id,
+		     phy_instance_rdesc.ispace_id,
+		     phy_instance_rdesc.fspace_id,
+		     phy_instance_rdesc.tree_id);
+    }
+
+    //------------------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(const LegionProfInstance::PhysicalInstLayoutDesc
+					      &phy_instance_layout_rdesc)
+    //------------------------------------------------------------------------------------
+    {
+      log_prof.print("Physical Inst Layout Desc " "%llu " IDFMT " %u",
+		     phy_instance_layout_rdesc.op_id,
+		     phy_instance_layout_rdesc.inst_id,
+		     phy_instance_layout_rdesc.field_id);
+    }
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(
@@ -767,6 +1174,15 @@ namespace Legion {
     {
       log_prof.print("Prof Mem Desc " IDFMT " %d %llu", 
                       mem_desc.mem_id, mem_desc.kind, mem_desc.capacity);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+					      const LegionProfDesc::ProcMemDesc &pm)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Prof Mem Proc Affinity Desc " IDFMT " " IDFMT,
+		     pm.proc_id, pm.mem_id);
     }
 
     //--------------------------------------------------------------------------
@@ -834,7 +1250,6 @@ namespace Legion {
                 task_info.op_id, task_info.task_id, task_info.variant_id,
                 wait_info.wait_start, wait_info.wait_ready, wait_info.wait_end);
     }
-
 
     //--------------------------------------------------------------------------
     void LegionProfASCIISerializer::serialize(

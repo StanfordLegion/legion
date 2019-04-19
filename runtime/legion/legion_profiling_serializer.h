@@ -50,16 +50,29 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::OpDesc&) = 0;
       virtual void serialize(const LegionProfDesc::ProcDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MemDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::ProcMemDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexSpacePointDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexSpaceRectDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::FieldDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::FieldSpaceDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexPartDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexPartitionDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexSpaceDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::IndexSubSpaceDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::LogicalRegionDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::PhysicalInstRegionDesc&) = 0;
+      virtual void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&) = 0;
       virtual void serialize(const LegionProfInstance::TaskKind&) = 0;
       virtual void serialize(const LegionProfInstance::TaskVariant&) = 0;
       virtual void serialize(const LegionProfInstance::OperationInstance&) = 0;
       virtual void serialize(const LegionProfInstance::MultiTask&) = 0;
       virtual void serialize(const LegionProfInstance::SliceOwner&) = 0;
-      virtual void serialize(const LegionProfInstance::WaitInfo, 
+      virtual void serialize(const LegionProfInstance::WaitInfo,
                              const LegionProfInstance::TaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::WaitInfo,
                              const LegionProfInstance::GPUTaskInfo&) = 0;
-      virtual void serialize(const LegionProfInstance::WaitInfo, 
+      virtual void serialize(const LegionProfInstance::WaitInfo,
                              const LegionProfInstance::MetaInfo&) = 0;
       virtual void serialize(const LegionProfInstance::TaskInfo&) = 0;
       virtual void serialize(const LegionProfInstance::MetaInfo&) = 0;
@@ -95,14 +108,27 @@ namespace Legion {
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::ProcDesc&);
       void serialize(const LegionProfDesc::MemDesc&);
+      void serialize(const LegionProfDesc::ProcMemDesc&);
+      void serialize(const LegionProfInstance::IndexSpacePointDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
+      void serialize(const LegionProfInstance::FieldDesc&);
+      void serialize(const LegionProfInstance::FieldSpaceDesc&);
+      void serialize(const LegionProfInstance::IndexPartDesc&);
+      void serialize(const LegionProfInstance::IndexPartitionDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceDesc&);
+      void serialize(const LegionProfInstance::IndexSubSpaceDesc&);
+      void serialize(const LegionProfInstance::LogicalRegionDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);
       void serialize(const LegionProfInstance::MultiTask&);
       void serialize(const LegionProfInstance::SliceOwner&);
-      void serialize(const LegionProfInstance::WaitInfo, 
+      void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::TaskInfo&);
-      void serialize(const LegionProfInstance::WaitInfo, 
+      void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::GPUTaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::MetaInfo&);
@@ -153,7 +179,20 @@ namespace Legion {
         MESSAGE_INFO_ID,
         MAPPER_CALL_INFO_ID,
         RUNTIME_CALL_INFO_ID,
-        GPU_TASK_INFO_ID,
+	GPU_TASK_INFO_ID,
+        PROC_MEM_DESC_ID,
+	INDEX_SPACE_POINT_ID,
+	INDEX_SPACE_RECT_ID,
+	INDEX_SPACE_EMPTY_ID,
+	FIELD_ID,
+	FIELD_SPACE_ID,
+	INDEX_PART_ID,
+	INDEX_PARTITION_ID,
+	INDEX_SPACE_ID,
+	INDEX_SUBSPACE_ID,
+	LOGICAL_REGION_ID,
+	PHYSICAL_INST_REGION_ID,
+	PHYSICAL_INST_LAYOUT_ID,
 #ifdef LEGION_PROF_SELF_PROFILE
         PROFTASK_INFO_ID
 #endif
@@ -175,12 +214,25 @@ namespace Legion {
       void serialize(const LegionProfDesc::OpDesc&);
       void serialize(const LegionProfDesc::ProcDesc&);
       void serialize(const LegionProfDesc::MemDesc&);
+      void serialize(const LegionProfDesc::ProcMemDesc&);
+      void serialize(const LegionProfInstance::IndexSpacePointDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
+      void serialize(const LegionProfInstance::FieldDesc&);
+      void serialize(const LegionProfInstance::FieldSpaceDesc&);
+      void serialize(const LegionProfInstance::IndexPartDesc&);
+      void serialize(const LegionProfInstance::IndexPartitionDesc&);
+      void serialize(const LegionProfInstance::IndexSpaceDesc&);
+      void serialize(const LegionProfInstance::IndexSubSpaceDesc&);
+      void serialize(const LegionProfInstance::LogicalRegionDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstRegionDesc&);
+      void serialize(const LegionProfInstance::PhysicalInstLayoutDesc&);
       void serialize(const LegionProfInstance::TaskKind&);
       void serialize(const LegionProfInstance::TaskVariant&);
       void serialize(const LegionProfInstance::OperationInstance&);
       void serialize(const LegionProfInstance::MultiTask&);
       void serialize(const LegionProfInstance::SliceOwner&);
-      void serialize(const LegionProfInstance::WaitInfo, 
+      void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::TaskInfo&);
       void serialize(const LegionProfInstance::WaitInfo,
                      const LegionProfInstance::GPUTaskInfo&);
