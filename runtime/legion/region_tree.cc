@@ -160,7 +160,7 @@ namespace Legion {
     {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did);
-      if (runtime->legion_spy_enabled || runtime->profiler != NULL)
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
         node->log_index_space_points();
     }
 
@@ -173,7 +173,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_union_space(to_trigger, op, handles);
-      if (runtime->legion_spy_enabled || runtime->profiler != NULL)
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -190,7 +190,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_intersection_space(to_trigger, op, handles);
-      if (runtime->legion_spy_enabled || runtime->profiler != NULL)
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -207,7 +207,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, NULL, NULL/*parent*/, 0/*color*/, did, to_trigger);
       node->initialize_difference_space(to_trigger, op, left, right);
-      if (runtime->legion_spy_enabled || runtime->profiler != NULL)
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
       {
         if (!node->index_space_ready.has_triggered())
           node->index_space_ready.wait();
@@ -4563,7 +4563,7 @@ namespace Legion {
             reinterpret_cast<const char*>(buffer));
       if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_index_space(handle.id,
-					      reinterpret_cast<const char*>(buffer));
+            reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -4582,7 +4582,7 @@ namespace Legion {
             reinterpret_cast<const char*>(buffer));
       if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_index_part(handle.id,
-					     reinterpret_cast<const char*>(buffer));
+            reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -4601,7 +4601,7 @@ namespace Legion {
             reinterpret_cast<const char*>(buffer));
       if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_field_space(handle.id,
-					      reinterpret_cast<const char*>(buffer));
+            reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -4620,8 +4620,8 @@ namespace Legion {
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
       if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
-	runtime->profiler->record_field(handle.id, fid,
-					size, reinterpret_cast<const char*>(buf));
+	runtime->profiler->record_field(handle.id, fid, size, 
+            reinterpret_cast<const char*>(buf));
     }
 
     //--------------------------------------------------------------------------
@@ -4641,9 +4641,8 @@ namespace Legion {
             reinterpret_cast<const char*>(buffer));
       if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
 	runtime->profiler->record_logical_region(handle.index_space.id,
-						 handle.field_space.id,
-						 handle.tree_id,
-						 reinterpret_cast<const char*>(buffer));
+            handle.field_space.id, handle.tree_id,
+	    reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -6274,9 +6273,8 @@ namespace Legion {
             LegionSpy::log_index_subspace(handle.id, is.id, 
                           result->get_domain_point_color());
 	  if (runtime->profiler != NULL)
-	    runtime->profiler->record_index_subspace(
-						     handle.id, is.id,
-						     result->get_domain_point_color());
+	    runtime->profiler->record_index_subspace(handle.id, is.id,
+                result->get_domain_point_color());
           return result; 
         }
       }
@@ -6445,8 +6443,8 @@ namespace Legion {
           LegionSpy::log_index_partition(parent->handle.id, handle.id, 
                                          disjoint, color);
       if (runtime->profiler != NULL)
-	runtime->profiler->record_index_partition(parent->handle.id,handle.id, disjoint,
-						  color);
+	runtime->profiler->record_index_partition(parent->handle.id, handle.id, 
+            disjoint, color);
     }
 
     //--------------------------------------------------------------------------

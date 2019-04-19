@@ -311,7 +311,7 @@ namespace Legion {
       get_realm_index_space(tight_space, true/*tight*/);
       if (context->runtime->legion_spy_enabled)
         log_index_space_points(tight_space);
-      if (context->runtime->profiler)
+      if (context->runtime->profiler != NULL)
         log_profiler_index_space_points(tight_space);
     }
       
@@ -338,6 +338,7 @@ namespace Legion {
       else
         LegionSpy::log_empty_index_space(handle.get_id());
     }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     void IndexSpaceNodeT<DIM,T>::log_profiler_index_space_points(
@@ -351,16 +352,17 @@ namespace Legion {
               itr.valid; itr.step())
         {
           if (itr.rect.volume() == 1)
-            context->runtime->profiler->record_index_space_point(handle.get_id(),
-                                             Point<DIM,T>(itr.rect.lo));
+            context->runtime->profiler->record_index_space_point(
+                handle.get_id(), Point<DIM,T>(itr.rect.lo));
           else
-            context->runtime->profiler->record_index_space_rect(handle.get_id(),
-                                            Rect<DIM,T>(itr.rect));
+            context->runtime->profiler->record_index_space_rect(
+                handle.get_id(), Rect<DIM,T>(itr.rect));
         }
       }
       else
         context->runtime->profiler->record_empty_index_space(handle.get_id());
     }
+
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
     ApEvent IndexSpaceNodeT<DIM,T>::compute_pending_space(Operation *op,

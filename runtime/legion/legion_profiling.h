@@ -337,7 +337,8 @@ namespace Legion {
 				   const char* name);
       void register_physical_instance_region(UniqueID op_id, IDType inst_id,
 					     LogicalRegion handle);
-      void register_instance_layout(UniqueID op_id, IDType inst_id, unsigned field_id);
+      void register_instance_layout(UniqueID op_id, IDType inst_id, 
+                                    unsigned field_id);
     public:
       void process_task(TaskID task_id, VariantID variant_id, UniqueID op_id, 
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -532,12 +533,13 @@ namespace Legion {
 				 const DomainPoint &point);
       void record_logical_region(IDType index_space, unsigned field_space,
 				 unsigned tree_id, const char* name);
-      void record_physical_instance_region(UniqueID op_id, IDType inst_id, LogicalRegion handle);
-
-      void record_instance_layout(UniqueID op_id, IDType inst_id, std::vector<FieldID>& f);
+      void record_physical_instance_region(UniqueID op_id, IDType inst_id, 
+                                           LogicalRegion handle);
+      void record_instance_layout(UniqueID op_id, IDType inst_id, 
+                                  std::vector<FieldID>& f);
       void record_index_part(UniqueID id, const char* name);
-      void record_index_partition(UniqueID parent_id, UniqueID id, bool disjoint, LegionColor c);
-
+      void record_index_partition(UniqueID parent_id, UniqueID id, 
+                                  bool disjoint, LegionColor c);
     public:
       void record_message_kinds(const char *const *const message_names,
                                 unsigned int num_message_kinds);
@@ -590,9 +592,10 @@ namespace Legion {
       // For knowing when we need to start dumping early
       size_t total_memory_footprint;
     public:
-      void record_index_space_point_desc(LegionProfInstance::IndexSpacePointDesc &i);
-      void record_index_space_rect_desc(LegionProfInstance::IndexSpaceRectDesc &i);
-
+      void record_index_space_point_desc(
+          LegionProfInstance::IndexSpacePointDesc &i);
+      void record_index_space_rect_desc(
+          LegionProfInstance::IndexSpaceRectDesc &i);
       template <int DIM, typename T>
 	void record_index_space_point(IDType handle, const Point<DIM, T> &point) {
 	LegionProfInstance::IndexSpacePointDesc ispace_point_desc;

@@ -188,12 +188,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LayoutDescription::record_instance_layout(UniqueID creator_id, IDType inst_id) const
+    void LayoutDescription::record_instance_layout(UniqueID creator_id, 
+                                                   IDType inst_id) const
     //--------------------------------------------------------------------------
     {
       std::vector<FieldID> fields;
       owner->get_field_ids(allocated_fields, fields);
-      implicit_runtime->profiler->record_instance_layout(creator_id, inst_id, fields);
+      implicit_runtime->profiler->record_instance_layout(creator_id, 
+                                                         inst_id, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -2136,11 +2138,11 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
-      if (runtime->profiler) {
-	runtime->profiler->record_physical_instance_region(creator_id, instance.id,
-							   ancestor->handle);
+      if (runtime->profiler) 
+      {
+	runtime->profiler->record_physical_instance_region(creator_id, 
+                                        instance.id, ancestor->handle);
 	layout->record_instance_layout(creator_id, instance.id);
-
       }
       return result;
     }
