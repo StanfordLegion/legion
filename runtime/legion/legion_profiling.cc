@@ -690,53 +690,53 @@ namespace Legion {
       }
       for (std::deque<IndexSpaceRectDesc>::const_iterator it =
 	     ispace_rect_desc.begin(); it != ispace_rect_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
 
       for (std::deque<IndexSpacePointDesc>::const_iterator it =
 	     ispace_point_desc.begin(); it != ispace_point_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
       for (std::deque<IndexSpaceEmptyDesc>::const_iterator it =
 	     ispace_empty_desc.begin(); it != ispace_empty_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
       for (std::deque<FieldDesc>::const_iterator it =
 	     field_desc.begin(); it != field_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
       for (std::deque<FieldSpaceDesc>::const_iterator it =
 	     field_space_desc.begin(); it != field_space_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
       for (std::deque<IndexPartDesc>::const_iterator it =
 	     index_part_desc.begin(); it != index_part_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
 
       for (std::deque<IndexSubSpaceDesc>::const_iterator it =
 	     index_subspace_desc.begin(); it != index_subspace_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
 
       for (std::deque<IndexPartitionDesc>::const_iterator it =
 	     index_partition_desc.begin(); it != index_partition_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
 
       for (std::deque<LogicalRegionDesc>::const_iterator it =
 	     lr_desc.begin(); it != lr_desc.end(); it++)
-	{
-	  serializer->serialize(*it);
-	}
+      {
+        serializer->serialize(*it);
+      }
 
       for (std::deque<PhysicalInstRegionDesc>::const_iterator it =
 	     phy_inst_rdesc.begin();
@@ -1301,24 +1301,26 @@ namespace Legion {
       return *this;
     }
 
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_index_space_rect_desc(
     LegionProfInstance::IndexSpaceRectDesc &ispace_rect_desc)
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_index_space_rect(ispace_rect_desc);
+      thread_local_profiling_instance->register_index_space_rect(
+                                                ispace_rect_desc);
     }
 
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_index_space_point_desc(
     LegionProfInstance::IndexSpacePointDesc &ispace_point_desc)
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_index_space_point(ispace_point_desc);
+      thread_local_profiling_instance->register_index_space_point(
+                                                ispace_point_desc);
     }
     //-------------------------------------------------------------------------
     void LegionProfiler::record_empty_index_space(IDType handle)
@@ -1374,67 +1376,65 @@ namespace Legion {
       thread_local_profiling_instance->register_index_space(unique_id,name);
     }
 
-    //------------------------------------------------------------------------------------
-    void LegionProfiler::record_index_subspace(IDType parent_id,
-					       IDType unique_id, const DomainPoint &point)
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_subspace(IDType parent_id, 
+                                     IDType unique_id, const DomainPoint &point)
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_index_subspace(parent_id, unique_id,
-							       point);
+      thread_local_profiling_instance->register_index_subspace(parent_id, 
+                                                              unique_id, point);
     }
 
-    //-------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_index_partition(IDType parent_id,
                                                 IDType unique_id, bool disjoint,
                                                 LegionColor point)
-    //--------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
 
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_index_partition(parent_id, unique_id,
-								disjoint, point);
+      thread_local_profiling_instance->register_index_partition(parent_id, 
+                                              unique_id, disjoint, point);
     }
 
-    //-----------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_logical_region(IDType index_space,
-					       unsigned field_space, unsigned tree_id,
-					       const char* name)
-    //-----------------------------------------------------------------------------------
+                       unsigned field_space, unsigned tree_id, const char* name)
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
-      thread_local_profiling_instance->register_logical_region(index_space, field_space,
-							       tree_id, name);
+      thread_local_profiling_instance->register_logical_region(index_space, 
+                                                  field_space, tree_id, name);
     }
 
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     void LegionProfiler::record_physical_instance_region(UniqueID op_id,
 							 IDType inst_id,
 							 LogicalRegion handle)
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
       thread_local_profiling_instance->register_physical_instance_region(op_id,
-									 inst_id,
-									 handle);
+                                                              inst_id, handle);
     }
 
-    //------------------------------------------------------------------------------------
-    void LegionProfiler::record_instance_layout(UniqueID op_id,
-						IDType inst_id,
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_instance_layout(UniqueID op_id, IDType inst_id,
 						std::vector<FieldID>& fields)
-    //------------------------------------------------------------------------------------
+    //--------------------------------------------------------------------------
     {
       if (thread_local_profiling_instance == NULL)
         create_thread_local_profiling_instance();
 
       for (std::vector<FieldID>::const_iterator it = fields.begin();
 	   it != fields.end(); it++) {
-	thread_local_profiling_instance->register_instance_layout(op_id, inst_id, *it);
+	thread_local_profiling_instance->register_instance_layout(op_id, 
+                                                          inst_id, *it);
       }
     }
 

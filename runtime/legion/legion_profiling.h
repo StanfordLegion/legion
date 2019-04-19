@@ -162,7 +162,11 @@ namespace Legion {
       public:
 	IDType unique_id;
 	unsigned dim;
-	long long point0, point1, point2;
+#define DIMFUNC(DIM) point##DIM,
+        long long 
+        LEGION_FOREACH_N(DIMFUNC)
+        dummy_last;
+#undef DIMFUNC
       };
       struct IndexSpaceEmptyDesc {
       public:
@@ -171,8 +175,11 @@ namespace Legion {
       struct IndexSpaceRectDesc {
       public:
 	IDType unique_id;
-	long long rect_lo0, rect_lo1, rect_lo2;
-	long long rect_hi0, rect_hi1, rect_hi2;
+#define DIMFUNC(DIM) rect_lo##DIM, rect_hi##DIM,
+        long long 
+        LEGION_FOREACH_N(DIMFUNC)
+        dummy_last;
+#undef DIMFUNC
 	unsigned dim;
       };
       struct FieldDesc {
@@ -597,7 +604,9 @@ namespace Legion {
       void record_index_space_rect_desc(
           LegionProfInstance::IndexSpaceRectDesc &i);
       template <int DIM, typename T>
-	void record_index_space_point(IDType handle, const Point<DIM, T> &point) {
+      void record_index_space_point(IDType handle, const Point<DIM, T> &point); 
+#if 0
+      {
 	LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
 	ispace_point_desc.unique_id = handle;
 	ispace_point_desc.dim = (unsigned)DIM;
@@ -606,9 +615,12 @@ namespace Legion {
 	ispace_point_desc.point2 = (DIM < 3) ? 0: (long long) point[2];
 	record_index_space_point_desc(ispace_point_desc);
       };
+#endif
 
       template<int DIM, typename T>
-	void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect) {
+      void record_index_space_rect(IDType handle, const Rect<DIM, T> &rect); 
+#if 0
+      {
 	LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
 	ispace_rect_desc.unique_id = handle;
 	ispace_rect_desc.dim = DIM;
@@ -620,6 +632,7 @@ namespace Legion {
 	ispace_rect_desc.rect_hi2 = (DIM < 3) ? 0: (long long) rect.hi[2];
 	record_index_space_rect_desc(ispace_rect_desc);
       };
+#endif
     };
 
     class DetailedProfiler {
@@ -634,6 +647,39 @@ namespace Legion {
       const RuntimeCallKind call_kind;
       timestamp_t start_time;
     };
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline void LegionProfiler::record_index_space_point(IDType handle,
+                                                      const Point<DIM,T> &point)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfInstance::IndexSpacePointDesc ispace_point_desc;
+      ispace_point_desc.unique_id = handle;
+      ispace_point_desc.dim = (unsigned)DIM;
+#define DIMFUNC(D2) \
+      ispace_point_desc.point##D2 = (D2 <= DIM) ? (long long)point[D2-1] : 0;
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+      record_index_space_point_desc(ispace_point_desc);
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    inline void LegionProfiler::record_index_space_rect(IDType handle,
+                                                        const Rect<DIM,T> &rect)
+    //--------------------------------------------------------------------------
+    {
+      LegionProfInstance::IndexSpaceRectDesc ispace_rect_desc;
+      ispace_rect_desc.unique_id = handle;
+      ispace_rect_desc.dim = DIM;
+#define DIMFUNC(D2) \
+      ispace_rect_desc.rect_lo##D2 = (D2<=DIM) ? (long long)rect.lo[D2-1] : 0; \
+      ispace_rect_desc.rect_hi##D2 = (D2<=DIM) ? (long long)rect.hi[D2-1] : 0;
+      LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+      record_index_space_rect_desc(ispace_rect_desc);
+    }
 
   }; // namespace Internal
 }; // namespace Legion
