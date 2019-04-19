@@ -5101,12 +5101,20 @@ namespace Legion {
       // Periodically merge these to keep this data structure from exploding
       // when we have a long-running task, although don't do this for fence
       // operations in case we have to prune ourselves out of the set
-      if ((previous_completion_events.size() >= LEGION_DEFAULT_MAX_TASK_WINDOW) 
-          && (op->get_operation_kind() != Operation::FENCE_OP_KIND))
+      if (previous_completion_events.size() >= LEGION_DEFAULT_MAX_TASK_WINDOW)
       {
-        ApEvent merge = Runtime::merge_events(previous_completion_events);
-        previous_completion_events.clear();
-        previous_completion_events.insert(merge);
+        const Operation::OpKind op_kind = op->get_operation_kind(); 
+        if ((op_kind != Operation::FENCE_OP_KIND) &&
+            (op_kind != Operation::DELETION_OP_KIND) &&
+            (op_kind != Operation::TRACE_BEGIN_OP_KIND) && 
+            (op_kind != Operation::TRACE_COMPLETE_OP_KIND) &&
+            (op_kind != Operation::TRACE_CAPTURE_OP_KIND) &&
+            (op_kind != Operation::TRACE_REPLAY_OP_KIND))
+        {
+          ApEvent merge = Runtime::merge_events(previous_completion_events);
+          previous_completion_events.clear();
+          previous_completion_events.insert(merge);
+        }
       }
       // Have to record this operation in case there is a fence later
       ops_since_last_fence.push_back(op->get_unique_op_id());
@@ -5127,6 +5135,21 @@ namespace Legion {
                                                  bool mapping, bool execution)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      {
+        const Operation::OpKind op_kind = op->get_operation_kind();
+        // It's alright if you hit this assertion for a new operation kind
+        // Just add the new operation kind here and then update the check
+        // in register_fence_dependence that looks for all these kinds too
+        // so that we do not run into trouble when running with Legion Spy.
+        assert((op_kind == Operation::FENCE_OP_KIND) || 
+               (op_kind == Operation::DELETION_OP_KIND) ||
+               (op_kind == Operation::TRACE_BEGIN_OP_KIND) ||
+               (op_kind == Operation::TRACE_COMPLETE_OP_KIND) ||
+               (op_kind == Operation::TRACE_CAPTURE_OP_KIND) ||
+               (op_kind == Operation::TRACE_REPLAY_OP_KIND));
+      }
+#endif
       std::map<Operation*,GenerationID> previous_operations;
       std::set<ApEvent> previous_events;
       // Take the lock and iterate through our current pending
