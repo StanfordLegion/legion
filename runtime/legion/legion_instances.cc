@@ -832,10 +832,21 @@ namespace Legion {
       }
       IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
         *(region_exprs.begin()) : context->union_index_spaces(region_exprs);
+      return meets_expression(space_expr, tight_region_bounds);
+    }
+
+    //--------------------------------------------------------------------------
+    bool PhysicalManager::meets_expression(IndexSpaceExpression *space_expr,
+                                           bool tight_bounds) const
+    //--------------------------------------------------------------------------
+    {
+      const size_t expr_volume = space_expr->get_volume();
       // If the space we need is empty then we're done for any instance
-      if (space_expr->is_empty())
+      if (expr_volume == 0)
         return true;
-      else if (instance_domain->is_empty())
+      const size_t inst_volume = instance_domain->get_volume();
+      // If we don't even have enough volume there is now way to satisfy it
+      if (inst_volume < expr_volume)
         return false;
       // Check to see if we have enough space in this instance
       IndexSpaceExpression *cover_expr = 
@@ -844,18 +855,18 @@ namespace Legion {
       if (!cover_expr->is_empty())
         return false;
       // We have enough space, if it's tight, then see if it is identical
-      if (tight_region_bounds)
+      if (tight_bounds)
       {
         // We know we cover, so the only way we're tight are is if
         // we have exactly the same set of points which requires 
         // that the number of points be the same
-        if (space_expr->get_volume() == instance_domain->get_volume())
+        if (expr_volume == inst_volume)
           return true;
         else
           return false;
       }
       else
-        // If we make it here then we have satisfied the regions
+        // If we make it here then we have satisfied the expression 
         return true;
     }
 

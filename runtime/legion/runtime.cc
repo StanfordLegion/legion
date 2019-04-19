@@ -3648,12 +3648,14 @@ namespace Legion {
       std::vector<PhysicalManager*> to_check;
       {
         AutoLock m_lock(manager_lock,1,false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-          to_check.push_back(it->first);
-        }
+        for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+              current_instances.begin(); cit != current_instances.end(); cit++)
+          for (TreeInstances::const_iterator it = 
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+            to_check.push_back(it->first);
+          }
       }
       for (std::vector<PhysicalManager*>::const_iterator it = 
             to_check.begin(); it != to_check.end(); it++)
@@ -3675,34 +3677,45 @@ namespace Legion {
       {
         AutoLock m_lock(manager_lock);
         std::vector<PhysicalManager*> to_remove;
-        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
-        {
-          if (it->second.current_state == PENDING_COLLECTED_STATE)
-            continue;
+        for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+              current_instances.begin(); cit != current_instances.end(); cit++)
+          for (TreeInstances::iterator it = 
+                cit->second.begin(); it != cit->second.end(); it++)
+          {
+            if (it->second.current_state == PENDING_COLLECTED_STATE)
+              continue;
 #ifdef DEBUG_LEGION
-          assert(it->second.current_state != PENDING_COLLECTED_STATE);
-          assert(it->second.current_state != PENDING_ACQUIRE_STATE);
+            assert(it->second.current_state != PENDING_COLLECTED_STATE);
+            assert(it->second.current_state != PENDING_ACQUIRE_STATE);
 #endif
-          if (it->second.current_state != COLLECTABLE_STATE)
-          {
-            RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-            it->second.current_state = PENDING_COLLECTED_STATE;
-            it->second.deferred_collect = deferred_collect;
-            to_delete[it->first] = deferred_collect;
-            it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+            if (it->second.current_state != COLLECTABLE_STATE)
+            {
+              RtUserEvent deferred_collect = Runtime::create_rt_user_event();
+              it->second.current_state = PENDING_COLLECTED_STATE;
+              it->second.deferred_collect = deferred_collect;
+              to_delete[it->first] = deferred_collect;
+              it->first->add_base_resource_ref(MEMORY_MANAGER_REF);   
+            }
+            else // reference flows out since we're deleting this
+            {
+              to_delete[it->first] = RtEvent::NO_RT_EVENT;
+              to_remove.push_back(it->first);
+            }
           }
-          else // reference flows out since we're deleting this
-          {
-            to_delete[it->first] = RtEvent::NO_RT_EVENT;
-            to_remove.push_back(it->first);
-          }
-        }
         if (!to_remove.empty())
         {
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
-            current_instances.erase(*it);
+          {
+            std::map<RegionTreeID,TreeInstances>::iterator finder = 
+              current_instances.find((*it)->tree_id);
+#ifdef DEBUG_LEGION
+            assert(finder != current_instances.end());
+#endif
+            finder->second.erase(*it);
+            if (finder->second.empty())
+              current_instances.erase(finder);
+          }
         }
       }
       for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
@@ -3722,14 +3735,16 @@ namespace Legion {
       if (!is_owner)
         return;
       // No need for the lock, no one should be doing anything at this point
-      for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-            current_instances.begin(); it != current_instances.end(); it++)
-      {
-        if (it->second.current_state == PENDING_COLLECTED_STATE)
-          Runtime::trigger_event(it->second.deferred_collect);
-        else
-          it->first->force_deletion();
-      }
+      for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+            current_instances.begin(); cit != current_instances.end(); cit++)
+        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
+              cit->second.begin(); it != cit->second.end(); it++)
+        {
+          if (it->second.current_state == PENDING_COLLECTED_STATE)
+            Runtime::trigger_event(it->second.deferred_collect);
+          else
+            it->first->force_deletion();
+        }
     }
     
     //--------------------------------------------------------------------------
@@ -3738,12 +3753,13 @@ namespace Legion {
     {
       const size_t inst_size = manager->get_instance_size();
       AutoLock m_lock(manager_lock);
+      TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) == current_instances.end());
+      assert(insts.find(manager) == insts.end());
 #endif
       // Make it valid to start since we know when we were created
       // that we were made valid to begin with
-      InstanceInfo &info = current_instances[manager];
+      InstanceInfo &info = insts[manager];
       info.instance_size = inst_size;
     }
 
@@ -3752,10 +3768,15 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
+      std::map<RegionTreeID,TreeInstances>::iterator finder = 
+        current_instances.find(manager->tree_id);
  #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) != current_instances.end());
+      assert(finder != current_instances.end());
+      assert(finder->second.find(manager) != finder->second.end());
 #endif     
-      current_instances.erase(manager);
+      finder->second.erase(manager);
+      if (finder->second.empty())
+        current_instances.erase(finder);
     }
 
     //--------------------------------------------------------------------------
@@ -3763,10 +3784,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
 #ifdef DEBUG_LEGION
-      assert(current_instances.find(manager) != current_instances.end());
+      assert(current_instances.find(manager->tree_id) != 
+              current_instances.end());
+#endif
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances[manager->tree_id].end());
       // This can be a valid state too if we just made the instance
       // and we marked it valid to prevent GC from claiming it before
       // it can be used for the first time
@@ -3793,10 +3818,14 @@ namespace Legion {
       bool remove_reference = false;
       {
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder =
-          current_instances.find(manager);
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
 #ifdef DEBUG_LEGION
-        assert(finder != current_instances.end());
+        assert(tree_finder != current_instances.end());
+#endif
+        TreeInstances::iterator finder = tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+        assert(finder != tree_finder->second.end());
         assert((finder->second.current_state == ACTIVE_STATE) ||
                (finder->second.current_state == PENDING_COLLECTED_STATE) ||
                (finder->second.current_state == PENDING_ACQUIRE_STATE));
@@ -3813,7 +3842,9 @@ namespace Legion {
 #endif
           Runtime::trigger_event(info.deferred_collect);
           // Now we can delete our entry because it has been deleted
-          current_instances.erase(finder);
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
           remove_reference = true;
         }
         else if (finder->second.current_state == PENDING_ACQUIRE_STATE)
@@ -3829,7 +3860,9 @@ namespace Legion {
           // currently allow the mappers to reuse them
           perform_deletion = true;
           remove_reference = true;
-          current_instances.erase(finder);
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
         }
         else // didn't collect it yet
           info.current_state = COLLECTABLE_STATE;
@@ -3848,10 +3881,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(finder != current_instances[manager->tree_id].end());
       assert((finder->second.current_state == ACTIVE_STATE) ||
              (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
              (finder->second.current_state == VALID_STATE));
@@ -3872,10 +3905,10 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      TreeInstances::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(finder != current_instances[manager->tree_id].end());
       assert((finder->second.current_state == VALID_STATE) ||
              (finder->second.current_state == PENDING_ACQUIRE_STATE) ||
              (finder->second.current_state == PENDING_COLLECTED_STATE));
@@ -3899,10 +3932,13 @@ namespace Legion {
       assert(is_owner);
 #endif
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
+      std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+        current_instances.find(manager->tree_id);
+      if (tree_finder == current_instances.end())
+        return false;
+      TreeInstances::iterator finder = tree_finder->second.find(manager);
       // If we can't even find it then it was deleted
-      if (finder == current_instances.end())
+      if (finder == tree_finder->second.end())
         return false;
       // If it's going to be deleted that is not going to work
       if (finder->second.current_state == PENDING_COLLECTED_STATE)
@@ -3924,10 +3960,14 @@ namespace Legion {
       assert(is_owner);
 #endif
       AutoLock m_lock(manager_lock);
-      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-        current_instances.find(manager);
 #ifdef DEBUG_LEGION
-      assert(finder != current_instances.end());
+      assert(current_instances.find(manager->tree_id) != 
+              current_instances.end());
+#endif
+      std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+        current_instances[manager->tree_id].find(manager);
+#ifdef DEBUG_LEGION
+      assert(finder != current_instances[manager->tree_id].end());
       assert(finder->second.current_state == PENDING_ACQUIRE_STATE);
       assert(finder->second.pending_acquires > 0);
 #endif
@@ -4347,11 +4387,16 @@ namespace Legion {
       // Take the manager lock and see if there are any managers
       // we can release now
       std::map<PhysicalManager*,std::pair<RtEvent,bool> > to_release;
+      do 
       {
         std::vector<PhysicalManager*> to_remove;
         AutoLock m_lock(manager_lock);
-        for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // If the region for the instance is not for the tree then
           // we get to skip it
@@ -4396,9 +4441,11 @@ namespace Legion {
         {
           for (std::vector<PhysicalManager*>::const_iterator it = 
                 to_remove.begin(); it != to_remove.end(); it++)
-            current_instances.erase(*it);
+            finder->second.erase(*it);
+          if (finder->second.empty())
+            current_instances.erase(finder);
         }
-      }
+      } while (false);
       for (std::map<PhysicalManager*,std::pair<RtEvent,bool> >::
             const_iterator it = to_release.begin(); it != to_release.end();it++)
       {
@@ -4438,31 +4485,41 @@ namespace Legion {
         {
           // See if we need a handback
           AutoLock m_lock(manager_lock,1,false);
-          std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-            current_instances.find(manager);
-          if (finder != current_instances.end())
+          std::map<RegionTreeID,TreeInstances>::const_iterator tree_finder =
+            current_instances.find(manager->tree_id);
+          if (tree_finder != current_instances.end())
           {
-            // If priority is already max priority, then we are done
-            if (finder->second.min_priority == priority)
-              return;
-            // Make an event for a callback
-            never_gc_wait = Runtime::create_rt_user_event();
+            TreeInstances::const_iterator finder = 
+              tree_finder->second.find(manager);
+            if (finder != tree_finder->second.end())
+            {
+              // If priority is already max priority, then we are done
+              if (finder->second.min_priority == priority)
+                return;
+              // Make an event for a callback
+              never_gc_wait = Runtime::create_rt_user_event();
+            }
           }
         }
         else
         {
           AutoLock m_lock(manager_lock);
-          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-            current_instances.find(manager);
-          if (finder != current_instances.end())
+          std::map<RegionTreeID,TreeInstances>::iterator tree_finder =
+            current_instances.find(manager->tree_id);
+          if (tree_finder != current_instances.end())
           {
-            if (finder->second.min_priority == GC_NEVER_PRIORITY)
+            TreeInstances::iterator finder = 
+              tree_finder->second.find(manager);
+            if (finder != tree_finder->second.end())
             {
-              finder->second.mapper_priorities.erase(key);
-              if (finder->second.mapper_priorities.empty())
+              if (finder->second.min_priority == GC_NEVER_PRIORITY)
               {
-                finder->second.min_priority = 0;
-                remove_never_gc_ref = true;
+                finder->second.mapper_priorities.erase(key);
+                if (finder->second.mapper_priorities.empty())
+                {
+                  finder->second.min_priority = 0;
+                  remove_never_gc_ref = true;
+                }
               }
             }
           }
@@ -4506,9 +4563,12 @@ namespace Legion {
             // Then record it
             AutoLock m_lock(manager_lock);
 #ifdef DEBUG_LEGION
-            assert(current_instances.find(manager) != current_instances.end());
+            assert(current_instances.find(manager->tree_id) !=
+                    current_instances.end());
+            assert(current_instances[manager->tree_id].find(manager) != 
+                    current_instances[manager->tree_id].end());
 #endif
-            InstanceInfo &info = current_instances[manager];
+            InstanceInfo &info = current_instances[manager->tree_id][manager];
             if (info.min_priority == GC_NEVER_PRIORITY)
               remove_duplicate = true; // lost the race
             else
@@ -4529,69 +4589,74 @@ namespace Legion {
           return;
         // Do the update locally 
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-          current_instances.find(manager);
-        if (finder != current_instances.end())
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
+        if (tree_finder != current_instances.end())
         {
-          std::map<std::pair<MapperID,Processor>,GCPriority> 
-            &mapper_priorities = finder->second.mapper_priorities;
-          std::pair<MapperID,Processor> key(mapper_id,processor);
-          // If the new priority is NEVER_GC and we were already at NEVER_GC
-          // then we need to remove the redundant reference when we are done
-          if ((priority == GC_NEVER_PRIORITY) && 
-              (finder->second.min_priority == GC_NEVER_PRIORITY))
-            remove_min_reference = true;
-          // See if we can find the current priority  
-          std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
-            priority_finder = mapper_priorities.find(key);
-          if (priority_finder != mapper_priorities.end())
+          std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+            tree_finder->second.find(manager);
+          if (finder != tree_finder->second.end())
           {
-            // See if it changed
-            if (priority_finder->second != priority)
+            std::map<std::pair<MapperID,Processor>,GCPriority> 
+              &mapper_priorities = finder->second.mapper_priorities;
+            std::pair<MapperID,Processor> key(mapper_id,processor);
+            // If the new priority is NEVER_GC and we were already at NEVER_GC
+            // then we need to remove the redundant reference when we are done
+            if ((priority == GC_NEVER_PRIORITY) && 
+                (finder->second.min_priority == GC_NEVER_PRIORITY))
+              remove_min_reference = true;
+            // See if we can find the current priority  
+            std::map<std::pair<MapperID,Processor>,GCPriority>::iterator 
+              priority_finder = mapper_priorities.find(key);
+            if (priority_finder != mapper_priorities.end())
             {
-              // Update the min if necessary
-              if (priority < finder->second.min_priority)
+              // See if it changed
+              if (priority_finder->second != priority)
               {
-                // It decreased 
-                finder->second.min_priority = priority;
-              }
-              // It might go up if this was (one of) the min priorities
-              else if ((priority > finder->second.min_priority) &&
-                       (finder->second.min_priority == priority_finder->second))
-              {
-                // This was (one of) the min priorities, but it 
-                // is about to go up so compute the new min
-                GCPriority new_min = priority;
-                for (std::map<std::pair<MapperID,Processor>,GCPriority>::
-                      const_iterator it = mapper_priorities.begin(); it != 
-                      mapper_priorities.end(); it++)
+                // Update the min if necessary
+                if (priority < finder->second.min_priority)
                 {
-                  if (it->first == key)
-                    continue;
-                  // If we find another one with the same as the current 
-                  // min then we know we are just going to stay the same
-                  if (it->second == finder->second.min_priority)
-                  {
-                    new_min = it->second;
-                    break;
-                  }
-                  if (it->second < new_min)
-                    new_min = it->second;
+                  // It decreased 
+                  finder->second.min_priority = priority;
                 }
-                if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
-                    (new_min > GC_NEVER_PRIORITY))
-                  remove_min_reference = true;
-                finder->second.min_priority = new_min;
+                // It might go up if this was (one of) the min priorities
+                else if ((priority > finder->second.min_priority) &&
+                       (finder->second.min_priority == priority_finder->second))
+                {
+                  // This was (one of) the min priorities, but it 
+                  // is about to go up so compute the new min
+                  GCPriority new_min = priority;
+                  for (std::map<std::pair<MapperID,Processor>,GCPriority>::
+                        const_iterator it = mapper_priorities.begin(); it != 
+                        mapper_priorities.end(); it++)
+                  {
+                    if (it->first == key)
+                      continue;
+                    // If we find another one with the same as the current 
+                    // min then we know we are just going to stay the same
+                    if (it->second == finder->second.min_priority)
+                    {
+                      new_min = it->second;
+                      break;
+                    }
+                    if (it->second < new_min)
+                      new_min = it->second;
+                  }
+                  if ((finder->second.min_priority == GC_NEVER_PRIORITY) &&
+                      (new_min > GC_NEVER_PRIORITY))
+                    remove_min_reference = true;
+                  finder->second.min_priority = new_min;
+                }
+                // Finally update the priority
+                priority_finder->second = priority;
               }
-              // Finally update the priority
-              priority_finder->second = priority;
             }
-          }
-          else // previous priority was zero, see if we need to update it
-          {
-            mapper_priorities[key] = priority;
-            if (priority < finder->second.min_priority)
-              finder->second.min_priority = priority;
+            else // previous priority was zero, see if we need to update it
+            {
+              mapper_priorities[key] = priority;
+              if (priority < finder->second.min_priority)
+                finder->second.min_priority = priority;
+            }
           }
         }
       }
@@ -5061,14 +5126,21 @@ namespace Legion {
             manager->add_base_valid_ref(NEVER_GC_REF, &mutator);
           {
             AutoLock m_lock(manager_lock);
-            std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-              current_instances.find(manager);
-            if (finder == current_instances.end())
-              current_instances[manager] = InstanceInfo();
+            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+              current_instances.find(manager->tree_id);
+            if (tree_finder != current_instances.end())
+            {
+              TreeInstances::const_iterator finder = 
+                tree_finder->second.find(manager);
+            if (finder == tree_finder->second.end())
+              tree_finder->second[manager] = InstanceInfo();  
+            }
+            else
+              current_instances[manager->tree_id][manager] = InstanceInfo();
             if (created && min_priority)
             {
               std::pair<MapperID,Processor> key(mapper_id,processor);
-              InstanceInfo &info = current_instances[manager];
+              InstanceInfo &info = current_instances[manager->tree_id][manager];
               if (info.min_priority == GC_NEVER_PRIORITY)
                 remove_duplicate_valid = true;
               else
@@ -5098,13 +5170,20 @@ namespace Legion {
           {
             std::pair<MapperID,Processor> key(mapper_id,processor);
             AutoLock m_lock(manager_lock);
-            std::map<PhysicalManager*,InstanceInfo>::const_iterator finder = 
-              current_instances.find(manager);
-            if (finder == current_instances.end())
-              current_instances[manager] = InstanceInfo();
+            std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+              current_instances.find(manager->tree_id);
+            if (tree_finder != current_instances.end())
+            {
+              TreeInstances::const_iterator finder = 
+                tree_finder->second.find(manager);
+            if (finder == tree_finder->second.end())
+              tree_finder->second[manager] = InstanceInfo();  
+            }
+            else
+              current_instances[manager->tree_id][manager] = InstanceInfo();
             if (min_priority)
             {
-              InstanceInfo &info = current_instances[manager];
+              InstanceInfo &info = current_instances[manager->tree_id][manager];
               if (info.min_priority == GC_NEVER_PRIORITY)
                 remove_duplicate_valid = true;
               else
@@ -5335,30 +5414,49 @@ namespace Legion {
                                 bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id(); 
+      do 
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
           if ((*it)->entails(constraints, NULL))
           {
@@ -5385,30 +5483,49 @@ namespace Legion {
                                       bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Skip it if has already been collected
           if (it->second.current_state == PENDING_COLLECTED_STATE)
             continue;
-          if (!it->first->meets_region_tree(regions))
-            continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
           if ((*it)->entails(constraints, NULL))
           {
@@ -5436,28 +5553,50 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
-        for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
+        for (TreeInstances::const_iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
         {
+
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
             continue;
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
           if ((*it)->entails(constraints, NULL))
           {
@@ -5485,12 +5624,20 @@ namespace Legion {
                                      bool tight_region_bounds, bool remote)
     //--------------------------------------------------------------------------
     {
-      // Hold the lock while iterating here
+      if (regions.empty())
+        return false;
       std::deque<PhysicalManager*> candidates;
+      const RegionTreeID tree_id = regions[0].get_tree_id();
+      do
       {
+        // Hold the lock while iterating here
         AutoLock m_lock(manager_lock, 1, false/*exclusive*/);
+        std::map<RegionTreeID,TreeInstances>::const_iterator finder = 
+          current_instances.find(tree_id);
+        if (finder == current_instances.end())
+          break;
         for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-              current_instances.begin(); it != current_instances.end(); it++)
+              finder->second.begin(); it != finder->second.end(); it++)
         {
           // Only consider ones that are currently valid
           if (it->second.current_state != VALID_STATE)
@@ -5498,15 +5645,28 @@ namespace Legion {
           it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
           candidates.push_back(it->first);
         }
-      }
+      } while (false);
       // If we have any candidates check their constraints
       bool found = false;
       if (!candidates.empty())
       {
+        std::set<IndexSpaceExpression*> region_exprs;
+        RegionTreeForest *forest = runtime->forest;
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              regions.begin(); it != regions.end(); it++)
+        {
+          // If the region tree IDs don't match that is bad
+          if (tree_id != it->get_tree_id())
+            return false;
+          RegionNode *node = forest->get_node(*it);
+          region_exprs.insert(node->row_source);
+        }
+        IndexSpaceExpression *space_expr = (region_exprs.size() == 1) ?
+          *(region_exprs.begin()) : forest->union_index_spaces(region_exprs);
         for (std::deque<PhysicalManager*>::const_iterator it = 
               candidates.begin(); it != candidates.end(); it++)
         {
-          if (!(*it)->meets_regions(regions, tight_region_bounds))
+          if (!(*it)->meets_expression(space_expr, tight_region_bounds))
             continue;
           if ((*it)->entails(constraints, NULL))
           {
@@ -5659,10 +5819,11 @@ namespace Legion {
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
+        TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+        assert(insts.find(manager) == insts.end());
 #endif
-        InstanceInfo &info = current_instances[manager];
+        InstanceInfo &info = insts[manager];
         if (early_valid)
           info.current_state = VALID_STATE;
         info.min_priority = priority;
@@ -5698,10 +5859,11 @@ namespace Legion {
       manager->add_base_resource_ref(MEMORY_MANAGER_REF);
       {
         AutoLock m_lock(manager_lock);
+        TreeInstances &insts = current_instances[manager->tree_id];
 #ifdef DEBUG_LEGION
-        assert(current_instances.find(manager) == current_instances.end());
+        assert(insts.find(manager) == insts.end());
 #endif
-        InstanceInfo &info = current_instances[manager];
+        InstanceInfo &info = insts[manager];
         info.instance_size = instance_size;
       }
     }
@@ -5718,30 +5880,45 @@ namespace Legion {
         AutoLock m_lock(manager_lock);
         if (state == COLLECTABLE_STATE)
         {
-          for (std::map<PhysicalManager*,InstanceInfo>::const_iterator it = 
-                current_instances.begin(); it != current_instances.end(); it++)
+          for (std::map<RegionTreeID,TreeInstances>::const_iterator cit = 
+               current_instances.begin(); cit != current_instances.end(); cit++)
           {
-            if (it->second.current_state != COLLECTABLE_STATE)
-              continue;
-            const size_t inst_size = it->first->get_instance_size();
-            if ((inst_size >= needed_size) || !larger_only)
+            for (TreeInstances::const_iterator it = 
+                  cit->second.begin(); it != cit->second.end(); it++)
             {
-              // Resource references will flow out
-              to_delete[it->first] = RtEvent::NO_RT_EVENT;
-              total_deleted += inst_size;
-              if (total_deleted >= needed_size)
+              if (it->second.current_state != COLLECTABLE_STATE)
+                continue;
+              const size_t inst_size = it->first->get_instance_size();
+              if ((inst_size >= needed_size) || !larger_only)
               {
-                // If we exit early we are not done with this pass
-                pass_complete = false;
-                break;
+                // Resource references will flow out
+                to_delete[it->first] = RtEvent::NO_RT_EVENT;
+                total_deleted += inst_size;
+                if (total_deleted >= needed_size)
+                {
+                  // If we exit early we are not done with this pass
+                  pass_complete = false;
+                  break;
+                }
               }
             }
+            if (!pass_complete)
+              break;
           }
           if (!to_delete.empty())
           {
             for (std::map<PhysicalManager*,RtEvent>::const_iterator it = 
                   to_delete.begin(); it != to_delete.end(); it++)
-              current_instances.erase(it->first);
+            {
+              std::map<RegionTreeID,TreeInstances>::iterator finder = 
+                current_instances.find(it->first->tree_id);
+#ifdef DEBUG_LEGION
+              assert(finder != current_instances.end());
+#endif
+              finder->second.erase(it->first);
+              if (finder->second.empty())
+                current_instances.erase(finder);
+            }
           }
         }
         else
@@ -5749,29 +5926,35 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(state == ACTIVE_STATE);
 #endif
-          for (std::map<PhysicalManager*,InstanceInfo>::iterator it = 
-                current_instances.begin(); it != current_instances.end(); it++)
+          for (std::map<RegionTreeID,TreeInstances>::iterator cit = 
+               current_instances.begin(); cit != current_instances.end(); cit++)
           {
-            if (it->second.current_state != ACTIVE_STATE)
-              continue;
-            const size_t inst_size = it->first->get_instance_size();
-            if ((inst_size >= needed_size) || !larger_only)
+            for (TreeInstances::iterator it = 
+                  cit->second.begin(); it != cit->second.end(); it++)
             {
-              RtUserEvent deferred_collect = Runtime::create_rt_user_event();
-              to_delete[it->first] = deferred_collect;
-              // Add our own reference here as this flows out
-              it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
-              // Update the state information
-              it->second.current_state = PENDING_COLLECTED_STATE;
-              it->second.deferred_collect = deferred_collect;
-              total_deleted += inst_size;
-              if (total_deleted >= needed_size)
+              if (it->second.current_state != ACTIVE_STATE)
+                continue;
+              const size_t inst_size = it->first->get_instance_size();
+              if ((inst_size >= needed_size) || !larger_only)
               {
-                // If we exit early we are not done with this pass
-                pass_complete = false;
-                break;
+                RtUserEvent deferred_collect = Runtime::create_rt_user_event();
+                to_delete[it->first] = deferred_collect;
+                // Add our own reference here as this flows out
+                it->first->add_base_resource_ref(MEMORY_MANAGER_REF);
+                // Update the state information
+                it->second.current_state = PENDING_COLLECTED_STATE;
+                it->second.deferred_collect = deferred_collect;
+                total_deleted += inst_size;
+                if (total_deleted >= needed_size)
+                {
+                  // If we exit early we are not done with this pass
+                  pass_complete = false;
+                  break;
+                }
               }
             }
+            if (!pass_complete)
+              break;
           }
         }
       }
@@ -5817,10 +6000,15 @@ namespace Legion {
       RtEvent deferred_collect = RtEvent::NO_RT_EVENT;
       {
         AutoLock m_lock(manager_lock);
-        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
-          current_instances.find(manager);
+        std::map<RegionTreeID,TreeInstances>::iterator tree_finder = 
+          current_instances.find(manager->tree_id);
 #ifdef DEBUG_LEGION
-        assert(finder != current_instances.end());
+        assert(tree_finder != current_instances.end());
+#endif
+        std::map<PhysicalManager*,InstanceInfo>::iterator finder = 
+          tree_finder->second.find(manager);
+#ifdef DEBUG_LEGION
+        assert(finder != tree_finder->second.end());
         assert(finder->second.current_state != PENDING_COLLECTED_STATE);
         assert(finder->second.current_state != PENDING_ACQUIRE_STATE);
 #endif
@@ -5832,7 +6020,11 @@ namespace Legion {
           manager->add_base_resource_ref(MEMORY_MANAGER_REF);
         }
         else // Reference will flow out
-          current_instances.erase(finder);
+        {
+          tree_finder->second.erase(finder);
+          if (tree_finder->second.empty())
+            current_instances.erase(tree_finder);
+        }
       }
       // Perform the deletion contingent on references being removed
       manager->perform_deletion(deferred_collect);

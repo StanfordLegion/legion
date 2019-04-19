@@ -921,9 +921,9 @@ namespace Legion {
       mutable LocalLock manager_lock;
       // We maintain several sets of instances here
       // This is a generic list that tracks all the allocated instances
-      // It is only valid on the owner node
-      LegionMap<PhysicalManager*,InstanceInfo,
-                MEMORY_INSTANCES_ALLOC>::tracked current_instances;
+      typedef LegionMap<PhysicalManager*,InstanceInfo,
+                        MEMORY_INSTANCES_ALLOC>::tracked TreeInstances;
+      std::map<RegionTreeID,TreeInstances> current_instances;
       // Keep track of outstanding requuests for allocations which 
       // will be tried in the order that they arrive
       std::deque<RtUserEvent> pending_allocation_attempts;
