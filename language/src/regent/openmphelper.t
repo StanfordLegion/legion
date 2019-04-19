@@ -136,7 +136,7 @@ omp.generate_atomic_update = terralib.memoize(function(op, typ)
   return atomic_update
 end)
 
-function omp.generate_preamble_structured(rect, idx, start_idx, end_idx)
+function omp.generate_preamble(rect, idx, start_idx, end_idx)
   return quote
     var num_threads = [omp.get_num_threads]()
     var thread_id = [omp.get_thread_num]()
@@ -168,7 +168,7 @@ function omp.generate_argument_type(symbols, reductions)
   return arg_type, mapping
 end
 
-function omp.generate_argument_init(arg, arg_type, mapping, reductions)
+function omp.generate_argument_init(arg, arg_type, mapping, can_change, reductions)
   local worker_init = arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
@@ -179,34 +179,52 @@ function omp.generate_argument_init(arg, arg_type, mapping, reductions)
       return quote var [symbol] = [arg].[field_name] end
     end
   end)
-  local launch_init = arg_type.entries:map(function(pair)
+
+  local launch_init = terralib.newlist()
+  launch_init:insert(quote
+    var arg_obj : arg_type
+    var [arg] = &arg_obj
+  end)
+  local launch_update = terralib.newlist()
+
+  arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
     if reductions[symbol] ~= nil then
+      local init = std.reduction_op_init[reductions[symbol]][symbol.type]
       assert(field_type:ispointer())
-      return quote
+      launch_init:insert(quote
+        var num_threads = [omp.get_max_threads]()
         -- We don't like false sharing
-        var size = [omp.get_max_threads]()  * omp.CACHE_LINE_SIZE
+        var size = num_threads  * omp.CACHE_LINE_SIZE
         var data = std.c.malloc(size)
         std.assert(size == 0 or data ~= nil, "malloc failed in generate_argument_init")
         [arg].[field_name] = [field_type](data)
-      end
+        for i = 0, num_threads do
+          @[&symbol.type]([&int8](data) + i * omp.CACHE_LINE_SIZE) = [init]
+        end
+      end)
+    elseif not can_change[symbol] then
+      launch_init:insert(quote [arg].[field_name] = [symbol] end)
     else
-      return quote [arg].[field_name] = [symbol] end
+      launch_update:insert(quote [arg].[field_name] = [symbol] end)
     end
   end)
-  return worker_init, launch_init
+
+  return worker_init, launch_init, launch_update
 end
 
 function omp.generate_worker_cleanup(arg, arg_type, mapping, reductions)
   return arg_type.entries:map(function(pair)
     local field_name, field_type = unpack(pair)
     local symbol = mapping[field_name]
-    if reductions[symbol] ~= nil then
+    local op = reductions[symbol]
+    if op ~= nil then
       return quote
         do
           var idx = [omp.get_thread_num]() * (omp.CACHE_LINE_SIZE / [sizeof(symbol.type)])
-          [arg].[field_name][idx] = [symbol]
+          [arg].[field_name][idx] = [std.quote_binary_op(op, symbol,
+            `([arg].[field_name][idx]))]
         end
       end
     else
