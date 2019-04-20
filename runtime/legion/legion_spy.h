@@ -989,38 +989,38 @@ namespace Legion {
                                              const DomainPoint &point)
       {
 #if LEGION_MAX_DIM == 1
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld",
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld",
                       creator_id, future_event.id, point.dim,
                       (long long)point.point_data[0]); 
 #elif LEGION_MAX_DIM == 2
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld",
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld",
                       creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0);
 #elif LEGION_MAX_DIM == 3
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld",
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld",
                       creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0);
 #elif LEGION_MAX_DIM == 4
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld",
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld",
                       creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0);
 #elif LEGION_MAX_DIM == 5
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld %lld",
-                      creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
+                      "%lld", creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0,
                       (point.dim > 4) ? (long long)point.point_data[4] : 0);
 #elif LEGION_MAX_DIM == 6
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld %lld "
-                      "%lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
+                      "%lld %lld", creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1028,8 +1028,8 @@ namespace Legion {
                       (point.dim > 4) ? (long long)point.point_data[4] : 0,
                       (point.dim > 5) ? (long long)point.point_data[5] : 0);
 #elif LEGION_MAX_DIM == 7
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld %lld "
-                      "%lld %lld", creator_id, future_event.id, point.dim,
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
+                      "%lld %lld %lld", creator_id, future_event.id, point.dim,
                                         (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
@@ -1038,9 +1038,9 @@ namespace Legion {
                       (point.dim > 5) ? (long long)point.point_data[5] : 0,
                       (point.dim > 6) ? (long long)point.point_data[6] : 0);
 #elif LEGION_MAX_DIM == 8
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld %lld "
-                      "%lld %lld %lld", creator_id, future_event.id, point.dim,
-                                        (long long)point.point_data[0], 
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld", creator_id, future_event.id, 
+                       point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
                       (point.dim > 3) ? (long long)point.point_data[3] : 0,
@@ -1049,8 +1049,8 @@ namespace Legion {
                       (point.dim > 6) ? (long long)point.point_data[6] : 0,
                       (point.dim > 7) ? (long long)point.point_data[7] : 0);
 #elif LEGION_MAX_DIM == 9
-        log_spy.print("Future Creation %llu " IDFMT " %u %ld %ld %ld %lld %lld "
-                      "%lld %lld %lld %lld", creator_id, future_event.id, 
+        log_spy.print("Future Creation %llu " IDFMT " %u %lld %lld %lld %lld "
+                      "%lld %lld %lld %lld %lld", creator_id, future_event.id, 
                        point.dim,       (long long)point.point_data[0], 
                       (point.dim > 1) ? (long long)point.point_data[1] : 0,
                       (point.dim > 2) ? (long long)point.point_data[2] : 0,
