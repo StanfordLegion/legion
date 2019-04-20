@@ -5582,11 +5582,11 @@ class Operation(object):
             for req in point_task.op.reqs.itervalues():
                 all_reqs.append(req)
         # All requirements should be non interfering
-        for idx1 in xrange(0, len(all_reqs)):
+        for idx1 in range(0, len(all_reqs)):
             req1 = all_reqs[idx1]
             if req1.is_no_access():
                 continue
-            for idx2 in xrange(idx1+1, len(all_reqs)):
+            for idx2 in range(idx1+1, len(all_reqs)):
                 req2 = all_reqs[idx2]
                 if req2.is_no_access():
                     continue
@@ -8899,7 +8899,7 @@ mapping_dep_pat         = re.compile(
     prefix+"Mapping Dependence (?P<ctx>[0-9]+) (?P<prev_id>[0-9]+) (?P<pidx>[0-9]+) "+
            "(?P<next_id>[0-9]+) (?P<nidx>[0-9]+) (?P<dtype>[0-9]+)")
 future_create_pat       = re.compile(
-    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<p1>[0-9]+) (?P<p2>[0-9]+) (?P<p3>[0-9]+)")
+    prefix+"Future Creation (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+) (?P<dim>[0-9]+) (?P<rem>.*)")
 future_use_pat          = re.compile(
     prefix+"Future Usage (?P<uid>[0-9]+) (?P<iid>[0-9a-f]+)")
 predicate_use_pat       = re.compile(
@@ -9197,13 +9197,11 @@ def parse_legion_spy_line(line, state):
     if m is not None:
         future = state.get_future(int(m.group('iid'),16))
         future.set_creator(int(m.group('uid')))
-        point = Point(int(m.group('dim')))
-        if point.dim > 0:
-            point.vals[0] = int(m.group('p1'))
-            if point.dim > 1:
-                point.vals[1] = int(m.group('p2'))
-                if point.dim > 2:
-                    point.vals[2] = int(m.group('p3'))
+        dim = int(m.group('dim'))
+        point = Point(dim)
+        values = decimal_pat.findall(m.group('rem'))
+        for index in range(dim):
+            point.vals[index] = int(values[index])
         future.set_point(point)
         return True 
     m = future_use_pat.match(line)
