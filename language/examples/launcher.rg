@@ -6,12 +6,12 @@ local legion_dir = runtime_dir .. "/legion"
 local realm_dir = runtime_dir .. "/realm"
 local mapper_dir = runtime_dir .. "/mappers"
 
-function launcher.compile_mapper(saveobj, prefix)
-  local cc_file = root_dir .. prefix .. ".cc"
+function launcher.compile_mapper(saveobj, name)
+  local cc_file = root_dir .. name .. ".cc"
   local binary_file
 
   if saveobj then
-    binary_file = root_dir .. "lib" .. prefix .. ".so"
+    binary_file = root_dir .. "lib" .. name .. ".so"
   else
     binary_file = os.tmpname() .. ".so"
   end
@@ -39,9 +39,9 @@ function launcher.compile_mapper(saveobj, prefix)
   return binary_file
 end
 
-function launcher.launch(toplevel, prefix)
+function launcher.launch(toplevel, name)
   local saveobj = os.getenv('SAVEOBJ') == '1'
-  local mapper_binary = launcher.compile_mapper(saveobj, prefix)
+  local mapper_binary = launcher.compile_mapper(saveobj, name)
   local mapper_header = terralib.includec("miniaero_mapper.h",
                                           { "-I", root_dir,
                                             "-I", runtime_dir,
@@ -53,7 +53,7 @@ function launcher.launch(toplevel, prefix)
     regentlib.start(toplevel)
   else
     local root_dir = arg[0]:match(".*/") or "./"
-    local link_flags = terralib.newlist({"-L" .. root_dir, "-l" .. prefix, "-lm"})
+    local link_flags = terralib.newlist({"-L" .. root_dir, "-l" .. name, "-lm"})
     if os.getenv('CRAYPE_VERSION') then
       local new_flags = terralib.newlist({"-Wl,-Bdynamic"})
       new_flags:insertall(link_flags)
@@ -68,7 +68,7 @@ function launcher.launch(toplevel, prefix)
       link_flags = new_flags
     end
 
-    regentlib.saveobj(toplevel, "miniaero_" .. prefix, "executable",
+    regentlib.saveobj(toplevel, name, "executable",
         mapper_header.register_mappers, link_flags)
   end
 end
