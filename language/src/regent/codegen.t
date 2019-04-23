@@ -8223,7 +8223,8 @@ function codegen.stat_for_list(cx, node)
   local cuda = cx.variant:is_cuda() and
                (node.metadata and node.metadata.parallelizable) and
                not node.annotations.cuda:is(ast.annotation.Forbid)
-  local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
+  local openmp = not cx.variant:is_cuda() and
+                 node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
   if node.annotations.openmp:is(ast.annotation.Demand) and
      not openmphelper.check_openmp_available() then
