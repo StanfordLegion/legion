@@ -4810,13 +4810,15 @@ namespace Legion {
       }
       if (issue_task)
       {
+        // Add a reference to the context the first time we defer this
+        add_reference();
         PostEndArgs args(ctx->owner_task, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
       }
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::process_post_end_tasks(void)
+    bool InnerContext::process_post_end_tasks(void)
     //--------------------------------------------------------------------------
     {
       std::vector<PostTaskArgs> to_perform;
@@ -4868,6 +4870,8 @@ namespace Legion {
             runtime->issue_runtime_meta_task(args, 
                   LG_THROUGHPUT_DEFERRED_PRIORITY);
           }
+          // We're done so remove the reference
+          return true;
         }
         else
         {
@@ -4887,13 +4891,19 @@ namespace Legion {
           PostEndArgs args(launch_next_op, this);
           runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
                                 Runtime::merge_events(next_op_preconditions));
+          // Not done iterating so reference keeps going with PostEndArgs
+          return false;
         }
       }
       else if (launch_next_op != NULL)
       {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+        // Not done iterating so reference keeps going with PostEndArgs
+        return false;
       }
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -6579,26 +6589,21 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
+      RtEvent effects_done(Processor::get_current_finish_event()); 
+      if (last_registration.exists() && !last_registration.has_triggered())
+        effects_done = Runtime::merge_events(effects_done, last_registration);
       if (deferred_result_instance.exists())
-      {
-        RtEvent result_ready(Processor::get_current_finish_event());
-        if (last_registration.exists() && !last_registration.has_triggered())
-          parent_ctx->add_to_post_task_queue(this, 
-              Runtime::merge_events(result_ready, last_registration),
-              res, res_size, deferred_result_instance);
-        else
-          parent_ctx->add_to_post_task_queue(this, result_ready,
+          parent_ctx->add_to_post_task_queue(this, effects_done,
                           res, res_size, deferred_result_instance);
-      }
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
         memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, last_registration,
+        parent_ctx->add_to_post_task_queue(this, effects_done,
                   result_copy, res_size, PhysicalInstance::NO_INST);
       }
       else
-        parent_ctx->add_to_post_task_queue(this, last_registration,
+        parent_ctx->add_to_post_task_queue(this, effects_done,
                           res, res_size, PhysicalInstance::NO_INST);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
@@ -6772,7 +6777,9 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const PostEndArgs *pargs = (const PostEndArgs*)args;
-      pargs->proxy_this->process_post_end_tasks();
+      if (pargs->proxy_this->process_post_end_tasks() && 
+          pargs->proxy_this->remove_reference())
+        delete pargs->proxy_this;
     }
 
     //--------------------------------------------------------------------------
@@ -7062,20 +7069,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       return NULL;
-    }
-
-    //--------------------------------------------------------------------------
-    void TopLevelContext::add_to_post_task_queue(TaskContext *ctx, 
-        RtEvent wait_on, const void *result, size_t size, PhysicalInstance inst)
-    //--------------------------------------------------------------------------
-    {
-      // Since we're the top-level task we should just handle this here
-#ifdef DEBUG_LEGION
-      assert(!inst.exists()); // This makes it safe to wait now
-#endif
-      if (wait_on.exists() && !wait_on.has_triggered())
-        wait_on.wait();
-      ctx->post_end_task(result, size, true/*owned*/);
     }
 
     //--------------------------------------------------------------------------
@@ -8823,21 +8816,19 @@ namespace Legion {
       // Tell the parent context that we are ready for post-end
       // Make a copy of the results if necessary
       TaskContext *parent_ctx = owner_task->get_context();
+      const RtEvent effects_done(Processor::get_current_finish_event());
       if (deferred_result_instance.exists())
-      {
-        RtEvent result_ready(Processor::get_current_finish_event());
-        parent_ctx->add_to_post_task_queue(this, result_ready,
+        parent_ctx->add_to_post_task_queue(this, effects_done,
                       res, res_size, deferred_result_instance);
-      }
       else if (!owned)
       {
         void *result_copy = malloc(res_size);
         memcpy(result_copy, res, res_size);
-        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
+        parent_ctx->add_to_post_task_queue(this, effects_done,
                   result_copy, res_size, PhysicalInstance::NO_INST);
       }
       else
-        parent_ctx->add_to_post_task_queue(this, RtEvent::NO_RT_EVENT,
+        parent_ctx->add_to_post_task_queue(this, effects_done,
                           res, res_size, PhysicalInstance::NO_INST);
 #ifdef DEBUG_LEGION
       runtime_ptr->decrement_total_outstanding_tasks(owner_task_id, 
