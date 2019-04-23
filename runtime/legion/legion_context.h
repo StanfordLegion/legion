@@ -996,7 +996,7 @@ namespace Legion {
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
           const void *result, size_t size, PhysicalInstance instance);
-      void process_post_end_tasks(void);
+      bool process_post_end_tasks(void);
       virtual void register_executing_child(Operation *op);
       virtual void register_child_executed(Operation *op);
       virtual void register_child_complete(Operation *op);
@@ -1257,9 +1257,6 @@ namespace Legion {
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
-      // Have a special implementation here to avoid a shutdown race
-      virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
-                     const void *result, size_t size, PhysicalInstance inst);
     public:
       virtual RtEvent compute_equivalence_sets(VersionManager *manager,
                         RegionTreeID tree_id, IndexSpace handle, 
