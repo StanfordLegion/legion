@@ -2083,8 +2083,7 @@ namespace Legion {
         parent_req_indexes(parent_indexes), virtual_mapped(virt_mapped), 
         total_children_count(0), total_close_count(0), total_summary_count(0),
         outstanding_children_count(0), outstanding_prepipeline(0),
-        outstanding_dependence(false), outstanding_post_task(0),
-        current_trace(NULL),previous_trace(NULL),
+        outstanding_dependence(false), current_trace(NULL),previous_trace(NULL),
         valid_wait_event(false), outstanding_subtasks(0), pending_subtasks(0), 
         pending_frames(0), currently_active_context(false),
         current_mapping_fence(NULL), mapping_fence_gen(0), 
@@ -4644,13 +4643,14 @@ namespace Legion {
       }
       if (issue_task)
       {
+        add_reference();
         PrepipelineArgs args(op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
       }
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::process_prepipeline_stage(void)
+    bool InnerContext::process_prepipeline_stage(void)
     //--------------------------------------------------------------------------
     {
       std::vector<std::pair<Operation*,GenerationID> > to_perform;
@@ -4694,7 +4694,11 @@ namespace Legion {
         // will not impact the correctness of the code
         PrepipelineArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
+        // Reference keeps flowing with the continuation
+        return false;
       }
+      else
+        return true;
     }
 
     //--------------------------------------------------------------------------
@@ -4793,20 +4797,9 @@ namespace Legion {
       bool issue_task = false;
       {
         AutoLock p_lock(post_task_lock);
+        if (post_task_queue.empty())
+          issue_task = true;
         post_task_queue.push_back(PostTaskArgs(ctx, result, size,inst,wait_on));
-        // No need to have more outstanding tasks than there are processors
-        if (outstanding_post_task < runtime->num_utility_procs)
-        {
-          const size_t needed_in_flight = 
-            (post_task_queue.size() + 
-             context_configuration.meta_task_vector_width - 1) /
-              context_configuration.meta_task_vector_width;
-          if (outstanding_post_task < needed_in_flight)
-          {
-            outstanding_post_task++;
-            issue_task = true;
-          }
-        }
       }
       if (issue_task)
       {
@@ -4826,8 +4819,9 @@ namespace Legion {
       TaskOp *launch_next_op = NULL;
       {
         AutoLock p_lock(post_task_lock);
-        for (std::list<PostTaskArgs>::iterator it = 
-              post_task_queue.begin(); it != post_task_queue.end(); /*nothing*/)
+        // First time through, we prefer tasks whose events have triggered
+        for (std::list<PostTaskArgs>::iterator it = post_task_queue.begin();
+              it != post_task_queue.end(); /*nothing*/)
         {
           if (!it->wait_on.exists() || it->wait_on.has_triggered())
           {
@@ -4840,62 +4834,26 @@ namespace Legion {
           else
             it++;
         }
-#ifdef DEBUG_LEGION
-        assert(outstanding_post_task > 0);
-#endif
+        // If we didn't find enough ready ones, we'll launch some 
+        // ones that are not ready yet
+        while (to_perform.size() < context_configuration.meta_task_vector_width)
+        {
+          if (post_task_queue.empty())
+            break;
+          to_perform.push_back(post_task_queue.front());
+          post_task_queue.pop_front();
+        }
         if (!post_task_queue.empty())
-        {
-          const size_t needed_in_flight = 
-            (post_task_queue.size() + 
-             context_configuration.meta_task_vector_width - 1) /
-              context_configuration.meta_task_vector_width;
-          if (outstanding_post_task <= needed_in_flight)
-            launch_next_op = post_task_queue.front().context->owner_task;
-          else
-            outstanding_post_task--;
-        }
-        else
-          outstanding_post_task--;
+          launch_next_op = post_task_queue.front().context->owner_task;
       }
-      if (!to_perform.empty())
+      for (std::vector<PostTaskArgs>::iterator it =
+            to_perform.begin(); it != to_perform.end(); it++)
       {
-        if (launch_next_op == NULL)
-        {
-          // We're not launching the next operation, so we can just kick
-          // these things off as they are without preconditions
-          for (std::vector<PostTaskArgs>::iterator it =
-                to_perform.begin(); it != to_perform.end(); it++)
-          {
-            DeferredPostTaskArgs args(*it, RtUserEvent::NO_RT_USER_EVENT);
-            runtime->issue_runtime_meta_task(args, 
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
-          }
-          // We're done so remove the reference
-          return true;
-        }
-        else
-        {
-          // We're going to launch the next iteration also, but don't do
-          // it until all of our currently kicked off tasks have started 
-          std::set<RtEvent> next_op_preconditions;
-          for (std::vector<PostTaskArgs>::iterator it =
-                to_perform.begin(); it != to_perform.end(); it++)
-          {
-            RtUserEvent start_event = Runtime::create_rt_user_event();
-            DeferredPostTaskArgs args(*it, start_event);
-            runtime->issue_runtime_meta_task(args, 
-                  LG_THROUGHPUT_DEFERRED_PRIORITY);
-            next_op_preconditions.insert(start_event);
-          }
-          // Now we can kick off the next iteration with the right preconditions
-          PostEndArgs args(launch_next_op, this);
-          runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY,
-                                Runtime::merge_events(next_op_preconditions));
-          // Not done iterating so reference keeps going with PostEndArgs
-          return false;
-        }
+        DeferredPostTaskArgs args(*it);
+        runtime->issue_runtime_meta_task(args, 
+              LG_THROUGHPUT_DEFERRED_PRIORITY, it->wait_on);
       }
-      else if (launch_next_op != NULL)
+      if (launch_next_op != NULL)
       {
         PostEndArgs args(launch_next_op, this);
         runtime->issue_runtime_meta_task(args, LG_THROUGHPUT_WORK_PRIORITY);
@@ -6759,8 +6717,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const PrepipelineArgs *pargs = (const PrepipelineArgs*)args;
-      pargs->context->process_prepipeline_stage();
-      if (pargs->context->remove_reference())
+      if (pargs->context->process_prepipeline_stage() &&
+          pargs->context->remove_reference())
         delete pargs->context;
     }
 
@@ -6788,9 +6746,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       const DeferredPostTaskArgs *pargs = ((const DeferredPostTaskArgs*)args);
-      // If we have a start event, trigger that now
-      if (pargs->started.exists())
-        Runtime::trigger_event(pargs->started);
       if (pargs->instance.exists())
       {
         pargs->context->post_end_task(

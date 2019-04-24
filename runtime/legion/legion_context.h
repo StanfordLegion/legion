@@ -593,7 +593,7 @@ namespace Legion {
       public:
         PrepipelineArgs(Operation *op, InnerContext *ctx)
           : LgTaskArgs<PrepipelineArgs>(op->get_unique_op_id()),
-            context(ctx) { ctx->add_reference(); }
+            context(ctx) { }
       public:
         InnerContext *const context;
       };
@@ -633,17 +633,16 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFERRED_POST_END_ID;
       public:
-        DeferredPostTaskArgs(const PostTaskArgs &a, RtUserEvent s)
+        DeferredPostTaskArgs(const PostTaskArgs &a)
           : LgTaskArgs<DeferredPostTaskArgs>(
               a.context->owner_task->get_unique_op_id()),
             context(a.context), result(a.result), size(a.size),
-            instance(a.instance), started(s) { }
+            instance(a.instance) { }
       public:
         TaskContext *context;
         const void *result;
         const size_t size;
         PhysicalInstance instance;
-        RtUserEvent started;
       };
       struct PostDecrementArgs : public LgTaskArgs<PostDecrementArgs> {
       public:
@@ -927,7 +926,7 @@ namespace Legion {
       virtual unsigned register_new_close_operation(CloseOp *op);
       virtual unsigned register_new_summary_operation(TraceSummaryOp *op);
       virtual void add_to_prepipeline_queue(Operation *op);
-      void process_prepipeline_stage(void);
+      bool process_prepipeline_stage(void);
       virtual void add_to_dependence_queue(Operation *op);
       void process_dependence_stage(void);
       virtual void add_to_post_task_queue(TaskContext *ctx, RtEvent wait_on,
@@ -1093,7 +1092,6 @@ namespace Legion {
     protected:
       mutable LocalLock                               post_task_lock;
       std::list<PostTaskArgs>                         post_task_queue;
-      unsigned                                        outstanding_post_task;
     protected:
       // Traces for this task's execution
       LegionMap<TraceID,DynamicTrace*,TASK_TRACES_ALLOC>::tracked traces;
