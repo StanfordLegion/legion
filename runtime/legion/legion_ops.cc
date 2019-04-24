@@ -4621,7 +4621,7 @@ namespace Legion {
     {
       const DeferredCopyAcross *dargs = (const DeferredCopyAcross*)args;
       std::set<RtEvent> applied_conditions;
-      const PhysicalTraceInfo trace_info(dargs->copy);
+      const PhysicalTraceInfo trace_info(dargs->copy, false);
       dargs->copy->perform_copy_across(dargs->index, dargs->precondition,
                             dargs->done, dargs->guard, *dargs->src_targets, 
                             *dargs->dst_targets, dargs->gather_targets,
@@ -13521,7 +13521,7 @@ namespace Legion {
     void FillOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     {
-      const PhysicalTraceInfo trace_info(this, false/*initialize*/);
+      const PhysicalTraceInfo trace_info(this);
       // Tell the region tree forest to fill in this field
       // Note that the forest takes ownership of the value buffer
       if (future.impl == NULL)
@@ -13898,6 +13898,7 @@ namespace Legion {
 #ifdef LEGION_SPY
       LegionSpy::log_replay_operation(unique_op_id);
 #endif
+      tpl->register_operation(this);
       complete_mapping();
       complete_execution();
     }
