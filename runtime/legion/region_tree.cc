@@ -2671,7 +2671,7 @@ namespace Legion {
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
         version_info.get_equivalence_sets();     
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index, 
-          req, &version_info, fill_view, precondition, 
+          RegionUsage(req), &version_info, fill_view, precondition, 
           RtEvent::NO_RT_EVENT/*reg guard*/, true_guard, true/*track effects*/);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
@@ -2750,9 +2750,9 @@ namespace Legion {
           map_applied_events.insert(guard_event);
       }
       OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, attach_op,
-          index, req, &version_info, registration_view, ApEvent::NO_AP_EVENT,
-          guard_event, PredEvent::NO_PRED_EVENT, false/*track effects*/, 
-          restricted);
+          index, RegionUsage(req), &version_info, registration_view, 
+          ApEvent::NO_AP_EVENT,  guard_event, PredEvent::NO_PRED_EVENT, 
+          false/*track effects*/, restricted);
       analysis->add_reference();
       std::set<RtEvent> deferral_events;
       const FieldMaskSet<EquivalenceSet> &eq_sets = 
@@ -2767,10 +2767,8 @@ namespace Legion {
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())
-        remote_ready = 
-          analysis->perform_remote(traversal_done, map_applied_events);
+        analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
       return ready;
@@ -2819,12 +2817,78 @@ namespace Legion {
       }
       const RtEvent traversal_done = deferral_events.empty() ?
         RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
-      RtEvent remote_ready;
       if (traversal_done.exists() || analysis->has_remote_sets())     
         analysis->perform_remote(traversal_done, map_applied_events);
       if (analysis->remove_reference())
         delete analysis;
       return done;
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::find_invalid_instances(Operation *op, unsigned index,
+                                                  VersionInfo &version_info,
+                                  const FieldMaskSet<InstanceView> &valid_views,
+                                      FieldMaskSet<InstanceView> &invalid_views,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(invalid_views.empty());
+#endif
+      const FieldMaskSet<EquivalenceSet> &eq_sets =
+        version_info.get_equivalence_sets();
+      InvalidInstAnalysis analysis(runtime, op, index, valid_views);
+      std::set<RtEvent> deferral_events;
+      for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+            eq_sets.begin(); it != eq_sets.end(); it++)
+        it->first->find_invalid_instances(analysis, it->second, 
+            deferral_events, map_applied_events);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      RtEvent ready;
+      if (traversal_done.exists() || analysis.has_remote_sets())
+        ready = analysis.perform_remote(traversal_done, map_applied_events);
+      // Wait for all the responses to be ready
+      if (ready.exists() && !ready.has_triggered())
+        ready.wait();
+      analysis.report_instances(invalid_views);
+    }
+
+    //--------------------------------------------------------------------------
+    void RegionTreeForest::update_valid_instances(Operation *op, unsigned index,
+                                                  VersionInfo &version_info,
+                                  const FieldMaskSet<InstanceView> &valid_views,
+                                          std::set<RtEvent> &map_applied_events)
+    //--------------------------------------------------------------------------
+    {
+      const FieldMaskSet<EquivalenceSet> &eq_sets = 
+        version_info.get_equivalence_sets();
+      const RegionUsage usage(READ_WRITE, EXCLUSIVE, 0);
+      for (FieldMaskSet<InstanceView>::const_iterator vit = 
+            valid_views.begin(); vit != valid_views.end(); vit++)
+      {
+        OverwriteAnalysis *analysis = new OverwriteAnalysis(runtime, op, index,
+            usage, NULL/*no updates*/, vit->first, ApEvent::NO_AP_EVENT);
+        analysis->add_reference();
+        std::set<RtEvent> deferral_events;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              eq_sets.begin(); it != eq_sets.end(); it++)
+        {
+          const FieldMask overlap = it->second & vit->second;
+          if (!overlap)
+            continue;
+          // We don't bother tracking updates here since they could race
+          // with each other to update the VersionInfo data structure
+          it->first->overwrite_set(*analysis, overlap, deferral_events,
+                                   map_applied_events);
+        }
+        const RtEvent traversal_done = deferral_events.empty() ?
+          RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+        if (traversal_done.exists() || analysis->has_remote_sets())
+          analysis->perform_remote(traversal_done, map_applied_events);
+        if (analysis->remove_reference())
+          delete analysis;
+      }
     }
 
     //--------------------------------------------------------------------------

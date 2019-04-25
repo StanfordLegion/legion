@@ -1069,6 +1069,46 @@ namespace Legion {
     };
 
     /**
+     * \class InvalidInstAnalysis
+     * For finding which of a set of instances are not valid across
+     * a set of equivalence sets
+     */
+    class InvalidInstAnalysis : public PhysicalAnalysis,
+                                public LegionHeapify<ValidInstAnalysis> {
+    public:
+      InvalidInstAnalysis(Runtime *rt, Operation *op, unsigned index,
+                          const FieldMaskSet<InstanceView> &valid_instances);
+      InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, AddressSpaceID prev,
+                          Operation *op, unsigned index, 
+                          InvalidInstAnalysis *target, 
+                          const FieldMaskSet<InstanceView> &valid_instances);
+      InvalidInstAnalysis(const InvalidInstAnalysis &rhs);
+      virtual ~InvalidInstAnalysis(void);
+    public:
+      InvalidInstAnalysis& operator=(const InvalidInstAnalysis &rhs);
+    public:
+      virtual void perform_traversal(EquivalenceSet *set,
+                                     const FieldMask &mask,
+                                     std::set<RtEvent> &deferral_events,
+                                     std::set<RtEvent> &applied_events,
+                                     FieldMask *remove_mask,
+                                     const bool original_set,
+                                     const bool already_deferred = false);
+      virtual RtEvent perform_remote(RtEvent precondition,
+                                     std::set<RtEvent> &applied_events,
+                                     const bool already_deferred = false);
+      virtual RtEvent perform_updates(RtEvent precondition, 
+                                      std::set<RtEvent> &applied_events,
+                                      const bool already_deferred = false);
+    public:
+      static void handle_remote_request_invalid(Deserializer &derez, 
+                                     Runtime *rt, AddressSpaceID previous);
+    public:
+      const FieldMaskSet<InstanceView> valid_instances;
+      InvalidInstAnalysis *const target;
+    };
+
+    /**
      * \class UpdateAnalysis
      * For performing updates on equivalence set trees
      */
@@ -1325,7 +1365,7 @@ namespace Legion {
                               public LegionHeapify<OverwriteAnalysis> {
     public:
       OverwriteAnalysis(Runtime *rt, Operation *op, unsigned index,
-                        const RegionRequirement &req,
+                        const RegionUsage &usage,
                         VersionInfo *info, LogicalView *view,
                         const ApEvent precondition,
                         const RtEvent guard_event = RtEvent::NO_RT_EVENT,
@@ -1648,6 +1688,11 @@ namespace Legion {
             const std::vector<InstanceView*> &corresponding,
                           std::set<RtEvent> &applied_events);
       void find_valid_instances(ValidInstAnalysis &analysis,
+                                FieldMask user_mask,
+                                std::set<RtEvent> &deferral_events,
+                                std::set<RtEvent> &applied_events,
+                                const bool already_deferred = false);
+      void find_invalid_instances(InvalidInstAnalysis &analysis,
                                 FieldMask user_mask,
                                 std::set<RtEvent> &deferral_events,
                                 std::set<RtEvent> &applied_events,
