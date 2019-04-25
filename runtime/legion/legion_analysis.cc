@@ -4187,6 +4187,261 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Invalid Inst Analysis
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, Operation *o, 
+                    unsigned idx, const FieldMaskSet<InstanceView> &valid_insts)
+      : PhysicalAnalysis(rt, o, idx, NULL, false/*on heap*/), 
+        valid_instances(valid_insts), target(this)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InvalidInstAnalysis::InvalidInstAnalysis(Runtime *rt, AddressSpaceID src, 
+        AddressSpaceID prev, Operation *o, unsigned idx, InvalidInstAnalysis *t,
+        const FieldMaskSet<InstanceView> &valid_insts)
+      : PhysicalAnalysis(rt, src, prev, o, idx, true/*on heap*/), 
+        valid_instances(valid_insts), target(t)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InvalidInstAnalysis::InvalidInstAnalysis(const InvalidInstAnalysis &rhs)
+      : PhysicalAnalysis(rhs), valid_instances(rhs.valid_instances),target(NULL)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    InvalidInstAnalysis::~InvalidInstAnalysis(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    InvalidInstAnalysis& InvalidInstAnalysis::operator=(
+                                                  const InvalidInstAnalysis &rs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void InvalidInstAnalysis::perform_traversal(EquivalenceSet *set,
+                                             const FieldMask &mask,
+                                             std::set<RtEvent> &deferral_events,
+                                             std::set<RtEvent> &applied_events,
+                                             FieldMask *remove_mask,
+                                             const bool original_set,
+                                             const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      set->find_invalid_instances(*this, mask, deferral_events, 
+                                  applied_events, already_deferred);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InvalidInstAnalysis::perform_remote(RtEvent perform_precondition,
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformRemoteArgs args(this);
+        runtime->issue_runtime_meta_task(args, 
+            LG_LATENCY_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      // Easy out if we don't have remote sets
+      if (remote_sets.empty())
+        return RtEvent::NO_RT_EVENT;
+      std::set<RtEvent> ready_events;
+      for (LegionMap<AddressSpaceID,FieldMaskSet<EquivalenceSet> >::aligned::
+            const_iterator rit = remote_sets.begin(); 
+            rit != remote_sets.end(); rit++)
+      {
+#ifdef DEBUG_LEGION
+        assert(!rit->second.empty());
+#endif
+        const RtUserEvent ready = Runtime::create_rt_user_event();
+        const RtUserEvent applied = Runtime::create_rt_user_event();
+        Serializer rez;
+        {
+          RezCheck z(rez);
+          rez.serialize(original_source);
+          rez.serialize<size_t>(rit->second.size());
+          for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+                rit->second.begin(); it != rit->second.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          op->pack_remote_operation(rez, rit->first);
+          rez.serialize(index);
+          rez.serialize<size_t>(valid_instances.size());
+          for (FieldMaskSet<InstanceView>::const_iterator it = 
+                valid_instances.begin(); it != valid_instances.end(); it++)
+          {
+            rez.serialize(it->first->did);
+            rez.serialize(it->second);
+          }
+          rez.serialize(target);
+          rez.serialize(ready);
+          rez.serialize(applied);
+        }
+        runtime->send_equivalence_set_remote_request_invalid(rit->first, rez);
+        ready_events.insert(ready);
+        applied_events.insert(applied);
+      }
+      return Runtime::merge_events(ready_events);
+    }
+
+    //--------------------------------------------------------------------------
+    RtEvent InvalidInstAnalysis::perform_updates(RtEvent perform_precondition,
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      if (perform_precondition.exists() && 
+          !perform_precondition.has_triggered())
+      {
+        // Defer this until the precondition is met
+        DeferPerformUpdateArgs args(this);
+        runtime->issue_runtime_meta_task(args,
+            LG_THROUGHPUT_DEFERRED_PRIORITY, perform_precondition);
+        applied_events.insert(args.applied_event);
+        return args.done_event;
+      }
+      if (!alt_sets.empty() || !delete_sets.empty())
+        apply_update_equivalence_sets();
+      if (remote_instances != NULL)
+      {
+        if (original_source != runtime->address_space)
+        {
+          const RtUserEvent response_event = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(target);
+            rez.serialize(response_event);
+            rez.serialize<size_t>(remote_instances->size());
+            for (FieldMaskSet<InstanceView>::const_iterator it = 
+                 remote_instances->begin(); it != remote_instances->end(); it++)
+            {
+              rez.serialize(it->first->did);
+              rez.serialize(it->second);
+            }
+            rez.serialize<bool>(restricted);
+          }
+          runtime->send_equivalence_set_remote_instances(original_source, rez);
+          return response_event;
+        }
+        else
+          target->process_local_instances(*remote_instances, restricted);
+      }
+      return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void InvalidInstAnalysis::handle_remote_request_invalid(
+                 Deserializer &derez, Runtime *runtime, AddressSpaceID previous)
+    //--------------------------------------------------------------------------
+    {
+      DerezCheck z(derez);
+      AddressSpaceID original_source;
+      derez.deserialize(original_source);
+      size_t num_eq_sets;
+      derez.deserialize(num_eq_sets);
+      std::set<RtEvent> ready_events;
+      std::vector<EquivalenceSet*> eq_sets(num_eq_sets, NULL);
+      LegionVector<FieldMask>::aligned eq_masks(num_eq_sets);
+      for (unsigned idx = 0; idx < num_eq_sets; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        eq_sets[idx] = runtime->find_or_request_equivalence_set(did, ready);
+        if (ready.exists())
+          ready_events.insert(ready);
+        derez.deserialize(eq_masks[idx]);
+      }
+      RemoteOp *op = 
+        RemoteOp::unpack_remote_operation(derez, runtime, ready_events);
+      unsigned index;
+      derez.deserialize(index);
+      FieldMaskSet<InstanceView> valid_instances;
+      size_t num_valid_instances;
+      derez.deserialize<size_t>(num_valid_instances);
+      for (unsigned idx = 0; idx < num_valid_instances; idx++)
+      {
+        DistributedID did;
+        derez.deserialize(did);
+        RtEvent ready;
+        InstanceView *view = static_cast<InstanceView*>(
+            runtime->find_or_request_logical_view(did, ready));
+        if (ready.exists())
+          ready_events.insert(ready);
+        FieldMask view_mask;
+        derez.deserialize(view_mask);
+        valid_instances.insert(view, view_mask);
+      }
+      InvalidInstAnalysis *target;
+      derez.deserialize(target);
+      RtUserEvent ready;
+      derez.deserialize(ready);
+      RtUserEvent applied;
+      derez.deserialize(applied);
+
+      InvalidInstAnalysis *analysis = new InvalidInstAnalysis(runtime, 
+          original_source, previous, op, index, target, valid_instances);
+      analysis->add_reference();
+      std::set<RtEvent> deferral_events, applied_events;
+      // Wait for the equivalence sets to be ready if necessary
+      RtEvent ready_event;
+      if (!ready_events.empty())
+        ready_event = Runtime::merge_events(ready_events);
+      for (unsigned idx = 0; idx < eq_sets.size(); idx++)
+        analysis->traverse(ready_event, eq_sets[idx], eq_masks[idx],
+                           deferral_events, applied_events);
+      const RtEvent traversal_done = deferral_events.empty() ?
+        RtEvent::NO_RT_EVENT : Runtime::merge_events(deferral_events);
+      if (traversal_done.exists() || analysis->has_remote_sets())
+      {
+        const RtEvent remote_ready = 
+          analysis->perform_remote(traversal_done, applied_events);
+        if (remote_ready.exists())
+          ready_events.insert(remote_ready);
+      }
+      // Defer sending the updates until we're ready
+      const RtEvent local_ready = 
+        analysis->perform_updates(traversal_done, applied_events);
+      if (local_ready.exists())
+        ready_events.insert(local_ready);
+      if (!ready_events.empty())
+        Runtime::trigger_event(ready, Runtime::merge_events(ready_events));
+      else
+        Runtime::trigger_event(ready);
+      if (!applied_events.empty())
+        Runtime::trigger_event(applied, Runtime::merge_events(applied_events));
+      else
+        Runtime::trigger_event(applied);
+      if (analysis->remove_reference())
+        delete analysis;
+    }
+
+    /////////////////////////////////////////////////////////////
     // Update Analysis
     /////////////////////////////////////////////////////////////
 
@@ -5601,11 +5856,11 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     OverwriteAnalysis::OverwriteAnalysis(Runtime *rt, Operation *o, 
-                        unsigned idx, const RegionRequirement &req,
+                        unsigned idx, const RegionUsage &use,
                         VersionInfo *info, LogicalView *v, const ApEvent pre,
                         const RtEvent guard, const PredEvent pred,
                         const bool track, const bool restriction)
-      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(req), 
+      : PhysicalAnalysis(rt, o, idx, info, true/*on heap*/), usage(use), 
         view(v), precondition(pre), guard_event(guard), pred_guard(pred), 
         track_effects(track), add_restriction(restriction), 
         output_aggregator(NULL)
@@ -8037,6 +8292,95 @@ namespace Legion {
       }
       if (has_restrictions(user_mask))
         analysis.record_restriction();
+    }
+
+    //--------------------------------------------------------------------------
+    void EquivalenceSet::find_invalid_instances(InvalidInstAnalysis &analysis,
+                                                FieldMask user_mask,
+                                             std::set<RtEvent> &deferral_events,
+                                              std::set<RtEvent> &applied_events,
+                                              const bool already_deferred)
+    //--------------------------------------------------------------------------
+    {
+      AutoTryLock eq(eq_lock);
+      if (!eq.has_lock())
+      {
+        defer_traversal(eq, analysis, user_mask, deferral_events,
+                        applied_events, already_deferred);
+        return;
+      }
+      if (!is_logical_owner())
+      {
+        // First check to see if our subsets are up to date
+        if (eq_state == INVALID_STATE)
+          request_remote_subsets(applied_events); 
+        if (subsets.empty())
+        {
+          analysis.record_remote(this, user_mask, logical_owner_space);
+          return;
+        }
+        else
+        {
+          const FieldMask non_subset = user_mask - subsets.get_valid_mask();
+          if (!!non_subset)
+          {
+            analysis.record_remote(this, non_subset, logical_owner_space);
+            user_mask -= non_subset;
+            if (!user_mask)
+              return;
+          }
+        }
+        // Otherwise we fall through and record our subsets
+      }
+      // If we've been refined, we need to get the names of 
+      // the sub equivalence sets to try
+      while (is_refined(user_mask))
+      {
+        check_for_unrefined_remainder(eq, user_mask, 
+                                      analysis.original_source);
+        FieldMaskSet<EquivalenceSet> to_traverse;
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              subsets.begin(); it != subsets.end(); it++)
+        {
+          const FieldMask overlap = it->second & user_mask;
+          if (!overlap)
+            continue;
+          to_traverse.insert(it->first, overlap);
+        }
+        eq.release();
+        // Update the user mask and the remove_mask if there is one
+        user_mask -= to_traverse.get_valid_mask();
+        for (FieldMaskSet<EquivalenceSet>::const_iterator it = 
+              to_traverse.begin(); it != to_traverse.end(); it++) 
+          it->first->find_invalid_instances(analysis, it->second, 
+                                            deferral_events, applied_events);
+        eq.reacquire();
+        // Return if our user mask is empty
+        if (!user_mask)
+          return;
+      }
+      // Lock the analysis so we can perform updates here
+      AutoLock a_lock(analysis);
+      // See if our instances are valid for any fields we're traversing
+      // and if not record them
+      for (FieldMaskSet<InstanceView>::const_iterator it = 
+            analysis.valid_instances.begin(); it != 
+            analysis.valid_instances.end(); it++)
+      {
+        FieldMask invalid_mask = it->second & user_mask;
+        if (!invalid_mask)
+          continue;
+        FieldMaskSet<LogicalView>::const_iterator finder = 
+          valid_instances.find(it->first);
+        if (finder != valid_instances.end())
+        {
+          invalid_mask -= finder->second;
+          if (!!invalid_mask)
+            analysis.record_instance(it->first, invalid_mask);
+        }
+        else // Not valid for any of them so record it
+          analysis.record_instance(it->first, invalid_mask);
+      }
     }
 
     //--------------------------------------------------------------------------

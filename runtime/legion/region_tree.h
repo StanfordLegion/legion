@@ -566,6 +566,16 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               LogicalView *registration_view = NULL);
+      // Support for tracing
+      void find_invalid_instances(Operation *op, unsigned index,
+                                  VersionInfo &version_info,
+                                  const FieldMaskSet<InstanceView> &valid_views,
+                                  FieldMaskSet<InstanceView> &invalid_instances,
+                                  std::set<RtEvent> &map_applied_events);
+      void update_valid_instances(Operation *op, unsigned index,
+                                  VersionInfo &version_info,
+                                  const FieldMaskSet<InstanceView> &valid_views,
+                                  std::set<RtEvent> &map_applied_events);
     public:
       int physical_convert_mapping(Operation *op,
                                const RegionRequirement &req,

@@ -754,6 +754,7 @@ namespace Legion {
       SEND_EQUIVALENCE_SET_OWNER_UPDATE,
       SEND_EQUIVALENCE_SET_REMOTE_REFINEMENT,
       SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INSTANCES,
+      SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
       SEND_EQUIVALENCE_SET_REMOTE_UPDATES,
       SEND_EQUIVALENCE_SET_REMOTE_ACQUIRES,
       SEND_EQUIVALENCE_SET_REMOTE_RELEASES,
@@ -917,6 +918,7 @@ namespace Legion {
         "Send Equivalence Set Owner Update",                          \
         "Send Equivalence Set Remote Refinement",                     \
         "Send Equivalence Set Remote Request Instances",              \
+        "Send Equivalence Set Remote Request Invalid",                \
         "Send Equivalence Set Remote Updates",                        \
         "Send Equivalence Set Remote Acquires",                       \
         "Send Equivalence Set Remote Releases",                       \

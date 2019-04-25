@@ -7206,6 +7206,12 @@ namespace Legion {
                                                         remote_address_space);
               break;
             }
+          case SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID:
+            {
+              runtime->handle_equivalence_set_remote_request_invalid(derez,
+                                                        remote_address_space);
+              break;
+            }
           case SEND_EQUIVALENCE_SET_REMOTE_UPDATES:
             {
               runtime->handle_equivalence_set_remote_updates(derez,
@@ -16248,6 +16254,16 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void Runtime::send_equivalence_set_remote_request_invalid(
+                                         AddressSpaceID target, Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      find_messenger(target)->send_message(rez,
+          SEND_EQUIVALENCE_SET_REMOTE_REQUEST_INVALID,
+          DEFAULT_VIRTUAL_CHANNEL, true/*flush*/);
+    }
+
+    //--------------------------------------------------------------------------
     void Runtime::send_equivalence_set_remote_updates(AddressSpaceID target,
                                                       Serializer &rez)
     //--------------------------------------------------------------------------
@@ -17576,6 +17592,14 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       ValidInstAnalysis::handle_remote_request_instances(derez, this, source);
+    }
+
+    //--------------------------------------------------------------------------
+    void Runtime::handle_equivalence_set_remote_request_invalid(
+                                     Deserializer &derez, AddressSpaceID source)
+    //--------------------------------------------------------------------------
+    {
+      InvalidInstAnalysis::handle_remote_request_invalid(derez, this, source);
     }
 
     //--------------------------------------------------------------------------

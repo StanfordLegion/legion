@@ -44,6 +44,17 @@ namespace Realm {
 	return handle;
       }
 
+      // This method was added with CUDA 10, not sure what it does yet
+      void __cudaRegisterFatBinaryEnd(void **fat_bin)
+      {
+        // mark that the hijack code is active
+	cudart_hijack_active = true;
+        // For now we don't actually do anything in here
+        // since it's not immediately obvious what else
+        // we might need to do for this cubin since we
+        // already registered it using the method above
+      }
+
       void __cudaUnregisterFatBinary(void **handle)
       {
 	// mark that the hijack code is active
@@ -410,12 +421,6 @@ namespace Realm {
 	return cudaSuccess;
       }
       
-      const char* cudaGetErrorString(cudaError_t error)
-      {
-	// device and driver error strings don't match up...
-	return "cudaGetErrorString() not supported";
-      }
-
       cudaError_t cudaGetDevice(int *device)
       {
 	GPUProcessor *p = get_gpu_or_die("cudaGetDevice");
@@ -560,6 +565,28 @@ namespace Realm {
         // For now we're not tracking this so if we were
         // going to die we already would have
         return cudaSuccess;
+      }
+
+      const char* cudaGetErrorName(cudaError_t error)
+      {
+        get_gpu_or_die("cudaGetErrorName");
+        const char *result = NULL;
+        // It wasn't always the case the cuda runtime errors
+        // and cuda driver errors had the same enum scheme
+        // but it appears that they do now
+        CHECK_CU( cuGetErrorName((CUresult)error, &result) );
+        return result;
+      }
+
+      const char* cudaGetErrorString(cudaError_t error)
+      {
+        get_gpu_or_die("cudaGetErrorString");
+        const char *result = NULL;
+        // It wasn't always the case the cuda runtime errors
+        // and cuda driver errors had the same enum scheme
+        // but it appears that they do now
+        CHECK_CU( cuGetErrorString((CUresult)error, &result) );
+        return result;
       }
 
     }; // extern "C"
