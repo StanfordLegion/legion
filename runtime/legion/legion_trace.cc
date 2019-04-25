@@ -2336,7 +2336,7 @@ namespace Legion {
           return false;
       }
 #else
-      assert(false);
+      //assert(false);
 #endif
       return true;
     }
@@ -4742,7 +4742,7 @@ namespace Legion {
       Memoizable *memo = operations[owner];
       ApEvent precondition = events[precondition_idx];
       const PhysicalTraceInfo trace_info(memo->get_operation(), memo);
-      events[lhs] = expr->issue_copy(trace_info, src_fields, dst_fields,
+      events[lhs] = expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
                                      handle, src_tree_id, dst_tree_id,
 #endif
