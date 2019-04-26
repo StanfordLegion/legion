@@ -2209,24 +2209,68 @@ namespace Legion {
             intersect_index_spaces(src_expr, dst_expr);
           if (intersect->is_empty())
             return ApEvent::NO_AP_EVENT;
-          return intersect->issue_copy(trace_info, dst_fields, src_fields,
+          if (trace_info.recording)
+          {
+            FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
+            for (unsigned idx = 0; idx < src_targets.size(); idx++)
+              tracing_srcs.insert(source_views[idx],
+                  src_targets[idx].get_valid_fields());
+            for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+              tracing_dsts.insert(target_views[idx],
+                  dst_targets[idx].get_valid_fields());
+            return intersect->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                       dst_req.region.get_field_space(), 
-                                       src_req.region.get_tree_id(),
-                                       dst_req.region.get_tree_id(),
+                                         dst_req.region.get_field_space(), 
+                                         src_req.region.get_tree_id(),
+                                         dst_req.region.get_tree_id(),
 #endif
-                                       full_precondition, guard,
-                                       dst_req.redop, false/*fold*/);
+                                         full_precondition, guard,
+                                         dst_req.redop, false/*fold*/, 
+                                         &tracing_srcs, &tracing_dsts);
+          }
+          else
+            return intersect->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                         dst_req.region.get_field_space(), 
+                                         src_req.region.get_tree_id(),
+                                         dst_req.region.get_tree_id(),
+#endif
+                                         full_precondition, guard,
+                                         dst_req.redop, false/*fold*/, 
+                                         NULL, NULL);
         }
         else
-          return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+        {
+          if (trace_info.recording)
+          {
+            FieldMaskSet<InstanceView> tracing_srcs, tracing_dsts;
+            for (unsigned idx = 0; idx < src_targets.size(); idx++)
+              tracing_srcs.insert(source_views[idx],
+                  src_targets[idx].get_valid_fields());
+            for (unsigned idx = 0; idx < dst_targets.size(); idx++)
+              tracing_dsts.insert(target_views[idx],
+                  dst_targets[idx].get_valid_fields());
+            return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
 #ifdef LEGION_SPY
-                                      dst_req.region.get_field_space(), 
-                                      src_req.region.get_tree_id(),
-                                      dst_req.region.get_tree_id(),
+                                        dst_req.region.get_field_space(), 
+                                        src_req.region.get_tree_id(),
+                                        dst_req.region.get_tree_id(),
 #endif
-                                      full_precondition, guard,
-                                      dst_req.redop, false/*fold*/);
+                                        full_precondition, guard,
+                                        dst_req.redop, false/*fold*/,
+                                        &tracing_srcs, &tracing_dsts);
+          }
+          else
+            return dst_expr->issue_copy(trace_info, dst_fields, src_fields,
+#ifdef LEGION_SPY
+                                        dst_req.region.get_field_space(), 
+                                        src_req.region.get_tree_id(),
+                                        dst_req.region.get_tree_id(),
+#endif
+                                        full_precondition, guard,
+                                        dst_req.redop, false/*fold*/,
+                                        NULL, NULL);
+        }
       }
       FieldMask src_mask, dst_mask; 
       for (unsigned idx = 0; idx < dst_indexes.size(); idx++)

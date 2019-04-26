@@ -1848,7 +1848,8 @@ namespace Legion {
         guard_postcondition(Runtime::create_rt_user_event()),
 #endif
         effects_applied(Runtime::create_rt_user_event()),
-        predicate_guard(p), track_events(t)
+        predicate_guard(p), track_events(t), tracing_src_fills(NULL),
+        tracing_srcs(NULL), tracing_dsts(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1864,7 +1865,8 @@ namespace Legion {
         guard_postcondition(Runtime::create_rt_user_event()),
 #endif
         effects_applied(Runtime::create_rt_user_event()),
-        predicate_guard(p), track_events(t)
+        predicate_guard(p), track_events(t), tracing_src_fills(NULL),
+        tracing_srcs(NULL), tracing_dsts(NULL)
     //--------------------------------------------------------------------------
     {
     }
@@ -1922,6 +1924,13 @@ namespace Legion {
             delete it->first;
         }
       }
+      // Clean up any data structures that we made for tracing
+      if (tracing_src_fills != NULL)
+        delete tracing_src_fills;
+      if (tracing_srcs != NULL)
+        delete tracing_srcs;
+      if (tracing_dsts != NULL)
+        delete tracing_dsts;
     }
 
     //--------------------------------------------------------------------------
@@ -2794,6 +2803,29 @@ namespace Legion {
 #endif
         IndexSpaceExpression *fill_expr = update->expr;
         FillView *fill_view = update->source;
+        // Check to see if we need to do any work for tracing
+        if (trace_info.recording)
+        {
+          if (tracing_src_fills == NULL)
+            tracing_src_fills = new FieldMaskSet<FillView>();
+          else
+            tracing_src_fills->clear();
+          // Record the source view
+          tracing_src_fills->insert(fill_view, fill_mask);
+          if (tracing_dsts == NULL)
+            tracing_dsts = new FieldMaskSet<InstanceView>();
+          else
+            tracing_dsts->clear();
+          // Record the destination view, convert field mask if necessary 
+          if (update->across_helper != NULL)
+          {
+            const FieldMask dst_mask = 
+              update->across_helper->convert_src_to_dst(fill_mask);
+            tracing_dsts->insert(target, dst_mask);
+          }
+          else
+            tracing_dsts->insert(target, fill_mask);
+        }
         const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
                                                      fill_view->value->value,
                                                    fill_view->value->value_size,
@@ -2803,7 +2835,9 @@ namespace Legion {
                                                      manager->tree_id,
 #endif
                                                      precondition,
-                                                     predicate_guard);
+                                                     predicate_guard,
+                                                     tracing_src_fills,
+                                                     tracing_dsts);
         // Record the fill result in the destination 
         if (result.exists())
         {
@@ -2857,11 +2891,31 @@ namespace Legion {
         const FieldMask dst_mask = 
           (fills[0]->across_helper == NULL) ? fill_mask : 
            fills[0]->across_helper->convert_src_to_dst(fill_mask);
+        // See if we have any work to do for tracing
+        if (trace_info.recording)
+        {
+          // Destination is the same for all the fills
+          if (tracing_dsts == NULL)
+            tracing_dsts = new FieldMaskSet<InstanceView>();
+          else
+            tracing_dsts->clear();
+          tracing_dsts->insert(target, dst_mask);
+        }
         for (std::map<FillView*,std::set<IndexSpaceExpression*> >::
               const_iterator it = exprs.begin(); it != exprs.end(); it++)
         {
           IndexSpaceExpression *fill_expr = (it->second.size() == 1) ?
             *(it->second.begin()) : forest->union_index_spaces(it->second);
+          if (trace_info.recording)
+          {
+            if (tracing_src_fills == NULL)
+              tracing_src_fills = new FieldMaskSet<FillView>();
+            else
+              tracing_src_fills->clear();
+            // Record the source view
+            tracing_src_fills->insert(it->first, fill_mask);
+          }
+          // See if we have any work to do for tracing
           const ApEvent result = fill_expr->issue_fill(trace_info, dst_fields,
                                                        it->first->value->value,
                                                   it->first->value->value_size,
@@ -2871,7 +2925,9 @@ namespace Legion {
                                                        manager->tree_id,
 #endif
                                                        precondition,
-                                                       predicate_guard);
+                                                       predicate_guard,
+                                                       tracing_src_fills,
+                                                       tracing_dsts);
           if (result.exists())
           {
             target->add_copy_user(false/*reading*/,
@@ -2925,6 +2981,28 @@ namespace Legion {
           InstanceView *source = update->source;
           source->copy_from(copy_mask, src_fields);
           IndexSpaceExpression *copy_expr = update->expr;
+          // See if we have any work to do for tracing
+          if (trace_info.recording)
+          {
+            if (tracing_srcs == NULL)
+              tracing_srcs = new FieldMaskSet<InstanceView>();
+            else
+              tracing_srcs->clear();
+            tracing_srcs->insert(source, copy_mask);
+            if (tracing_dsts == NULL)
+              tracing_dsts = new FieldMaskSet<InstanceView>();
+            else
+              tracing_dsts->clear();
+            // Handle the across case properly here
+            if (update->across_helper != NULL)
+            {
+              const FieldMask dst_mask = 
+                update->across_helper->convert_src_to_dst(copy_mask);
+              tracing_dsts->insert(target, dst_mask);
+            }
+            else
+              tracing_dsts->insert(target, copy_mask);
+          }
           const ApEvent result = copy_expr->issue_copy(trace_info, 
                                     dst_fields, src_fields, 
 #ifdef LEGION_SPY
@@ -2933,7 +3011,8 @@ namespace Legion {
                                     manager->tree_id,
 #endif
                                     precondition, predicate_guard,
-                                    update->redop, false/*fold*/);
+                                    update->redop, false/*fold*/,
+                                    tracing_srcs, tracing_dsts);
           if (result.exists())
           {
             source->add_copy_user(true/*reading*/,
@@ -2987,6 +3066,15 @@ namespace Legion {
           const FieldMask dst_mask = 
             (cit->second[0]->across_helper == NULL) ? copy_mask : 
              cit->second[0]->across_helper->convert_src_to_dst(copy_mask);
+          // If we're tracing we can get the destination now
+          if (trace_info.recording)
+          {
+            if (tracing_dsts == NULL)
+              tracing_dsts = new FieldMaskSet<InstanceView>();
+            else
+              tracing_dsts->clear();
+            tracing_dsts->insert(target, dst_mask);
+          }
           for (std::map<InstanceView*,std::set<IndexSpaceExpression*> >::
                 const_iterator it = src_exprs.begin(); 
                 it != src_exprs.end(); it++)
@@ -2995,6 +3083,15 @@ namespace Legion {
               *(it->second.begin()) : forest->union_index_spaces(it->second);
             src_fields.clear();
             it->first->copy_from(copy_mask, src_fields);
+            // If we're tracing then get the source information
+            if (trace_info.recording)
+            {
+              if (tracing_srcs == NULL)
+                tracing_srcs = new FieldMaskSet<InstanceView>();
+              else
+                tracing_srcs->clear();
+              tracing_srcs->insert(it->first, copy_mask);
+            }
             const ApEvent result = copy_expr->issue_copy(trace_info, 
                                     dst_fields, src_fields, 
 #ifdef LEGION_SPY
@@ -3003,7 +3100,8 @@ namespace Legion {
                                     manager->tree_id,
 #endif
                                     precondition, predicate_guard,
-                                    redop, false/*fold*/);
+                                    redop, false/*fold*/,
+                                    tracing_srcs, tracing_dsts);
             if (result.exists())
             {
               it->first->add_copy_user(true/*reading*/,

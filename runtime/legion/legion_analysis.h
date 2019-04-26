@@ -878,6 +878,11 @@ namespace Legion {
       };
       // Cached calls to the mapper for selecting sources
       std::map<InstanceView*,LegionVector<SourceQuery>::aligned> mapper_queries;
+    protected:
+      // Help for tracing 
+      FieldMaskSet<FillView> *tracing_src_fills;
+      FieldMaskSet<InstanceView> *tracing_srcs;
+      FieldMaskSet<InstanceView> *tracing_dsts;
     };
 
     /**

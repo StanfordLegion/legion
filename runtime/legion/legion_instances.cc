@@ -2219,11 +2219,11 @@ namespace Legion {
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
                     fill_buffer, reduction_op->sizeof_rhs, 0/*uid*/, 
                     field_space_node->handle, tree_id, ready,
-                    PredEvent::NO_PRED_EVENT);
+                    PredEvent::NO_PRED_EVENT, NULL, NULL);
 #else
               ApEvent filled = instance_domain->issue_fill(fake_info, dsts,
                     fill_buffer, reduction_op->sizeof_rhs, ready,
-                    PredEvent::NO_PRED_EVENT);
+                    PredEvent::NO_PRED_EVENT, NULL, NULL);
 #endif
               // We can free the buffer after we've issued the fill
               free(fill_buffer);
