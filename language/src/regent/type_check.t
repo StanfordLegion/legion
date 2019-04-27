@@ -577,13 +577,13 @@ function type_check.expr_field_access(cx, node)
                 tostring(std.as_read(value_type)))
   else
     field_type = std.get_field(unpack_type, node.field_name)
-    if std.as_read(unpack_type):isstruct() and std.as_read(unpack_type).__no_field_slicing then
-      field_type = std.rawref(&std.as_read(field_type))
-    end
-
     if not field_type then
       report.error(node, "no field '" .. node.field_name .. "' in type " ..
                   tostring(std.as_read(value_type)))
+    end
+
+    if std.as_read(unpack_type):isstruct() and std.as_read(unpack_type).__no_field_slicing then
+      field_type = std.rawref(&std.as_read(field_type))
     end
   end
 
