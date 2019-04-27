@@ -912,15 +912,8 @@ end
 function value:read(cx)
   local actions = self.expr.actions
   local result = self.expr.value
-  local value_type = self.value_type
   for _, field_name in ipairs(self.field_path) do
-    if std.is_index_type(value_type) then
-      result = `([result].__ptr)
-    elseif std.is_bounded_type(value_type) then
-      result = `([result].__ptr.__ptr)
-    end
     result = `([result].[field_name])
-    value_type = std.get_field(value_type, field_name)
   end
   return expr.just(actions, result)
 end
@@ -936,6 +929,11 @@ end
 function value:__get_field(cx, node, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(node, self:read(cx), value_type, data.newtuple(field_name))
+  elseif std.is_index_type(std.as_read(value_type)) then
+    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
+  elseif std.is_bounded_type(value_type) then
+    assert(std.get_field(value_type.index_type.base_type, field_name))
+    return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", "__ptr", field_name))
   else
     return self:new(
       node, self.expr, self.value_type, self.field_path .. data.newtuple(field_name))
@@ -1972,15 +1970,8 @@ end
 function rawref:__ref(cx)
   local actions = self.expr.actions
   local result = self.expr.value
-  local value_type = self.value_type.type
   for _, field_name in ipairs(self.field_path) do
-    if std.is_index_type(value_type) then
-      result = `([result].__ptr)
-    elseif std.is_bounded_type(value_type) then
-      result = `([result].__ptr.__ptr)
-    end
     result = `([result].[field_name])
-    value_type = std.get_field(value_type, field_name)
   end
   return expr.just(actions, result)
 end
