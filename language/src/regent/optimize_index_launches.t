@@ -697,7 +697,7 @@ local function optimize_loop_body(cx, node, report_pass, report_fail)
       assert(mapping[arg] == nil)
       mapping[arg] = param_types[i]
       -- Tests for conformance to index launch requirements.
-      if std.is_ispace(arg_type) or std.is_region(arg_type) then
+      if std.is_region(arg_type) then
         if analyze_is_projectable(loop_cx, arg) then
           partition_type = std.as_read(arg.value.expr_type)
           arg_projectable = true
