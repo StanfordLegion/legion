@@ -530,7 +530,11 @@ function type_check.expr_field_access(cx, node)
     -- type, restore it before continuing.
     if not std.type_eq(std.as_read(unpack_type), result_type) then
       constraints = result_constraints
-      if std.is_ref(unpack_type) then
+      if (std.is_index_type(std.as_read(unpack_type)) or
+          std.is_bounded_type(std.as_read(unpack_type)))
+      then
+        unpack_type = std.rawref(&result_type)
+      elseif std.is_ref(unpack_type) then
         unpack_type = std.ref(unpack_type.pointer_type.index_type(result_type, unpack(unpack_type.bounds_symbols)),
                               unpack(unpack_type.field_path))
       elseif std.is_rawref(unpack_type) then

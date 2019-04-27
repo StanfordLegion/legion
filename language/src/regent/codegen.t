@@ -1463,8 +1463,7 @@ function ref:get_field(cx, node, field_name, field_type, value_type)
   if value_type:isstruct() and value_type.__no_field_slicing then
     local value_actions, value = result:__ref(cx)
     assert(#value == 1)
-    result = values.rawref(result.node, expr.just(value_actions, value[1]),
-        &value_type, result.field_path)
+    result = values.rawref(result.node, expr.just(value_actions, value[1]), &value_type)
   end
   return result:__get_field(cx, node, value_type, field_name)
 end
