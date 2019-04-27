@@ -35,7 +35,9 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 const FieldMaskSet<FillView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_FILL_CALL);
@@ -122,7 +124,9 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ReductionOpID redop, bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(forest->runtime, REALM_ISSUE_COPY_CALL);
@@ -625,7 +629,9 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 const FieldMaskSet<FillView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -637,21 +643,23 @@ namespace Legion {
             fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition), 
-            pred_guard);
+            pred_guard, tracing_srcs, tracing_dsts);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard);
+                                   space_ready, pred_guard,
+                                   tracing_srcs, tracing_dsts);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard,
+                                   tracing_srcs, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -666,7 +674,9 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ReductionOpID redop, bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -678,21 +688,23 @@ namespace Legion {
             handle, src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, precondition, space_ready),
-            pred_guard, redop, reduction_fold);
+            pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 handle, src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold);
+                space_ready, pred_guard, redop, reduction_fold,
+                tracing_srcs, tracing_dsts);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 handle, src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold);
+                precondition, pred_guard, redop, reduction_fold,
+                tracing_srcs, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -742,11 +754,11 @@ namespace Legion {
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
-                                       space_ready, pred_guard); 
+                                       space_ready, pred_guard);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
-                                       precondition, pred_guard); 
+                                       precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------
@@ -4145,7 +4157,9 @@ namespace Legion {
                                  FieldSpace handle,
                                  RegionTreeID tree_id,
 #endif
-                                 ApEvent precondition, PredEvent pred_guard)
+                                 ApEvent precondition, PredEvent pred_guard,
+                                 const FieldMaskSet<FillView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4157,21 +4171,23 @@ namespace Legion {
                                    fill_uid, handle, tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard);
+            pred_guard, tracing_srcs, tracing_dsts);
       else if (space_ready.exists())
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   space_ready, pred_guard);
+                                   space_ready, pred_guard,
+                                   tracing_srcs, tracing_dsts);
       else
         return issue_fill_internal(context, local_space, trace_info, 
                                    dst_fields, fill_value, fill_size,
 #ifdef LEGION_SPY
                                    fill_uid, handle, tree_id,
 #endif
-                                   precondition, pred_guard);
+                                   precondition, pred_guard,
+                                   tracing_srcs, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -4186,7 +4202,9 @@ namespace Legion {
                                  RegionTreeID dst_tree_id,
 #endif
                                  ApEvent precondition, PredEvent pred_guard,
-                                 ReductionOpID redop, bool reduction_fold)
+                                 ReductionOpID redop, bool reduction_fold,
+                                 const FieldMaskSet<InstanceView> *tracing_srcs,
+                                 const FieldMaskSet<InstanceView> *tracing_dsts)
     //--------------------------------------------------------------------------
     {
       Realm::IndexSpace<DIM,T> local_space;
@@ -4198,21 +4216,23 @@ namespace Legion {
             handle, src_tree_id, dst_tree_id,
 #endif
             Runtime::merge_events(&trace_info, space_ready, precondition),
-            pred_guard, redop, reduction_fold);
+            pred_guard, redop, reduction_fold, tracing_srcs, tracing_dsts);
       else if (space_ready.exists())
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 handle, src_tree_id, dst_tree_id,
 #endif
-                space_ready, pred_guard, redop, reduction_fold);
+                space_ready, pred_guard, redop, reduction_fold,
+                tracing_srcs, tracing_dsts);
       else
         return issue_copy_internal(context, local_space, trace_info, 
                 dst_fields, src_fields, 
 #ifdef LEGION_SPY
                 handle, src_tree_id, dst_tree_id,
 #endif
-                precondition, pred_guard, redop, reduction_fold);
+                precondition, pred_guard, redop, reduction_fold,
+                tracing_srcs, tracing_dsts);
     }
 
     //--------------------------------------------------------------------------
@@ -4262,11 +4282,11 @@ namespace Legion {
       else if (space_ready.exists())
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects, 
-                                       space_ready, pred_guard); 
+                                       space_ready, pred_guard);
       else
         return issue_indirect_internal(context, local_space, trace_info, 
                                        dst_fields, src_fields, indirects,
-                                       precondition, pred_guard); 
+                                       precondition, pred_guard);
     }
 
     //--------------------------------------------------------------------------

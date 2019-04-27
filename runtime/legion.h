@@ -6857,9 +6857,12 @@ namespace Legion {
        * index space task launches. The reduction operation ID zero is
        * reserved for runtime use.
        * @param redop_id ID at which to register the reduction operation
+       * @param permit_duplicates will allow a duplicate registration to
+       *        be successful if this reduction ID has been used before
        */
       template<typename REDOP>
-      static void register_reduction_op(ReductionOpID redop_id);
+      static void register_reduction_op(ReductionOpID redop_id,
+                                        bool permit_duplicates = false);
 
       /**
        * Register an untyped reduction operation with the runtime. Note 
@@ -6876,11 +6879,14 @@ namespace Legion {
        *        type of this reduction operator if they also support compression
        * @pram fold_fnptr optional function for folding reduction types of this
        *        reduction operator if they also support compression 
+       * @param permit_duplicates will allow a duplicate registration to 
+       *        be successful if this reduction ID has been used before
        */
       static void register_reduction_op(ReductionOpID redop_id,
                                         ReductionOp *op,
                                         SerdezInitFnptr init_fnptr = NULL,
-                                        SerdezFoldFnptr fold_fnptr = NULL);
+                                        SerdezFoldFnptr fold_fnptr = NULL,
+                                        bool permit_duplicates = false);
 
       /**
        * Return a pointer to a given reduction operation object.
@@ -6896,9 +6902,13 @@ namespace Legion {
        * copied (e.g. byte-wise copies). The type being registered
        * must conform to the Realm definition of a CustomSerdez
        * object (see realm/custom_serdez.h).
+       * @param serdez_id ID at which to register the serdez operator
+       * @param permit_duplicates will allow a duplicate registration to 
+       *        be successful if this serdez ID has been used before
        */
       template<typename SERDEZ>
-      static void register_custom_serdez_op(CustomSerdezID serdez_id);
+      static void register_custom_serdez_op(CustomSerdezID serdez_id,
+                                            bool permit_duplicates = false);
 
       /**
        * Return a pointer to the given custom serdez operation object.

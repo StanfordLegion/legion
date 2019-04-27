@@ -6608,7 +6608,8 @@ namespace Legion {
     /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
                                                    ReductionOp *redop,
                                                    SerdezInitFnptr init_fnptr,
-                                                   SerdezFoldFnptr fold_fnptr)
+                                                   SerdezFoldFnptr fold_fnptr,
+                                                   bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
@@ -6616,7 +6617,8 @@ namespace Legion {
                             "ERROR: ReductionOpID zero is reserved.")
       ReductionOpTable &red_table = Runtime::get_reduction_table(); 
       // Check to make sure we're not overwriting a prior reduction op 
-      if (red_table.find(redop_id) != red_table.end())
+      if (!permit_duplicates &&
+          (red_table.find(redop_id) != red_table.end()))
         REPORT_LEGION_ERROR(ERROR_DUPLICATE_REDOP_ID, "ERROR: ReductionOpID "
             "%d has already been used in the reduction table\n",redop_id)
       red_table[redop_id] = redop;
