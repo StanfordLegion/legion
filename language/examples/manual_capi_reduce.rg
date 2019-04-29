@@ -129,7 +129,7 @@ local args = require("manual_capi_args")
 
 terra main()
   c.printf("in main...\n")
-  c.register_reduction_plus_int32(RED_PLUS_INT)
+  c.register_reduction_plus_int32(RED_PLUS_INT, false)
 
   var execution_constraints = c.legion_execution_constraint_set_create()
   c.legion_execution_constraint_set_add_processor_constraint(execution_constraints, c.LOC_PROC)
