@@ -24,6 +24,9 @@ Version 19.04.0 (April ??, 2019)
     - Realm IDs uses explicit bit packing instead of fragile C bit fields
     - numerous fixes for create_equal_subspace deppart operations
     - Support for CUDA 10
+  * Legion Prof
+    - Added support for recording GPU processor times
+
 
 Version 18.12.0 (December 27, 2018)
   * Realm
