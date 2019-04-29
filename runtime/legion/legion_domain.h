@@ -28,6 +28,15 @@
 
 namespace Legion {
 
+#if __cplusplus >= 201103L
+  // If we've got c++11 we can just include these directly
+  template<int DIM, typename T = coord_t>
+  using Point = Realm::Point<DIM,T>;
+  template<int DIM, typename T = coord_t>
+  using Rect = Realm::Rect<DIM,T>;
+  template<int M, int N, typename T = coord_t>
+  using Transform = Realm::Matrix<M,N,T>;
+#else
   /**
    * \class Point
    * Our way of importing the templated Realm Point class
@@ -104,6 +113,7 @@ namespace Legion {
     template<typename T2> __CUDA_HD__
     Transform<M,N,T>& operator=(const Realm::Matrix<M,N,T2> &rhs);
   };
+#endif
 
   /**
    * \class AffineTransform
@@ -182,6 +192,11 @@ namespace Legion {
     Point<M,T>       divisor; // d
   };
 
+#if __cplusplus >= 201103L
+  // If we've got c++11 we can just include this directly
+  template<int DIM, typename T = coord_t>
+  using DomainT = Realm::IndexSpace<DIM,T>;
+#else
   /**
    * \class DomainT
    * Our way of importing the templated Realm Rect class
@@ -210,6 +225,7 @@ namespace Legion {
     // Support conversion back to rect
     operator Rect<DIM,T>(void) const;
   };
+#endif
 
   /**
    * \class DomainPoint
