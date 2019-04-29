@@ -1,7 +1,7 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (??????? ??, ????)
+Version 19.04.0 (April ??, 2019)
   * Legion
     - Support for dimensions > 3. Set MAX_DIM at build time
         (or -DLegion_MAX_DIM in CMake) to build with any number of
@@ -17,6 +17,10 @@ Version ??.??.? (??????? ??, ????)
       numbers of fields
     - Build fixes for macOS
     - setup_env.py now works on macOS
+  * Realm
+    - support for #pragma omp single sections in OpenMP processors
+    - Realm IDs uses explicit bit packing instead of fragile C bit fields
+    - numerous fixes for create_equal_subspace deppart operations
 
 Version 18.12.0 (December 27, 2018)
   * Realm
