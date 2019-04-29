@@ -42,6 +42,13 @@ namespace Realm {
   {}
 
   template <int N, typename T> __CUDA_HD__
+  inline Point<N,T>::Point(T val)
+  {
+    for(int i = 0; i < N; i++)
+      (&x)[i] = val;
+  }
+
+  template <int N, typename T> __CUDA_HD__
   inline Point<N,T>::Point(const T vals[N])
   {
     for(int i = 0; i < N; i++)
@@ -87,6 +94,18 @@ namespace Realm {
     return acc;
   }
 
+  template <int N, typename T>
+  /*static*/ inline Point<N,T> Point<N,T>::ZEROES(void)
+  {
+    return Point<N,T>(0);
+  }
+
+  template <int N, typename T>
+  /*static*/ inline Point<N,T> Point<N,T>::ONES(void)
+  {
+    return Point<N,T>(1);
+  }
+
   // specializations for N <= 4
   template <typename T>
   struct Point<1,T> {
@@ -120,6 +139,11 @@ namespace Realm {
     // special case: for N == 1, we're willing to coerce to T
     __CUDA_HD__
     operator T(void) const { return x; }
+
+    __CUDA_HD__
+    static inline Point<1,T> ZEROES(void) { return Point<1,T>(0); }
+    __CUDA_HD__
+    static inline Point<1,T> ONES(void) { return Point<1,T>(1); }
   };
 
   template <typename T>
@@ -127,6 +151,8 @@ namespace Realm {
     T x, y;
     __CUDA_HD__
     Point(void) {}
+    __CUDA_HD__
+    explicit Point(T val) : x(val), y(val) { }
     __CUDA_HD__
     explicit Point(const T vals[2]) : x(vals[0]), y(vals[1]) {}
     __CUDA_HD__
@@ -153,6 +179,11 @@ namespace Realm {
     {
       return (x * rhs.x) + (y * rhs.y);
     }
+
+    __CUDA_HD__
+    static inline Point<2,T> ZEROES(void) { return Point<2,T>(0); }
+    __CUDA_HD__
+    static inline Point<2,T> ONES(void) { return Point<2,T>(1); }
   };
 
   template <typename T>
@@ -160,6 +191,8 @@ namespace Realm {
     T x, y, z;
     __CUDA_HD__
     Point(void) {}
+    __CUDA_HD__
+    Point(T val) : x(val), y(val), z(val) { }
     __CUDA_HD__
     explicit Point(const T vals[3]) : x(vals[0]), y(vals[1]), z(vals[2]) {}
     __CUDA_HD__
@@ -187,6 +220,11 @@ namespace Realm {
     {
       return (x * rhs.x) + (y * rhs.y) + (z * rhs.z);
     }
+
+    __CUDA_HD__
+    static inline Point<3,T> ZEROES(void) { return Point<3,T>(0); }
+    __CUDA_HD__
+    static inline Point<3,T> ONES(void) { return Point<3,T>(1); }
   };
 
   template <typename T>
@@ -194,6 +232,8 @@ namespace Realm {
     T x, y, z, w;
     __CUDA_HD__
     Point(void) {}
+    __CUDA_HD__
+    Point(T val) : x(val), y(val), z(val), w(val) { }
     __CUDA_HD__
     explicit Point(const T vals[4]) : x(vals[0]), y(vals[1]), z(vals[2]), w(vals[3]) {}
     __CUDA_HD__
@@ -222,6 +262,11 @@ namespace Realm {
     {
       return (x * rhs.x) + (y * rhs.y) + (z * rhs.z) + (w * rhs.w);
     }
+
+    __CUDA_HD__
+    static inline Point<4,T> ZEROES(void) { return Point<4,T>(0); }
+    __CUDA_HD__
+    static inline Point<4,T> ONES(void) { return Point<4,T>(1); }
   };
 
   template <int N, typename T>
