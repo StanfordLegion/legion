@@ -2016,6 +2016,7 @@ std.rect_type = terralib.memoize(function(index_type)
   st.is_rect_type = true
   st.index_type = index_type
   st.dim = index_type.dim
+  st.__no_field_slicing = true
 
   st.metamethods.__eq = macro(function(a, b)
     return `([a].lo == [b].lo and [a].hi == [b].hi)
@@ -2074,6 +2075,7 @@ function std.index_type(base_type, displayname)
   st.impl_type = impl_type
   st.dim = dim
   st.fields = fields
+  st.__no_field_slicing = true
 
   function st:is_opaque()
     return std.type_eq(self.base_type, opaque)
@@ -3783,12 +3785,12 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
     if op_type:isprimitive() then
       register = c["register_reduction_" .. op_name .. "_" .. tostring(op_type)]
       reduction_registrations:insert(quote
-        [register]([ base.reduction_op_ids[op][op_type] ])
+        [register]([ base.reduction_op_ids[op][op_type] ], true --[[ permit duplicates ]])
       end)
     elseif op_type:isarray() then
       register = c["register_array_reduction_" .. op_name .. "_" .. tostring(op_type.type)]
       reduction_registrations:insert(quote
-        [register]([ base.reduction_op_ids[op][op_type] ], [op_type.N])
+        [register]([ base.reduction_op_ids[op][op_type] ], [op_type.N], true --[[ permit duplicates ]])
       end)
     else
       assert(false)

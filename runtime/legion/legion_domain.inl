@@ -15,6 +15,7 @@
 
 namespace Legion {
 
+#if __cplusplus < 201103L
   // Specialization for 1-D Points
   template<typename T>
   struct Point<1,T> : public Realm::Point<1,T> {
@@ -132,10 +133,12 @@ namespace Legion {
   public:
     template<typename T2> __CUDA_HD__
     inline Point<4,T>& operator=(const Point<4,T2> &rhs)
-      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
     template<typename T2> __CUDA_HD__
     inline Point<4,T>& operator=(const Realm::Point<4,T2> &rhs)
-      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
   public:
     __CUDA_HD__
     inline static Point<4,T> ZEROES(void) { return Point<4,T>((T)0); }
@@ -318,6 +321,7 @@ namespace Legion {
       this->rows[i] = rhs.rows[i];
     return *this;
   }
+#endif // pre c++11
 
   //----------------------------------------------------------------------------
   template<int M, int N, typename T> __CUDA_HD__
@@ -491,6 +495,7 @@ namespace Legion {
     return true;
   }
 
+#if __cplusplus < 201103L
   //----------------------------------------------------------------------------
   template<int DIM, typename T>
   inline DomainT<DIM,T>::DomainT(void)
@@ -583,6 +588,7 @@ namespace Legion {
     const Rect<DIM,T> result = this->bounds;
     return result;
   }
+#endif // pre c++11
 
   //----------------------------------------------------------------------------
   inline DomainPoint::DomainPoint(void)
@@ -1215,6 +1221,7 @@ namespace Legion {
   {
     p.dim = d.get_dim();
     switch(p.get_dim()) {
+#if __cplusplus < 201103L
 #define DIMFUNC(DIM) \
     case DIM: \
       { \
@@ -1233,6 +1240,25 @@ namespace Legion {
         } \
         break; \
       }
+#else
+#define DIMFUNC(DIM) \
+    case DIM: \
+      { \
+        Realm::IndexSpaceIterator<DIM,coord_t> *is_itr = \
+          new (is_iterator) Realm::IndexSpaceIterator<DIM,coord_t>(d); \
+        is_valid = is_itr->valid; \
+        if (is_valid) { \
+          Realm::PointInRectIterator<DIM,coord_t> *rect_itr = \
+            new (rect_iterator) \
+              Realm::PointInRectIterator<DIM,coord_t>(is_itr->rect); \
+          rect_valid = rect_itr->valid; \
+          p = Point<DIM,coord_t>(rect_itr->p); \
+        } else { \
+          rect_valid = false; \
+        } \
+        break; \
+      }
+#endif
     LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
     default:
@@ -1360,6 +1386,7 @@ namespace Legion {
     : itr(Realm::PointInRectIterator<DIM,COORD_T>(r, column_major_order))
   //----------------------------------------------------------------------------
   {
+    assert(valid());
   }
 
   //----------------------------------------------------------------------------
@@ -1390,12 +1417,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                          PointInRectIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return current;
+    return itr.p;
   }
 
   //----------------------------------------------------------------------------
@@ -1413,8 +1439,7 @@ namespace Legion {
                         PointInRectIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return &current;
+    return &(itr.p);
   }
 
   //----------------------------------------------------------------------------
@@ -1482,12 +1507,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Rect<DIM,COORD_T>&
+  inline Rect<DIM,COORD_T>
                         RectInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return current;
+    return itr.rect;
   }
 
   //----------------------------------------------------------------------------
@@ -1496,8 +1520,7 @@ namespace Legion {
                        RectInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return &current;
+    return &(itr.rect);
   }
 
   //----------------------------------------------------------------------------
@@ -1574,12 +1597,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                        PointInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return current;
+    return *point_itr;
   }
 
   //----------------------------------------------------------------------------
@@ -1588,8 +1610,7 @@ namespace Legion {
                       PointInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return &current;
+    return &(*point_itr);
   }
 
   //----------------------------------------------------------------------------
@@ -1925,6 +1946,7 @@ namespace Legion {
 }; // namespace Legion
 
 // Specializations of std::less<T> for Point,Rect,DomainT for use in containers
+#if __cplusplus < 201103L
 namespace std {
   template<int DIM, typename T>
   struct less<Legion::Point<DIM,T> > {
@@ -1947,4 +1969,5 @@ namespace std {
     { return std::less<Realm::IndexSpace<DIM,T> >()(d1, d2); }
   };
 };
+#endif // pre c++11
 

@@ -929,7 +929,7 @@ end
 function value:__get_field(cx, node, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(node, self:read(cx), value_type, data.newtuple(field_name))
-  elseif std.is_index_type(value_type) then
+  elseif std.is_index_type(std.as_read(value_type)) then
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
     assert(std.get_field(value_type.index_type.base_type, field_name))
@@ -1461,8 +1461,7 @@ function ref:get_field(cx, node, field_name, field_type, value_type)
   if value_type:isstruct() and value_type.__no_field_slicing then
     local value_actions, value = result:__ref(cx)
     assert(#value == 1)
-    result = values.rawref(result.node, expr.just(value_actions, value[1]),
-        &value_type, result.field_path)
+    result = values.rawref(result.node, expr.just(value_actions, value[1]), &value_type)
   end
   return result:__get_field(cx, node, value_type, field_name)
 end
