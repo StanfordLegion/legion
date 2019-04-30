@@ -246,7 +246,7 @@ namespace Realm {
 
     class ComparePendingIBInfo {
     public:
-      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) {
+      bool operator() (const PendingIBInfo& a, const PendingIBInfo& b) const {
         if (a.memory.id == b.memory.id) {
           assert(a.idx != b.idx);
           return a.idx < b.idx;

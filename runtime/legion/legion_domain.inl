@@ -44,9 +44,11 @@ namespace Legion {
       { this->x = rhs.x; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<1,T> ZEROES(void) { return Point<1,T>((T)0); }
+    inline static Point<1,T> ZEROES(void) 
+      { return Point<1,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<1,T> ONES(void) { return Point<1,T>((T)1); }
+    inline static Point<1,T> ONES(void) 
+      { return Point<1,T>(static_cast<T>(1)); }
   };
 
   // Specialization for 2-D Points
@@ -75,9 +77,11 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<2,T> ZEROES(void) { return Point<2,T>((T)0); }
+    inline static Point<2,T> ZEROES(void) 
+      { return Point<2,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<2,T> ONES(void) { return Point<2,T>((T)1); }
+    inline static Point<2,T> ONES(void) 
+      { return Point<2,T>(static_cast<T>(1)); }
   };
 
   // Specialization for 3-D Points
@@ -107,9 +111,11 @@ namespace Legion {
       { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<3,T> ZEROES(void) { return Point<3,T>((T)0); }
+    inline static Point<3,T> ZEROES(void) 
+      { return Point<3,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<3,T> ONES(void) { return Point<3,T>((T)1); }
+    inline static Point<3,T> ONES(void) 
+      { return Point<3,T>(static_cast<T>(1)); }
   };
 
   // Specialization for 4-D Points
@@ -141,9 +147,11 @@ namespace Legion {
         this->w = rhs.w; return *this; }
   public:
     __CUDA_HD__
-    inline static Point<4,T> ZEROES(void) { return Point<4,T>((T)0); }
+    inline static Point<4,T> ZEROES(void) 
+      { return Point<4,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    inline static Point<4,T> ONES(void) { return Point<4,T>((T)1); }
+    inline static Point<4,T> ONES(void) 
+      { return Point<4,T>(static_cast<T>(1)); }
   };
 
   //----------------------------------------------------------------------------
@@ -213,7 +221,7 @@ namespace Legion {
   /*static*/ inline Point<DIM,T> Point<DIM,T>::ZEROES(void)
   //----------------------------------------------------------------------------
   {
-    return Point<DIM,T>(0);
+    return Point<DIM,T>(static_cast<T>(0));
   }
 
   //----------------------------------------------------------------------------
@@ -221,7 +229,7 @@ namespace Legion {
   /*static*/ inline Point<DIM,T> Point<DIM,T>::ONES(void)
   //----------------------------------------------------------------------------
   {
-    return Point<DIM,T>(1);
+    return Point<DIM,T>(static_cast<T>(1));
   }
 
   //----------------------------------------------------------------------------
