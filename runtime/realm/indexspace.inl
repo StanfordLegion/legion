@@ -97,13 +97,13 @@ namespace Realm {
   template <int N, typename T>
   /*static*/ inline Point<N,T> Point<N,T>::ZEROES(void)
   {
-    return Point<N,T>(T(0));
+    return Point<N,T>(static_cast<T>(0));
   }
 
   template <int N, typename T>
   /*static*/ inline Point<N,T> Point<N,T>::ONES(void)
   {
-    return Point<N,T>(T(1));
+    return Point<N,T>(static_cast<T>(1));
   }
 
   // specializations for N <= 4
@@ -141,9 +141,11 @@ namespace Realm {
     operator T(void) const { return x; }
 
     __CUDA_HD__
-    static inline Point<1,T> ZEROES(void) { return Point<1,T>(T(0)); }
+    static inline Point<1,T> ZEROES(void) 
+      { return Point<1,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    static inline Point<1,T> ONES(void) { return Point<1,T>(T(1)); }
+    static inline Point<1,T> ONES(void) 
+      { return Point<1,T>(static_cast<T>(1)); }
   };
 
   template <typename T>
@@ -181,9 +183,11 @@ namespace Realm {
     }
 
     __CUDA_HD__
-    static inline Point<2,T> ZEROES(void) { return Point<2,T>(T(0)); }
+    static inline Point<2,T> ZEROES(void) 
+      { return Point<2,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    static inline Point<2,T> ONES(void) { return Point<2,T>(T(1)); }
+    static inline Point<2,T> ONES(void) 
+      { return Point<2,T>(static_cast<T>(1)); }
   };
 
   template <typename T>
@@ -222,9 +226,11 @@ namespace Realm {
     }
 
     __CUDA_HD__
-    static inline Point<3,T> ZEROES(void) { return Point<3,T>(T(0)); }
+    static inline Point<3,T> ZEROES(void) 
+      { return Point<3,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    static inline Point<3,T> ONES(void) { return Point<3,T>(T(1)); }
+    static inline Point<3,T> ONES(void) 
+      { return Point<3,T>(static_cast<T>(1)); }
   };
 
   template <typename T>
@@ -264,9 +270,11 @@ namespace Realm {
     }
 
     __CUDA_HD__
-    static inline Point<4,T> ZEROES(void) { return Point<4,T>(T(0)); }
+    static inline Point<4,T> ZEROES(void) 
+      { return Point<4,T>(static_cast<T>(0)); }
     __CUDA_HD__
-    static inline Point<4,T> ONES(void) { return Point<4,T>(T(1)); }
+    static inline Point<4,T> ONES(void) 
+      { return Point<4,T>(static_cast<T>(1)); }
   };
 
   template <int N, typename T>
