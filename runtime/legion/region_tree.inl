@@ -3971,7 +3971,8 @@ namespace Legion {
     LegionColor ColorSpaceIteratorT<DIM,T>::yield_color(void)
     //--------------------------------------------------------------------------
     {
-      const LegionColor result = color_space->linearize_color(this->current);
+      const LegionColor result = 
+        color_space->linearize_color(*(this->point_itr));
       this->step();
       return result;
     }

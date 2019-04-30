@@ -89,9 +89,11 @@ typedef CObjectWrapper::ArrayAccessor3D ArrayAccessor3D;
                                                                         \
   extern "C"                                                            \
   {                                                                     \
-  void REG(legion_reduction_op_id_t redop_id)                           \
+  void REG(legion_reduction_op_id_t redop_id,                           \
+           bool permit_duplicates)                                      \
   {                                                                     \
-    Runtime::register_reduction_op<CLASS>(redop_id);                    \
+    Runtime::register_reduction_op<CLASS>(redop_id,                     \
+                                          permit_duplicates);           \
   }                                                                     \
   void SRED(legion_accessor_array_1d_t accessor_,                       \
            legion_ptr_t ptr_, T value)                                  \
@@ -468,10 +470,12 @@ public:
 #define DECLARE_ARRAY_REDUCTION(REG, CLASS)                                  \
   extern "C"                                                                 \
   {                                                                          \
-    void REG(legion_reduction_op_id_t redop_id, unsigned array_size)         \
+    void REG(legion_reduction_op_id_t redop_id, unsigned array_size,         \
+             bool permit_duplicates)                                         \
     {                                                                        \
       ArrayReductionOp<CLASS> *op = new ArrayReductionOp<CLASS>(array_size); \
-      Runtime::register_reduction_op(redop_id, op);                          \
+      Runtime::register_reduction_op(redop_id, op, NULL, NULL,               \
+                                     permit_duplicates);                     \
     }                                                                        \
   }
 
