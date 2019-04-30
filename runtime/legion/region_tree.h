@@ -841,7 +841,11 @@ namespace Legion {
                 helper->records.begin(); it != 
                 helper->records.end(); it++, index++)
           {
+#if __cplusplus < 201103L
             indirect->spaces[index] = DomainT<N2::N,T2>((*it)->domain);
+#else
+            indirect->spaces[index] = (*it)->domain;
+#endif
             indirect->insts[index] = (*it)->inst; 
           }
           helper->result = indirect;
