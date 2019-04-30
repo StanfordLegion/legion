@@ -928,7 +928,7 @@ namespace Realm {
 
     class CompareXferDes {
     public:
-      bool operator() (XferDes* a, XferDes* b) {
+      bool operator() (XferDes* a, XferDes* b) const {
         if(a->priority == b->priority)
           return (a < b);
         else 
