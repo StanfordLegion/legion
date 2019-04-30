@@ -410,14 +410,13 @@ namespace Legion {
     inline bool step(void);
   public:
     inline bool operator()(void) const;
-    inline const Point<DIM,COORD_T>& operator*(void) const;
+    inline Point<DIM,COORD_T> operator*(void) const;
     inline COORD_T operator[](unsigned index) const;
     inline const Point<DIM,COORD_T>* operator->(void) const;
     inline PointInRectIterator<DIM,COORD_T>& operator++(void);
     inline PointInRectIterator<DIM,COORD_T> operator++(int/*postfix*/);
   protected:
     Realm::PointInRectIterator<DIM,COORD_T> itr;
-    mutable Point<DIM,COORD_T> current;
   };
 
   template<int DIM, typename COORD_T = coord_t>
@@ -430,13 +429,12 @@ namespace Legion {
     inline bool step(void);
   public:
     inline bool operator()(void) const;
-    inline const Rect<DIM,COORD_T>& operator*(void) const;
+    inline Rect<DIM,COORD_T> operator*(void) const;
     inline const Rect<DIM,COORD_T>* operator->(void) const;
     inline RectInDomainIterator<DIM,COORD_T>& operator++(void);
     inline RectInDomainIterator<DIM,COORD_T> operator++(int/*postfix*/);
   protected:
     Realm::IndexSpaceIterator<DIM,COORD_T> itr;
-    mutable Rect<DIM,COORD_T> current;
   };
 
   template<int DIM, typename COORD_T = coord_t>
@@ -450,7 +448,7 @@ namespace Legion {
     inline bool step(void); 
   public:
     inline bool operator()(void) const;
-    inline const Point<DIM,COORD_T>& operator*(void) const;
+    inline Point<DIM,COORD_T> operator*(void) const;
     inline COORD_T operator[](unsigned index) const; 
     inline const Point<DIM,COORD_T>* operator->(void) const;
     inline PointInDomainIterator& operator++(void);
@@ -458,7 +456,6 @@ namespace Legion {
   protected:
     RectInDomainIterator<DIM,COORD_T> rect_itr;
     PointInRectIterator<DIM,COORD_T> point_itr;
-    mutable Point<DIM,COORD_T> current;
     bool column_major;
   };
 

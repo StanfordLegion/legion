@@ -133,10 +133,12 @@ namespace Legion {
   public:
     template<typename T2> __CUDA_HD__
     inline Point<4,T>& operator=(const Point<4,T2> &rhs)
-      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
     template<typename T2> __CUDA_HD__
     inline Point<4,T>& operator=(const Realm::Point<4,T2> &rhs)
-      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; this->w = rhs.w; return *this; }
+      { this->x = rhs.x; this->y = rhs.y; this->z = rhs.z; 
+        this->w = rhs.w; return *this; }
   public:
     __CUDA_HD__
     inline static Point<4,T> ZEROES(void) { return Point<4,T>((T)0); }
@@ -1384,6 +1386,7 @@ namespace Legion {
     : itr(Realm::PointInRectIterator<DIM,COORD_T>(r, column_major_order))
   //----------------------------------------------------------------------------
   {
+    assert(valid());
   }
 
   //----------------------------------------------------------------------------
@@ -1414,12 +1417,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                          PointInRectIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return current;
+    return itr.p;
   }
 
   //----------------------------------------------------------------------------
@@ -1437,8 +1439,7 @@ namespace Legion {
                         PointInRectIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.p;
-    return &current;
+    return &(itr.p);
   }
 
   //----------------------------------------------------------------------------
@@ -1506,12 +1507,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Rect<DIM,COORD_T>&
+  inline Rect<DIM,COORD_T>
                         RectInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return current;
+    return itr.rect;
   }
 
   //----------------------------------------------------------------------------
@@ -1520,8 +1520,7 @@ namespace Legion {
                        RectInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = itr.rect;
-    return &current;
+    return &(itr.rect);
   }
 
   //----------------------------------------------------------------------------
@@ -1598,12 +1597,11 @@ namespace Legion {
 
   //----------------------------------------------------------------------------
   template<int DIM, typename COORD_T>
-  inline const Point<DIM,COORD_T>& 
+  inline Point<DIM,COORD_T> 
                        PointInDomainIterator<DIM,COORD_T>::operator*(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return current;
+    return *point_itr;
   }
 
   //----------------------------------------------------------------------------
@@ -1612,8 +1610,7 @@ namespace Legion {
                       PointInDomainIterator<DIM,COORD_T>::operator->(void) const
   //----------------------------------------------------------------------------
   {
-    current = *point_itr;
-    return &current;
+    return &(*point_itr);
   }
 
   //----------------------------------------------------------------------------
