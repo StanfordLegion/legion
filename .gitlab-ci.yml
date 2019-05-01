@@ -190,13 +190,8 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
-.image_clang: &image_clang
-  image: stanfordlegion/gitlab-ci:clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
-
-.image_ubuntu1604: &image_ubuntu1604
   image: stanfordlegion/gitlab-ci:ubuntu16.04 # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
-.image_ubuntu1604_clang: &image_ubuntu1604_clang
+.image_clang: &image_clang
   image: stanfordlegion/gitlab-ci:ubuntu16.04-clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 
 ###
@@ -614,18 +609,3 @@ n0003_gcc48_cxx98_release_legion_cuda:
 #   <<: [*n0003, *image, *tests]
 #   variables:
 #     <<: [*gcc48, *terra38, *release, *cxx98_normal, *cuda, *regent]
-
-# Ubuntu 16.04 tests:
-ubuntu1604_gcc8_cxx17_debug_legion:
-  <<: [*linux, *image_ubuntu1604, *tests]
-  variables:
-    <<: [*gcc8, *terra38, *debug, *cxx17_checks, *legion]
-ubuntu1604_gcc8_cxx17_debug_regent:
-  <<: [*linux_compute, *image_ubuntu1604, *tests]
-  variables:
-    <<: [*gcc8, *terra38, *debug, *cxx17_normal, *regent]
-
-ubuntu1604_clang38_cxx98_debug_legion:
-  <<: [*linux, *image_ubuntu1604_clang, *tests]
-  variables:
-    <<: [*clang38, *terra38, *debug, *cxx98_normal, *llvm, *legion]
