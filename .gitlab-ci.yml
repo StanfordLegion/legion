@@ -54,6 +54,10 @@ variables:
   CC_FLAGS: "-std=c++14"
 .cxx14_checks: &cxx14_checks
   CC_FLAGS: "-std=c++14 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+.cxx17_normal: &cxx17_normal
+  CC_FLAGS: "-std=c++17"
+.cxx17_checks: &cxx17_checks
+  CC_FLAGS: "-std=c++17 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
@@ -554,6 +558,14 @@ gcc7_cxx14_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc7, *terra38, *debug, *cxx14_normal, *regent]
+gcc7_cxx17_debug_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx17_checks, *legion]
+gcc7_cxx17_debug_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx17_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:
