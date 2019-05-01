@@ -1,6 +1,6 @@
 # Build Image for Gitlab CI
 
-FROM ubuntu:14.04
+FROM ubuntu:16.04
 
 MAINTAINER Elliott Slaughter <slaughter@cs.stanford.edu>
 
@@ -21,7 +21,7 @@ RUN dpkg --add-architecture i386 && \
       clang-3.8 libclang-3.8-dev llvm-3.8-dev \
       libncurses5-dev \
       zlib1g-dev zlib1g-dev:i386 \
-      mpich2 libmpich-dev \
+      mpich libmpich-dev \
       mesa-common-dev \
       libblas-dev liblapack-dev libhdf5-dev \
       libssl-dev \
