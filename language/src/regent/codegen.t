@@ -929,7 +929,7 @@ end
 function value:__get_field(cx, node, value_type, field_name)
   if value_type:ispointer() then
     return values.rawptr(node, self:read(cx), value_type, data.newtuple(field_name))
-  elseif std.is_index_type(value_type) then
+  elseif std.is_index_type(std.as_read(value_type)) then
     return self:new(node, self.expr, self.value_type, self.field_path .. data.newtuple("__ptr", field_name))
   elseif std.is_bounded_type(value_type) then
     assert(std.get_field(value_type.index_type.base_type, field_name))
@@ -1461,8 +1461,7 @@ function ref:get_field(cx, node, field_name, field_type, value_type)
   if value_type:isstruct() and value_type.__no_field_slicing then
     local value_actions, value = result:__ref(cx)
     assert(#value == 1)
-    result = values.rawref(result.node, expr.just(value_actions, value[1]),
-        &value_type, result.field_path)
+    result = values.rawref(result.node, expr.just(value_actions, value[1]), &value_type)
   end
   return result:__get_field(cx, node, value_type, field_name)
 end
@@ -8160,16 +8159,8 @@ function codegen.stat_for_list(cx, node)
   local break_label = terralib.newlabel()
   local cx = cx:new_local_scope(nil, nil, nil, break_label)
 
-  local ispace_type, is, it
-  if std.is_ispace(value_type) then
-    ispace_type = value_type
-    is = `([value.value].impl)
-  elseif std.is_region(value_type) then
-    ispace_type = value_type:ispace()
-    assert(cx:has_ispace(ispace_type))
-    is = `([value.value].impl.index_space)
-    it = cx:ispace(ispace_type).index_iterator
-  elseif std.is_list(value_type) then
+  -- Exit early when the iteration space is a regent list
+  if std.is_list(value_type) then
     local block = cleanup_after(cx, codegen.block(cx, node.block))
     return quote
       for i = 0, [value.value].__size do
@@ -8180,67 +8171,48 @@ function codegen.stat_for_list(cx, node)
       end
       ::[break_label]::
     end
+  end
+
+  local ispace_type, is
+  if std.is_ispace(value_type) then
+    ispace_type = value_type
+    is = `([value.value].impl)
+  elseif std.is_region(value_type) then
+    ispace_type = value_type:ispace()
+    assert(cx:has_ispace(ispace_type))
+    is = `([value.value].impl.index_space)
   else
     assert(false)
   end
+  local index_type = ispace_type.index_type
 
-  local actions = quote
-    [value.actions]
-  end
-  local cleanup_actions = quote end
+  -- Retrieve dimension-specific handle types and functions from the C API
+  local dim = data.max(ispace_type.dim, 1)
+  local rect_type = c["legion_rect_" .. tostring(dim) .. "d_t"]
+  local rect_it_type =
+    c["legion_rect_in_domain_iterator_" .. tostring(dim) .. "d_t"]
+  local rect_it_create =
+    c["legion_rect_in_domain_iterator_create_" .. tostring(dim) .. "d"]
+  local rect_it_destroy =
+    c["legion_rect_in_domain_iterator_destroy_" .. tostring(dim) .. "d"]
+  local rect_it_valid =
+    c["legion_rect_in_domain_iterator_valid_" .. tostring(dim) .. "d"]
+  local rect_it_step =
+    c["legion_rect_in_domain_iterator_step_" .. tostring(dim) .. "d"]
+  local rect_it_get =
+    c["legion_rect_in_domain_iterator_get_rect_" .. tostring(dim) .. "d"]
 
-  local iterator_has_next, iterator_next_span -- For unstructured
-  local rect_it, rect_it_create, rect_it_destroy -- For structured
-  local rect_it_valid, rect_it_step, rect_it_get, domain -- For structured
-  if ispace_type.dim == 0 then
-    if it and cache_index_iterator then
-      iterator_has_next = c.legion_terra_cached_index_iterator_has_next
-      iterator_next_span = c.legion_terra_cached_index_iterator_next_span
-      actions = quote
-        [actions]
-        c.legion_terra_cached_index_iterator_reset(it)
-      end
-    else
-      iterator_has_next = c.legion_index_iterator_has_next
-      iterator_next_span = c.legion_index_iterator_next_span
-      it = terralib.newsymbol(c.legion_index_iterator_t, "it")
-      actions = quote
-        [actions]
-        var [it] = c.legion_index_iterator_create([cx.runtime], [cx.context], [is])
-      end
-      cleanup_actions = quote
-        c.legion_index_iterator_destroy([it])
-      end
-    end
-  else
-    domain = terralib.newsymbol(c.legion_domain_t, "domain")
-    local rect_it_type =
-      c["legion_rect_in_domain_iterator_" .. tostring(ispace_type.dim) .. "d_t"]
-    rect_it = terralib.newsymbol(rect_it_type, "rect_it")
-    rect_it_create =
-      c["legion_rect_in_domain_iterator_create_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_destroy =
-      c["legion_rect_in_domain_iterator_destroy_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_valid =
-      c["legion_rect_in_domain_iterator_valid_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_step =
-      c["legion_rect_in_domain_iterator_step_" .. tostring(ispace_type.dim) .. "d"]
-    rect_it_get =
-      c["legion_rect_in_domain_iterator_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-    actions = quote
-      [actions]
-      var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
-      var [rect_it] = [rect_it_create]([domain])
-    end
-    cleanup_actions = quote
-      [rect_it_destroy]([rect_it])
-    end
-  end
+  -- Create variables for the outer loop that iterates over rectangles in a domain
+  local domain = terralib.newsymbol(c.legion_domain_t, "domain")
+  local rect = terralib.newsymbol(rect_type, "rect")
+  local rect_it = terralib.newsymbol(rect_it_type, "rect_it")
 
+  -- Check if the loop needs the CUDA or OpenMP code generation
   local cuda = cx.variant:is_cuda() and
                (node.metadata and node.metadata.parallelizable) and
                not node.annotations.cuda:is(ast.annotation.Forbid)
-  local openmp = node.annotations.openmp:is(ast.annotation.Demand) and
+  local openmp = not cx.variant:is_cuda() and
+                 node.annotations.openmp:is(ast.annotation.Demand) and
                  openmphelper.check_openmp_available()
   if node.annotations.openmp:is(ast.annotation.Demand) and
      not openmphelper.check_openmp_available() then
@@ -8250,409 +8222,229 @@ function codegen.stat_for_list(cx, node)
       " since the OpenMP module is unavailable")
   end
 
-  if not cuda then
-    local block = cleanup_after(cx, codegen.block(cx, node.block))
-    if ispace_type.dim == 0 then
-      if not openmp then
-        return quote
-          [actions]
-          while iterator_has_next([it]) do
-            var count : c.size_t = 0
-            var base = iterator_next_span([it], &count, -1).value
-            for i = 0, count do
-              var [symbol] = [symbol.type]{
-                __ptr = ptr {
-                  __ptr = c.legion_ptr_t {
-                    value = base + i
-                  }
-                }
-              }
-              do
-                [block]
-              end
-            end
-          end
-          ::[break_label]::
-          [cleanup_actions]
-        end
-      else
-        local count = terralib.newsymbol(uint64, "count")
-        local base = terralib.newsymbol(int64, "base")
-        local symbols, reductions = collect_symbols(cx, node)
-        symbols:insert(count)
-        symbols:insert(base)
-        local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-        local arg = terralib.newsymbol(&arg_type, "arg")
-        local worker_init, launch_init =
-          openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-        local worker_cleanup =
-          openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-        local launcher_cleanup =
-          openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+  -- Code generation for the loop body
+  local block = node.block
 
-        local terra omp_worker(data : &opaque)
-          var [arg] = [&arg_type](data)
-          [worker_init]
-          var num_threads = [openmphelper.get_num_threads]()
-          var thread_id = [openmphelper.get_thread_num]()
-          var chunk = (count + num_threads - 1) / num_threads
-          if chunk == 0 then chunk = 1 end
-          var start_idx = thread_id * chunk + base
-          var end_idx = (thread_id + 1) * chunk + base
-          if end_idx > base + count then end_idx = base + count end
-          for i = start_idx, end_idx do
-            var [symbol] = [symbol.type]{ __ptr = ptr { __ptr = c.legion_ptr_t { value = i } } }
-            do
-              [block]
-            end
-          end
-          [worker_cleanup]
-        end
-
-        return quote
-          [actions]
-          while iterator_has_next([it]) do
-            var [count] = 0
-            var [base] = iterator_next_span([it], &count, -1).value
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-          end
-          ::[break_label]::
-          [cleanup_actions]
-        end
-      end
-    else
-      local fields = ispace_type.index_type.fields
-      if fields then
-        local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-        local index = fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end)
-        local body = quote
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ index } }
-          do
-            [block]
-          end
-        end
-        if not openmp then
-          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-          local rect = terralib.newsymbol(rect_type, "rect")
-          for i = 1, ispace_type.dim do
-            local rect_i = i - 1 -- C is zero-based, Lua is one-based
-            body = quote
-              for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-                [body]
-              end
-            end
-          end
-          return quote
-            [actions]
-            while [rect_it_valid]([rect_it]) do
-              var [rect] = [rect_it_get]([rect_it])
-              [body]
-              [rect_it_step]([rect_it])
-            end
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        else
-          local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-          local rect = terralib.newsymbol(&rect_type, "rect")
-          for i = 1, ispace_type.dim do
-            local rect_i = i - 1 -- C is zero-based, Lua is one-based
-            if i ~= ispace_type.dim then
-              body = quote
-                for [ index[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
-                  [body]
-                end
-              end
-            else
-              local start_idx = terralib.newsymbol(int64, "start_idx")
-              local end_idx = terralib.newsymbol(int64, "end_idx")
-              body = quote
-                [openmphelper.generate_preamble_structured(rect, rect_i, start_idx, end_idx)]
-                for [ index[i] ] = [start_idx], [end_idx] do
-                  [body]
-                end
-              end
-            end
-          end
-          local symbols, reductions = collect_symbols(cx, node)
-          symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-          local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init =
-            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-          local worker_cleanup =
-            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-          local launcher_cleanup =
-            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
-          local terra omp_worker(data : &opaque)
-            var [arg] = [&arg_type](data)
-            [worker_init]
-            [body]
-            [worker_cleanup]
-          end
-          return quote
-            [actions]
-            var r = [domain_get_rect]([domain])
-            var [rect] = &r
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        end
-      else
-        if not openmp then
-          return quote
-            [actions]
-            while [rect_it_valid]([rect_it]) do
-              var rect = [rect_it_get]([rect_it])
-              for i = rect.lo.x[0], rect.hi.x[0] + 1 do
-                var [symbol] = [symbol.type]{ __ptr = i }
-                do
-                  [block]
-                end
-              end
-              [rect_it_step]([rect_it])
-            end
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        else
-          local start_idx = terralib.newsymbol(int64, "start_idx")
-          local end_idx = terralib.newsymbol(int64, "end_idx")
-          local rect_type = c.legion_rect_1d_t
-          local rect = terralib.newsymbol(&rect_type, "rect")
-          local symbols, reductions = collect_symbols(cx, node)
-          symbols:insert(rect)
-          local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
-          local arg = terralib.newsymbol(&arg_type, "arg")
-          local worker_init, launch_init =
-            openmphelper.generate_argument_init(arg, arg_type, mapping, reductions)
-          local worker_cleanup =
-            openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
-          local launcher_cleanup =
-            openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
-          local terra omp_worker(data : &opaque)
-            var [arg] = [&arg_type](data)
-            [worker_init]
-            [openmphelper.generate_preamble_structured(rect, 0, start_idx, end_idx)]
-            for i = [start_idx], [end_idx] do
-              var [symbol] = [symbol.type]{ __ptr = i }
-              do
-                [block]
-              end
-            end
-            [worker_cleanup]
-          end
-          return quote
-            [actions]
-            var r = c.legion_domain_get_rect_1d([domain])
-            var [rect] = &r
-            var arg_obj : arg_type
-            var [arg] = &arg_obj
-            [launch_init]
-            [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
-            [launcher_cleanup]
-            ::[break_label]::
-            [cleanup_actions]
-          end
-        end
-      end
-    end
-  else
-    -- Before we do codegen on the body, we replace all math functions with the GPU variants.
-    -- We also check if the body has any task launches or external function calls.
-    local block = ast.map_node_postorder(function(node)
+  -- If the loop needs the CUDA code generation, we replace calls to CPU math functions
+  -- with their GPU counterparts.
+  if cuda then
+    block = ast.map_node_postorder(function(node)
       if node:is(ast.typed.expr.Call) then
         local value = node.fn.value
         if std.is_math_fn(value) then
           return node { fn = node.fn { value = cudahelper.get_cuda_variant(value) } }
-        elseif value == array then
+        elseif value == array or value == arrayof then
           return node
         else
-          if std.is_task(value) then
-            report.error(node, "CUDA task cannot launch other tasks in a for loop")
-          else
-            report.error(node, "CUDA task cannot call external functions in a for loop")
-          end
+          assert(false, "this case should have been catched by the checker")
         end
-      elseif node:is(ast.typed.expr.IndexAccess) and std.is_region(node.expr_type) then
-        report.error(node, "CUDA task cannot access partitions in a for loop")
       else
         return node
       end
     end, node.block)
+  end
 
+  local fields = index_type.fields
+  local indices = terralib.newlist()
+  if fields then
+    indices:insertall(fields:map(function(field)
+      return terralib.newsymbol(c.coord_t, tostring(field))
+    end))
+  else
+    indices:insert(terralib.newsymbol(c.coord_t, "x"))
+  end
 
-    -- Now wrap the body as a terra function
-    block = cleanup_after(cx, codegen.block(cx, block))
+  local symbol_setup = nil
+  if ispace_type.dim == 0 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{
+        __ptr = ptr { __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
+      }
+    end
+  elseif ispace_type.dim == 1 then
+    symbol_setup = quote
+      var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
+    end
+  else
+    symbol_setup = quote
+      var [symbol] = [symbol.type] { __ptr = [index_type.impl_type]{ [indices] } }
+    end
+  end
+  local body = quote
+    [symbol_setup]
+    do
+      [cleanup_after(cx, codegen.block(cx, block))]
+    end
+  end
+  local preamble = quote end
+  local postamble = quote end
 
-    local indices = terralib.newlist()
-    local lower_bounds = terralib.newlist()
-    local upper_bounds = terralib.newlist()
-    local body
-    if ispace_type:is_opaque() then
-      indices:insert(terralib.newsymbol(c.coord_t, "ptr"))
-      lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo1"))
-      upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi1"))
+  if not (cuda or openmp) then
+    -- TODO: Need to codegen these dimension loops in the right order
+    --       based on the instance layout
+    for i = 1, dim do
+      local rect_i = i - 1 -- C is zero-based, Lua is one-based
       body = quote
-        var [symbol] = [symbol.type]{
-          __ptr = [ptr]{ __ptr = c.legion_ptr_t { value = [ indices[1] ] } }
-        }
-        do
-          [block]
+        for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+          [body]
         end
       end
-    else
-      for i = 1, ispace_type.dim do
-        lower_bounds:insert(terralib.newsymbol(c.coord_t, "lo" .. tostring(i)))
-        upper_bounds:insert(terralib.newsymbol(c.coord_t, "hi" .. tostring(i)))
-      end
-      local fields = ispace_type.index_type.fields
-      if fields then
-        indices:insertall(
-          fields:map(function(field) return terralib.newsymbol(c.coord_t, tostring(field)) end))
-        body = quote
-          var [symbol] = [symbol.type] { __ptr = [symbol.type.index_type.impl_type]{ [indices] } }
-          do
-            [block]
+    end
+
+  else
+    local symbols, reductions = collect_symbols(cx, node)
+    if openmp then
+      symbols:insert(rect)
+      local can_change = { [rect] = true }
+      local arg_type, mapping = openmphelper.generate_argument_type(symbols, reductions)
+      local arg = terralib.newsymbol(&arg_type, "arg")
+      local worker_init, launch_init, launch_update =
+        openmphelper.generate_argument_init(arg, arg_type, mapping, can_change, reductions)
+      local worker_cleanup =
+        openmphelper.generate_worker_cleanup(arg, arg_type, mapping, reductions)
+      local launcher_cleanup =
+        openmphelper.generate_launcher_cleanup(arg, arg_type, mapping, reductions)
+
+      -- TODO: Need to codegen these dimension loops in the right order
+      --       based on the instance layout
+      for i = 1, dim do
+        local rect_i = i - 1 -- C is zero-based, Lua is one-based
+        if i ~= dim then
+          body = quote
+            for [ indices[i] ] = [rect].lo.x[rect_i], [rect].hi.x[rect_i] + 1 do
+              [body]
+            end
+          end
+        else
+          local start_idx = terralib.newsymbol(int64, "start_idx")
+          local end_idx = terralib.newsymbol(int64, "end_idx")
+          body = quote
+            [openmphelper.generate_preamble(rect, rect_i, start_idx, end_idx)]
+            for [ indices[i] ] = [start_idx], [end_idx] do
+              [body]
+            end
           end
         end
-      else
-        indices:insert(terralib.newsymbol(c.coord_t, "idx"))
-        body = quote
-          var [symbol] = [symbol.type]{ __ptr = [ indices[1] ] }
-          do
-            [block]
-          end
-        end
       end
-    end
 
-    local index_inits = terralib.newlist()
-    local tid = terralib.newsymbol(c.size_t, "tid")
-    local offsets = terralib.newlist()
-    local counts = terralib.newlist()
-    for idx = 1, #indices do
-      offsets:insert(terralib.newsymbol(c.size_t, "offset" .. tostring(idx)))
-      counts:insert(terralib.newsymbol(c.size_t, "dim_size_" .. tostring(idx)))
-    end
-    local count = counts[1]
-    for idx = 2, #indices do
-      count = `([count] * [ counts[idx] ])
-    end
-
-    -- Compute a global tid
-    index_inits:insert(quote
-      var [tid] = [cudahelper.global_thread_id()]
-      if [tid] >= [count] then
-        return
+      local terra omp_worker(data : &opaque)
+        var [arg] = [&arg_type](data)
+        [worker_init]
+        [body]
+        [worker_cleanup]
       end
-    end)
 
-    -- Convert the global tid into a point in an index space
-    index_inits:insert(quote var [ offsets[1] ] = 1 end)
-    for idx = 2, #indices do
-      index_inits:insert(quote
-        var [ offsets[idx] ] = [ offsets[idx - 1] ] * [ counts[idx - 1] ]
+      body = quote
+        [launch_update]
+        [openmphelper.launch]([omp_worker], [arg], [openmphelper.get_max_threads](), 0)
+      end
+      preamble = launch_init
+      postamble = launcher_cleanup
+
+    else -- if openmp then
+      assert(cuda)
+      local lower_bounds = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "lo_" .. symbol.id)
       end)
-    end
-
-    for idx = #indices, 1, -1 do
-      index_inits:insert(quote
-        var [ indices[idx] ] = [ lower_bounds[idx] ] + [tid] / [ offsets[idx] ]
-        [tid] = [tid] % [ offsets[idx] ]
+      local counts = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "cnt_" .. symbol.id)
       end)
-    end
+      local args = data.filter(function(arg) return reductions[arg] == nil end, symbols)
+      local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
+      local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
+        cudahelper.generate_reduction_preamble(reductions)
+      local kernel_preamble, kernel_postamble =
+        cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
+      local host_postamble =
+        cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
+      args:insertall(lower_bounds)
+      args:insertall(counts)
+      args:insertall(device_ptrs)
 
-    body = quote
-      [index_inits]
-      [body]
-    end
+      -- Sort arguments in descending order of sizes to avoid misalignment
+      -- (which causes a segfault inside the driver API)
+      args:sort(function(s1, s2)
+          local t1 = s1.type
+          if t1:isarray() then t1 = t1.type end
+          local t2 = s2.type
+          if t2:isarray() then t2 = t2.type end
+          return sizeof(t1) > sizeof(t2)
+      end)
 
-    local args, reductions = collect_symbols(cx, node)
-    -- Remove reduction variables from kernel argument list as
-    -- we will define them in the kernel
-    args = data.filter(function(arg) return reductions[arg] == nil end, args)
-    local shared_mem_size = cudahelper.compute_reduction_buffer_size(node, reductions)
-    local device_ptrs, device_ptrs_map, host_ptrs_map, host_preamble =
-      cudahelper.generate_reduction_preamble(reductions)
-    local kernel_preamble, kernel_postamble =
-      cudahelper.generate_reduction_kernel(reductions, device_ptrs_map)
-    local host_postamble =
-      cudahelper.generate_reduction_postamble(reductions, device_ptrs_map, host_ptrs_map)
-    args:insertall(lower_bounds)
-    args:insertall(counts)
-    args:insertall(device_ptrs)
-    args:sort(function(s1, s2)
-        local t1 = s1.type
-        if t1:isarray() then t1 = t1.type end
-        local t2 = s2.type
-        if t2:isarray() then t2 = t2.type end
-        return sizeof(t1) > sizeof(t2)
-    end)
-
-    local terra kernel([args])
-      [kernel_preamble]
-      [body]
-      [kernel_postamble]
-    end
-
-    -- Register the kernel function to JIT
-    local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
-
-    ---- kernel launch
-    local count = terralib.newsymbol(c.size_t, "count")
-    local kernel_call =
-      cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
-
-    if ispace_type:is_opaque() then
-      return quote
-        [actions]
-        [host_preamble]
-        while iterator_has_next([it]) do
-          var [ counts[1] ] = 0
-          var [ lower_bounds[1] ] = iterator_next_span([it], &[ counts[1] ], -1).value
-          var [count] = [ counts[1] ]
-          [kernel_call]
-        end
-        [host_postamble]
-        [cleanup_actions]
+      -- Reconstruct indices from the global thread id
+      local index_inits = terralib.newlist()
+      local tid = terralib.newsymbol(c.size_t, "tid")
+      local offsets = indices:map(function(symbol)
+        return terralib.newsymbol(c.coord_t, "off_" .. symbol.id)
+      end)
+      local count = counts[1]
+      for idx = 2, #indices do
+        count = `([count] * [ counts[idx] ])
       end
-    else
-      local rect_type = c["legion_rect_" .. tostring(ispace_type.dim) .. "d_t"]
-      local domain_get_rect = c["legion_domain_get_rect_" .. tostring(ispace_type.dim) .. "d"]
-      local rect = terralib.newsymbol(rect_type, "rect")
+      index_inits:insert(quote
+        var [tid] = [cudahelper.global_thread_id()]
+        if [tid] >= [count] then return end
+      end)
+      index_inits:insert(quote var [ offsets[1] ] = 1 end)
+      for idx = 2, #indices do
+        index_inits:insert(quote
+          var [ offsets[idx] ] = [ offsets[idx - 1] ] * [ counts[idx - 1] ]
+        end)
+      end
+      for idx = #indices, 1, -1 do
+        index_inits:insert(quote
+          var [ indices[idx] ] = [ lower_bounds[idx] ] + [tid] / [ offsets[idx] ]
+          [tid] = [tid] % [ offsets[idx] ]
+        end)
+      end
+      local terra kernel([args])
+        [kernel_preamble]
+        [index_inits]
+        [body]
+        [kernel_postamble]
+      end
+
+      -- Register the kernel function to JIT
+      local kernel_id = cx.task_meta:get_cuda_variant():add_cuda_kernel(kernel)
+      local count = terralib.newsymbol(c.size_t, "count")
+      local kernel_call =
+        cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size, false)
+
       local bounds_setup = terralib.newlist()
       bounds_setup:insert(quote var [count] = 1 end)
-      for idx = 1, ispace_type.dim do
+      for idx = 1, dim do
         bounds_setup:insert(quote
           var [ lower_bounds[idx] ], [ counts[idx] ] =
             [rect].lo.x[ [idx - 1] ], [rect].hi.x[ [idx - 1] ] - [rect].lo.x[ [idx - 1] ] + 1
           [count] = [count] * [ counts[idx] ]
         end)
       end
-      kernel_call = quote
-        if [ count ] > 0 then [kernel_call] end
-      end
-      return quote
-        [actions]
-        [host_preamble]
-        var [rect] = [domain_get_rect]([domain])
+
+      body = quote
         [bounds_setup]
         [kernel_call]
-        [host_postamble]
-        [cleanup_actions]
       end
-    end
+
+      preamble = host_preamble
+      postamble = host_postamble
+    end  -- if openmp then
   end
+
+  return quote
+    [value.actions]
+    var [domain] = c.legion_index_space_get_domain([cx.runtime], [is])
+    var [rect_it] = [rect_it_create]([domain])
+    [preamble]
+    while [rect_it_valid]([rect_it]) do
+      var [rect] = [rect_it_get]([rect_it])
+      [body]
+      [rect_it_step]([rect_it])
+    end
+    ::[break_label]::
+    [rect_it_destroy]([rect_it]) 
+    [postamble]
+  end
+
 end
 
 function codegen.stat_for_list_vectorized(cx, node)

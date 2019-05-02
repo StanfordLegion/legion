@@ -1,12 +1,14 @@
 This file lists the major changes as they appear in the stable branch.  No
 attempt is made to keep this list accurate for the master branch.
 
-Version ??.??.? (??????? ??, ????)
+Version 19.04.0 (April 30, 2019)
   * Legion
     - Support for dimensions > 3. Set MAX_DIM at build time
         (or -DLegion_MAX_DIM in CMake) to build with any number of
         dimensions up to 9.
     - Change VariantID to 32 bits to match AUTO_GENERATE_ID
+    - Improved mapper interfaces for instance allocation and 
+      failed instance allocation due to layout constraint conflicts
   * Regent
     - Support for index fills
     - Support for disabling structure-slicing on structs by setting
@@ -17,6 +19,14 @@ Version ??.??.? (??????? ??, ????)
       numbers of fields
     - Build fixes for macOS
     - setup_env.py now works on macOS
+  * Realm
+    - support for #pragma omp single sections in OpenMP processors
+    - Realm IDs uses explicit bit packing instead of fragile C bit fields
+    - numerous fixes for create_equal_subspace deppart operations
+    - Support for CUDA 10
+  * Legion Prof
+    - Added support for recording GPU processor times
+
 
 Version 18.12.0 (December 27, 2018)
   * Realm

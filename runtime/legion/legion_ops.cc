@@ -2953,6 +2953,7 @@ namespace Legion {
       Mapper::MapInlineInput input;
       Mapper::MapInlineOutput output;
       output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.track_valid_region = true;
       if (restrict_info.has_restrictions())
       {
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -12897,6 +12898,8 @@ namespace Legion {
     {
       Mapper::MapPartitionInput input;
       Mapper::MapPartitionOutput output;
+      output.profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
+      output.track_valid_region = true;
       if (restrict_info.has_restrictions())
       {
         prepare_for_mapping(restrict_info.get_instances(), 
@@ -12912,9 +12915,12 @@ namespace Legion {
       }
       mapper->invoke_map_partition(this, &input, &output);
       if (!output.profiling_requests.empty())
+      {
         filter_copy_request_kinds(mapper,
             output.profiling_requests.requested_measurements,
             profiling_requests, true/*warn*/);
+        profiling_priority = output.profiling_priority;
+      }
       // Now we have to validate the output
       // Go through the instances and make sure we got one for every field
       // Also check to make sure that none of them are composite instances
@@ -13219,6 +13225,7 @@ namespace Legion {
       commit_request = false;
       outstanding_profiling_requests = 1; // start at 1 to guard
       profiling_reported = RtUserEvent::NO_RT_USER_EVENT;
+      profiling_priority = LG_THROUGHPUT_WORK_PRIORITY;
     }
 
     //--------------------------------------------------------------------------
@@ -13375,7 +13382,7 @@ namespace Legion {
       ProfilingResponseBase base(this);
       Realm::ProfilingRequest &request = requests.add_request( 
           runtime->find_utility_group(), LG_LEGION_PROFILING_ID, 
-          &base, sizeof(base));
+          &base, sizeof(base), profiling_priority);
       for (std::vector<ProfilingMeasurementID>::const_iterator it = 
             profiling_requests.begin(); it != profiling_requests.end(); it++)
         request.add_measurement((Realm::ProfilingMeasurementID)(*it));

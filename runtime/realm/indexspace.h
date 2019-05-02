@@ -139,6 +139,8 @@ namespace Realm {
     __CUDA_HD__
     Point(void);
     __CUDA_HD__
+    explicit Point(T val); // same value for all dimensions
+    __CUDA_HD__
     explicit Point(const T vals[N]);
     // copies allow type coercion (assuming the underlying type does)
     template <typename T2> __CUDA_HD__
@@ -153,6 +155,11 @@ namespace Realm {
 
     template <typename T2> __CUDA_HD__
     T dot(const Point<N, T2>& rhs) const;
+  public:
+    __CUDA_HD__
+    static Point<N,T> ZEROES(void);
+    __CUDA_HD__
+    static Point<N,T> ONES(void);
   };
 
   template <int N, typename T>

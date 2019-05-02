@@ -133,8 +133,9 @@ def build_llvm(source_dir, build_dir, install_dir, use_cmake, cmake_exe, thread_
     subprocess.check_call(['make', '-j', str(thread_count)], cwd=build_dir)
     subprocess.check_call(['make', 'install'], cwd=build_dir)
 
-def build_terra(terra_dir, terra_branch, llvm_dir, cache, is_cray, thread_count):
+def build_terra(terra_dir, terra_branch, use_cmake, cmake_exe, llvm_dir, cache, is_cray, thread_count):
     if cache:
+        assert not use_cmake
         subprocess.check_call(['make', 'download'], cwd=terra_dir)
         return
 
@@ -155,18 +156,32 @@ def build_terra(terra_dir, terra_branch, llvm_dir, cache, is_cray, thread_count)
             ('CXX', os.environ['HOST_CXX']),
         ]))
 
-    flags = [
-        'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
-        'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
-    ]
-    if platform.system() != 'Darwin':
-        flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')
-    flags.extend(['-j', str(thread_count)])
+    if use_cmake:
+        flags = [
+            '-DCMAKE_PREFIX_PATH=%s' % llvm_dir,
+            '-DCMAKE_INSTALL_PREFIX=%s' % os.path.join(terra_dir, 'release'),
+        ]
+        subprocess.check_call(
+            [cmake_exe] + flags + [terra_dir],
+            cwd=os.path.join(terra_dir, 'build'),
+            env=env)
+        subprocess.check_call(
+            ['make', 'install', '-j', str(thread_count)],
+            cwd=os.path.join(terra_dir, 'build'),
+            env=env)
+    else:
+        flags = [
+            'LLVM_CONFIG=%s' % os.path.join(llvm_dir, 'bin', 'llvm-config'),
+            'CLANG=%s' % os.path.join(llvm_dir, 'bin', 'clang'),
+        ]
+        if platform.system() != 'Darwin':
+            flags.append('REEXPORT_LLVM_COMPONENTS=irreader mcjit x86')
+        flags.extend(['-j', str(thread_count)])
 
-    subprocess.check_call(
-        ['make'] + flags,
-        cwd=terra_dir,
-        env=env)
+        subprocess.check_call(
+            ['make'] + flags,
+            cwd=terra_dir,
+            env=env)
 
 def build_hdf(source_dir, install_dir, thread_count, is_cray):
     env = None
@@ -317,7 +332,8 @@ def check_dirty_build(name, build_result, component_dir):
 
 def driver(prefix_dir=None, scratch_dir=None, cache=False,
            legion_use_cmake=False, llvm_version=None,
-           terra_url=None, terra_branch=None, insecure=False):
+           terra_url=None, terra_branch=None, terra_use_cmake=False,
+           insecure=False):
     if not cache:
         if 'CC' not in os.environ:
             raise Exception('Please set CC in your environment')
@@ -351,6 +367,9 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         llvm_use_cmake = True
     else:
         raise Exception('Unrecognized LLVM version %s' % llvm_version)
+
+    if terra_use_cmake and not llvm_use_cmake:
+        raise Exception('Terra with CMake requires LLVM to be built with CMake')
 
     root_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     legion_dir = os.path.dirname(root_dir)
@@ -396,7 +415,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
             raise Exception('Cannot parse CMake version:\n\n%s' % cmake_version)
         else:
             cmake_exe = 'cmake' # CMake is ok, use it
-    if cache or ((legion_use_cmake or llvm_use_cmake) and cmake_exe is None):
+    if cache or ((legion_use_cmake or llvm_use_cmake or terra_use_cmake) and cmake_exe is None):
         cmake_stem = 'cmake-3.7.2-%s-x86_64' % platform.system()
         cmake_basename = '%s.tar.gz' % cmake_stem
         cmake_url = 'https://cmake.org/files/v3.7/%s' % cmake_basename
@@ -440,7 +459,7 @@ def driver(prefix_dir=None, scratch_dir=None, cache=False,
         git_clone(terra_dir, terra_url, terra_branch)
     if not os.path.exists(terra_build_dir):
         try:
-            build_terra(terra_dir, terra_branch, llvm_install_dir, cache, is_cray, thread_count)
+            build_terra(terra_dir, terra_branch, terra_use_cmake, cmake_exe, llvm_install_dir, cache, is_cray, thread_count)
         except Exception as e:
             report_build_failure('terra', terra_dir, e)
     else:
@@ -500,5 +519,8 @@ if __name__ == '__main__':
         '--terra-branch', dest='terra_branch', required=False,
         default='luajit2.1',
         help='Branch of Terra repository to checkout.')
+    parser.add_argument(
+        '--terra-cmake', dest='terra_use_cmake', action='store_true',
+        help='Use CMake to build Terra.')
     args = parser.parse_args()
     driver(**vars(args))

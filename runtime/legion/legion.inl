@@ -8729,7 +8729,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename REDOP>
-    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id)
+    /*static*/ void Runtime::register_reduction_op(ReductionOpID redop_id,
+                                                   bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
       if (redop_id == 0)
@@ -8742,7 +8743,8 @@ namespace Legion {
       }
       ReductionOpTable &red_table = Runtime::get_reduction_table(); 
       // Check to make sure we're not overwriting a prior reduction op 
-      if (red_table.find(redop_id) != red_table.end())
+      if (!permit_duplicates &&
+          (red_table.find(redop_id) != red_table.end()))
       {
         fprintf(stderr,"ERROR: ReductionOpID %d has already been used " 
                        "in the reduction table\n",redop_id);
@@ -8761,7 +8763,8 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<typename SERDEZ>
-    /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id)
+    /*static*/ void Runtime::register_custom_serdez_op(CustomSerdezID serdez_id,
+                                                       bool permit_duplicates)
     //--------------------------------------------------------------------------
     {
       if (serdez_id == 0)
@@ -8774,7 +8777,8 @@ namespace Legion {
       }
       SerdezOpTable &serdez_table = Runtime::get_serdez_table();
       // Check to make sure we're not overwriting a prior serdez op
-      if (serdez_table.find(serdez_id) != serdez_table.end())
+      if (!permit_duplicates &&
+          (serdez_table.find(serdez_id) != serdez_table.end()))
       {
         fprintf(stderr,"ERROR: CustomSerdezID %d has already been used "
                        "in the serdez operation table\n", serdez_id);
