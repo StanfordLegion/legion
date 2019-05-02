@@ -84,6 +84,11 @@ namespace Legion {
          << "kind:ProcKind:"  << sizeof(ProcKind)
          << "}" << std::endl;
 
+      ss << "MaxDimDesc {"
+         << "id:" << MAX_DIM_DESC_ID                 << delim
+         << "max_dim:maxdim:" << sizeof(unsigned)
+         << "}" << std::endl;
+
       ss << "MemDesc {" 
          << "id:" << MEM_DESC_ID                               << delim
          << "mem_id:MemID:"                << sizeof(MemID)    << delim
@@ -100,22 +105,15 @@ namespace Legion {
       ss << "IndexSpacePointDesc {"
          << "id:" << INDEX_SPACE_POINT_ID                    << delim
          << "unique_id:IDType:"          << sizeof(IDType)   << delim
-         << "dim:unsigned:"             << sizeof(unsigned)  << delim
-         << "point0:long long:"         << sizeof(long long) << delim
-         << "point1:long long:"         << sizeof(long long) << delim
-         << "point2:long long:"         << sizeof(long long)
+         << "dim:unsigned:"              << sizeof(unsigned) << delim
+	 << "rem:point:"                 << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "IndexSpaceRectDesc {"
          << "id:" << INDEX_SPACE_RECT_ID                       << delim
          << "unique_id:IDType:"            << sizeof(IDType)   << delim
-         << "rect_lo0:long long:"         << sizeof(long long) << delim
-         << "rect_lo1:long long:"         << sizeof(long long) << delim
-         << "rect_lo2:long long:"         << sizeof(long long) << delim
-         << "rect_hi0:long long:"         << sizeof(long long) << delim
-         << "rect_hi1:long long:"         << sizeof(long long) << delim
-         << "rect_hi2:long long:"         << sizeof(long long) << delim
-         << "dim:unsigned:"               << sizeof(unsigned)
+         << "dim:unsigned:"               << sizeof(unsigned)  << delim
+         << "rem:array:"                  << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "IndexSpaceEmptyDesc {"
@@ -152,10 +150,7 @@ namespace Legion {
       ss << "IndexSubSpaceDesc {"
          << "id:" << INDEX_SUBSPACE_ID                          << delim
 	 << "parent_id:UniqueID:"          << sizeof(UniqueID)  << delim
-	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
-	 << "point0:long long:"            << sizeof(long long) << delim
-	 << "point1:long long:"            << sizeof(long long) << delim
-	 << "point2:long long:"            << sizeof(long long)
+	 << "unique_id:UniqueID:"          << sizeof(UniqueID)
          << "}" << std::endl;
 
       ss << "IndexPartitionDesc {"
@@ -163,7 +158,7 @@ namespace Legion {
 	 << "parent_id:UniqueID:"          << sizeof(UniqueID)  << delim
 	 << "unique_id:UniqueID:"          << sizeof(UniqueID)  << delim
 	 << "disjoint:bool:"               << sizeof(bool)      << delim
-	 << "point:unsigned long long:"    << sizeof(unsigned long long)
+	 << "point0:unsigned long long:"    << sizeof(unsigned long long)
          << "}" << std::endl;
 
       ss << "LogicalRegionDesc {"
@@ -447,6 +442,18 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void LegionProfBinarySerializer::serialize(
+                                      const LegionProfDesc::MaxDimDesc
+				      &max_dim_desc)
+    //--------------------------------------------------------------------------
+    {
+      int ID = MAX_DIM_DESC_ID;
+      lp_fwrite(f, (char*)&ID, sizeof(ID));
+      lp_fwrite(f, (char*)&(max_dim_desc.max_dim),
+		sizeof(max_dim_desc.max_dim));
+
+    }
+    //--------------------------------------------------------------------------
+    void LegionProfBinarySerializer::serialize(
                                         const LegionProfDesc::MemDesc& mem_desc)
     //--------------------------------------------------------------------------
     {
@@ -496,6 +503,8 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*) &(ispace_rect_desc.unique_id), 
                 sizeof(ispace_rect_desc.unique_id));
+      lp_fwrite(f, (char*) &(ispace_rect_desc.dim),
+                sizeof(ispace_rect_desc.dim));
 #define DIMFUNC(DIM) \
       lp_fwrite(f, (char*) &(ispace_rect_desc.rect_lo[DIM-1]), \
                 sizeof(ispace_rect_desc.rect_lo[DIM-1]));
@@ -506,8 +515,6 @@ namespace Legion {
                 sizeof(ispace_rect_desc.rect_hi[DIM-1]));
       LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
-      lp_fwrite(f, (char*) &(ispace_rect_desc.dim), 
-                sizeof(ispace_rect_desc.dim));
     }
 
     //--------------------------------------------------------------------------
@@ -578,9 +585,6 @@ namespace Legion {
       lp_fwrite(f, (char*)&ID, sizeof(ID));
       lp_fwrite(f, (char*)&(index_subspace_desc.parent_id), sizeof(IDType));
       lp_fwrite(f, (char*)&(index_subspace_desc.unique_id), sizeof(IDType));
-      lp_fwrite(f, (char*)&(index_subspace_desc.point0), sizeof(long long));
-      lp_fwrite(f, (char*)&(index_subspace_desc.point1), sizeof(long long));
-      lp_fwrite(f, (char*)&(index_subspace_desc.point2), sizeof(long long));
     }
 
     //--------------------------------------------------------------------------
@@ -1017,7 +1021,8 @@ namespace Legion {
 		     (long long)ispace_point_desc.points[2],
                      (long long)ispace_point_desc.points[3]);
 #elif LEGION_MAX_DIM == 5
-      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld",
+      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld "
+	             "%lld %lld",
 		     ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
 		     (long long)ispace_point_desc.points[0],
@@ -1026,8 +1031,8 @@ namespace Legion {
                      (long long)ispace_point_desc.points[3],
                      (long long)ispace_point_desc.points[4]);
 #elif LEGION_MAX_DIM == 6
-      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
-                     "%lld", ispace_point_desc.unique_id,
+      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld "
+                     "%lld %lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
 		     (long long)ispace_point_desc.points[0],
 		     (long long)ispace_point_desc.points[1],
@@ -1036,8 +1041,8 @@ namespace Legion {
                      (long long)ispace_point_desc.points[4],
                      (long long)ispace_point_desc.points[5]);
 #elif LEGION_MAX_DIM == 7
-      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
-                     "%lld %lld", ispace_point_desc.unique_id,
+      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld "
+                     "%lld %lld %lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
 		     (long long)ispace_point_desc.points[0],
 		     (long long)ispace_point_desc.points[1],
@@ -1047,8 +1052,8 @@ namespace Legion {
                      (long long)ispace_point_desc.points[5],
                      (long long)ispace_point_desc.points[6]);
 #elif LEGION_MAX_DIM == 8
-      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld", ispace_point_desc.unique_id,
+      log_prof.print("Index Space Point Desc  %llu %d %lld %lld %lld "
+                     "%lld %lld %lld %lld %lld", ispace_point_desc.unique_id,
 		     ispace_point_desc.dim,
 		     (long long)ispace_point_desc.points[0],
 		     (long long)ispace_point_desc.points[1],
@@ -1091,32 +1096,36 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #if LEGION_MAX_DIM == 1
-      log_prof.print("Index Space Rect Desc %llu %lld "
-                     "%lld %d", ispace_rect_desc.unique_id,
+      log_prof.print("Index Space Rect Desc %llu %d %lld "
+                     "%lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_hi[0]),
-		     ispace_rect_desc.dim);
+		     );
 #elif LEGION_MAX_DIM == 2
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld "
-                     "%lld %d", ispace_rect_desc.unique_id,
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld "
+                     "%lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_hi[0]),
 		     (long long)(ispace_rect_desc.rect_hi[1]),
-		     ispace_rect_desc.dim);
+		     );
 #elif LEGION_MAX_DIM == 3
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
-                     "%lld %d", ispace_rect_desc.unique_id,
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld "
+                     "%lld %lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
 		     (long long)(ispace_rect_desc.rect_hi[0]),
 		     (long long)(ispace_rect_desc.rect_hi[1]),
-		     (long long)(ispace_rect_desc.rect_hi[2]),
-		     ispace_rect_desc.dim);
+		     (long long)(ispace_rect_desc.rect_hi[2])
+		     );
 #elif LEGION_MAX_DIM == 4
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld %d", ispace_rect_desc.unique_id,
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld "
+                     "%lld %lld %lld %lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1124,12 +1133,13 @@ namespace Legion {
 		     (long long)(ispace_rect_desc.rect_hi[0]),
 		     (long long)(ispace_rect_desc.rect_hi[1]),
 		     (long long)(ispace_rect_desc.rect_hi[2]),
-                     (long long)(ispace_rect_desc.rect_hi[3]),
-		     ispace_rect_desc.dim);
+                     (long long)(ispace_rect_desc.rect_hi[3])
+		     );
 #elif LEGION_MAX_DIM == 5
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld %lld %lld %d", 
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld "
+                     "%lld %lld %lld %lld %lld %lld",
                      ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1139,12 +1149,13 @@ namespace Legion {
 		     (long long)(ispace_rect_desc.rect_hi[1]),
 		     (long long)(ispace_rect_desc.rect_hi[2]),
                      (long long)(ispace_rect_desc.rect_hi[3]),
-                     (long long)(ispace_rect_desc.rect_hi[4]),
-		     ispace_rect_desc.dim);
+                     (long long)(ispace_rect_desc.rect_hi[4])
+		     );
 #elif LEGION_MAX_DIM == 6
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld %lld %lld %lld %lld %d", 
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld %lld "
+                     "%lld %lld %lld %lld %lld %lld %lld",
                      ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1156,12 +1167,13 @@ namespace Legion {
 		     (long long)(ispace_rect_desc.rect_hi[2]),
                      (long long)(ispace_rect_desc.rect_hi[3]),
                      (long long)(ispace_rect_desc.rect_hi[4]),
-                     (long long)(ispace_rect_desc.rect_hi[5]),
-		     ispace_rect_desc.dim);
+                     (long long)(ispace_rect_desc.rect_hi[5])
+		     );
 #elif LEGION_MAX_DIM == 7
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld %lld %lld %lld %lld %lld %lld %d", 
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld %lld "
+                     "%lld %lld %lld %lld %lld %lld %lld %lld %lld",
                      ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1175,12 +1187,13 @@ namespace Legion {
                      (long long)(ispace_rect_desc.rect_hi[3]),
                      (long long)(ispace_rect_desc.rect_hi[4]),
                      (long long)(ispace_rect_desc.rect_hi[5]),
-                     (long long)(ispace_rect_desc.rect_hi[6]),
-		     ispace_rect_desc.dim);
+                     (long long)(ispace_rect_desc.rect_hi[6])
+		     );
 #elif LEGION_MAX_DIM == 8
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
-                     "%lld %d", ispace_rect_desc.unique_id,
+                     "%lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1196,12 +1209,13 @@ namespace Legion {
                      (long long)(ispace_rect_desc.rect_hi[4]),
                      (long long)(ispace_rect_desc.rect_hi[5]),
                      (long long)(ispace_rect_desc.rect_hi[6]),
-                     (long long)(ispace_rect_desc.rect_hi[7]),
-		     ispace_rect_desc.dim);
+                     (long long)(ispace_rect_desc.rect_hi[7])
+		     );
 #elif LEGION_MAX_DIM == 9
-      log_prof.print("Index Space Rect Desc %llu %lld %lld %lld %lld %lld "
+      log_prof.print("Index Space Rect Desc %llu %d %lld %lld %lld %lld %lld "
                      "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld "
-                     "%lld %lld %lld %d", ispace_rect_desc.unique_id,
+                     "%lld %lld %lld", ispace_rect_desc.unique_id,
+		     ispace_rect_desc.dim,
 		     (long long)(ispace_rect_desc.rect_lo[0]),
 		     (long long)(ispace_rect_desc.rect_lo[1]),
 		     (long long)(ispace_rect_desc.rect_lo[2]),
@@ -1219,9 +1233,9 @@ namespace Legion {
                      (long long)(ispace_rect_desc.rect_hi[5]),
                      (long long)(ispace_rect_desc.rect_hi[6]),
                      (long long)(ispace_rect_desc.rect_hi[7]),
-                     (long long)(ispace_rect_desc.rect_hi[8]),
-		     ispace_rect_desc.dim[0])
-#el[0]s
+                     (long long)(ispace_rect_desc.rect_hi[8])
+		     );
+#else
 #error "Illegal LEGION_MAX_DIM"
 #endif
     }
@@ -1271,12 +1285,9 @@ namespace Legion {
                const LegionProfInstance::IndexSubSpaceDesc &index_subspace_desc)
     //--------------------------------------------------------------------------
     {
-      log_prof.print("Index Sub Space Desc %llu %llu %lld %lld %lld",
+      log_prof.print("Index Sub Space Desc %llu %llu",
 		     index_subspace_desc.parent_id,
-		     index_subspace_desc.unique_id,
-		     index_subspace_desc.point0,
-		     index_subspace_desc.point1,
-		     index_subspace_desc.point2);
+		     index_subspace_desc.unique_id);
     }
 
     //--------------------------------------------------------------------------
@@ -1378,6 +1389,16 @@ namespace Legion {
     {
       log_prof.print("Prof Proc Desc " IDFMT " %d", 
                      proc_desc.proc_id, proc_desc.kind);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfASCIISerializer::serialize(
+                                      const LegionProfDesc::MaxDimDesc
+				      &max_dim_desc)
+    //--------------------------------------------------------------------------
+    {
+      log_prof.print("Max Dim Desc %d",
+                     max_dim_desc.max_dim);
     }
 
     //--------------------------------------------------------------------------

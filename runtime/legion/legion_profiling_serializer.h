@@ -51,6 +51,7 @@ namespace Legion {
       virtual void serialize(const LegionProfDesc::ProcDesc&) = 0;
       virtual void serialize(const LegionProfDesc::MemDesc&) = 0;
       virtual void serialize(const LegionProfDesc::ProcMemDesc&) = 0;
+      virtual void serialize(const LegionProfDesc::MaxDimDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpacePointDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceRectDesc&) = 0;
       virtual void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&) = 0;
@@ -109,6 +110,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::ProcDesc&);
       void serialize(const LegionProfDesc::MemDesc&);
       void serialize(const LegionProfDesc::ProcMemDesc&);
+      void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);
@@ -161,6 +163,7 @@ namespace Legion {
         OP_DESC_ID,
         PROC_DESC_ID,
         MEM_DESC_ID,
+	MAX_DIM_DESC_ID,
         TASK_KIND_ID,
         TASK_VARIANT_ID,
         OPERATION_INSTANCE_ID,
@@ -215,6 +218,7 @@ namespace Legion {
       void serialize(const LegionProfDesc::ProcDesc&);
       void serialize(const LegionProfDesc::MemDesc&);
       void serialize(const LegionProfDesc::ProcMemDesc&);
+      void serialize(const LegionProfDesc::MaxDimDesc&);
       void serialize(const LegionProfInstance::IndexSpacePointDesc&);
       void serialize(const LegionProfInstance::IndexSpaceRectDesc&);
       void serialize(const LegionProfInstance::IndexSpaceEmptyDesc&);

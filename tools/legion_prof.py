@@ -1842,63 +1842,72 @@ class Partition(StatObject):
         self.point = point
 
 class IndexSpace(StatObject):
-    def __init__(self, is_type, unique_id, dim, point0, point1, point2, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2):
+    def __init__(self, is_type, unique_id, dim, values, max_dim):
         StatObject.__init__(self)
         self.is_type = is_type
         self.unique_id = unique_id
         self.dim = dim
         self.point = []
-        self.point = [point0, point1, point2]
-        self.rect_lo = [rect_lo0, rect_lo1, rect_lo2]
-        self.rect_hi = [rect_hi0, rect_hi1, rect_hi2]
+        self.rect_lo = []
+        self.rect_hi = []
+        if (self.is_type == 0):
+            for index in range(self.dim):
+                self.point.append(int(values[index]))
+        if (self.is_type == 1):
+            for index in range(self.dim):
+                self.rect_lo.append(int(values[index]))
+                self.rect_hi.append(int(values[max_dim + index]))
+
         self.name = None
         self.parent = None
 
 
-    def set_vals(self, is_type, unique_id, dim, point0, point1, point2, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2):
+    def set_vals(self, is_type, unique_id, dim, values, max_dim):
         self.is_type = is_type
         self.unique_id = unique_id
         self.dim = dim
-        self.point[0] = point0
-        self.point[1] = point1
-        self.point[2] = point2
-        self.rect_lo[0] = rect_lo0
-        self.rect_lo[1] = rect_lo1
-        self.rect_lo[2] = rect_lo2
-        self.rect_hi[0] = rect_hi0
-        self.rect_hi[1] = rect_hi1
-        self.rect_hi[2] = rect_hi2
+        self.point = []
+        self.rect_lo = []
+        self.rect_hi = []
+        if (self.is_type == 0):
+            for index in range(self.dim):
+                self.point.append(int(values[index]))
+        if (self.is_type == 1):
+            for index in range(self.dim):
+                self.rect_lo.append(int(values[index]))
+                self.rect_hi.append(int(values[max_dim + index]))
 
-    def setPoint(self, unique_id, dim, point0, point1, point2):
+
+    def setPoint(self, unique_id, dim, values):
         is_type = 0
-        self.set_vals(is_type, unique_id, dim, point0, point1, point2, None, None, None, None, None, None)
+        self.set_vals(is_type, unique_id, dim, values,0)
 
-    def setRect(self, unique_id, dim, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2):
+    def setRect(self, unique_id, dim, values, max_dim):
         is_type = 1
-        self.set_vals(is_type, unique_id, dim, None, None, None, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2)
+        self.set_vals(is_type, unique_id, dim, values, max_dim)
 
     def setEmpty(self, unique_id):
         is_type = 2
-        self.set_vals(is_type, unique_id, None, None, None, None, None, None, None, None, None, None)
+        self.set_vals(is_type, unique_id, None, None, 0)
 
     @classmethod
-    def forPoint(cls, unique_id, dim, point0, point1, point2):
+    def forPoint(cls, unique_id, dim, values):
         is_type = 0
-        return cls(is_type, unique_id, dim, point0, point1, point2, None, None, None, None, None, None)
+        return cls(is_type, unique_id, dim, values,0)
 
     @classmethod
-    def forRect(cls, unique_id, dim, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2):
+    def forRect(cls, unique_id, dim, values, max_dim):
         is_type = 1
-        return cls(is_type, unique_id, dim, None, None, None, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2)
+        return cls(is_type, unique_id, dim, values, max_dim)
 
     @classmethod
     def forEmpty(cls, unique_id):
         is_type = 2
-        return cls(is_type, unique_id, None, None, None, None, None, None, None, None, None, None)
+        return cls(is_type, unique_id, None, None, 0)
 
     @classmethod
     def forUnknown(cls, unique_id):
-        return cls(None, unique_id, None, None, None, None, None, None, None, None, None, None)
+        return cls(None, unique_id, None, None, 0)
 
     def set_name(self, name):
         self.name = name
@@ -1921,19 +1930,11 @@ class IndexSpace(StatObject):
         if (self.is_type == None):
             return stext
         if (self.is_type == 0):
-            if (self.dim > 0):
-                stext = stext + '[' + str(self.point[0]) + ']'
-            if (self.dim > 1):
-                stext = stext + '[' + str(self.point[1]) + ']'
-            if (self.dim > 2):
-                stext = stext + '[' + str(self.point[2]) + ']'
+            for index in range(self.dim):
+                stext = stext + '[' + str(self.point[index]) + ']'
         if (self.is_type == 1):
-            if (self.dim > 0):
-                stext = stext + '[' + str(self.rect_lo[0]) + ':' + str(self.rect_hi[0]) + ']'
-            if (self.dim > 1):
-                stext = stext + '[' + str(self.rect_lo[1]) + ':' + str(self.rect_hi[1]) + ']'
-            if (self.dim > 2):
-                stext = stext + '[' + str(self.rect_lo[2]) + ':' + str(self.rect_hi[2]) + ']'
+            for index in range(self.dim):
+                stext = stext + '[' + str(self.rect_lo[index]) + ':' + str(self.rect_hi[index]) + ']'
         if (self.is_type == 2):
             stext = 'empty index space'
         return stext
@@ -2095,6 +2096,7 @@ class StatGatherer(object):
 
 class State(object):
     def __init__(self):
+        self.max_dim = 3
         self.processors = {}
         self.memories = {}
         self.mem_proc_affinity = {}
@@ -2163,17 +2165,19 @@ class State(object):
             "IndexSubSpaceDesc": self.log_index_subspace_desc,
             "LogicalRegionDesc": self.log_logical_region_desc,
             "PhysicalInstRegionDesc": self.log_physical_inst_region_desc,
-            "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc
+            "PhysicalInstLayoutDesc": self.log_physical_inst_layout_desc,
+            "MaxDimDesc": self.log_max_dim
             #"UserInfo": self.log_user_info
         }
 
-    def log_index_space_point_desc(self, unique_id, dim, point0, point1, point2):
-        index_space = self.create_index_space_point(unique_id, dim, point0, point1, point2)
+    def log_max_dim(self, max_dim):
+        self.max_dim = max_dim
 
-    def log_index_space_rect_desc(self, unique_id, dim, rect_lo0, rect_lo1,
-                                  rect_lo2, rect_hi0, rect_hi1, rect_hi2):
-        index_space = self.create_index_space_rect(unique_id, dim, rect_lo0, rect_lo1,
-                                                   rect_lo2, rect_hi0, rect_hi1, rect_hi2)
+    def log_index_space_point_desc(self, unique_id, dim, rem):
+        index_space = self.create_index_space_point(unique_id, dim, rem)
+
+    def log_index_space_rect_desc(self, unique_id, dim, rem):
+        index_space = self.create_index_space_rect(unique_id, dim, rem)
 
     def log_index_space_empty_desc(self, unique_id):
         index_space = self.create_index_space_empty(unique_id)
@@ -2195,13 +2199,13 @@ class State(object):
     def log_index_part_desc(self, unique_id, name):
         part = self.create_partition(unique_id, name)
 
-    def log_index_partition_desc(self,parent_id, unique_id, disjoint, point):
+    def log_index_partition_desc(self,parent_id, unique_id, disjoint, point0):
         part = self.find_partition(unique_id)
         part.parent = self.find_index_space(parent_id)
         part.disjoint = disjoint
-        part.point = point
+        part.point = point0
 
-    def log_index_subspace_desc(self, parent_id, unique_id, point0, point1, point2):
+    def log_index_subspace_desc(self, parent_id, unique_id):
         index_space = self.find_index_space(unique_id)
         index_part_parent = self.find_partition(parent_id)
         index_space.set_parent(index_part_parent)
@@ -2514,26 +2518,26 @@ class State(object):
             assert task.variant == variant
         return task
 
-    def create_index_space_point(self, unique_id, dim, point0, point1, point2):
+    def create_index_space_point(self, unique_id, dim, values):
         key = unique_id
         if key not in self.index_spaces:
-            index_space = IndexSpace.forPoint(unique_id, dim, point0, point1, point2)
+            index_space = IndexSpace.forPoint(unique_id, dim, values)
             self.index_spaces[key] = index_space
         else:
             index_space = self.index_spaces[key]
             if index_space.is_type is None:
-                index_space.setPoint(unique_id, dim, point0, point1, point2)
+                index_space.setPoint(unique_id, dim, values)
         return index_space
 
-    def create_index_space_rect(self, unique_id, dim, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2):
+    def create_index_space_rect(self, unique_id, dim, values):
         key = unique_id
         if key not in self.index_spaces:
-            index_space = IndexSpace.forRect(unique_id, dim, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2)
+            index_space = IndexSpace.forRect(unique_id, dim, values, self.max_dim)
             self.index_spaces[key] = index_space
         else:
             index_space = self.index_spaces[key]
             if index_space.is_type is None:
-                index_space.setRect(unique_id, dim, rect_lo0, rect_lo1, rect_lo2, rect_hi0, rect_hi1, rect_hi2)
+                index_space.setRect(unique_id, dim, values, self.max_dim)
         return index_space
 
     def create_index_space_empty(self, unique_id):

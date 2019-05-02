@@ -248,9 +248,6 @@ namespace Legion {
       IndexSubSpaceDesc &desc = index_subspace_desc.back();
       desc.parent_id = parent_id;
       desc.unique_id = unique_id;
-      desc.point0 = (int)point.point_data[0];
-      desc.point1 = (int)point.point_data[1];
-      desc.point2 = (int)point.point_data[2];
       owner->update_footprint(sizeof(IndexSubSpaceDesc), this);
     }
 
@@ -1262,6 +1259,11 @@ namespace Legion {
             serializer->serialize(proc_mem_desc);
 	  }
       }
+      // log max dim
+      LegionProfDesc::MaxDimDesc max_dim_desc;
+      max_dim_desc.max_dim = LEGION_MAX_DIM;
+      serializer->serialize(max_dim_desc);
+
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
         total_outstanding_requests[idx] = 0;

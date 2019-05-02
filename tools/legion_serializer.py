@@ -23,7 +23,7 @@ import gzip
 import io
 
 binary_filetype_pat = re.compile(r"FileType: BinaryLegionProf v: (?P<version>\d+(\.\d+)?)")
-
+max_dim_val = 0
 def getFileObj(filename, compressed=False, buffer_size=32768):
     if compressed:
         return io.BufferedReader(gzip.open(filename, mode='rb'), buffer_size=buffer_size)
@@ -53,6 +53,17 @@ class LegionDeserializer(object):
 def read_time(string):
     return long(string)/1000
 
+def read_max_dim(string):
+    global max_dim_val
+    max_dim_val = int(string)
+    return int(string)
+
+decimal_pat = re.compile("\-?[0-9]+")
+def read_array(string):
+    global max_dim_val
+    values = decimal_pat.findall(string)
+    return values
+
 class LegionProfASCIIDeserializer(LegionDeserializer):
     """
     This is the serializer for the regex log files
@@ -70,15 +81,16 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "ProcDesc": re.compile(prefix + r'Prof Proc Desc (?P<proc_id>[a-f0-9]+) (?P<kind>[0-9]+)'),
         "MemDesc": re.compile(prefix + r'Prof Mem Desc (?P<mem_id>[a-f0-9]+) (?P<kind>[0-9]+) (?P<capacity>[0-9]+)'),
         "ProcMDesc": re.compile(prefix + r'Prof Mem Proc Affinity Desc (?P<proc_id>[a-f0-9]+) (?P<mem_id>[a-f0-9]+)'),
-        "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<point0>[0-9]+) (?P<point1>[0-9]+) (?P<point2>[0-9]+)'),
-        "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<rect_lo0>[0-9]+) (?P<rect_lo1>[0-9]+) (?P<rect_lo2>[0-9]+) (?P<rect_hi0>[0-9]+) (?P<rect_hi1>[0-9]+) (?P<rect_hi2>[0-9]+) (?P<dim>[0-9]+)'),
+        "MaxDimDesc": re.compile(prefix + r'Max Dim (?P<maxdim>[0-9]+)'),
+        "IndexSpacePointDesc": re.compile(prefix + r'Index Space Point Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
+        "IndexSpaceRectDesc": re.compile(prefix + r'Index Space Rect Desc (?P<unique_id>[0-9]+) (?P<dim>[0-9]+) (?P<rem>.*)'),
         "IndexSpaceEmptyDesc": re.compile(prefix + r'Index Space Empty Desc (?P<unique_id>[0-9]+)'),
         "FieldDesc": re.compile(prefix + r'Field Name Desc (?P<unique_id>[0-9]+) (?P<field_id>[0-9]+) (?P<size>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
         "FieldSpaceDesc": re.compile(prefix + r'Field Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
         "IndexSpaceDesc": re.compile(prefix + r'Index Space Name Desc (?P<unique_id>[0-9]+) (?P<name>[$()a-zA-Z0-9_<>.]+)'),
         "PartDesc": re.compile(prefix + r'Index Part Name Desc (?P<unique_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
-        "IndexPartitionDesc": re.compile(prefix + r'Index Partition Desc (?P<parent_id>[0-9]+) (?P<unique_id>[0-9]+) (?P<disjoint>[0-1]+) (?P<point>[0-9]+)'),
-        "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+) (?P<point0>[0-9]+) (?P<point1>[0-9]+) (?P<point2>[0-9]+)'),
+        "IndexPartitionDesc": re.compile(prefix + r'Index Partition Desc (?P<parent_id>[0-9]+) (?P<unique_id>[0-9]+) (?P<disjoint>[0-1]+) (?P<point0>[0-9]+)'),
+        "IndexSubSpaceDesc": re.compile(prefix + r'Index Sub Space Desc (?P<parent_id>[a-f0-9]+) (?P<unique_id>[0-9]+)'),
         "LogicalRegionDesc": re.compile(prefix + r'Logical Region Desc (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+) (?P<name>[a-zA-Z0-9_ ]+)'),
         "PhysicalInstRegionDesc": re.compile(prefix + r'Physical Inst Region Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<ispace_id>[0-9]+) (?P<fspace_id>[0-9]+) (?P<tree_id>[0-9]+)'),
         "PhysicalInstLayoutDesc": re.compile(prefix + r'Physical Inst Layout Desc (?P<op_id>[0-9]+) (?P<inst_id>[a-f0-9]+) (?P<field_id>[0-9]+)'),
@@ -122,18 +134,14 @@ class LegionProfASCIIDeserializer(LegionDeserializer):
         "point1": long,
         "point2": long,
         "dim": int,
-        "rect_lo0":long,
-        "rect_lo1":long,
-        "rect_lo2":long,
-        "rect_hi0":long,
-        "rect_hi1":long,
-        "rect_hi2":long,
         "field_id": int,
         "fspace_id": int,
         "ispace_id": long,
         "unique_id": long,
         "disjoint": bool,
         "tree_id": int,
+        "maxdim": read_max_dim,
+        "rem": read_array,
         "proc_id": lambda x: int(x, 16),
         "mem_id": lambda x: int(x, 16),
         "src": lambda x: int(x, 16),
@@ -231,8 +239,11 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
         "VariantID":          "I", # unsigned int
         "unsigned":           "I", # unsigned int
         "timestamp_t":        "Q", # unsigned long long
+        "maxdim":             "i", # int
         "unsigned long long": "Q", # unsigned long long
         "long long":          "q", # long long
+        "array":              "Q", # unsigned long long
+        "point":              "Q", # unsigned long long
         "int":                "i", # int
         "ProcKind":           "i", # int (really an enum so this depends)
         "MemKind":            "i", # int (really an enum so this depends)
@@ -257,13 +268,38 @@ class LegionProfBinaryDeserializer(LegionDeserializer):
                     char = log.read(1)
                 return string
             return string_reader
+        if param_type == "point":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def point_reader(log):
+                global max_dim_val
+                values = []
+                for index in range(max_dim_val):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return point_reader
+        if param_type == "array":
+            fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
+            def array_reader(log):
+                global max_dim_val
+                values = []
+                for index in range(max_dim_val*2):
+                    raw_val = log.read(num_bytes)
+                    value = struct.unpack(fmt, raw_val)[0]
+                    values.append(value)
+                return values
+            return array_reader
         else:
             fmt = LegionProfBinaryDeserializer.fmt_dict[param_type]
             def reader(log):
+                global max_dim_val
                 raw_val = log.read(num_bytes)
                 val = struct.unpack(fmt, raw_val)[0]
                 if param_type == "timestamp_t":
                     val = val / 1000
+                if param_type == "maxdim":
+                    max_dim_val = val
                 return val
             return reader
 

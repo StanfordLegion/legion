@@ -104,6 +104,9 @@ namespace Legion {
         ProcID proc_id;
         MemID mem_id;
       };
+      struct MaxDimDesc {
+	unsigned max_dim;
+      };
     };
 
     class LegionProfInstance {
@@ -208,7 +211,6 @@ namespace Legion {
       public:
 	IDType parent_id;
 	IDType unique_id;
-	long long point0, point1, point2;
       };
       struct LogicalRegionDesc {
       public:
