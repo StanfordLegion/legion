@@ -77,6 +77,8 @@ variables:
   PYTHON_VERSION_MAJOR: "3"
 .hdf5: &hdf5
   USE_HDF: "1"
+  HDF_HEADER: "hdf5/serial/hdf5.h"
+  HDF_LIBNAME: "hdf5_serial"
 .llvm: &llvm
   USE_LLVM: "1"
 .cuda: &cuda
