@@ -44,11 +44,11 @@ variables:
   MAX_DIM: "4"
 
 .cxx98_normal: &cxx98_normal
-  CC_FLAGS: "-std=c++98 -D_GLIBCXX_USE_CXX11_ABI=0"
+  CC_FLAGS: "-std=c++98"
 .cxx98_checks: &cxx98_checks
-  CC_FLAGS: "-std=c++98 -D_GLIBCXX_USE_CXX11_ABI=0 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+  CC_FLAGS: "-std=c++98 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_spy: &cxx98_spy
-  CC_FLAGS: "-std=c++98 -D_GLIBCXX_USE_CXX11_ABI=0 -DLEGION_SPY"
+  CC_FLAGS: "-std=c++98 -DLEGION_SPY"
   USE_SPY: "1"
 .cxx11_normal: &cxx11_normal
   CC_FLAGS: "-std=c++11"
@@ -61,7 +61,7 @@ variables:
 .cxx17_checks: &cxx17_checks
   CC_FLAGS: "-std=c++17 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_32bit_normal: &cxx98_32bit_normal
-  CC_FLAGS: "-std=c++98 -D_GLIBCXX_USE_CXX11_ABI=0 -m32"
+  CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
   MARCH: "i686"
 
@@ -142,6 +142,7 @@ before_script:
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
+      export MPICH_CXX=${CXX}
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       make -C gasnet -j$THREADS
     fi
@@ -151,6 +152,7 @@ before_script:
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
       module load cuda/8.0
+      export OMPI_CXX=${CXX}
 
       if [[ "$USE_GASNET" -eq 1 ]]; then
         module load gasnet/1.30.0-openmpi
