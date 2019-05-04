@@ -500,14 +500,22 @@ local function split_region_access(cx, lhs, rhs, ref_type, reads, template)
   end
   local cache = cx:get_incl_cache(index)
 
+  local index_type = index.expr_type
+  if std.is_rawref(index_type) then
+    index_type = std.as_read(index_type)
+  end
   local centered =
-    std.is_bounded_type(index.expr_type) and
-    #index.expr_type.bounds_symbols == 1 and
-    index.expr_type.bounds_symbols[1] == region_symbol
+    std.is_bounded_type(index_type) and
+    #index_type.bounds_symbols == 1 and
+    index_type.bounds_symbols[1] == region_symbol
   index = rewrite_accesses.expr(cx, index)
 
   if centered then
-    local region_param = index.expr_type.bounds_symbols[1]
+    local index_type = index.expr_type
+    if std.is_rawref(index_type) then
+      index_type = std.as_read(index_type)
+    end
+    local region_param = index_type.bounds_symbols[1]
     local local_mapping = { [region_symbol] = region_param }
     if reads then
       rhs = rewrite_region_access(cx, local_mapping, rhs)
@@ -818,6 +826,11 @@ function rewrite_accesses.stat_var(cx, stat)
       if stats[#stats]:is(ast.typed.stat.Assignment) then
         local stat = stats[#stats]
         local ref_type = stat.rhs.expr_type
+        local value = stat.rhs.value
+        while not std.is_ref(ref_type) do
+          ref_type = value.expr_type
+          value = value.value
+        end
         if #ref_type.bounds_symbols == 1 and
            cx:is_transitively_closed(ref_type.bounds_symbols[1], ref_type.field_path)
         then

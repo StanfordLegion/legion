@@ -62,7 +62,7 @@ end
 
 local function create_index_launch(cx, task, call, stat)
   local generator = task:get_parallel_task_generator()
-  local pair_of_mappings = cx.mappings[task]
+  local pair_of_mappings = cx.mappings[call]
   assert(pair_of_mappings ~= nil)
   local parallel_task_variants, params_to_partitions, metadata = generator(pair_of_mappings, cx)
   local parallel_task = parallel_task_variants["primary"]
@@ -280,7 +280,7 @@ function rewrite_task_launches.block(cx, block)
 end
 
 function rewrite_task_launches.rewrite(solution, caller_constraints, stat)
-  if #solution.all_tasks == 0 then
+  if #solution.all_calls == 0 then
     return ast.typed.stat.Block {
       block = stat.block,
       span = stat.span,
