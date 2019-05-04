@@ -2658,11 +2658,11 @@ function solver_context:synthesize_partitions(existing_disjoint_partitions,
         mapping = mappings_by_range_sets[all_ranges]
         local function all_affine_images(ranges)
           return data.all(unpack(secondary_ranges:map(function(range)
-            local pair = image_partitions[range]
-            if pair then
-              local info, _ = unpack(pair)
-              return info:is_affine()
-            end
+            --local pair = image_partitions[range]
+            --if pair then
+            --  local info, _ = unpack(pair)
+            --  return info:is_affine()
+            --end
             return false
           end)))
         end
