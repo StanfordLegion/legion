@@ -920,6 +920,7 @@ public:
       const Point<DIM,COORD_T> &offset,
       const Rect<DIM,COORD_T> &modulo,
       bool is_modulo,
+      bool is_preimage,
       const LogicalRegion &target_ranges,
       const LogicalPartition &target_ranges_part,
       FieldID ranges_fid);
@@ -942,6 +943,7 @@ AffineTransformRects<DIM,COORD_T>::AffineTransformRects(
       const Point<DIM,COORD_T> &offset,
       const Rect<DIM,COORD_T> &modulo,
       bool is_modulo,
+      bool is_preimage,
       const LogicalRegion &target_ranges,
       const LogicalPartition &target_ranges_part,
       FieldID ranges_fid)
@@ -954,6 +956,7 @@ AffineTransformRects<DIM,COORD_T>::AffineTransformRects(
   rez.serialize<Point<DIM,COORD_T> >(offset);
   rez.serialize<Rect<DIM,COORD_T> >(modulo);
   rez.serialize<bool>(is_modulo);
+  rez.serialize<bool>(is_preimage);
   rez.serialize<LogicalPartition>(target_ranges_part);
   argument = TaskArgument(rez.get_buffer(), rez.get_used_bytes());
 }
@@ -1036,8 +1039,9 @@ compute_modulo(std::vector<Rect<DIM,COORD_T> > &results,
       {
         intervals[dim].push_back(Interval<COORD_T>(lo, mod_hi));
         intervals[dim].push_back(Interval<COORD_T>(mod_lo, new_hi - 1));
-        continue;
       }
+      else
+        intervals[dim].push_back(Interval<COORD_T>(mod_lo, mod_hi));
     }
     else if (lo < mod_lo)
     {
@@ -1048,8 +1052,11 @@ compute_modulo(std::vector<Rect<DIM,COORD_T> > &results,
         intervals[dim].push_back(Interval<COORD_T>(new_lo + 1, mod_hi));
         continue;
       }
+      else
+        intervals[dim].push_back(Interval<COORD_T>(mod_lo, mod_hi));
     }
-    intervals[dim].push_back(Interval<COORD_T>(mod_lo, mod_hi));
+    else
+      intervals[dim].push_back(Interval<COORD_T>(lo, hi));
   }
 
   unsigned num_rectangles = 1;
@@ -1080,8 +1087,14 @@ AffineTransformRects<DIM,COORD_T>::cpu_variant(
   derez.deserialize(modulo);
   bool is_modulo;
   derez.deserialize(is_modulo);
+  bool is_preimage;
+  derez.deserialize(is_preimage);
   LogicalPartition target_ranges_part;
   derez.deserialize(target_ranges_part);
+
+  if (is_preimage)
+    for (unsigned idx = 0; idx < DIM; ++idx)
+      offset[idx] = -offset[idx];
 
   const FieldAccessor<WRITE_DISCARD,Rect<DIM,COORD_T>,1,coord_t>
     fa_range(regions[0], task->regions[0].instance_fields[0]);
@@ -1147,12 +1160,13 @@ legion_terra_register_all_affine_transform_tasks(void)
 }
 
 legion_index_partition_t
-legion_index_partition_create_by_affine_image(
+legion_index_partition_create_by_affine_transform(
     legion_runtime_t runtime_,
     legion_context_t ctx_,
     legion_index_space_t handle_,
     legion_index_partition_t projection_,
     regent_affine_descriptor_t descriptor,
+    bool is_preimage,
     legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
     int color /* = AUTO_GENERATE_ID */)
 {
@@ -1167,6 +1181,16 @@ legion_index_partition_create_by_affine_image(
   assert(handle.get_dim() == projection.get_dim());
   assert(projection.get_dim() == offset.get_dim());
   assert(!is_modulo || projection.get_dim() == modulo.get_dim());
+  if (is_preimage && is_modulo) {
+    IndexSpace parent = handle;
+    while (runtime->has_parent_index_partition(ctx, parent))
+      parent = runtime->get_parent_index_space(
+          runtime->get_parent_index_partition(ctx, parent));
+    Domain domain = runtime->get_index_space_domain(parent);
+    assert(domain.dense());
+    for (int idx = 0; idx < domain.dim; ++idx)
+      assert(domain.rect_data[idx] == modulo.rect_data[idx]);
+  }
 
   // We compute an affine image using partition by image range in these steps:
   // 1) Find the maximum M of the number of dense rectangles in each subregion
@@ -1252,17 +1276,17 @@ legion_index_partition_create_by_affine_image(
     runtime->get_logical_partition(ctx, temp_lr, temp_ip);
 
   // Step 4
-#define GENERATE_CASE(DIM)                                        \
-  case DIM:                                                       \
-    {                                                             \
-      Point<DIM,coord_t> o = offset;                              \
-      Rect<DIM,coord_t> m;                                        \
-      if (is_modulo) m = modulo;                                  \
-      IndexPartitionT<DIM,coord_t> p(projection);                 \
-      AffineTransformRects<DIM,coord_t>                           \
-        launcher(p, o, m, is_modulo, temp_lr, temp_lp, temp_fid); \
-      Future f = runtime->execute_task(ctx, launcher);            \
-      break;                                                      \
+#define GENERATE_CASE(DIM)                                                     \
+  case DIM:                                                                    \
+    {                                                                          \
+      Point<DIM,coord_t> o = offset;                                           \
+      Rect<DIM,coord_t> m;                                                     \
+      if (is_modulo) m = modulo;                                               \
+      IndexPartitionT<DIM,coord_t> p(projection);                              \
+      AffineTransformRects<DIM,coord_t>                                        \
+        launcher(p, o, m, is_modulo, is_preimage, temp_lr, temp_lp, temp_fid); \
+      Future f = runtime->execute_task(ctx, launcher);                         \
+      break;                                                                   \
     }
   switch (projection.get_dim())
   {
@@ -1286,6 +1310,20 @@ legion_index_partition_create_by_affine_image(
   return CObjectWrapper::wrap(result_ip);
 }
 
+legion_index_partition_t
+legion_index_partition_create_by_affine_image(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_index_space_t handle_,
+    legion_index_partition_t projection_,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  return legion_index_partition_create_by_affine_transform(
+    runtime_, ctx_, handle_, projection_, descriptor, false, part_kind, color);
+}
+
 legion_logical_partition_t
 legion_logical_partition_create_by_affine_image(
     legion_runtime_t runtime_,
@@ -1298,6 +1336,37 @@ legion_logical_partition_create_by_affine_image(
 {
   legion_index_partition_t ip =
     legion_index_partition_create_by_affine_image(
+        runtime_, ctx_, handle_.index_space, projection_.index_partition,
+        descriptor, part_kind, color);
+  return legion_logical_partition_create(runtime_, ctx_, handle_, ip);
+}
+
+legion_index_partition_t
+legion_index_partition_create_by_affine_preimage(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_index_space_t handle_,
+    legion_index_partition_t projection_,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  return legion_index_partition_create_by_affine_transform(
+    runtime_, ctx_, handle_, projection_, descriptor, true, part_kind, color);
+}
+
+legion_logical_partition_t
+legion_logical_partition_create_by_affine_preimage(
+    legion_runtime_t runtime_,
+    legion_context_t ctx_,
+    legion_logical_region_t handle_,
+    legion_logical_partition_t projection_,
+    regent_affine_descriptor_t descriptor,
+    legion_partition_kind_t part_kind /* = COMPUTE_KIND */,
+    int color /* = AUTO_GENERATE_ID */)
+{
+  legion_index_partition_t ip =
+    legion_index_partition_create_by_affine_preimage(
         runtime_, ctx_, handle_.index_space, projection_.index_partition,
         descriptor, part_kind, color);
   return legion_logical_partition_create(runtime_, ctx_, handle_, ip);
