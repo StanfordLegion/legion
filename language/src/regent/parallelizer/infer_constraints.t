@@ -442,6 +442,7 @@ local infer_constraints_stat_table = {
   [ast.typed.stat.Reduce]     = infer_constraints.stat_assignment_or_reduce,
 
   [ast.typed.stat.Return]     = infer_constraints.pass_through_stat,
+  [ast.typed.stat.Break]      = infer_constraints.pass_through_stat,
   [ast.typed.stat.Expr]       = infer_constraints.pass_through_stat,
 
   [ast.typed.stat]            = unreachable,
