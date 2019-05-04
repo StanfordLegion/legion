@@ -55,7 +55,8 @@ end
 local function is_singleton_type(type)
   return std.is_ispace(type) or std.is_region(type) or
          std.is_list_of_regions(type) or
-         std.is_partition(type) or std.is_cross_product(type)
+         std.is_partition(type) or std.is_cross_product(type) or
+         std.is_rect_type(type)
 end
 
 local substitute = {}
