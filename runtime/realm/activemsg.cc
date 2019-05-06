@@ -2525,18 +2525,6 @@ static void handle_new_activemsg(gasnet_token_t token,
     record_message(src, false);
 }
 
-static const int MAX_HANDLERS = 128;
-static gasnet_handlerentry_t handlers[MAX_HANDLERS];
-static int hcount = 0;
-
-void add_handler_entry(int msgid, void (*fnptr)())
-{
-  assert(hcount < MAX_HANDLERS);
-  handlers[hcount].index = msgid;
-  handlers[hcount].fnptr = fnptr;
-  hcount++;
-}
-			   
 void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
@@ -2606,7 +2594,10 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   }
 #endif
 
-  assert(hcount < (MAX_HANDLERS - 4));
+  const int MAX_HANDLERS = 4;
+  gasnet_handlerentry_t handlers[MAX_HANDLERS];
+  int hcount = 0;
+
   handlers[hcount].index = MSGID_NEW_ACTIVEMSG;
   handlers[hcount].fnptr = (void (*)())handle_new_activemsg;
   hcount++;
@@ -2619,6 +2610,7 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   handlers[hcount].index = MSGID_RELEASE_SRCPTR;
   handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
   hcount++;
+  assert(hcount <= MAX_HANDLERS);
 #ifdef ACTIVE_MESSAGE_TRACE
   record_am_handler(MSGID_FLIP_REQ, "Flip Request AM");
   record_am_handler(MSGID_FLIP_ACK, "Flip Acknowledgement AM");
@@ -2982,11 +2974,6 @@ bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
 void handle_long_msgptr(NodeID source, const void *ptr)
 {
   assert(0 && "compiled without USE_GASNET - active messages not available!");
-}
-
-void add_handler_entry(int msgid, void (*fnptr)())
-{
-  // ignored
 }
 
 void init_endpoints(int gasnet_mem_size_in_mb,
