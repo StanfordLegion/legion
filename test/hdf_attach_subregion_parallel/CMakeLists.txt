@@ -24,6 +24,8 @@ endif()
 
 add_executable(hdf_attach_subregion_parallel tester_io.cc legion_io.cc)
 target_link_libraries(hdf_attach_subregion_parallel Legion::Legion)
+target_include_directories(hdf_attach_subregion_parallel PRIVATE ${HDF5_INCLUDE_DIRS})
+target_link_libraries(hdf_attach_subregion_parallel ${HDF5_LIBRARIES})
 if(Legion_ENABLE_TESTING)
   add_test(NAME hdf_attach_subregion_parallel COMMAND ${Legion_TEST_LAUNCHER} $<TARGET_FILE:hdf_attach_subregion_parallel> -ll:cpu 4) 
 endif()

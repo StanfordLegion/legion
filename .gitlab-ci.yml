@@ -20,6 +20,8 @@ variables:
   CXX: "g++-6"
 .gcc7: &gcc7
   CXX: "g++-7"
+.gcc8: &gcc8
+  CXX: "g++-8"
 
 .clang35: &clang35
   CXX: "clang++-3.5"
@@ -54,6 +56,10 @@ variables:
   CC_FLAGS: "-std=c++14"
 .cxx14_checks: &cxx14_checks
   CC_FLAGS: "-std=c++14 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
+.cxx17_normal: &cxx17_normal
+  CC_FLAGS: "-std=c++17"
+.cxx17_checks: &cxx17_checks
+  CC_FLAGS: "-std=c++17 -DPRIVILEGE_CHECKS -DBOUNDS_CHECKS"
 .cxx98_32bit_normal: &cxx98_32bit_normal
   CC_FLAGS: "-std=c++98 -m32"
   LD_FLAGS: "-m32"
@@ -67,16 +73,21 @@ variables:
   USE_PYTHON: "1"
   # FIXME: It would be nice to find a better way to do this,
   # but the alternatives look scary
-  PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.4m.so"
+  PYTHON_LIB: "/usr/lib/x86_64-linux-gnu/libpython3.5m.so"
   PYTHON_VERSION_MAJOR: "3"
 .hdf5: &hdf5
   USE_HDF: "1"
+  HDF_HEADER: "hdf5/serial/hdf5.h"
+  HDF_LIBNAME: "hdf5_serial"
 .llvm: &llvm
   USE_LLVM: "1"
 .cuda: &cuda
   USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
+.gasnetdbg: &gasnetdbg
+  USE_GASNET: "1"
+  GASNET_DEBUG: "1"
 .gasnetex: &gasnetex
   USE_GASNET: "1"
   GASNET_VERSION: "GASNet-EX-snapshot"
@@ -128,12 +139,17 @@ before_script:
   - |
     if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
       export CONDUIT=mpi
-      export GASNET_ROOT="$PWD/gasnet/release"
+      if [[ "$GASNET_DEBUG" -eq 1 ]]; then
+        export GASNET_ROOT="$PWD/gasnet/debug"
+      else
+        export GASNET_ROOT="$PWD/gasnet/release"
+      fi
       # OpenMPI:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
+      export MPICH_CXX=${CXX}
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       make -C gasnet -j$THREADS
     fi
@@ -143,6 +159,7 @@ before_script:
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
       module load cuda/8.0
+      export OMPI_CXX=${CXX}
 
       if [[ "$USE_GASNET" -eq 1 ]]; then
         module load gasnet/1.30.0-openmpi
@@ -184,9 +201,9 @@ before_script:
 
 # Each job will run in a fresh container with this image.
 .image: &image
-  image: stanfordlegion/gitlab-ci # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: stanfordlegion/gitlab-ci:ubuntu16.04 # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 .image_clang: &image_clang
-  image: stanfordlegion/gitlab-ci:clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
+  image: stanfordlegion/gitlab-ci:ubuntu16.04-clang # i.e. https://hub.docker.com/r/stanfordlegion/gitlab-ci/
 
 ###
 ### Tests
@@ -334,6 +351,10 @@ gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+gcc49_cxx98_debug_gasnetdbg_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetdbg, *regent, *incremental]
 gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -513,7 +534,7 @@ clang38_cxx11_debug_external:
 
 # Run minimal tests on other compilers.
 
-# Linux with GCC 4.8, 5, 6, 7
+# Linux with GCC 4.8, 5, 6, 7, 8
 gcc48_cxx98_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
@@ -554,6 +575,22 @@ gcc7_cxx14_debug_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc7, *terra38, *debug, *cxx14_normal, *regent]
+gcc7_cxx17_debug_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx17_checks, *legion]
+gcc7_cxx17_debug_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc7, *terra38, *debug, *cxx17_normal, *regent]
+gcc8_cxx17_debug_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *debug, *cxx17_checks, *legion]
+gcc8_cxx17_debug_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc8, *terra38, *debug, *cxx17_normal, *regent]
 
 # Linux with Clang 3.5
 clang35_cxx98_debug_legion:
