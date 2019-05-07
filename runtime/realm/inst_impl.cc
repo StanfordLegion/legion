@@ -228,14 +228,14 @@ namespace Realm {
         (unsigned char*)m_impl->get_direct_ptr(0/*offset*/, 0/*size*/);
       size_t inst_offset = (size_t)(((unsigned char*)base) - impl_base);
 #ifndef NDEBUG
-      bool ok = 
+      MemoryImpl::AllocationResult result =
 #endif
         m_impl->allocate_instance_storage(impl->me,
 					  ilg->bytes_used,
 					  ilg->alignment_reqd,
 					  wait_on, 
                                           inst_offset);
-      assert(ok);
+      assert(result == MemoryImpl::ALLOC_INSTANT_SUCCESS);
 
       inst = impl->me;
       log_inst.info() << "external instance created: inst=" << inst;
