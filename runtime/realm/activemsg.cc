@@ -38,18 +38,21 @@
 static const void *ignore_gasnet_warning1 __attribute__((unused)) = (void *)_gasneti_threadkey_init;
 static const void *ignore_gasnet_warning2 __attribute__((unused)) = (void *)_gasnett_trace_printf_noop;
 
+// can't use gasnet_hsl_t in debug mode
+#ifndef GASNET_DEBUG
+#define USE_GASNET_HSL_T
 #define GASNETHSL_IMPL     gasnet_hsl_t mutex
 #define GASNETCONDVAR_IMPL gasnett_cond_t condvar
+#endif
 
-#else
+#endif
 
-// no gasnet, so use pthread mutex/condvar
-
+#ifndef USE_GASNET_HSL_T
+// use pthread mutex/condvar
 #include <pthread.h>
 
 #define GASNETHSL_IMPL     pthread_mutex_t mutex
 #define GASNETCONDVAR_IMPL pthread_cond_t  condvar
-
 #endif
 
 #include "realm/activemsg.h"
@@ -80,6 +83,92 @@ enum { MSGID_LONG_EXTENSION = 253,
 NodeID my_node_id = 0;
 NodeID max_node_id = 0;
 
+// gasnet_hsl_t in object form for templating goodness
+GASNetHSL::GASNetHSL(void)
+{
+  assert(sizeof(mutex) <= sizeof(placeholder));
+#ifdef USE_GASNET_HSL_T
+  gasnet_hsl_init(&mutex);
+#else
+  pthread_mutex_init(&mutex, 0);
+#endif
+}
+
+GASNetHSL::~GASNetHSL(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnet_hsl_destroy(&mutex);
+#else
+  pthread_mutex_destroy(&mutex);
+#endif
+}
+
+void GASNetHSL::lock(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnet_hsl_lock(&mutex);
+#else
+  pthread_mutex_lock(&mutex);
+#endif
+}
+
+void GASNetHSL::unlock(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnet_hsl_unlock(&mutex);
+#else
+  pthread_mutex_unlock(&mutex);
+#endif
+}
+
+GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
+  : mutex(_mutex)
+{
+  assert(sizeof(condvar) <= sizeof(placeholder));
+#ifdef USE_GASNET_HSL_T
+  gasnett_cond_init(&condvar);
+#else
+  pthread_cond_init(&condvar, 0);
+#endif
+}
+
+GASNetCondVar::~GASNetCondVar(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnett_cond_destroy(&condvar);
+#else
+  pthread_cond_destroy(&condvar);
+#endif
+}
+
+// these require that you hold the lock when you call
+void GASNetCondVar::signal(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnett_cond_signal(&condvar);
+#else
+  pthread_cond_signal(&condvar);
+#endif
+}
+
+void GASNetCondVar::broadcast(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnett_cond_broadcast(&condvar);
+#else
+  pthread_cond_broadcast(&condvar);
+#endif
+}
+
+void GASNetCondVar::wait(void)
+{
+#ifdef USE_GASNET_HSL_T
+  gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
+#else
+  pthread_cond_wait(&condvar, &mutex.mutex);
+#endif
+}
+
 // most of this file assumes the use of gasnet - stubs for a few entry
 //  points are defined at the bottom for the !USE_GASNET case
 #ifdef USE_GASNET
@@ -99,56 +188,6 @@ NodeID max_node_id = 0;
     exit(1); \
   } \
 } while(0)
-
-// gasnet_hsl_t in object form for templating goodness
-GASNetHSL::GASNetHSL(void)
-{
-  assert(sizeof(mutex) <= sizeof(placeholder));
-  gasnet_hsl_init(&mutex);
-}
-
-GASNetHSL::~GASNetHSL(void)
-{
-  gasnet_hsl_destroy(&mutex);
-}
-
-void GASNetHSL::lock(void)
-{
-  gasnet_hsl_lock(&mutex);
-}
-
-void GASNetHSL::unlock(void)
-{
-  gasnet_hsl_unlock(&mutex);
-}
-
-GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
-  : mutex(_mutex)
-{
-  assert(sizeof(condvar) <= sizeof(placeholder));
-  gasnett_cond_init(&condvar);
-}
-
-GASNetCondVar::~GASNetCondVar(void)
-{
-  gasnett_cond_destroy(&condvar);
-}
-
-// these require that you hold the lock when you call
-void GASNetCondVar::signal(void)
-{
-  gasnett_cond_signal(&condvar);
-}
-
-void GASNetCondVar::broadcast(void)
-{
-  gasnett_cond_broadcast(&condvar);
-}
-
-void GASNetCondVar::wait(void)
-{
-  gasnett_cond_wait(&condvar, &(mutex.mutex.lock));
-}
 
 #ifdef REALM_PROFILE_AM_HANDLERS
 struct ActiveMsgHandlerStats {
@@ -2856,55 +2895,6 @@ extern void record_message(NodeID source, bool sent_reply)
 }
 
 #else // defined USE_GASNET
-
-GASNetHSL::GASNetHSL(void)
-{
-  assert(sizeof(mutex) <= sizeof(placeholder));
-  pthread_mutex_init(&mutex, 0);
-}
-
-GASNetHSL::~GASNetHSL(void)
-{
-  pthread_mutex_destroy(&mutex);
-}
-
-void GASNetHSL::lock(void)
-{
-  pthread_mutex_lock(&mutex);
-}
-
-void GASNetHSL::unlock(void)
-{
-  pthread_mutex_unlock(&mutex);
-}
-
-GASNetCondVar::GASNetCondVar(GASNetHSL &_mutex) 
-  : mutex(_mutex)
-{
-  assert(sizeof(condvar) <= sizeof(placeholder));
-  pthread_cond_init(&condvar, 0);
-}
-
-GASNetCondVar::~GASNetCondVar(void)
-{
-  pthread_cond_destroy(&condvar);
-}
-
-// these require that you hold the lock when you call
-void GASNetCondVar::signal(void)
-{
-  pthread_cond_signal(&condvar);
-}
-
-void GASNetCondVar::broadcast(void)
-{
-  pthread_cond_broadcast(&condvar);
-}
-
-void GASNetCondVar::wait(void)
-{
-  pthread_cond_wait(&condvar, &mutex.mutex);
-}
 
 void enqueue_message(NodeID target, int msgid,
 		     const void *args, size_t arg_size,

@@ -607,7 +607,6 @@ namespace Legion {
       const UniqueID creator_id;
     protected:
       PhysicalInstance instance;
-      size_t instance_footprint;
       RtUserEvent profiling_ready;
     protected:
       FieldSpaceNode *field_space_node;
