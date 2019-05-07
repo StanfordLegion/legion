@@ -85,6 +85,9 @@ variables:
   USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
+.gasnetdbg: &gasnetdbg
+  USE_GASNET: "1"
+  GASNET_DEBUG: "1"
 .gasnetex: &gasnetex
   USE_GASNET: "1"
   GASNET_VERSION: "GASNet-EX-snapshot"
@@ -136,7 +139,11 @@ before_script:
   - |
     if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
       export CONDUIT=mpi
-      export GASNET_ROOT="$PWD/gasnet/release"
+      if [[ "$GASNET_DEBUG" -eq 1 ]]; then
+        export GASNET_ROOT="$PWD/gasnet/debug"
+      else
+        export GASNET_ROOT="$PWD/gasnet/release"
+      fi
       # OpenMPI:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       # MPICH:
@@ -344,6 +351,10 @@ gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+gcc49_cxx98_debug_gasnetdbg_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetdbg, *regent, *incremental]
 gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
