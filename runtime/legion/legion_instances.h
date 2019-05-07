@@ -524,7 +524,6 @@ namespace Legion {
       const UniqueID creator_id;
     protected:
       PhysicalInstance instance;
-      size_t instance_footprint;
       RtUserEvent profiling_ready;
     protected:
       RegionNode *ancestor;

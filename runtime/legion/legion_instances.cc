@@ -1956,6 +1956,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(realm_layout != NULL);
 #endif
+      // Have to grab this now since realm is going to take ownership of
+      // the instance layout generic object once we do the creation call
+      const size_t instance_footprint = realm_layout->bytes_used;
+      // Save the footprint size if we need to
+      if (footprint != NULL)
+        *footprint = instance_footprint;
       Realm::ProfilingRequestSet requests;
       // Add a profiling request to see if the instance is actually allocated
       // Make it very high priority so we get the response quickly
@@ -1988,10 +1994,7 @@ namespace Legion {
                   memory_manager->memory, realm_layout, requests));
       // Wait for the profiling response
       if (!profiling_ready.has_triggered())
-        profiling_ready.wait();
-      // Save the footprint size if we need to
-      if (footprint != NULL)
-        *footprint = instance_footprint;
+        profiling_ready.wait(); 
       // If we couldn't make it then we are done
       if (!instance.exists())
         return NULL;
@@ -2152,7 +2155,6 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(measured);
 #endif
-      instance_footprint = result.footprint;
       // If we failed then clear the instance name since it is not valid
       if (!result.success)
       {
