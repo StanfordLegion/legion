@@ -256,7 +256,8 @@ namespace Legion {
       ValueBroadcast(ReplicateContext *ctx, ShardID origin,
                      CollectiveIndexLocation loc)
         : BroadcastCollective(loc, ctx, origin) { }
-      ValueBroadcast(const ValueBroadcast &rhs) { assert(false); }
+      ValueBroadcast(const ValueBroadcast &rhs) 
+        : BroadcastCollective(rhs) { assert(false); }
       virtual ~ValueBroadcast(void) { }
     public:
       ValueBroadcast& operator=(const ValueBroadcast &rhs)
@@ -315,6 +316,36 @@ namespace Legion {
       }
     protected:
       std::set<T> values;
+    };
+
+    /**
+     * \class BufferBroadcast
+     * Broadcast out a binary buffer out to all the shards
+     */
+    class BufferBroadcast : public BroadcastCollective {
+    public:
+      BufferBroadcast(ReplicateContext *ctx, CollectiveIndexLocation loc)
+        : BroadcastCollective(loc, ctx, ctx->owner_shard->shard_id),
+          buffer(NULL), size(0), own(false) { }
+      BufferBroadcast(ReplicateContext *ctx, ShardID origin,
+                     CollectiveIndexLocation loc)
+        : BroadcastCollective(loc, ctx, origin),
+          buffer(NULL), size(0), own(false) { }
+      BufferBroadcast(const BufferBroadcast &rhs) 
+        : BroadcastCollective(rhs) { assert(false); }
+      virtual ~BufferBroadcast(void) { if (own) free(buffer); }
+    public:
+      BufferBroadcast& operator=(const BufferBroadcast &rhs)
+        { assert(false); return *this; }
+      void broadcast(void *buffer, size_t size, bool copy = true);
+      const void* get_buffer(size_t &size, bool wait = true);
+    public:
+      virtual void pack_collective(Serializer &rez) const; 
+      virtual void unpack_collective(Deserializer &derez);
+    protected:
+      void *buffer;
+      size_t size;
+      bool own;
     };
 
     /**

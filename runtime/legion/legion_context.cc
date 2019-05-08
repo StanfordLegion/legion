@@ -9736,12 +9736,65 @@ namespace Legion {
                                          bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
+      AutoRuntimeCall call(this);
+      if (local)
+        REPORT_LEGION_FATAL(LEGION_FATAL_UNIMPLEMENTED_FEATURE,
+                      "Local field creation is not currently supported "
+                      "for control replication with task %s (UID %lld)",
+                      get_task_name(), get_unique_id())
       if (resulting_fields.size() < sizes.size())
         resulting_fields.resize(sizes.size(), AUTO_GENERATE_ID);
-      // Do this the slow way for now
-      for (unsigned idx = 0; idx < sizes.size(); idx++)
-        resulting_fields[idx] = allocate_field(forest, space, sizes[idx],
-                                resulting_fields[idx], local, serdez_id);
+      if (field_allocator_shard == owner_shard->shard_id)
+      {
+        // We're the owner so we do the allocation
+        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+        {
+          if (resulting_fields[idx] == AUTO_GENERATE_ID)
+            resulting_fields[idx] = runtime->get_unique_field_id();
+#ifdef DEBUG_LEGION
+          else if (resulting_fields[idx] >= LEGION_MAX_APPLICATION_FIELD_ID)
+            REPORT_LEGION_ERROR(ERROR_TASK_ATTEMPTED_ALLOCATE_FIELD,
+              "Task %s (ID %lld) attempted to allocate a field with "
+              "ID %d which exceeds the LEGION_MAX_APPLICATION_FIELD_ID "
+              "bound set in legion_config.h", get_task_name(),
+              get_unique_id(), resulting_fields[idx])
+#endif
+          if (runtime->legion_spy_enabled)
+            LegionSpy::log_field_creation(space.id, 
+                                          resulting_fields[idx], sizes[idx]);
+        }
+        std::set<RtEvent> done_events;
+        forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
+        if (!done_events.empty())
+        {
+          RtEvent wait_on = Runtime::merge_events(done_events);
+          wait_on.wait();
+        }
+        BufferBroadcast fields_collective(this, COLLECTIVE_LOC_82);
+        fields_collective.broadcast(&resulting_fields[0], 
+            resulting_fields.size() * sizeof(FieldID), false/*copy*/);
+      }
+      else
+      {
+        // We need to get the barrier result
+        BufferBroadcast fields_collective(this, 
+            field_allocator_shard, COLLECTIVE_LOC_82);
+        size_t buffer_size;
+        const FieldID *buffer = 
+          (const FieldID*) fields_collective.get_buffer(buffer_size);
+#ifdef DEBUG_LEGION
+        assert(buffer != NULL);
+        assert(buffer_size == (resulting_fields.size() * sizeof(FieldID)));
+#endif
+        for (unsigned idx = 0; idx < resulting_fields.size(); idx++)
+          resulting_fields[idx] = buffer[idx];
+        // No need to do the allocation since it was already done
+      }
+      register_field_creations(space, local, resulting_fields);
+      // Update the allocator
+      field_allocator_shard++;
+      if (field_allocator_shard == total_shards)
+        field_allocator_shard = 0;
     }
 
     //--------------------------------------------------------------------------

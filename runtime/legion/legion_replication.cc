@@ -6378,6 +6378,68 @@ namespace Legion {
     template class BarrierExchangeCollective<ApBarrier>;
 
     /////////////////////////////////////////////////////////////
+    // Buffer Broadcast
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    void BufferBroadcast::broadcast(void *b, size_t s, bool copy)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(buffer == NULL);
+#endif
+      if (copy)
+      {
+        size = s;
+        buffer = malloc(size);
+        memcpy(buffer, b, size);
+        own = true;
+      }
+      else
+      {
+        buffer = b;
+        size = s;
+        own = false;
+      }
+      perform_collective_async();
+    }
+
+    //--------------------------------------------------------------------------
+    const void* BufferBroadcast::get_buffer(size_t &s, bool wait)
+    //--------------------------------------------------------------------------
+    {
+      if (wait) 
+        perform_collective_wait();
+      s = size;
+      return buffer;
+    }
+
+    //--------------------------------------------------------------------------
+    void BufferBroadcast::pack_collective(Serializer &rez) const
+    //--------------------------------------------------------------------------
+    {
+      rez.serialize(size);
+      if (size > 0)
+        rez.serialize(buffer, size);
+    }
+
+    //--------------------------------------------------------------------------
+    void BufferBroadcast::unpack_collective(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      derez.deserialize(size);
+      if (size > 0)
+      {
+#ifdef DEBUG_LEGION
+        assert(buffer == NULL);
+#endif
+        buffer = malloc(size);  
+        derez.deserialize(buffer, size);
+        own = true;
+      }
+    }
+
+    /////////////////////////////////////////////////////////////
     // Shard Sync Tree 
     /////////////////////////////////////////////////////////////
 
