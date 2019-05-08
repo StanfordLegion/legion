@@ -467,6 +467,8 @@ namespace Legion {
                                       const std::set<LogicalRegion> &regions);
       bool have_proc_kind_variant(const MapperContext ctx, TaskID id,
 				  Processor::Kind kind);
+      const std::vector<Processor>& local_procs_by_kind(Processor::Kind kind);
+      const std::vector<Processor>& remote_procs_by_kind(Processor::Kind kind);
     protected: // static helper methods
       static const char* create_default_name(Processor p);
       template<int DIM>

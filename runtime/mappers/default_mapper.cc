@@ -1701,16 +1701,20 @@ namespace Legion {
     {
       // Should only be replicated for the top-level task
       assert((task.get_depth() == 0) && (task.regions.size() == 0));
-      Processor::Kind target_kind = task.target_proc.kind();
+      const Processor::Kind target_kind = task.target_proc.kind();
       // Get the variant that we are going to use to map this task
-      VariantInfo chosen = default_find_preferred_variant(task, ctx,
+      const VariantInfo chosen = default_find_preferred_variant(task, ctx,
                         true/*needs tight bound*/, true/*cache*/, target_kind);
-      if (chosen.is_replicable && (target_kind == Processor::LOC_PROC))
+      if (chosen.is_replicable)
       {
+        const std::vector<Processor> &remote_procs = 
+          remote_procs_by_kind(target_kind);
         // Place on replicate on each node by default
-        assert(remote_cpus.size() == total_nodes);
+        assert(remote_procs.size() == total_nodes);
         output.task_mappings.resize(total_nodes, def_output);
-        if (runtime->is_MPI_interop_configured(ctx))
+        // Only check for MPI interop case when dealing with CPUs
+        if ((target_kind == Processor::LOC_PROC) &&
+            runtime->is_MPI_interop_configured(ctx))
         {
           // Check to see if we're interoperating with MPI
           const std::map<AddressSpace,int/*rank*/> &mpi_interop_mapping = 
@@ -1718,7 +1722,7 @@ namespace Legion {
           // If we're interoperating with MPI make the shards align with ranks
           assert(mpi_interop_mapping.size() == total_nodes);
           for (std::vector<Processor>::const_iterator it = 
-                remote_cpus.begin(); it != remote_cpus.end(); it++)
+                remote_procs.begin(); it != remote_procs.end(); it++)
           {
             AddressSpace space = it->address_space();
             std::map<AddressSpace,int>::const_iterator finder = 
@@ -1734,7 +1738,7 @@ namespace Legion {
           if (total_nodes > 1)
           {
             for (std::vector<Processor>::const_iterator it = 
-                  remote_cpus.begin(); it != remote_cpus.end(); it++)
+                  remote_procs.begin(); it != remote_procs.end(); it++)
             {
               AddressSpace space = it->address_space();
               assert(space < output.task_mappings.size());
@@ -1744,10 +1748,12 @@ namespace Legion {
 #ifdef DEBUG_CTRL_REPL
           else
           {
+            const std::vector<Processor> &local_procs = 
+              local_procs_by_kind(target_kind);
             output.task_mappings.resize(local_cpus.size());
             unsigned index = 0;
             for (std::vector<Processor>::const_iterator it = 
-                  local_cpus.begin(); it != local_cpus.end(); it++, index++)
+                  local_procs.begin(); it != local_procs.end(); it++, index++)
               output.task_mappings[index].target_procs.push_back(*it);
           }
 #endif
@@ -1768,8 +1774,10 @@ namespace Legion {
 #ifdef DEBUG_CTRL_REPL
         else
         {
-          output.control_replication_map.resize(local_cpus.size());
-          for (unsigned idx = 0; idx < local_cpus.size(); idx++)
+          const std::vector<Processor> &local_procs = 
+            local_procs_by_kind(target_kind);
+          output.control_replication_map.resize(local_procs.size());
+          for (unsigned idx = 0; idx < local_procs.size(); idx++)
           {
             output.task_mappings[idx].chosen_variant = chosen.variant;
             output.control_replication_map[idx] = 
@@ -1780,16 +1788,12 @@ namespace Legion {
       }
       else
       {
-        // Only issue this warning for CPU processors for the moment
-        // since that's all our code above supports for control replication
-        if (target_kind == Processor::LOC_PROC)
-          log_mapper.warning("WARNING: Default mapper was unable to locate "
-                             "a replicable task variant for the top-level "
-                             "task during a multi-node execution! We STRONGLY "
-                             "encourage users to make their top-level tasks "
-                             "replicable to avoid sequential bottlenecks on "
-                             "one node during the execution of an "
-                             "application!");
+        log_mapper.warning("WARNING: Default mapper was unable to locate "
+                           "a replicable task variant for the top-level "
+                           "task during a multi-node execution! We STRONGLY "
+                           "encourage users to make their top-level tasks "
+                           "replicable to avoid sequential bottlenecks on "
+                           "one node during the execution of an application!");
         output.task_mappings.resize(1);
         map_task(ctx, task, input, output.task_mappings[0]);
       }
@@ -3380,6 +3384,56 @@ namespace Legion {
 	  return true;
       }
       return false; 
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<Processor>& DefaultMapper::local_procs_by_kind(
+                                                           Processor::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case Processor::LOC_PROC:
+          return local_cpus;
+        case Processor::TOC_PROC:
+          return local_gpus;
+        case Processor::IO_PROC:
+          return local_ios;
+        case Processor::PROC_SET:
+          return local_procsets;
+        case Processor::OMP_PROC:
+          return local_omps;
+        case Processor::PY_PROC:
+          return local_pys;
+        default:
+          assert(0);
+      }
+      return local_cpus;
+    }
+
+    //--------------------------------------------------------------------------
+    const std::vector<Processor>& DefaultMapper::remote_procs_by_kind(
+                                                           Processor::Kind kind)
+    //--------------------------------------------------------------------------
+    {
+      switch (kind)
+      {
+        case Processor::LOC_PROC:
+          return remote_cpus;
+        case Processor::TOC_PROC:
+          return remote_gpus;
+        case Processor::IO_PROC:
+          return remote_ios;
+        case Processor::PROC_SET:
+          return remote_procsets;
+        case Processor::OMP_PROC:
+          return remote_omps;
+        case Processor::PY_PROC:
+          return remote_pys;
+        default:
+          assert(0);
+      }
+      return remote_cpus;
     }
 
     //--------------------------------------------------------------------------
