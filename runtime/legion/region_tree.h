@@ -2929,8 +2929,8 @@ namespace Legion {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(void);
-      void free_index(unsigned index);
+      int allocate_index(RtEvent &ready_event);
+      void free_index(unsigned index, RtEvent free_event);
     protected:
       bool allocate_local_indexes(
             const std::vector<size_t> &sizes,
@@ -2947,6 +2947,7 @@ namespace Legion {
       std::set<RegionNode*> local_trees;
       std::map<FieldID,FieldInfo> fields;
       FieldMask available_indexes;
+      std::map<int,RtEvent> available_events;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help

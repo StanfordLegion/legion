@@ -4530,6 +4530,26 @@ legion_accessor_array_##DIM##d_destroy(legion_accessor_array_##DIM##d_t handle_)
 LEGION_FOREACH_N(DESTROY_ACCESSOR)
 #undef DESTROY_ACCESSOR
 
+#define RAW_RECT_PTR(DIM) \
+void *                    \
+legion_accessor_array_##DIM##d_raw_rect_ptr(legion_accessor_array_##DIM##d_t handle_, \
+                                            legion_rect_##DIM##d_t rect_, \
+                                            legion_rect_##DIM##d_t *subrect_, \
+                                            legion_byte_offset_t *offsets_) \
+{ \
+  UnsafeFieldAccessor<char,DIM,coord_t,Realm::AffineAccessor<char,DIM,coord_t> > \
+    *handle = CObjectWrapper::unwrap(handle_); \
+  Rect##DIM##D rect = CObjectWrapper::unwrap(rect_); \
+  \
+  void *data = handle->ptr(rect.lo); \
+  *subrect_ = CObjectWrapper::wrap(rect); \
+  for (int i = 0; i < DIM; i++) \
+    offsets_[i] = CObjectWrapper::wrap(handle->accessor.strides[i]); \
+  return data; \
+}
+LEGION_FOREACH_N(RAW_RECT_PTR)
+#undef RAW_RECT_PTR
+
 #if LEGION_MAX_DIM >= 1
 legion_accessor_array_1d_t
 legion_physical_region_get_field_accessor_array_1d_with_transform(
@@ -4559,22 +4579,6 @@ legion_physical_region_get_field_accessor_array_1d_with_transform(
   }
 
   return CObjectWrapper::wrap(accessor);
-}
-
-void *
-legion_accessor_array_1d_raw_rect_ptr(legion_accessor_array_1d_t handle_,
-                                      legion_rect_1d_t rect_,
-                                      legion_rect_1d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,1,coord_t,Realm::AffineAccessor<char,1,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect1D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  return data;
 }
 #endif
 
@@ -4608,23 +4612,6 @@ legion_physical_region_get_field_accessor_array_2d_with_transform(
 
   return CObjectWrapper::wrap(accessor);
 }
-
-void *
-legion_accessor_array_2d_raw_rect_ptr(legion_accessor_array_2d_t handle_,
-                                      legion_rect_2d_t rect_,
-                                      legion_rect_2d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,2,coord_t,Realm::AffineAccessor<char,2,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect2D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  return data;
-}
 #endif
 
 #if LEGION_MAX_DIM >= 3
@@ -4656,24 +4643,6 @@ legion_physical_region_get_field_accessor_array_3d_with_transform(
   }
 
   return CObjectWrapper::wrap(accessor);
-}
-
-void *
-legion_accessor_array_3d_raw_rect_ptr(legion_accessor_array_3d_t handle_,
-                                      legion_rect_3d_t rect_,
-                                      legion_rect_3d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,3,coord_t,Realm::AffineAccessor<char,3,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect3D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  return data;
 }
 #endif
 
@@ -4707,25 +4676,6 @@ legion_physical_region_get_field_accessor_array_4d_with_transform(
 
   return CObjectWrapper::wrap(accessor);
 }
-
-void *
-legion_accessor_array_4d_raw_rect_ptr(legion_accessor_array_4d_t handle_,
-                                      legion_rect_4d_t rect_,
-                                      legion_rect_4d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,4,coord_t,Realm::AffineAccessor<char,4,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect4D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  return data;
-}
 #endif
 
 #if LEGION_MAX_DIM >= 5
@@ -4757,26 +4707,6 @@ legion_physical_region_get_field_accessor_array_5d_with_transform(
   }
 
   return CObjectWrapper::wrap(accessor);
-}
-
-void *
-legion_accessor_array_5d_raw_rect_ptr(legion_accessor_array_5d_t handle_,
-                                      legion_rect_5d_t rect_,
-                                      legion_rect_5d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,5,coord_t,Realm::AffineAccessor<char,5,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect5D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  offsets_[4] = CObjectWrapper::wrap(handle->accessor.strides[4]);
-  return data;
 }
 #endif
 
@@ -4810,27 +4740,6 @@ legion_physical_region_get_field_accessor_array_6d_with_transform(
 
   return CObjectWrapper::wrap(accessor);
 }
-
-void *
-legion_accessor_array_6d_raw_rect_ptr(legion_accessor_array_6d_t handle_,
-                                      legion_rect_6d_t rect_,
-                                      legion_rect_6d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,6,coord_t,Realm::AffineAccessor<char,6,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect6D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  offsets_[4] = CObjectWrapper::wrap(handle->accessor.strides[4]);
-  offsets_[5] = CObjectWrapper::wrap(handle->accessor.strides[5]);
-  return data;
-}
 #endif
 
 #if LEGION_MAX_DIM >= 7
@@ -4862,28 +4771,6 @@ legion_physical_region_get_field_accessor_array_7d_with_transform(
   }
 
   return CObjectWrapper::wrap(accessor);
-}
-
-void *
-legion_accessor_array_7d_raw_rect_ptr(legion_accessor_array_7d_t handle_,
-                                      legion_rect_7d_t rect_,
-                                      legion_rect_7d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,7,coord_t,Realm::AffineAccessor<char,7,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect7D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  offsets_[4] = CObjectWrapper::wrap(handle->accessor.strides[4]);
-  offsets_[5] = CObjectWrapper::wrap(handle->accessor.strides[5]);
-  offsets_[6] = CObjectWrapper::wrap(handle->accessor.strides[6]);
-  return data;
 }
 #endif
 
@@ -4917,29 +4804,6 @@ legion_physical_region_get_field_accessor_array_8d_with_transform(
 
   return CObjectWrapper::wrap(accessor);
 }
-
-void *
-legion_accessor_array_8d_raw_rect_ptr(legion_accessor_array_8d_t handle_,
-                                      legion_rect_8d_t rect_,
-                                      legion_rect_8d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,8,coord_t,Realm::AffineAccessor<char,8,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect8D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  offsets_[4] = CObjectWrapper::wrap(handle->accessor.strides[4]);
-  offsets_[5] = CObjectWrapper::wrap(handle->accessor.strides[5]);
-  offsets_[6] = CObjectWrapper::wrap(handle->accessor.strides[6]);
-  offsets_[7] = CObjectWrapper::wrap(handle->accessor.strides[7]);
-  return data;
-}
 #endif
 
 #if LEGION_MAX_DIM >= 9
@@ -4971,30 +4835,6 @@ legion_physical_region_get_field_accessor_array_9d_with_transform(
   }
 
   return CObjectWrapper::wrap(accessor);
-}
-
-void *
-legion_accessor_array_9d_raw_rect_ptr(legion_accessor_array_9d_t handle_,
-                                      legion_rect_9d_t rect_,
-                                      legion_rect_9d_t *subrect_,
-                                      legion_byte_offset_t *offsets_)
-{
-  UnsafeFieldAccessor<char,9,coord_t,Realm::AffineAccessor<char,9,coord_t> >
-    *handle = CObjectWrapper::unwrap(handle_);
-  Rect9D rect = CObjectWrapper::unwrap(rect_);
-
-  void *data = handle->ptr(rect.lo);
-  *subrect_ = CObjectWrapper::wrap(rect); // no checks
-  offsets_[0] = CObjectWrapper::wrap(handle->accessor.strides[0]);
-  offsets_[1] = CObjectWrapper::wrap(handle->accessor.strides[1]);
-  offsets_[2] = CObjectWrapper::wrap(handle->accessor.strides[2]);
-  offsets_[3] = CObjectWrapper::wrap(handle->accessor.strides[3]);
-  offsets_[4] = CObjectWrapper::wrap(handle->accessor.strides[4]);
-  offsets_[5] = CObjectWrapper::wrap(handle->accessor.strides[5]);
-  offsets_[6] = CObjectWrapper::wrap(handle->accessor.strides[6]);
-  offsets_[7] = CObjectWrapper::wrap(handle->accessor.strides[7]);
-  offsets_[8] = CObjectWrapper::wrap(handle->accessor.strides[8]);
-  return data;
 }
 #endif
 

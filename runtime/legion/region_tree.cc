@@ -10101,6 +10101,7 @@ namespace Legion {
         context->runtime->send_field_alloc_request(owner_space, rez);
         return allocated_event;
       }
+      std::set<RtEvent> allocated_events;
       std::deque<AddressSpaceID> targets;
       unsigned index = 0;
       {
@@ -10111,13 +10112,16 @@ namespace Legion {
             "Illegal duplicate field ID %d used by the "
                           "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
-        int result = allocate_index();
+        RtEvent ready_event;
+        int result = allocate_index(ready_event);
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
             "Exceeded maximum number of allocated fields for "
                           "field space %x. Change LEGION_MAX_FIELDS from %d and"
                           " related macros at the top of legion_config.h and "
                           "recompile.", handle.id, LEGION_MAX_FIELDS)
+        if (ready_event.exists())
+          allocated_events.insert(ready_event);
         index = result;
         fields[fid] = FieldInfo(size, index, serdez_id);
         if (has_remote_instances())
@@ -10128,7 +10132,6 @@ namespace Legion {
       }
       if (!targets.empty())
       {
-        std::set<RtEvent> allocated_events;
         for (std::deque<AddressSpaceID>::const_iterator it = targets.begin();
               it != targets.end(); it++)
         {
@@ -10147,9 +10150,11 @@ namespace Legion {
           }
           context->runtime->send_field_alloc_notification(*it, rez);
         }
-        return Runtime::merge_events(allocated_events);
       }
-      return RtEvent::NO_RT_EVENT;
+      if (!allocated_events.empty())
+        return Runtime::merge_events(allocated_events);
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10183,6 +10188,7 @@ namespace Legion {
       }
       std::deque<AddressSpaceID> targets;
       std::vector<unsigned> indexes(fids.size());
+      std::set<RtEvent> allocated_events;
       {
         // We're the owner so do the field allocation
         AutoLock n_lock(node_lock);
@@ -10194,13 +10200,16 @@ namespace Legion {
               "Illegal duplicate field ID %d used by the "
                             "application in field space %d", fid, handle.id)
           // Find an index in which to allocate this field  
-          int result = allocate_index();
+          RtEvent ready_event;
+          int result = allocate_index(ready_event);
           if (result < 0)
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
                             "field space %x. Change LEGION_MAX_FIELDS from %d "
                             "and related macros at the top of legion_config.h "
                             "and recompile.", handle.id, LEGION_MAX_FIELDS)
+          if (ready_event.exists())
+            allocated_events.insert(ready_event);
           unsigned index = result;
           fields[fid] = FieldInfo(sizes[idx], index, serdez_id);
           indexes[idx] = index;
@@ -10213,7 +10222,6 @@ namespace Legion {
       }
       if (!targets.empty())
       {
-        std::set<RtEvent> allocated_events;
         for (std::deque<AddressSpaceID>::const_iterator it = targets.begin();
               it != targets.end(); it++)
         {
@@ -10235,9 +10243,11 @@ namespace Legion {
           }
           context->runtime->send_field_alloc_notification(*it, rez);
         }
-        return Runtime::merge_events(allocated_events);
       }
-      return RtEvent::NO_RT_EVENT;
+      if (!allocated_events.empty())
+        return Runtime::merge_events(allocated_events);
+      else
+        return RtEvent::NO_RT_EVENT;
     }
 
     //--------------------------------------------------------------------------
@@ -10252,10 +10262,12 @@ namespace Legion {
           rez.serialize(handle);
           rez.serialize<size_t>(1);
           rez.serialize(fid);
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
         }
         context->runtime->send_field_free(owner_space, rez);
         return;
       }
+      RtUserEvent freed_event;
       std::deque<AddressSpaceID> targets;
       {
         // We can actually do this with the read-only lock since we're
@@ -10264,28 +10276,38 @@ namespace Legion {
         AutoLock n_lock(node_lock); 
         std::map<FieldID,FieldInfo>::iterator finder = fields.find(fid);
         finder->second.destroyed = true;
-        if (is_owner())
-          free_index(finder->second.idx);
         if (is_owner() && has_remote_instances())
         {
           FindTargetsFunctor functor(targets);
           map_over_remote_instances(functor);
+#ifdef DEBUG_LEGION
+          assert(!targets.empty());
+#endif
+          freed_event = Runtime::create_rt_user_event();
         }
+        if (is_owner())
+          free_index(finder->second.idx, freed_event);
       }
       if (!targets.empty())
       {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize<size_t>(1);
-          rez.serialize(fid);
-        }
+        std::set<RtEvent> preconditions;
         for (std::deque<AddressSpaceID>::const_iterator it = 
               targets.begin(); it != targets.end(); it++)
         {
+          RtUserEvent pre = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<size_t>(1);
+            rez.serialize(fid);
+            rez.serialize(pre);
+          }
           context->runtime->send_field_free(*it, rez);
+          preconditions.insert(pre);
         }
+        Runtime::trigger_event(freed_event, 
+            Runtime::merge_events(preconditions));
       }
     }
 
@@ -10303,45 +10325,57 @@ namespace Legion {
           rez.serialize<size_t>(to_free.size());
           for (unsigned idx = 0; idx < to_free.size(); idx++)
             rez.serialize(to_free[idx]);
+          rez.serialize(RtUserEvent::NO_RT_USER_EVENT);
         }
         context->runtime->send_field_free(owner_space, rez);
         return;
       }
+      RtUserEvent freed_event;
       std::deque<AddressSpaceID> targets;
       {
         // We can actually do this with the read-only lock since we're
         // not actually going to change the allocation of the fields
         // data structure
         AutoLock n_lock(node_lock); 
+        if (is_owner() && has_remote_instances())
+        {
+          FindTargetsFunctor functor(targets);
+          map_over_remote_instances(functor);
+#ifdef DEBUG_LEGION
+          assert(!targets.empty());
+#endif
+          freed_event = Runtime::create_rt_user_event();
+        }
         for (std::vector<FieldID>::const_iterator it = to_free.begin();
               it != to_free.end(); it++)
         {
           std::map<FieldID,FieldInfo>::iterator finder = fields.find(*it);
           finder->second.destroyed = true;  
           if (is_owner())
-            free_index(finder->second.idx);
-        }
-        if (is_owner() && has_remote_instances())
-        {
-          FindTargetsFunctor functor(targets);
-          map_over_remote_instances(functor);
+            free_index(finder->second.idx, freed_event);
         }
       }
       if (!targets.empty())
       {
-        Serializer rez;
-        {
-          RezCheck z(rez);
-          rez.serialize(handle);
-          rez.serialize<size_t>(to_free.size());
-          for (unsigned idx = 0; idx < to_free.size(); idx++)
-            rez.serialize(to_free[idx]);
-        }
+        std::set<RtEvent> preconditions;
         for (std::deque<AddressSpaceID>::const_iterator it = 
               targets.begin(); it != targets.end(); it++)
         {
+          RtUserEvent pre = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(handle);
+            rez.serialize<size_t>(to_free.size());
+            for (unsigned idx = 0; idx < to_free.size(); idx++)
+              rez.serialize(to_free[idx]);
+            rez.serialize(pre);
+          }
           context->runtime->send_field_free(*it, rez);
+          preconditions.insert(pre);
         }
+        Runtime::trigger_event(freed_event, 
+            Runtime::merge_events(preconditions));
       }
     }
 
@@ -10901,8 +10935,12 @@ namespace Legion {
       std::vector<FieldID> fields(num_fields);
       for (unsigned idx = 0; idx < num_fields; idx++)
         derez.deserialize(fields[idx]);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
       FieldSpaceNode *node = forest->get_node(handle);
       node->free_fields(fields, source);
+      if (done_event.exists())
+        Runtime::trigger_event(done_event);
     }
 
     //--------------------------------------------------------------------------
@@ -11354,33 +11392,73 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int FieldSpaceNode::allocate_index(void)
+    int FieldSpaceNode::allocate_index(RtEvent &ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       int result = available_indexes.find_first_set();
-      if (result >= 0)
+      if ((result < 0) || 
+          // If we have slots for local fields then we can't use those
+          (result >= int(LEGION_MAX_FIELDS - runtime->max_local_fields)))
+        return -1;
+      std::map<int,RtEvent>::iterator finder = available_events.find(result);
+      if (finder != available_events.end())
       {
-        // If we have slots for local fields then we can't use those
-        if (result >= int(LEGION_MAX_FIELDS - runtime->max_local_fields))
-          return -1;
-        available_indexes.unset_bit(result);
+        if (!finder->second.has_triggered())
+        {
+          // Scan through and see if we can find any other free fields
+          // which either have no precondition or already have an event
+          // precondition that has triggered
+          int next = available_indexes.find_next_set(result+1);
+          bool found = false;
+          while ((next >= 0) && 
+                  (next < int(LEGION_MAX_FIELDS - runtime->max_local_fields)))
+          {
+            std::map<int,RtEvent>::iterator finder2 = 
+              available_events.find(next);
+            if (finder2 == available_events.end())
+            {
+              result = next;
+              found = true;
+              break;
+            }
+            else if (finder2->second.has_triggered())
+            {
+              result = next;
+              available_events.erase(finder2);
+              found = true;
+              break;
+            }
+            next = available_indexes.find_next_set(next+1);
+          }
+          if (!found)
+          {
+            ready_event = finder->second;
+            available_events.erase(finder);
+          }
+        }
+        else
+          available_events.erase(finder);
       }
+      available_indexes.unset_bit(result);
       return result;
     }
 
     //--------------------------------------------------------------------------
-    void FieldSpaceNode::free_index(unsigned index)
+    void FieldSpaceNode::free_index(unsigned index, RtEvent ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
       assert(!available_indexes.is_set(index));
+      assert(available_events.find(index) == available_events.end());
 #endif
       // Assume we are already holding the node lock
       available_indexes.set_bit(index);
+      if (ready_event.exists() && !ready_event.has_triggered())
+        available_events[index] = ready_event;
       // We also need to invalidate all our layout descriptions
       // that contain this field
       std::vector<LEGION_FIELD_MASK_FIELD_TYPE> to_delete;
