@@ -130,59 +130,74 @@ namespace Realm {
           impl->timeline.record_create_time();
       }
 
+      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
+
       // request allocation of storage - a true response means it was serviced right
       //  away
       Event ready_event;
-      if(m_impl->allocate_instance_storage(impl->me,
-					   ilg->bytes_used,
-					   ilg->alignment_reqd,
-					   wait_on)) {
-	assert(impl->metadata.inst_offset != (size_t)-1);
-	if(impl->metadata.inst_offset != (size_t)-2) {
+      switch(m_impl->allocate_instance_storage(impl->me,
+					       ilg->bytes_used,
+					       ilg->alignment_reqd,
+					       wait_on)) {
+      case MemoryImpl::ALLOC_INSTANT_SUCCESS:
+	{
 	  // successful allocation
+	  assert(impl->metadata.inst_offset != (size_t)-1);
+	  assert(impl->metadata.inst_offset != (size_t)-2);
 	  ready_event = Event::NO_EVENT;
 	  if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
 	    impl->timeline.record_ready_time();
-	} else {
+	  break;
+	}
+
+      case MemoryImpl::ALLOC_INSTANT_FAILURE:
+	{
 	  // generate a poisoned event for completion
+	  // NOTE: it is unsafe to look at the impl->metadata or the 
+	  //  passed-in instance layout at this point due to the possibility
+	  //  of an asynchronous destruction of the instance in a profiling
+	  //  handler
 	  GenEventImpl *ev = GenEventImpl::create_genevent();
 	  ready_event = ev->current_event();
 	  GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  break;
 	}
-      } else {
-	// we will probably need an event to track when it is ready
-	GenEventImpl *ev = GenEventImpl::create_genevent();
-	ready_event = ev->current_event();
-	bool alloc_done, alloc_successful;
-	// use mutex to avoid race on allocation callback
+
+      case MemoryImpl::ALLOC_DEFERRED:
 	{
-	  AutoHSLLock al(impl->mutex);
-	  if(impl->metadata.inst_offset != (size_t)-1) {
-	    alloc_done = true;
-	    alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
-	  } else {
-	    alloc_done = false;
-	    alloc_successful = false;
-	    impl->metadata.ready_event = ready_event;
+	  // we will probably need an event to track when it is ready
+	  GenEventImpl *ev = GenEventImpl::create_genevent();
+	  ready_event = ev->current_event();
+	  bool alloc_done, alloc_successful;
+	  // use mutex to avoid race on allocation callback
+	  {
+	    AutoHSLLock al(impl->mutex);
+	    if(impl->metadata.inst_offset != (size_t)-1) {
+	      alloc_done = true;
+	      alloc_successful = (impl->metadata.inst_offset != (size_t)-2);
+	    } else {
+	      alloc_done = false;
+	      alloc_successful = false;
+	      impl->metadata.ready_event = ready_event;
+	    }
 	  }
-	}
-	if(alloc_done) {
-	  // lost the race to the notification callback, so we trigger the
-	  //  ready event ourselves
-	  if(alloc_successful) {
-	    if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
-	      impl->timeline.record_ready_time();
-	    GenEventImpl::trigger(ready_event, false /*!poisoned*/);
-	    ready_event = Event::NO_EVENT;
-	  } else {
-	    // poison the ready event and still return it
-	    GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	  if(alloc_done) {
+	    // lost the race to the notification callback, so we trigger the
+	    //  ready event ourselves
+	    if(alloc_successful) {
+	      if(impl->measurements.wants_measurement<ProfilingMeasurements::InstanceTimeline>())
+		impl->timeline.record_ready_time();
+	      GenEventImpl::trigger(ready_event, false /*!poisoned*/);
+	      ready_event = Event::NO_EVENT;
+	    } else {
+	      // poison the ready event and still return it
+	      GenEventImpl::trigger(ready_event, true /*poisoned*/);
+	    }
 	  }
 	}
       }
 
       log_inst.info() << "instance created: inst=" << inst << " bytes=" << ilg->bytes_used << " ready=" << ready_event;
-      log_inst.debug() << "instance layout: inst=" << inst << " layout=" << *ilg;
       return ready_event;
     }
 
@@ -213,14 +228,14 @@ namespace Realm {
         (unsigned char*)m_impl->get_direct_ptr(0/*offset*/, 0/*size*/);
       size_t inst_offset = (size_t)(((unsigned char*)base) - impl_base);
 #ifndef NDEBUG
-      bool ok = 
+      MemoryImpl::AllocationResult result =
 #endif
         m_impl->allocate_instance_storage(impl->me,
 					  ilg->bytes_used,
 					  ilg->alignment_reqd,
 					  wait_on, 
                                           inst_offset);
-      assert(ok);
+      assert(result == MemoryImpl::ALLOC_INSTANT_SUCCESS);
 
       inst = impl->me;
       log_inst.info() << "external instance created: inst=" << inst;
