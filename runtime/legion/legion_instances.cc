@@ -247,11 +247,9 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_runtime->legion_spy_enabled);
 #endif
-      std::vector<FieldID> fields;  
-      owner->get_field_ids(allocated_fields, fields);
-      for (std::vector<FieldID>::const_iterator it = fields.begin();
-            it != fields.end(); it++)
-        LegionSpy::log_physical_instance_field(inst_event, *it);
+      for (std::map<FieldID,unsigned>::const_iterator it = 
+            field_indexes.begin(); it != field_indexes.end(); it++)
+        LegionSpy::log_physical_instance_field(inst_event, it->first);
     }
 
     //--------------------------------------------------------------------------
@@ -492,6 +490,11 @@ namespace Legion {
     {
       if (num_dims != total_dims)
         return false;
+      // This is a sound test, but it doesn't guarantee that the field sets
+      // match since fields can be allocated and freed between instance
+      // creations, so while this is a necessary precondition, it is not
+      // sufficient that the two sets of fields are the same, to guarantee
+      // that we actually need to check the FieldIDs which happens next
       if (layout->allocated_fields != allocated_fields)
         return false;
       // Layout descriptions are always complete so just check for conflicts
