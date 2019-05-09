@@ -177,7 +177,7 @@ if(Legion_USE_HWLOC)
 endif()
 
 if(Legion_USE_GASNet)
-  target_link_libraries(RealmRuntime PUBLIC GASNet::GASNet)
+  target_link_libraries(RealmRuntime PRIVATE GASNet::GASNet)
 endif()
 
 if(Legion_USE_LLVM)
