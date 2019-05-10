@@ -211,6 +211,9 @@ local function get_num_accessed_fields(node)
   elseif node:is(ast.specialized.expr.Deref) then
     return get_num_accessed_fields(node.value)
 
+  elseif node:is(ast.specialized.expr.AddressOf) then
+    return get_num_accessed_fields(node.value)
+
   elseif node:is(ast.specialized.expr.Cast) then
     return get_num_accessed_fields(node.args[1])
 
@@ -267,6 +270,11 @@ local function get_nth_field_access(node, idx)
     }
 
   elseif node:is(ast.specialized.expr.Deref) then
+    return node {
+      value = get_nth_field_access(node.value, idx),
+    }
+
+  elseif node:is(ast.specialized.expr.AddressOf) then
     return node {
       value = get_nth_field_access(node.value, idx),
     }
@@ -355,6 +363,10 @@ local predicates = {
     function(node)
       return normalize.normalized(node.value)
     end,
+  [ast.specialized.expr.AddressOf]       =
+    function(node)
+      return normalize.normalized(node.value)
+    end,
   [ast.specialized.expr.IndexAccess] =
     function(node)
       return
@@ -402,6 +414,8 @@ local expr_region = normalize_expr_factory("ispace", false, true)
 local expr_field_access = normalize_expr_factory("value", false, true)
 
 local expr_deref = normalize_expr_factory("value", false, true)
+
+local expr_address_of = normalize_expr_factory("value", false, true)
 
 local function expr_index_access(stats, expr)
   local value = normalize.expr(stats, expr.value, true)
@@ -485,6 +499,7 @@ local normalize_expr_table = {
   [ast.specialized.expr.Region]                     = expr_region,
   [ast.specialized.expr.FieldAccess]                = expr_field_access,
   [ast.specialized.expr.Deref]                      = expr_deref,
+  [ast.specialized.expr.AddressOf]                  = expr_address_of,
   [ast.specialized.expr.IndexAccess]                = expr_index_access,
   [ast.specialized.expr.MethodCall]                 = expr_method_call,
   [ast.specialized.expr.Call]                       = expr_call,
