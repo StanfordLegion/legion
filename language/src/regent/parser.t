@@ -1438,6 +1438,12 @@ parser.expr_unary = function(precedence)
         annotations = ast.default_annotations(),
         span = ast.span(start, p),
       }
+    elseif op == "&" then
+      return ast.unspecialized.expr.AddressOf {
+        value = rhs,
+        annotations = ast.default_annotations(),
+        span = ast.span(start, p),
+      }
     end
     return ast.unspecialized.expr.Unary {
       op = op,
@@ -1463,6 +1469,7 @@ end
 
 parser.expr = parsing.Pratt()
   :prefix("@", parser.expr_unary(50))
+  :prefix("&", parser.expr_unary(50))
   :prefix("-", parser.expr_unary(50))
   :prefix("not", parser.expr_unary(50))
   :infix("*", 40, parser.expr_binary_left)

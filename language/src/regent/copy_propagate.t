@@ -177,7 +177,7 @@ function copy_propagate.expr_regent_cast(cx, expr)
   }
 end
 
-function copy_propagate.expr_field_access_or_deref(cx, expr)
+function copy_propagate.expr_field_access_or_deref_or_address_of(cx, expr)
   return expr {
     value = copy_propagate.expr(cx, expr.value),
   }
@@ -253,8 +253,9 @@ local copy_propagate_expr_table = {
   [ast.typed.expr.DynamicCast]                = copy_propagate.expr_regent_cast,
   [ast.typed.expr.StaticCast]                 = copy_propagate.expr_regent_cast,
   [ast.typed.expr.UnsafeCast]                 = copy_propagate.expr_regent_cast,
-  [ast.typed.expr.FieldAccess]                = copy_propagate.expr_field_access_or_deref,
-  [ast.typed.expr.Deref]                      = copy_propagate.expr_field_access_or_deref,
+  [ast.typed.expr.FieldAccess]                = copy_propagate.expr_field_access_or_deref_or_address_of,
+  [ast.typed.expr.Deref]                      = copy_propagate.expr_field_access_or_deref_or_address_of,
+  [ast.typed.expr.AddressOf]                  = copy_propagate.expr_field_access_or_deref_or_address_of,
   [ast.typed.expr.IndexAccess]                = copy_propagate.expr_index_access,
   [ast.typed.expr.Ctor]                       = copy_propagate.expr_ctor,
   [ast.typed.expr.Unary]                      = copy_propagate.expr_unary,
