@@ -271,11 +271,12 @@ namespace Legion {
       // allocation was not local.
       bool allocate_field(FieldSpace handle, size_t field_size, 
                           FieldID fid, CustomSerdezID serdez_id);
-      void free_field(FieldSpace handle, FieldID fid);
+      void free_field(FieldSpace handle, FieldID fid, RtEvent freed);
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
-      void free_fields(FieldSpace handle, const std::vector<FieldID> &to_free);
+      void free_fields(FieldSpace handle, 
+                       const std::vector<FieldID> &to_free, RtEvent freed);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -283,7 +284,7 @@ namespace Legion {
                                  CustomSerdezID serdez_id,
                                  const std::set<unsigned> &allocated_indexes,
                                  std::vector<unsigned> &new_indexes);
-      void free_local_fields(FieldSpace handle,
+      void free_local_fields(FieldSpace handle, RtEvent free_event,
                              const std::vector<FieldID> &to_free,
                              const std::vector<unsigned> &indexes);
       void update_local_fields(FieldSpace handle,

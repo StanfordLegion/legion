@@ -401,48 +401,28 @@ namespace Legion {
       void log_created_requirements(void);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                     const std::map<LogicalRegion,bool> &regions);
-      virtual void register_region_deletions(
-                          const std::set<LogicalRegion> &regions);
-    public:
+                     const std::set<LogicalRegion> &regions);
       virtual void register_field_creations(
-            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields);
-      virtual void register_field_deletions(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
-    public:
+            const std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_space_creations(
                           const std::set<FieldSpace> &spaces);
-      virtual void register_field_space_deletions(
-                          const std::set<FieldSpace> &spaces);
-    public:
       virtual void register_index_space_creations(
                           const std::set<IndexSpace> &spaces);
-      virtual void register_index_space_deletions(
-                          const std::set<IndexSpace> &spaces);
-    public:
       virtual void register_index_partition_creations(
-                          const std::set<IndexPartition> &parts);
-      virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
     public:
       void register_region_creation(LogicalRegion handle, bool task_local);
-      void register_region_deletion(LogicalRegion handle);
     public:
       void register_field_creation(FieldSpace space, FieldID fid, bool local);
       void register_field_creations(FieldSpace space, bool local,
                                     const std::vector<FieldID> &fields);
-      void register_field_deletions(FieldSpace space,
-                                    const std::set<FieldID> &to_free);
     public:
       void register_field_space_creation(FieldSpace space);
-      void register_field_space_deletion(FieldSpace space);
     public:
       bool has_created_index_space(IndexSpace space) const;
       void register_index_space_creation(IndexSpace space);
-      void register_index_space_deletion(IndexSpace space);
     public:
       void register_index_partition_creation(IndexPartition handle);
-      void register_index_partition_deletion(IndexPartition handle);
     public:
       bool was_created_requirement_deleted(const RegionRequirement &req) const;
     public:
@@ -1145,10 +1125,7 @@ namespace Legion {
     protected:
       // Track information for locally allocated fields
       mutable LocalLock                                 local_field_lock;
-      std::map<FieldSpace,std::vector<LocalFieldInfo> > local_fields;
-    protected:
-      // Track information for locally created regions
-      std::set<LogicalRegion> local_regions;
+      std::map<FieldSpace,std::vector<LocalFieldInfo> > local_field_infos;
     protected:
       // Cache for fill views
       mutable LocalLock     fill_view_lock;            

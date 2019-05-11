@@ -401,36 +401,14 @@ namespace Legion {
       // be returning values from the utility processor
       AutoLock priv_lock(privilege_lock);
 #ifdef DEBUG_LEGION
+      assert(local_regions.find(handle) == local_regions.end());
       assert(created_regions.find(handle) == created_regions.end());
 #endif
-      created_regions[handle] = task_local; 
+      if (task_local)
+        local_regions.insert(handle);
+      else
+        created_regions.insert(handle);
       add_created_region(handle, task_local);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_region_deletion(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      // Hold the operation lock when doing this since children could
-      // be returning values from the utility processor
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::map<LogicalRegion,bool>::iterator finder =
-          created_regions.find(handle);
-        // See if we created this region, if so remove it from the list
-        // of created regions, otherwise add it to the list of deleted
-        // regions to flow backwards
-        if (finder != created_regions.end())
-        {
-          created_regions.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_regions.insert(handle);
-      }
-      if (finalize)
-        runtime->finalize_logical_region_destroy(handle);
     }
 
     //--------------------------------------------------------------------------
@@ -441,9 +419,13 @@ namespace Legion {
       AutoLock priv_lock(privilege_lock);
       std::pair<FieldSpace,FieldID> key(handle,fid);
 #ifdef DEBUG_LEGION
+      assert(local_fields.find(key) == local_fields.end());
       assert(created_fields.find(key) == created_fields.end());
 #endif
-      created_fields[key] = local;
+      if (local)
+        local_fields.insert(key);
+      else
+        created_fields.insert(key);
     }
 
     //--------------------------------------------------------------------------
@@ -452,41 +434,28 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoLock priv_lock(privilege_lock);
-      for (unsigned idx = 0; idx < fields.size(); idx++)
+      if (local)
       {
-        std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
-#ifdef DEBUG_LEGION
-        assert(created_fields.find(key) == created_fields.end());
-#endif
-        created_fields[key] = local;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_field_deletions(FieldSpace handle,
-                                         const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      std::set<FieldID> to_finalize;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<FieldID>::const_iterator it = to_free.begin();
-              it != to_free.end(); it++)
+        for (unsigned idx = 0; idx < fields.size(); idx++)
         {
-          std::pair<FieldSpace,FieldID> key(handle,*it);
-          std::map<std::pair<FieldSpace,FieldID>,bool>::iterator finder = 
-            created_fields.find(key);
-          if (finder != created_fields.end())
-          {
-            created_fields.erase(finder);
-            to_finalize.insert(*it);
-          }
-          else
-            deleted_fields.insert(key);
+          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
+#ifdef DEBUG_LEGION
+          assert(local_fields.find(key) == local_fields.end());
+#endif
+          local_fields.insert(key);
         }
       }
-      if (!to_finalize.empty())
-        runtime->finalize_field_destroy(handle, to_finalize);
+      else
+      {
+        for (unsigned idx = 0; idx < fields.size(); idx++)
+        {
+          std::pair<FieldSpace,FieldID> key(handle,fields[idx]);
+#ifdef DEBUG_LEGION
+          assert(created_fields.find(key) == created_fields.end());
+#endif
+          created_fields.insert(key);
+        }
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -498,39 +467,6 @@ namespace Legion {
       assert(created_field_spaces.find(space) == created_field_spaces.end());
 #endif
       created_field_spaces.insert(space);
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_field_space_deletion(FieldSpace space)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::deque<FieldID> to_delete;
-        for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
-              created_fields.begin(); it != created_fields.end(); it++)
-        {
-          if (it->first.first == space)
-            to_delete.push_back(it->first.second);
-        }
-        for (unsigned idx = 0; idx < to_delete.size(); idx++)
-        {
-          std::pair<FieldSpace,FieldID> key(space, to_delete[idx]);
-          created_fields.erase(key);
-        }
-        std::set<FieldSpace>::iterator finder = 
-          created_field_spaces.find(space);
-        if (finder != created_field_spaces.end())
-        {
-          created_field_spaces.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_field_spaces.insert(space);
-      }
-      if (finalize)
-        runtime->finalize_field_space_destroy(space);
     }
 
     //--------------------------------------------------------------------------
@@ -553,27 +489,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_index_space_deletion(IndexSpace space)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::set<IndexSpace>::iterator finder = 
-          created_index_spaces.find(space);
-        if (finder != created_index_spaces.end())
-        {
-          created_index_spaces.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_index_spaces.insert(space);
-      }
-      if (finalize)
-        runtime->finalize_index_space_destroy(space);
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::register_index_partition_creation(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -586,27 +501,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_index_partition_deletion(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      bool finalize = false;
-      {
-        AutoLock priv_lock(privilege_lock);
-        std::set<IndexPartition>::iterator finder = 
-          created_index_partitions.find(handle);
-        if (finder != created_index_partitions.end())
-        {
-          created_index_partitions.erase(finder);
-          finalize = true;
-        }
-        else
-          deleted_index_partitions.insert(handle);
-      }
-      if (finalize)
-        runtime->finalize_index_partition_destroy(handle);
-    }
-
-    //--------------------------------------------------------------------------
     bool TaskContext::was_created_requirement_deleted(
                                              const RegionRequirement &req) const
     //--------------------------------------------------------------------------
@@ -614,102 +508,41 @@ namespace Legion {
       // No need to worry about deleted field creation requirements here
       // since this method is only called for requirements with returnable
       // privileges and therefore we just need to see if the region is
-      // still in the set of created regions.
+      // still in the set of created regions. 
+      // Same thing applies to local_regions
       return (created_regions.find(req.region) == created_regions.end());
     }
 
     //--------------------------------------------------------------------------
     void TaskContext::register_region_creations(
-                                       const std::map<LogicalRegion,bool> &regs)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock priv_lock(privilege_lock);
-      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
-            it != regs.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_regions.find(it->first) == created_regions.end());
-#endif
-        created_regions[it->first] = it->second;
-        add_created_region(it->first, it->second);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_region_deletions(
                                             const std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
     {
-      std::vector<LogicalRegion> to_finalize;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<LogicalRegion>::const_iterator it = regs.begin();
-              it != regs.end(); it++)
-        {
-          std::map<LogicalRegion,bool>::iterator finder =
-            created_regions.find(*it);
-          if (finder != created_regions.end())
-          {
-            created_regions.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_regions.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<LogicalRegion>::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-          runtime->finalize_logical_region_destroy(*it);
-      }
-    } 
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_field_creations(
-                     const std::map<std::pair<FieldSpace,FieldID>,bool> &fields)
-    //--------------------------------------------------------------------------
-    {
       AutoLock priv_lock(privilege_lock);
-      for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
+      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+            it != regs.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(it->first) == created_fields.end());
+        assert(created_regions.find(*it) == created_regions.end());
 #endif
-        created_fields.insert(*it);
+        created_regions.insert(*it);
+        add_created_region(*it, false/*task local*/);
       }
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_field_deletions(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+    void TaskContext::register_field_creations(
+                         const std::set<std::pair<FieldSpace,FieldID> > &fields)
     //--------------------------------------------------------------------------
     {
-      std::map<FieldSpace,std::set<FieldID> > to_finalize;
+      AutoLock priv_lock(privilege_lock);
+      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
       {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              fields.begin(); it != fields.end(); it++)
-        {
-          std::map<std::pair<FieldSpace,FieldID>,bool>::iterator finder = 
-            created_fields.find(*it);
-          if (finder != created_fields.end())
-          {
-            created_fields.erase(finder);
-            to_finalize[it->first].insert(it->second);
-          }
-          else
-            deleted_fields.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::map<FieldSpace,std::set<FieldID> >::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-        {
-          runtime->finalize_field_destroy(it->first, it->second);
-        }
+#ifdef DEBUG_LEGION
+        assert(created_fields.find(*it) == created_fields.end());
+#endif
+        created_fields.insert(*it);
       }
     }
 
@@ -730,47 +563,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::register_field_space_deletions(
-                                            const std::set<FieldSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldSpace> to_finalize;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-              it != spaces.end(); it++)
-        {
-          std::deque<FieldID> to_delete;
-          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator cit 
-                = created_fields.begin(); cit != created_fields.end(); cit++)
-          {
-            if (cit->first.first == *it)
-              to_delete.push_back(cit->first.second);
-          }
-          for (unsigned idx = 0; idx < to_delete.size(); idx++)
-          {
-            std::pair<FieldSpace,FieldID> key(*it, to_delete[idx]);
-            created_fields.erase(key);
-          }
-          std::set<FieldSpace>::iterator finder = created_field_spaces.find(*it);
-          if (finder != created_field_spaces.end())
-          {
-            created_field_spaces.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_field_spaces.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<FieldSpace>::const_iterator it = to_finalize.begin();
-              it != to_finalize.end(); it++)
-          runtime->finalize_field_space_destroy(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::register_index_space_creations(
                                             const std::set<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
@@ -783,36 +575,6 @@ namespace Legion {
         assert(created_index_spaces.find(*it) == created_index_spaces.end());
 #endif
         created_index_spaces.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_index_space_deletions(
-                                            const std::set<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<IndexSpace> to_finalize;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-              it != spaces.end(); it++)
-        {
-          std::set<IndexSpace>::iterator finder = 
-            created_index_spaces.find(*it);
-          if (finder != created_index_spaces.end())
-          {
-            created_index_spaces.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_index_spaces.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<IndexSpace>::const_iterator it = to_finalize.begin();
-              it != to_finalize.end(); it++)
-          runtime->finalize_index_space_destroy(*it);
       }
     }
 
@@ -830,36 +592,6 @@ namespace Legion {
                created_index_partitions.end());
 #endif
         created_index_partitions.insert(*it);
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void TaskContext::register_index_partition_deletions(
-                                          const std::set<IndexPartition> &parts)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<IndexPartition> to_finalize;
-      {
-        AutoLock priv_lock(privilege_lock);
-        for (std::set<IndexPartition>::const_iterator it = parts.begin();
-              it != parts.end(); it++)
-        {
-          std::set<IndexPartition>::iterator finder = 
-            created_index_partitions.find(*it);
-          if (finder != created_index_partitions.end())
-          {
-            created_index_partitions.erase(finder);
-            to_finalize.push_back(*it);
-          }
-          else
-            deleted_index_partitions.insert(*it);
-        }
-      }
-      if (!to_finalize.empty())
-      {
-        for (std::vector<IndexPartition>::const_iterator it = 
-              to_finalize.begin(); it != to_finalize.end(); it++)
-          runtime->finalize_index_partition_destroy(*it);
       }
     }
 
@@ -2116,7 +1848,7 @@ namespace Legion {
 #else
         InnerContext *parent_ctx = static_cast<InnerContext*>(owner_ctx);
 #endif
-        parent_ctx->clone_local_fields(local_fields);
+        parent_ctx->clone_local_fields(local_field_infos);
       }
       if (!remote_context)
         runtime->register_local_context(context_uid, this);
@@ -2166,25 +1898,8 @@ namespace Legion {
         Runtime::trigger_event(window_wait);
       }
       // No need for the lock here since we're being cleaned up
-      if (!local_fields.empty())
-      {
-        for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
-              it = local_fields.begin(); it != local_fields.end(); it++)
-        {
-          const std::vector<LocalFieldInfo> &infos = it->second;
-          std::vector<FieldID> to_free;
-          std::vector<unsigned> indexes;
-          for (unsigned idx = 0; idx < infos.size(); idx++)
-          {
-            if (infos[idx].ancestor)
-              continue;
-            to_free.push_back(infos[idx].fid); 
-            indexes.push_back(infos[idx].index);
-          }
-          if (!to_free.empty())
-            runtime->forest->free_local_fields(it->first, to_free, indexes);
-        }
-      }
+      if (!local_field_infos.empty())
+        local_field_infos.clear();
       // Unregister ourselves from any tracking contexts that we might have
       if (!tree_equivalence_sets.empty())
       {
@@ -2478,9 +2193,10 @@ namespace Legion {
       rez.serialize(find_parent_context()->get_context_uid());
       // Finally pack the local field infos
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
-      rez.serialize<size_t>(local_fields.size());
+      rez.serialize<size_t>(local_field_infos.size());
       for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
-            it = local_fields.begin(); it != local_fields.end(); it++)
+            it = local_field_infos.begin(); 
+            it != local_field_infos.end(); it++)
       {
         rez.serialize(it->first);
         rez.serialize<size_t>(it->second.size());
@@ -2526,13 +2242,37 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Check to see if this is a top-level index space, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_index_space(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index space %x in task %s (UID %lld) "
+            "which is not a top-level index space. Legion only permits "
+            "top-level index spaces to be destroyed.", handle.get_id(),
+            get_task_name(), get_unique_id())
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        AutoLock priv_lock(privilege_lock);
+        std::set<IndexSpace>::iterator finder = 
+          created_index_spaces.find(handle);
+        if (finder != created_index_spaces.end())
+          created_index_spaces.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index space %x in task %s (UID %lld) "
+            "which is not the task that made the index space or one of its "
+            "ancestor tasks. Index space deletions must be lexicographically "
+            "scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_index.debug("Destroying index space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_space_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->forest->destroy_index_space(handle, runtime->address_space); 
     }
 
     //--------------------------------------------------------------------------
@@ -2540,13 +2280,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        AutoLock priv_lock(privilege_lock);
+        std::set<IndexPartition>::iterator finder = 
+          created_index_partitions.find(handle);
+        if (finder != created_index_partitions.end())
+          created_index_partitions.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index partition %x in task %s (UID %lld) "
+            "which is not the task that made the index partition or one of its "
+            "ancestor tasks. Index partition deletions must be " 
+            "lexicographically scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
-      log_index.debug("Destroying index partition %x in task %s (ID %lld)", 
+      log_index.debug("Destroying index partition %x in task %s (ID %lld)",
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_index_part_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->forest->destroy_index_partition(handle, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -3465,13 +3221,29 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        AutoLock priv_lock(privilege_lock);
+        std::set<FieldSpace>::iterator finder = 
+          created_field_spaces.find(handle);
+        if (finder != created_field_spaces.end())
+          created_field_spaces.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy field space %x in task %s (UID %lld) "
+            "which is not the task that made the field space or one of its "
+            "ancestor tasks. Field space deletions must be lexicographically "
+            "scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      DeletionOp *op = runtime->get_available_deletion_op();
-      op->initialize_field_space_deletion(this, handle);
-      runtime->add_to_dependence_queue(this, executing_processor, op);
+      runtime->forest->destroy_field_space(handle, runtime->address_space);
     } 
 
     //--------------------------------------------------------------------------
@@ -3484,7 +3256,7 @@ namespace Legion {
       // See if we've exceeded our local field allocations 
       // for this field space
       AutoLock local_lock(local_field_lock);
-      std::vector<LocalFieldInfo> &infos = local_fields[space];
+      std::vector<LocalFieldInfo> &infos = local_field_infos[space];
       if (infos.size() == runtime->max_local_fields)
         REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS,
           "Exceeded maximum number of local fields in "
@@ -3548,7 +3320,7 @@ namespace Legion {
       // See if we've exceeded our local field allocations 
       // for this field space
       AutoLock local_lock(local_field_lock);
-      std::vector<LocalFieldInfo> &infos = local_fields[space];
+      std::vector<LocalFieldInfo> &infos = local_field_infos[space];
       if ((infos.size() + sizes.size()) > runtime->max_local_fields)
         REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_LOCAL_FIELDS,
           "Exceeded maximum number of local fields in "
@@ -3606,9 +3378,71 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      bool is_local = false;
+      bool has_created = true;
+      {
+        AutoLock priv_lock(privilege_lock);
+        const std::pair<FieldSpace,FieldID> key(space, fid);
+        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+          created_fields.find(key);
+        if (finder == created_fields.end())
+        {
+          finder = local_fields.find(key);
+          if (finder != local_fields.end())
+          {
+            local_fields.erase(finder);
+            is_local = true;
+          }
+          else
+            has_created = false;
+        }
+        else
+          created_fields.erase(finder);
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to deallocate field %d in field space %x in task %s "
+            "(UID %lld) which is not the task that allocated the field "
+            "or one of its ancestor tasks. Field deallocations must be " 
+            "lexicographically scoped by the task tree.", fid, space.id,
+            get_task_name(), get_unique_id())
+      // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid);
+      const RtEvent freed = Runtime::protect_event(op->get_completion_event());
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      // Then tell the forest that the field is going to be deleted
+      if (is_local)
+      {
+        const std::vector<FieldID> to_free(1,fid); 
+        std::vector<unsigned> indexes(1);
+        {
+          AutoLock local_lock(local_field_lock,1,false);
+          std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
+            finder = local_field_infos.find(space);
+#ifdef DEBUG_LEGION
+          assert(finder != local_field_infos.end());
+          bool found = false;
+#endif
+          for (unsigned idx = 0; idx < finder->second.size(); idx++)
+          {
+            if (finder->second[idx].fid == fid)
+            {
+              indexes[0] = finder->second[idx].index;
+#ifdef DEBUG_LEGION
+              found = true;
+#endif
+              break;
+            }
+          }
+#ifdef DEBUG_LEGION
+          assert(found);
+#endif
+        }
+        runtime->forest->free_local_fields(space, freed, to_free, indexes);
+      }
+      else
+        runtime->forest->free_field(space, fid, freed);
     } 
 
     //--------------------------------------------------------------------------
@@ -3617,9 +3451,85 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      long bad_fid = -1;
+      std::vector<FieldID> local_free;
+      std::vector<FieldID> global_free;
+      {
+        AutoLock priv_lock(privilege_lock);
+        for (std::set<FieldID>::const_iterator it = 
+              to_free.begin(); it != to_free.end(); it++)
+        {
+          const std::pair<FieldSpace,FieldID> key(space, *it);
+          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+            created_fields.find(key);
+          if (finder == created_fields.end())
+          {
+            finder = local_fields.find(key);
+            if (finder == local_fields.end())
+            {
+              bad_fid = *it;
+              break;
+            }
+            else
+            {
+              local_fields.erase(finder);
+              local_free.push_back(*it);
+            }
+          }
+          else
+          {
+            created_fields.erase(finder);
+            global_free.push_back(*it);
+          }
+        }
+      }
+      if (bad_fid != -1)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to deallocate field %ld in field space %x in task %s "
+            "(UID %lld) which is not the task that allocated the field "
+            "or one of its ancestor tasks. Field deallocations must be " 
+            "lexicographically scoped by the task tree.", bad_fid, space.id,
+            get_task_name(), get_unique_id())
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, to_free);
+      const RtEvent freed = Runtime::protect_event(op->get_completion_event());
       runtime->add_to_dependence_queue(this, executing_processor, op);
+      if (!local_free.empty())
+      {
+        std::vector<unsigned> indexes(local_free.size());
+        {
+          AutoLock local_lock(local_field_lock,1,false);
+          std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
+            finder = local_field_infos.find(space);
+#ifdef DEBUG_LEGION
+          assert(finder != local_field_infos.end());
+#endif
+          for (unsigned idx = 0; idx < local_free.size(); idx++)
+          {
+#ifdef DEBUG_LEGION
+            bool found = false;
+#endif
+            for (std::vector<LocalFieldInfo>::const_iterator it = 
+                  finder->second.begin(); it != finder->second.end(); it++)
+            {
+              if (it->fid == local_free[idx])
+              {
+                indexes[idx] = it->index;
+#ifdef DEBUG_LEGION
+                found = true;
+#endif
+                break;
+              }
+            }
+#ifdef DEBUG_LEGION
+            assert(found);
+#endif
+          }
+        }
+        runtime->forest->free_local_fields(space, freed, local_free, indexes);
+      }
+      if (!global_free.empty())
+        runtime->forest->free_fields(space, global_free, freed);
     }
 
     //--------------------------------------------------------------------------
@@ -3637,15 +3547,45 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // Check to see if this is a top-level logical region, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_region(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy logical region (%x,%x,%x in task %s "
+            "(UID %lld) which is not a top-level logical region. Legion only "
+            "permits top-level logical regions to be destroyed.", 
+            handle.index_space.id, handle.field_space.id, handle.tree_id,
+            get_task_name(), get_unique_id())
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        AutoLock priv_lock(privilege_lock);
+        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
+        if (finder == created_regions.end())
+        {
+          // Check to see if it is a local region
+          finder = local_regions.find(handle);
+          if (finder !=local_regions.end())
+            local_regions.erase(finder);
+          else
+            has_created = false;
+        }
+        else
+          created_regions.erase(finder);
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy logical region (%x,%x,%x) in task %s "
+            "(UID %lld) which is not the task that made the logical region "
+            "or one of its ancestor tasks. Logical region deletions must be " 
+            "lexicographically scoped by the task tree.", handle.index_space.id,
+            handle.field_space.id, handle.tree_id,
+            get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
                        handle.index_space.id, handle.field_space.id, 
                        get_task_name(), get_unique_id());
 #endif
-      // If this is a local region remove it from our set
-      std::set<LogicalRegion>::iterator finder = local_regions.find(handle);
-      if (finder != local_regions.end())
-        local_regions.erase(finder);
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_logical_region_deletion(this, handle);
       runtime->add_to_dependence_queue(this, executing_processor, op);
@@ -3656,6 +3596,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
+      // For now we just trust that this has never been deleted before
 #ifdef DEBUG_LEGION
       log_region.debug("Deleting logical partition (%x,%x) in task %s "
                        "(ID %lld)", handle.index_partition.id, 
@@ -6417,6 +6358,17 @@ namespace Legion {
                                 PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
+      // See if we have any local regions or fields that need to be deallocated
+      while (!local_regions.empty())
+      {
+        const LogicalRegion next = *(local_regions.begin());
+        destroy_logical_region(next);
+      }
+      while (!local_fields.empty())
+      {
+        const std::pair<FieldSpace,FieldID> key = *(local_fields.begin());
+        free_field(key.first, key.second);
+      }
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -6933,14 +6885,15 @@ namespace Legion {
       assert(child_local.empty());
 #endif
       AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
-      if (local_fields.empty())
+      if (local_field_infos.empty())
         return;
       for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
-            fit = local_fields.begin(); fit != local_fields.end(); fit++)
+            fit = local_field_infos.begin(); 
+            fit != local_field_infos.end(); fit++)
       {
         std::vector<LocalFieldInfo> &child = child_local[fit->first];
         child.resize(fit->second.size());
-        for (unsigned idx = 0; idx < local_fields.size(); idx++)
+        for (unsigned idx = 0; idx < fit->second.size(); idx++)
         {
           LocalFieldInfo &field = child[idx];
           field = fit->second[idx];
@@ -7187,13 +7140,13 @@ namespace Legion {
     RemoteContext::~RemoteContext(void)
     //--------------------------------------------------------------------------
     {
-      if (!local_fields.empty())
+      if (!local_field_infos.empty())
       {
         // If we have any local fields then tell field space that
-        // we can remove them and then clear them so that the base
-        // InnerContext destructor doesn't try to deallocate them
+        // we can remove them and then clear them 
         for (std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator
-              it = local_fields.begin(); it != local_fields.end(); it++)
+              it = local_field_infos.begin(); 
+              it != local_field_infos.end(); it++)
         {
           const std::vector<LocalFieldInfo> &infos = it->second;
           std::vector<FieldID> to_remove;
@@ -7206,7 +7159,7 @@ namespace Legion {
           if (!to_remove.empty())
             runtime->forest->remove_local_fields(it->first, to_remove);
         }
-        local_fields.clear();
+        local_field_infos.clear();
       } 
     }
 
@@ -7523,7 +7476,7 @@ namespace Legion {
         {
           // Take the lock for updating this data structure
           AutoLock local_lock(local_field_lock);
-          std::vector<LocalFieldInfo> &infos = local_fields[handle];
+          std::vector<LocalFieldInfo> &infos = local_field_infos[handle];
           infos.resize(num_local);
           for (unsigned idx = 0; idx < num_local; idx++)
           {
@@ -7789,18 +7742,68 @@ namespace Legion {
     void LeafContext::destroy_index_space(IndexSpace handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
-        "Illegal index space deletion performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      // Check to see if this is a top-level index space, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_index_space(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index space %x in task %s (UID %lld) "
+            "which is not a top-level index space. Legion only permits "
+            "top-level index spaces to be destroyed.", handle.get_id(),
+            get_task_name(), get_unique_id())
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        // No need for the lock since this is a leaf context
+        std::set<IndexSpace>::iterator finder = 
+          created_index_spaces.find(handle);
+        if (finder != created_index_spaces.end())
+          created_index_spaces.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index space %x in task %s (UID %lld) "
+            "which is not the task that made the index space or one of its "
+            "ancestor tasks. Index space deletions must be lexicographically "
+            "scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
+#ifdef DEBUG_LEGION
+      log_index.debug("Destroying index space %x in task %s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      runtime->forest->destroy_index_space(handle, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_index_partition(IndexPartition handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
-        "Illegal index partition deletion performed in leaf "
-                     "task %s (ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        // No need for a lock since this is a leaf context
+        std::set<IndexPartition>::iterator finder = 
+          created_index_partitions.find(handle);
+        if (finder != created_index_partitions.end())
+          created_index_partitions.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy index partition %x in task %s (UID %lld) "
+            "which is not the task that made the index space or one of its "
+            "ancestor tasks. Index space deletions must be lexicographically "
+            "scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
+#ifdef DEBUG_LEGION
+      log_index.debug("Destroying index partition %x in task %s (ID %lld)",
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      runtime->forest->destroy_index_partition(handle, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -8112,18 +8115,57 @@ namespace Legion {
     void LeafContext::destroy_field_space(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_DESTROY_FIELD_SPACE,
-        "Illegal destroy field space performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        // No need for a lock since this is a leaf context
+        std::set<FieldSpace>::iterator finder = 
+          created_field_spaces.find(handle);
+        if (finder != created_field_spaces.end())
+          created_field_spaces.erase(finder);
+        else
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy field space %x in task %s (UID %lld) "
+            "which is not the task that made the field space or one of its "
+            "ancestor tasks. Field space deletions must be lexicographically "
+            "scoped by the task tree.", handle.get_id(), 
+            get_task_name(), get_unique_id())
+#ifdef DEBUG_LEGION
+      log_field.debug("Destroying field space %x in task %s (ID %lld)", 
+                      handle.id, get_task_name(), get_unique_id());
+#endif
+      runtime->forest->destroy_field_space(handle, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::free_field(FieldSpace space, FieldID fid)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_FIELD_DESTRUCTION,
-        "Illegal field destruction performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      bool has_created = true;
+      {
+        // No need for the lock since this is a leaf context
+        const std::pair<FieldSpace,FieldID> key(space, fid);
+        std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+          created_fields.find(key);
+        if (finder != created_fields.end())
+          created_fields.erase(finder);
+        else // No need to check for local fields since we can't make them
+          has_created = false;
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to deallocate field %d in field space %x in task %s "
+            "(UID %lld) which is not the task that allocated the field "
+            "or one of its ancestor tasks. Field deallocations must be " 
+            "lexicographically scoped by the task tree.", fid, space.id,
+            get_task_name(), get_unique_id())
+      // We can free this field immediately
+      runtime->forest->free_field(space, fid, RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8131,9 +8173,37 @@ namespace Legion {
                                   const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_FIELD_DESTRUCTION2,
-        "Illegal field destruction performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      long bad_fid = -1;
+      {
+        // No need for the lock since this is a leaf context 
+        for (std::set<FieldID>::const_iterator it = 
+              to_free.begin(); it != to_free.end(); it++)
+        {
+          const std::pair<FieldSpace,FieldID> key(space, *it);
+          std::set<std::pair<FieldSpace,FieldID> >::iterator finder = 
+            created_fields.find(key);
+          if (finder == created_fields.end())
+          {
+            // No need to check for local fields since we know
+            // that leaf tasks are not allowed to make them
+            bad_fid = *it;
+            break;
+          }
+          else
+            created_fields.erase(finder);
+        }
+      }
+      if (bad_fid != -1)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to deallocate field %ld in field space %x in task %s "
+            "(UID %lld) which is not the task that allocated the field "
+            "or one of its ancestor tasks. Field deallocations must be " 
+            "lexicographically scoped by the task tree.", bad_fid, space.id,
+            get_task_name(), get_unique_id())
+      // We can free these fields immediately
+      const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
+      runtime->forest->free_fields(space, field_vec, RtEvent::NO_RT_EVENT);
     }
 
     //--------------------------------------------------------------------------
@@ -8175,18 +8245,61 @@ namespace Legion {
     void LeafContext::destroy_logical_region(LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_DESTRUCTION,
-        "Illegal region destruction performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      // Check to see if this is a top-level logical region, if not then
+      // we shouldn't even be destroying it
+      if (!runtime->forest->is_top_level_region(handle))
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy logical region (%x,%x,%x in task %s "
+            "(UID %lld) which is not a top-level logical region. Legion only "
+            "permits top-level logical regions to be destroyed.", 
+            handle.index_space.id, handle.field_space.id, handle.tree_id,
+            get_task_name(), get_unique_id())
+      // Check to see if this is one that we should be allowed to destory
+      bool has_created = true;
+      {
+        // No need for a lock since this is a leaf context
+        std::set<LogicalRegion>::iterator finder = created_regions.find(handle);
+        if (finder == created_regions.end())
+        {
+          // Check to see if it is a local region
+          finder = local_regions.find(handle);
+          if (finder !=local_regions.end())
+            local_regions.erase(finder);
+          else
+            has_created = false;
+        }
+        else
+          created_regions.erase(finder);
+      }
+      if (!has_created)
+        REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
+            "Illegal call to destroy logical region (%x,%x,%x) in task %s "
+            "(UID %lld) which is not the task that made the logical region "
+            "or one of its ancestor tasks. Logical region deletions must be " 
+            "lexicographically scoped by the task tree.", handle.index_space.id,
+            handle.field_space.id, handle.tree_id,
+            get_task_name(), get_unique_id())
+#ifdef DEBUG_LEGION
+      log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
+                       handle.index_space.id, handle.field_space.id, 
+                       get_task_name(), get_unique_id());
+#endif
+      runtime->forest->destroy_logical_region(handle, runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
     void LeafContext::destroy_logical_partition(LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_PARTITION_DESTRUCTION,
-        "Illegal partition destruction performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
+      AutoRuntimeCall call(this);
+      // For now we just trust that this has never been deleted before
+#ifdef DEBUG_LEGION
+      log_region.debug("Deleting logical partition (%x,%x) in task %s "
+                       "(ID %lld)", handle.index_partition.id, 
+                       handle.field_space.id, get_task_name(), get_unique_id());
+#endif
+      runtime->forest->destroy_logical_partition(handle,runtime->address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -8741,6 +8854,17 @@ namespace Legion {
                                PhysicalInstance deferred_result_instance)
     //--------------------------------------------------------------------------
     {
+      // See if we have any local regions or fields that need to be deallocated
+      while (!local_regions.empty())
+      {
+        const LogicalRegion next = *(local_regions.begin());
+        destroy_logical_region(next);
+      }
+      while (!local_fields.empty())
+      {
+        const std::pair<FieldSpace,FieldID> key = *(local_fields.begin());
+        free_field(key.first, key.second);
+      }
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();

@@ -1703,12 +1703,8 @@ namespace Legion {
       IndexSpace subtract_index_spaces(Context ctx,
                                     IndexSpace left, IndexSpace right);
       void destroy_index_space(Context ctx, IndexSpace handle);
-      // Called from deletion op
-      void finalize_index_space_destroy(IndexSpace handle);
     public:
       void destroy_index_partition(Context ctx, IndexPartition handle);
-      // Called from deletion op
-      void finalize_index_partition_destroy(IndexPartition handle);
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
@@ -1889,19 +1885,11 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
-      // Called from deletion op
-      void finalize_field_space_destroy(FieldSpace handle);
-      void finalize_field_destroy(FieldSpace handle, FieldID fid);
-      void finalize_field_destroy(FieldSpace handle, 
-                                  const std::set<FieldID> &to_free);
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
-      // Called from deletion ops
-      void finalize_logical_region_destroy(LogicalRegion handle);
-      void finalize_logical_partition_destroy(LogicalPartition handle);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);

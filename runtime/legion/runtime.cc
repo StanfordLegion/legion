@@ -10681,13 +10681,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_index_space_destroy(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -10695,13 +10688,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index partition!");
       ctx->destroy_index_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_index_partition_destroy(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_partition(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -11624,29 +11610,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_space_destroy(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_field_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      forest->free_field(handle, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, 
-                                               const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> dense(to_free.begin(), to_free.end());
-      forest->free_fields(handle, dense);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
                 IndexSpace index_space, FieldSpace field_space, bool task_local)
     //--------------------------------------------------------------------------
@@ -11676,21 +11639,6 @@ namespace Legion {
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical partition!");
       ctx->destroy_logical_partition(handle); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_region_destroy(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_region(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_partition_destroy(
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_partition(handle, address_space);
     }
 
     //--------------------------------------------------------------------------

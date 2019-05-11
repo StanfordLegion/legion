@@ -46,48 +46,32 @@ namespace Legion {
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
       virtual void register_region_creations(
-                     const std::map<LogicalRegion,bool> &regions) = 0;
-      virtual void register_region_deletions(
-                          const std::set<LogicalRegion> &regions) = 0;
+                     const std::set<LogicalRegion> &regions) = 0;
     public:
       virtual void register_field_creations(
-            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields) = 0;
-      virtual void register_field_deletions(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
+            const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
     public:
       virtual void register_field_space_creations(
-                          const std::set<FieldSpace> &spaces) = 0;
-      virtual void register_field_space_deletions(
                           const std::set<FieldSpace> &spaces) = 0;
     public:
       virtual void register_index_space_creations(
                           const std::set<IndexSpace> &spaces) = 0;
-      virtual void register_index_space_deletions(
-                          const std::set<IndexSpace> &spaces) = 0;
     public:
       virtual void register_index_partition_creations(
                           const std::set<IndexPartition> &parts) = 0;
-      virtual void register_index_partition_deletions(
-                          const std::set<IndexPartition> &parts) = 0;
     public:
-      void return_privilege_state(ResourceTracker *target) const;
-      void pack_privilege_state(Serializer &rez, 
-                                AddressSpaceID target, bool returning) const;
-      static void unpack_privilege_state(Deserializer &derez,
-                                         ResourceTracker *target);
+      void return_resources(ResourceTracker *target);
+      void pack_resources_return(Serializer &rez, AddressSpaceID target);
+      static void unpack_resources_return(Deserializer &derez,
+                                          ResourceTracker *target);
     protected:
-      std::map<LogicalRegion,
-               bool/*local*/>                   created_regions;
-      std::map<std::pair<FieldSpace,FieldID>,
-               bool/*local*/>                   created_fields;
+      std::set<LogicalRegion>                   created_regions;
+      std::set<LogicalRegion>                   local_regions;
+      std::set<std::pair<FieldSpace,FieldID> >  created_fields;
+      std::set<std::pair<FieldSpace,FieldID> >  local_fields;
       std::set<FieldSpace>                      created_field_spaces;
       std::set<IndexSpace>                      created_index_spaces;
       std::set<IndexPartition>                  created_index_partitions;
-      std::set<LogicalRegion>                   deleted_regions;
-      std::set<std::pair<FieldSpace,FieldID> >  deleted_fields;
-      std::set<FieldSpace>                      deleted_field_spaces;
-      std::set<IndexSpace>                      deleted_index_spaces;
-      std::set<IndexPartition>                  deleted_index_partitions;
     };
 
     /**
@@ -1045,28 +1029,14 @@ namespace Legion {
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                     const std::map<LogicalRegion,bool> &regions);
-      virtual void register_region_deletions(
-                          const std::set<LogicalRegion> &regions);
-    public:
+                     const std::set<LogicalRegion> &regions);
       virtual void register_field_creations(
-            const std::map<std::pair<FieldSpace,FieldID>,bool> &fields);
-      virtual void register_field_deletions(
-                const std::set<std::pair<FieldSpace,FieldID> > &fields);
-    public:
+            const std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_space_creations(
                           const std::set<FieldSpace> &spaces);
-      virtual void register_field_space_deletions(
-                          const std::set<FieldSpace> &spaces);
-    public:
       virtual void register_index_space_creations(
                           const std::set<IndexSpace> &spaces);
-      virtual void register_index_space_deletions(
-                          const std::set<IndexSpace> &spaces);
-    public:
       virtual void register_index_partition_creations(
-                          const std::set<IndexPartition> &parts);
-      virtual void register_index_partition_deletions(
                           const std::set<IndexPartition> &parts);
     public:
       // From MemoizableOp

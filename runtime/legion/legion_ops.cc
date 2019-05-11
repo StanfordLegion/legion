@@ -6939,45 +6939,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_space_deletion(TaskContext *ctx,
-                                                     IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      kind = INDEX_SPACE_DELETION;
-      index_space = handle;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_part_deletion(TaskContext *ctx,
-                                                    IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      kind = INDEX_PARTITION_DELETION;
-      index_part = handle;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_space_deletion(TaskContext *ctx,
-                                                     FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      initialize_operation(ctx, true/*track*/);
-      kind = FIELD_SPACE_DELETION;
-      field_space = handle;
-      if (runtime->legion_spy_enabled)
-        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
-                                          unique_op_id);
-    }
-
-    //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(TaskContext *ctx, 
                                                 FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
@@ -7070,11 +7031,6 @@ namespace Legion {
       std::vector<RegionRequirement> deletion_requirements;
       switch (kind)
       {
-        // No analysis for these since they don't need to defer anything
-        case INDEX_SPACE_DELETION:
-        case INDEX_PARTITION_DELETION:
-        case FIELD_SPACE_DELETION:
-          break;
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields, 
@@ -7163,42 +7119,26 @@ namespace Legion {
     {
       switch (kind)
       {
-        case INDEX_SPACE_DELETION:
-          {
-            // Only need to tell our parent if it is a top-level index space
-            if (runtime->forest->is_top_level_index_space(index_space))
-              parent_ctx->register_index_space_deletion(index_space);
-            break;
-          }
-        case INDEX_PARTITION_DELETION:
-          {
-            parent_ctx->register_index_partition_deletion(index_part);
-            break;
-          }
-        case FIELD_SPACE_DELETION:
-          {
-            parent_ctx->register_field_space_deletion(field_space);
-            break;
-          }
         case FIELD_DELETION:
-          {
-            parent_ctx->register_field_deletions(field_space, free_fields);
-            break;
-          }
+          // Nothing to do for the field deletion as the forest was
+          // already made aware of the deletion operation
+          break;
         case LOGICAL_REGION_DELETION:
           {
-            // Only need to tell our parent if it is a top-level region
-            if (runtime->forest->is_top_level_region(logical_region))
-              parent_ctx->register_region_deletion(logical_region);
+            // Now we can do the call to the runtime for the deletion
+            runtime->forest->destroy_logical_region(logical_region, 
+                                            runtime->address_space);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
           {
-            // We don't need to register partition deletions explicitly
+            // Now we can do the call to the runtime for the deletion
+            runtime->forest->destroy_logical_partition(logical_part,
+                                            runtime->address_space);
             break;
           }
         default:
-          assert(false); // should never get here
+          assert(false);
       }
       complete_operation();
     }

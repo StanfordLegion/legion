@@ -959,6 +959,7 @@ namespace Legion {
       return false;
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_field(FieldSpace handle, FieldID fid) 
     //--------------------------------------------------------------------------
@@ -966,6 +967,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       node->free_field(fid, runtime->address_space);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::allocate_fields(FieldSpace handle, 
@@ -985,6 +987,7 @@ namespace Legion {
         ready.wait();
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_fields(FieldSpace handle,
                                        const std::vector<FieldID> &to_free)
@@ -993,6 +996,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       node->free_fields(to_free, runtime->address_space);
     }
+#endif
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::allocate_local_fields(FieldSpace handle,
@@ -1008,6 +1012,7 @@ namespace Legion {
                                          current_indexes, new_indexes);
     }
 
+#if 0
     //--------------------------------------------------------------------------
     void RegionTreeForest::free_local_fields(FieldSpace handle,
                                            const std::vector<FieldID> &to_free,
@@ -1017,6 +1022,7 @@ namespace Legion {
       FieldSpaceNode *node = get_node(handle);
       node->free_local_fields(to_free, indexes);
     }
+#endif
 
     //--------------------------------------------------------------------------
     void RegionTreeForest::update_local_fields(FieldSpace handle,
@@ -6510,11 +6516,7 @@ namespace Legion {
     {
       // Remove ourselves from the context
       if (registered_with_runtime)
-      {
-        if (parent != NULL)
-          parent->remove_child(color);
         context->remove_node(handle);
-      }
       if ((parent != NULL) && parent->remove_nested_resource_ref(did))
         delete parent;
       // Clean-up any untriggered events
@@ -7627,7 +7629,6 @@ namespace Legion {
       // Lastly we can unregister ourselves with the context
       if (registered_with_runtime)
       {
-        parent->remove_child(color);
         context->remove_node(handle);
         if (color_space->remove_nested_resource_ref(did))
           delete color_space;

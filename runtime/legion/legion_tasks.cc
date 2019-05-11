@@ -55,6 +55,15 @@ namespace Legion {
     ResourceTracker::~ResourceTracker(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(created_regions.empty());
+      assert(local_regions.empty());
+      assert(created_fields.empty());
+      assert(local_fields.empty());
+      assert(created_field_spaces.empty());
+      assert(created_index_spaces.empty());
+      assert(created_index_partitions.empty());
+#endif
     }
 
     //--------------------------------------------------------------------------
@@ -67,131 +76,62 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void ResourceTracker::return_privilege_state(ResourceTracker *target) const
+    void ResourceTracker::return_resources(ResourceTracker *target)
     //--------------------------------------------------------------------------
     {
       if (!created_regions.empty())
+      {
         target->register_region_creations(created_regions);
-      if (!deleted_regions.empty())
-        target->register_region_deletions(deleted_regions);
+        created_regions.clear();
+      }
       if (!created_fields.empty())
+      {
         target->register_field_creations(created_fields);
-      if (!deleted_fields.empty())
-        target->register_field_deletions(deleted_fields);
+        created_fields.clear();
+      }
       if (!created_field_spaces.empty())
+      {
         target->register_field_space_creations(created_field_spaces);
-      if (!deleted_field_spaces.empty())
-        target->register_field_space_deletions(deleted_field_spaces);
+        created_field_spaces.clear();
+      }
       if (!created_index_spaces.empty())
+      {
         target->register_index_space_creations(created_index_spaces);
-      if (!deleted_index_spaces.empty())
-        target->register_index_space_deletions(deleted_index_spaces);
+        created_index_spaces.clear();
+      }
       if (!created_index_partitions.empty())
+      {
         target->register_index_partition_creations(created_index_partitions);
-      if (!deleted_index_partitions.empty())
-        target->register_index_partition_deletions(deleted_index_partitions);
+        created_index_partitions.clear();
+      }
     }
 
     //--------------------------------------------------------------------------
-    void ResourceTracker::pack_privilege_state(Serializer &rez, 
-                                    AddressSpaceID target, bool returning) const
+    void ResourceTracker::pack_resources_return(Serializer &rez, 
+                                                AddressSpaceID target)
     //--------------------------------------------------------------------------
     {
       // Shouldn't need the lock here since we only do this
       // while there is no one else executing
       RezCheck z(rez);
-      if (returning)
-      {
-        // Only non-local task regions get returned
-        size_t non_local = 0;
-        for (std::map<LogicalRegion,bool>::const_iterator it =
-             created_regions.begin(); it != created_regions.end(); it++)
-        {
-          if (it->second)
-            continue;
-          non_local++;
-        }
-        rez.serialize(non_local);
-        if (non_local > 0)
-        {
-          for (std::map<LogicalRegion,bool>::const_iterator it =
-               created_regions.begin(); it != created_regions.end(); it++)
-            if (!it->second)
-            {
-              rez.serialize(it->first);
-              rez.serialize<bool>(it->second);
-            }
-        }
-      }
-      else
-      {
-        rez.serialize<size_t>(created_regions.size());
-        if (!created_regions.empty())
-        {
-          for (std::map<LogicalRegion,bool>::const_iterator it =
-              created_regions.begin(); it != created_regions.end(); it++)
-          {
-            rez.serialize(it->first);
-            rez.serialize<bool>(it->second);
-          }
-        }
-      }
-      rez.serialize<size_t>(deleted_regions.size());
-      if (!deleted_regions.empty())
+      rez.serialize<size_t>(created_regions.size());
+      if (!created_regions.empty())
       {
         for (std::set<LogicalRegion>::const_iterator it =
-              deleted_regions.begin(); it != deleted_regions.end(); it++)
-        {
+              created_regions.begin(); it != created_regions.end(); it++)
           rez.serialize(*it);
-        }
+        created_regions.clear();
       }
-      if (returning)
+      rez.serialize<size_t>(created_fields.size());
+      if (!created_fields.empty())
       {
-        // Only non-local fields get returned
-        size_t non_local = 0;
-        for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it =
               created_fields.begin(); it != created_fields.end(); it++)
-        {
-          if (it->second)
-            continue;
-          non_local++;
-        }
-        rez.serialize(non_local);
-        if (non_local > 0)
-        {
-          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
-                created_fields.begin(); it != created_fields.end(); it++)
-            if (!it->second)
-            {
-              rez.serialize(it->first.first);
-              rez.serialize(it->first.second);
-              rez.serialize<bool>(it->second);
-            }
-        }
-      }
-      else
-      {
-        rez.serialize<size_t>(created_fields.size());
-        if (!created_fields.empty())
-        {
-          for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it =
-                created_fields.begin(); it != created_fields.end(); it++)
-          {
-            rez.serialize(it->first.first);
-            rez.serialize(it->first.second);
-            rez.serialize<bool>(it->second);
-          }
-        }
-      }
-      rez.serialize<size_t>(deleted_fields.size());
-      if (!deleted_fields.empty())
-      {
-        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-              deleted_fields.begin(); it != deleted_fields.end(); it++)
         {
           rez.serialize(it->first);
           rez.serialize(it->second);
         }
+        created_fields.clear();
       }
       rez.serialize<size_t>(created_field_spaces.size());
       if (!created_field_spaces.empty())
@@ -199,19 +139,8 @@ namespace Legion {
         for (std::set<FieldSpace>::const_iterator it = 
               created_field_spaces.begin(); it != 
               created_field_spaces.end(); it++)
-        {
           rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_field_spaces.size());
-      if (!deleted_field_spaces.empty())
-      {
-        for (std::set<FieldSpace>::const_iterator it = 
-              deleted_field_spaces.begin(); it !=
-              deleted_field_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
+        created_field_spaces.clear();
       }
       rez.serialize<size_t>(created_index_spaces.size());
       if (!created_index_spaces.empty())
@@ -219,19 +148,8 @@ namespace Legion {
         for (std::set<IndexSpace>::const_iterator it = 
               created_index_spaces.begin(); it != 
               created_index_spaces.end(); it++)
-        {
           rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_index_spaces.size());
-      if (!deleted_index_spaces.empty())
-      {
-        for (std::set<IndexSpace>::const_iterator it = 
-              deleted_index_spaces.begin(); it !=
-              deleted_index_spaces.end(); it++)
-        {
-          rez.serialize(*it);
-        }
+        created_index_spaces.clear();
       }
       rez.serialize<size_t>(created_index_partitions.size());
       if (!created_index_partitions.empty())
@@ -239,25 +157,14 @@ namespace Legion {
         for (std::set<IndexPartition>::const_iterator it = 
               created_index_partitions.begin(); it !=
               created_index_partitions.end(); it++)
-        {
           rez.serialize(*it);
-        }
-      }
-      rez.serialize<size_t>(deleted_index_partitions.size());
-      if (!deleted_index_partitions.empty())
-      {
-        for (std::set<IndexPartition>::const_iterator it = 
-              deleted_index_partitions.begin(); it !=
-              deleted_index_partitions.end(); it++)
-        {
-          rez.serialize(*it);
-        }
+        created_index_partitions.clear();
       }
     }
 
     //--------------------------------------------------------------------------
-    /*static*/ void ResourceTracker::unpack_privilege_state(Deserializer &derez,
-                                                        ResourceTracker *target)
+    /*static*/ void ResourceTracker::unpack_resources_return(
+                                   Deserializer &derez, ResourceTracker *target)
     //--------------------------------------------------------------------------
     {
       // Hold the lock while doing the unpack to avoid conflicting
@@ -267,60 +174,29 @@ namespace Legion {
       derez.deserialize(num_created_regions);
       if (num_created_regions > 0)
       {
-        std::map<LogicalRegion,bool> created_regions;
+        std::set<LogicalRegion> created_regions;
         for (unsigned idx = 0; idx < num_created_regions; idx++)
         {
           LogicalRegion reg;
-          bool local;
           derez.deserialize(reg);
-          derez.deserialize(local);
-          created_regions[reg] = local;
+          created_regions.insert(reg);
         }
         target->register_region_creations(created_regions);
-      }
-      size_t num_deleted_regions;
-      derez.deserialize(num_deleted_regions);
-      if (num_deleted_regions > 0)
-      {
-        std::set<LogicalRegion> deleted_regions;
-        for (unsigned idx = 0; idx < num_deleted_regions; idx++)
-        {
-          LogicalRegion reg;
-          derez.deserialize(reg);
-          deleted_regions.insert(reg);
-        }
-        target->register_region_deletions(deleted_regions);
       }
       size_t num_created_fields;
       derez.deserialize(num_created_fields);
       if (num_created_fields > 0)
       {
-        std::map<std::pair<FieldSpace,FieldID>,bool> created_fields;
+        std::set<std::pair<FieldSpace,FieldID> > created_fields;
         for (unsigned idx = 0; idx < num_created_fields; idx++)
         {
           FieldSpace sp;
           derez.deserialize(sp);
           FieldID fid;
           derez.deserialize(fid);
-          derez.deserialize<bool>(
-              created_fields[std::pair<FieldSpace,FieldID>(sp,fid)]);
+          created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
         }
         target->register_field_creations(created_fields);
-      }
-      size_t num_deleted_fields;
-      derez.deserialize(num_deleted_fields);
-      if (num_deleted_fields > 0)
-      {
-        std::set<std::pair<FieldSpace,FieldID> > deleted_fields;
-        for (unsigned idx = 0; idx < num_deleted_fields; idx++)
-        {
-          FieldSpace sp;
-          derez.deserialize(sp);
-          FieldID fid;
-          derez.deserialize(fid);
-          deleted_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
-        }
-        target->register_field_deletions(deleted_fields);
       }
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
@@ -335,19 +211,6 @@ namespace Legion {
         }
         target->register_field_space_creations(created_field_spaces);
       }
-      size_t num_deleted_field_spaces;
-      derez.deserialize(num_deleted_field_spaces);
-      if (num_deleted_field_spaces > 0)
-      {
-        std::set<FieldSpace> deleted_field_spaces;
-        for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
-        {
-          FieldSpace sp;
-          derez.deserialize(sp);
-          deleted_field_spaces.insert(sp);
-        }
-        target->register_field_space_deletions(deleted_field_spaces);
-      }
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
       if (num_created_index_spaces > 0)
@@ -361,19 +224,6 @@ namespace Legion {
         }
         target->register_index_space_creations(created_index_spaces);
       }
-      size_t num_deleted_index_spaces;
-      derez.deserialize(num_deleted_index_spaces);
-      if (num_deleted_index_spaces > 0)
-      {
-        std::set<IndexSpace> deleted_index_spaces;
-        for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
-        {
-          IndexSpace sp;
-          derez.deserialize(sp);
-          deleted_index_spaces.insert(sp);
-        }
-        target->register_index_space_deletions(deleted_index_spaces);
-      }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       if (num_created_index_partitions > 0)
@@ -386,19 +236,6 @@ namespace Legion {
           created_index_partitions.insert(ip);
         }
         target->register_index_partition_creations(created_index_partitions);
-      }
-      size_t num_deleted_index_partitions;
-      derez.deserialize(num_deleted_index_partitions);
-      if (num_deleted_index_partitions > 0)
-      {
-        std::set<IndexPartition> deleted_index_partitions;
-        for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
-        {
-          IndexPartition ip;
-          derez.deserialize(ip);
-          deleted_index_partitions.insert(ip);
-        }
-        target->register_index_partition_deletions(deleted_index_partitions);
       }
     }
 
@@ -5187,7 +5024,7 @@ namespace Legion {
       {
         // Pass back our created and deleted operations
         if (!top_level_task && (execution_context != NULL))
-          execution_context->return_privilege_state(parent_ctx);
+          execution_context->return_resources(parent_ctx);
         // The future has already been set so just trigger it
         result.impl->complete_future();
       }
@@ -5471,7 +5308,7 @@ namespace Legion {
         start_condition.wait();
       variant->dispatch_inline(current, inline_ctx); 
       // Return any created privilege state
-      inline_ctx->return_privilege_state(enclosing);
+      inline_ctx->return_resources(enclosing);
       // Then delete the inline context
       delete inline_ctx;
     }
@@ -5502,7 +5339,7 @@ namespace Legion {
       rez.serialize(orig_task);
       RezCheck z(rez);
       // Pack the privilege state
-      execution_context->pack_privilege_state(rez, target, true/*returning*/);
+      execution_context->pack_resources_return(rez, target);
       // Then pack the future result
       {
         RezCheck z2(rez);
@@ -5518,7 +5355,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, INDIVIDUAL_UNPACK_REMOTE_COMPLETE_CALL);
       DerezCheck z(derez);
       // First unpack the privilege state
-      ResourceTracker::unpack_privilege_state(derez, parent_ctx);
+      ResourceTracker::unpack_resources_return(derez, parent_ctx);
       // Unpack the future result
       if (must_epoch == NULL)
         result.impl->unpack_future(derez);
@@ -7027,7 +6864,7 @@ namespace Legion {
         parent_ctx = inline_ctx;
         variant->dispatch_inline(current, inline_ctx);
         // Return any created privilege state
-        inline_ctx->return_privilege_state(enclosing);
+        inline_ctx->return_resources(enclosing);
         // Then we can delete the inline context
         delete inline_ctx;
       }
@@ -7334,7 +7171,7 @@ namespace Legion {
       derez.deserialize(points);
       ApEvent slice_postcondition;
       derez.deserialize(slice_postcondition);
-      ResourceTracker::unpack_privilege_state(derez, parent_ctx);
+      ResourceTracker::unpack_resources_return(derez, parent_ctx);
       if (redop == 0)
       {
         // No reduction so we can unpack these futures directly
@@ -7618,6 +7455,10 @@ namespace Legion {
       points.clear(); 
       if (!acquired_instances.empty())
         release_acquired_instances(acquired_instances);
+#ifdef DEBUG_LEGION
+      assert(local_regions.empty());
+      assert(local_fields.empty());
+#endif
       acquired_instances.clear();
       map_applied_conditions.clear();
       commit_preconditions.clear();
@@ -7626,11 +7467,6 @@ namespace Legion {
       created_field_spaces.clear();
       created_index_spaces.clear();
       created_index_partitions.clear();
-      deleted_regions.clear();
-      deleted_fields.clear();
-      deleted_field_spaces.clear();
-      deleted_index_spaces.clear();
-      deleted_index_partitions.clear();
       runtime->free_slice_task(this);
     }
 
@@ -8153,9 +7989,9 @@ namespace Legion {
       // If we're remote, pass our privileges back to ourself
       // otherwise pass them directly back to the index owner
       if (is_remote())
-        point_context->return_privilege_state(this);
+        point_context->return_resources(this);
       else
-        point_context->return_privilege_state(parent_ctx);
+        point_context->return_resources(parent_ctx);
     }
 
     //--------------------------------------------------------------------------
@@ -8387,7 +8223,7 @@ namespace Legion {
       rez.serialize<size_t>(points.size());
       rez.serialize(slice_postcondition);
       // Serialize the privilege state
-      pack_privilege_state(rez, target, true/*returning*/); 
+      pack_resources_return(rez, target); 
       // Now pack up the future results
       if (redop == 0)
       {
@@ -8448,56 +8284,34 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void SliceTask::register_region_creations(
-                                       const std::map<LogicalRegion,bool> &regs)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::map<LogicalRegion,bool>::const_iterator it = regs.begin();
-            it != regs.end(); it++)
-      {
-#ifdef DEBUG_LEGION
-        assert(created_regions.find(it->first) == created_regions.end());
-#endif
-        created_regions[it->first] = it->second;
-      }
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_region_deletions(
                                             const std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       for (std::set<LogicalRegion>::const_iterator it = regs.begin();
             it != regs.end(); it++)
-        deleted_regions.insert(*it);
-    } 
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_field_creations(
-                     const std::map<std::pair<FieldSpace,FieldID>,bool> &fields)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::map<std::pair<FieldSpace,FieldID>,bool>::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(it->first) == created_fields.end());
+        assert(created_regions.find(*it) == created_regions.end());
 #endif
-        created_fields.insert(*it);
+        created_regions.insert(*it);
       }
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_field_deletions(
-                        const std::set<std::pair<FieldSpace,FieldID> > &fields)
+    void SliceTask::register_field_creations(
+                         const std::set<std::pair<FieldSpace,FieldID> > &fields)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
       for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
             fields.begin(); it != fields.end(); it++)
-        deleted_fields.insert(*it);
+      {
+#ifdef DEBUG_LEGION
+        assert(created_fields.find(*it) == created_fields.end());
+#endif
+        created_fields.insert(*it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -8517,17 +8331,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_field_space_deletions(
-                                            const std::set<FieldSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
-        deleted_field_spaces.insert(*it);
-    }
-
-    //--------------------------------------------------------------------------
     void SliceTask::register_index_space_creations(
                                             const std::set<IndexSpace> &spaces)
     //--------------------------------------------------------------------------
@@ -8541,17 +8344,6 @@ namespace Legion {
 #endif
         created_index_spaces.insert(*it);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_space_deletions(
-                                            const std::set<IndexSpace> &spaces)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
-        deleted_index_spaces.insert(*it);
     }
 
     //--------------------------------------------------------------------------
@@ -8569,17 +8361,6 @@ namespace Legion {
 #endif
         created_index_partitions.insert(*it);
       }
-    }
-
-    //--------------------------------------------------------------------------
-    void SliceTask::register_index_partition_deletions(
-                                          const std::set<IndexPartition> &parts)
-    //--------------------------------------------------------------------------
-    {
-      AutoLock o_lock(op_lock);
-      for (std::set<IndexPartition>::const_iterator it = parts.begin();
-            it != parts.end(); it++)
-        deleted_index_partitions.insert(*it);
     }
 
     //--------------------------------------------------------------------------
