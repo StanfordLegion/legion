@@ -84,6 +84,8 @@ end
 
 normalize_access.expr_deref = normalize_expr_factory("value", true)
 
+normalize_access.expr_address_of = normalize_expr_factory("value", false)
+
 function normalize_access.expr_index_access(stats, expr)
   local index = normalize_access.expr(stats, expr.index, true)
   local value = normalize_access.expr(stats, expr.value, std.is_ref(expr.expr_type))
@@ -136,6 +138,7 @@ local normalize_access_expr_table = {
   [ast.typed.expr.UnsafeCast]                 = normalize_access.expr_regent_cast,
   [ast.typed.expr.FieldAccess]                = normalize_access.expr_field_access,
   [ast.typed.expr.Deref]                      = normalize_access.expr_deref,
+  [ast.typed.expr.AddressOf]                  = normalize_access.expr_address_of,
   [ast.typed.expr.IndexAccess]                = normalize_access.expr_index_access,
   [ast.typed.expr.Ctor]                       = normalize_access.expr_ctor,
   [ast.typed.expr.Unary]                      = normalize_access.expr_unary,

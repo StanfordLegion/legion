@@ -221,6 +221,9 @@ function analyze_var_flow.expr(cx, node)
   elseif node:is(ast.typed.expr.Deref) then
     return flow_empty()
 
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return flow_empty()
+
   else
     assert(false, "unexpected node type " .. tostring(node.node_type))
   end
@@ -948,6 +951,11 @@ function optimize_futures.expr_deref(cx, node)
   return node { value = value }
 end
 
+function optimize_futures.expr_address_of(cx, node)
+  local value = concretize(optimize_futures.expr(cx, node.value))
+  return node { value = value }
+end
+
 function optimize_futures.expr_import_ispace(cx, node)
   local value = concretize(optimize_futures.expr(cx, node.value))
   return node { value = value }
@@ -1146,6 +1154,9 @@ function optimize_futures.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     return optimize_futures.expr_deref(cx, node)
+
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return optimize_futures.expr_address_of(cx, node)
 
   elseif node:is(ast.typed.expr.ImportIspace) then
     return optimize_futures.expr_import_ispace(cx, node)

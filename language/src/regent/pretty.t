@@ -698,6 +698,10 @@ function pretty.expr_deref(cx, node)
   return join({"(", "@", pretty.expr(cx, node.value), ")"})
 end
 
+function pretty.expr_address_of(cx, node)
+  return join({"(", "&", pretty.expr(cx, node.value), ")"})
+end
+
 function pretty.expr_future(cx, node)
   return join({"__future(", pretty.expr(cx, node.value), ")"})
 end
@@ -900,6 +904,9 @@ function pretty.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     return pretty.expr_deref(cx, node)
+
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return pretty.expr_address_of(cx, node)
 
   elseif node:is(ast.typed.expr.Future) then
     return pretty.expr_future(cx, node)
