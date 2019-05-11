@@ -158,6 +158,7 @@ local node_allow_annotations = {
   [ast.typed.expr.Unary]                      = deny_all,
   [ast.typed.expr.Binary]                     = deny_all,
   [ast.typed.expr.Deref]                      = deny_all,
+  [ast.typed.expr.AddressOf]                  = deny_all,
   [ast.typed.expr.ParallelizerConstraint]     = deny_all,
   [ast.typed.expr.ImportIspace]               = deny_all,
   [ast.typed.expr.ImportRegion]               = deny_all,

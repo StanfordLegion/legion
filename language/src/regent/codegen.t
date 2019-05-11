@@ -909,6 +909,10 @@ function value:new(node, value_expr, value_type, field_path)
   return values.value(node, value_expr, value_type, field_path)
 end
 
+function value:address()
+  assert(false)
+end
+
 function value:read(cx)
   local actions = self.expr.actions
   local result = self.expr.value
@@ -1278,6 +1282,10 @@ function ref:__ref(cx, expr_type)
   return actions, values, value_type, field_paths, field_types
 end
 
+function ref:address()
+  return values.value(self.node, self.expr, self.value_type)
+end
+
 function ref:read(cx, expr_type)
   if expr_type and (std.is_ref(expr_type) or std.is_rawref(expr_type)) then
     expr_type = std.as_read(expr_type)
@@ -1578,6 +1586,10 @@ function aref:get_index(cx, node, index, result_type)
   return values.rawref(node, result, &result_type, data.newtuple())
 end
 
+function aref:address()
+  assert(false)
+end
+
 function aref:read(cx, expr_type)
   local value_type = std.as_read(self.node.expr_type)
   assert(std.type_eq(value_type, std.as_read(expr_type)))
@@ -1649,6 +1661,10 @@ function vref:__unpack(cx)
     end)
 
   return field_paths, field_types, region_types, base_pointers_by_region
+end
+
+function vref:address()
+  assert(false)
 end
 
 function vref:read(cx, expr_type)
@@ -1974,6 +1990,12 @@ function rawref:__ref(cx)
     result = `([result].[field_name])
   end
   return expr.just(actions, result)
+end
+
+function rawref:address()
+  local actions = self.expr.actions
+  local result = `(&[self.expr.value])
+  return values.value(self.node, expr.just(actions, result), self.value_type)
 end
 
 function rawref:read(cx)
@@ -7411,6 +7433,11 @@ function codegen.expr_deref(cx, node)
   end
 end
 
+function codegen.expr_address_of(cx, node)
+  local value = codegen.expr(cx, node.value)
+  return value:address()
+end
+
 function codegen.expr_future(cx, node)
   local value = codegen.expr(cx, node.value):read(cx)
   local value_type = std.as_read(node.value.expr_type)
@@ -7915,6 +7942,9 @@ function codegen.expr(cx, node)
 
   elseif node:is(ast.typed.expr.Deref) then
     return codegen.expr_deref(cx, node)
+
+  elseif node:is(ast.typed.expr.AddressOf) then
+    return codegen.expr_address_of(cx, node)
 
   elseif node:is(ast.typed.expr.Future) then
     return codegen.expr_future(cx, node)

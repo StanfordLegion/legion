@@ -3140,6 +3140,25 @@ function type_check.expr_deref(cx, node)
   }
 end
 
+function type_check.expr_address_of(cx, node)
+  local value = type_check.expr(cx, node.value)
+  local ref_type = value.expr_type
+
+  if not (std.is_ref(ref_type) or std.is_rawref(ref_type))
+  then
+    report.error(node, "attempting to take address of a non-l-value " .. tostring(ref_type))
+  end
+
+  local expr_type = ref_type.pointer_type
+
+  return ast.typed.expr.AddressOf {
+    value = value,
+    expr_type = expr_type,
+    annotations = node.annotations,
+    span = node.span,
+  }
+end
+
 function type_check.expr_import_ispace(cx, node)
   if not std.is_index_type(node.index_type) then
     report.error(node, "type mismatch in argument 1: expected index type but got " ..
@@ -3374,6 +3393,7 @@ local type_check_expr_node = {
   [ast.specialized.expr.Unary]                      = type_check.expr_unary,
   [ast.specialized.expr.Binary]                     = type_check.expr_binary,
   [ast.specialized.expr.Deref]                      = type_check.expr_deref,
+  [ast.specialized.expr.AddressOf]                  = type_check.expr_address_of,
   [ast.specialized.expr.ImportIspace]               = type_check.expr_import_ispace,
   [ast.specialized.expr.ImportRegion]               = type_check.expr_import_region,
   [ast.specialized.expr.ImportPartition]            = type_check.expr_import_partition,
