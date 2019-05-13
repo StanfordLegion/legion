@@ -7114,9 +7114,11 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_complete(void)
+    void DeletionOp::trigger_commit(void)
     //--------------------------------------------------------------------------
     {
+      // We put these operations in the commit stage to make sure that there
+      // is no mis-speculation or faults that could potentially affect them
       switch (kind)
       {
         case FIELD_DELETION:
@@ -7140,7 +7142,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      complete_operation();
+      commit_operation(true/*deactivate*/);
     }
 
     //--------------------------------------------------------------------------

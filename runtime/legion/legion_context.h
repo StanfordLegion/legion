@@ -239,22 +239,19 @@ namespace Legion {
                                 const std::vector<IndexSpace> &handles) = 0;
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
       virtual void destroy_field_space(FieldSpace handle) = 0;
-      virtual FieldID allocate_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+      virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
-      virtual void allocate_local_field(RegionTreeForest *forest,
+      virtual void allocate_local_field(
                                      FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events) = 0;
       virtual void free_field(FieldSpace space, FieldID fid) = 0;
-      virtual void allocate_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
                                    bool local, CustomSerdezID serdez_id);
-      virtual void allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -268,8 +265,8 @@ namespace Legion {
       virtual void record_task_local_region(LogicalRegion region) = 0;
       virtual void destroy_logical_region(LogicalRegion handle) = 0;
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
-      virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
-                                                    FieldSpace handle);
+      virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher) = 0;
       virtual FutureMap execute_index_space(
@@ -549,6 +546,9 @@ namespace Legion {
     protected:
       // Cache for accelerating safe casts
       std::map<IndexSpace,IndexSpaceNode*> safe_cast_spaces;
+    protected:
+      // Field allocation data
+      std::map<FieldSpace,FieldAllocatorImpl*> field_allocators;
     protected:
       RtEvent pending_done;
       bool task_executed;
@@ -854,12 +854,10 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual void destroy_field_space(FieldSpace handle);
-      virtual void allocate_local_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+      virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
-      virtual void allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -1457,12 +1455,10 @@ namespace Legion {
                                             IndexSpace initial,
                                 const std::vector<IndexSpace> &handles);
       virtual void destroy_field_space(FieldSpace handle);
-      virtual void allocate_local_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+      virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
-      virtual void allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -1761,24 +1757,20 @@ namespace Legion {
                                 const std::vector<IndexSpace> &handles);
       virtual FieldSpace create_field_space(RegionTreeForest *forest);
       virtual void destroy_field_space(FieldSpace handle);
-      virtual FieldID allocate_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+      virtual FieldID allocate_field(FieldSpace space, size_t field_size,
                                      FieldID fid, bool local,
                                      CustomSerdezID serdez_id);
       virtual void free_field(FieldSpace space, FieldID fid);
-      virtual void allocate_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    std::vector<FieldID> &resuling_fields,
                                    bool local, CustomSerdezID serdez_id);
       virtual void free_fields(FieldSpace space, 
                                const std::set<FieldID> &to_free);
-      virtual void allocate_local_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+      virtual void allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events);
-      virtual void allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+      virtual void allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -1790,8 +1782,8 @@ namespace Legion {
       virtual void record_task_local_region(LogicalRegion region);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
-      virtual FieldAllocator create_field_allocator(Legion::Runtime *external,
-                                                    FieldSpace handle);
+      virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
+      virtual void destroy_field_allocator(FieldSpace handle);
     public:
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);

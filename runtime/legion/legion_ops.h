@@ -1341,7 +1341,7 @@ namespace Legion {
     public:
       virtual void trigger_dependence_analysis(void);
       virtual void trigger_mapping(void); 
-      virtual void trigger_complete(void);
+      virtual void trigger_commit(void);
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       DeletionKind kind;

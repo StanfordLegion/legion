@@ -666,49 +666,6 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
-    // Field Allocator 
-    /////////////////////////////////////////////////////////////
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(void)
-      : field_space(FieldSpace::NO_SPACE), parent(NULL), runtime(NULL)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(const FieldAllocator &allocator)
-      : field_space(allocator.field_space), parent(allocator.parent), 
-        runtime(allocator.runtime)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::FieldAllocator(FieldSpace f, Context p, 
-                                   Runtime *rt)
-      : field_space(f), parent(p), runtime(rt)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator::~FieldAllocator(void)
-    //--------------------------------------------------------------------------
-    {
-    }
-
-    //--------------------------------------------------------------------------
-    FieldAllocator& FieldAllocator::operator=(const FieldAllocator &rhs)
-    //--------------------------------------------------------------------------
-    {
-      field_space = rhs.field_space;
-      parent = rhs.parent;
-      runtime = rhs.runtime;
-      return *this;
-    }
-
-    /////////////////////////////////////////////////////////////
     // Argument Map 
     /////////////////////////////////////////////////////////////
 
@@ -2752,6 +2709,140 @@ namespace Legion {
 #ifdef __clang__
 #pragma clang diagnostic pop
 #endif
+
+    /////////////////////////////////////////////////////////////
+    // Field Allocator
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(void)
+      : impl(NULL)
+    //--------------------------------------------------------------------------
+    {
+    }
+    
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(const FieldAllocator &rhs)
+      : impl(rhs.impl)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::~FieldAllocator(void)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+      {
+        if (impl->remove_reference())
+          delete impl;
+        impl = NULL;
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator::FieldAllocator(Internal::FieldAllocatorImpl *i)
+      : impl(i)
+    //--------------------------------------------------------------------------
+    {
+      if (impl != NULL)
+        impl->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocator& FieldAllocator::operator=(const FieldAllocator &rhs)
+    //--------------------------------------------------------------------------
+    {
+      if ((impl != NULL) && impl->remove_reference())
+        delete impl;
+      impl = rhs.impl;
+      if (impl != NULL)
+        impl->add_reference();
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocator::allocate_field(size_t field_size,
+                                           FieldID desired_fieldid,
+                                           CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->allocate_field(field_size, desired_fieldid, serdez_id,local);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::free_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif     
+      impl->free_field(fid);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocator::allocate_local_field(size_t field_size,
+                                                 FieldID desired_fieldid,
+                                                 CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      return impl->allocate_field(field_size, desired_fieldid, 
+                                  serdez_id, true/*local*/);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::allocate_fields(const std::vector<size_t> &field_sizes,
+                                         std::vector<FieldID> &resulting_fields,
+                                         CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->allocate_fields(field_sizes, resulting_fields, serdez_id, local);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::free_fields(const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->free_fields(to_free);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocator::allocate_local_fields(
+                                        const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(impl != NULL);
+#endif
+      impl->allocate_fields(field_sizes, resulting_fields, 
+                            serdez_id, true/*local*/); 
+    }
+
+    //--------------------------------------------------------------------------
+    FieldSpace FieldAllocator::get_field_space(void) const
+    //--------------------------------------------------------------------------
+    {
+      if (impl == NULL)
+        return FieldSpace::NO_SPACE;
+      else
+        return impl->get_field_space();
+    }
 
     /////////////////////////////////////////////////////////////
     // Task Config Options 
@@ -6455,40 +6546,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       // Do nothing, just don't deactivate it
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
-                                             size_t field_size, FieldID fid,
-                                             bool local, CustomSerdezID sd_id)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->allocate_field(ctx, space, field_size, fid, local, sd_id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace sp, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_field(ctx, sp, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
-                                           const std::vector<size_t> &sizes,
-                                         std::vector<FieldID> &resulting_fields,
-                                         bool local, CustomSerdezID _id)
-    //--------------------------------------------------------------------------
-    {
-      runtime->allocate_fields(ctx, space, sizes, resulting_fields, local, _id);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
-                                       const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_fields(ctx, space, to_free);
     }
 
     //--------------------------------------------------------------------------

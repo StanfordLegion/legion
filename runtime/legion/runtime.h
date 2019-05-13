@@ -180,6 +180,38 @@ namespace Legion {
     };
 
     /**
+     * \class FieldAllocatorImpl
+     * The base implementation of a field allocator object. This
+     * tracks how many outstanding copies of a field allocator
+     * object there are for a task and once they've all been
+     * destroyed it informs the context that there are no more
+     * outstanding allocations.
+     */
+    class FieldAllocatorImpl : public Collectable {
+    public:
+      FieldAllocatorImpl(FieldSpace space, TaskContext *context);
+      FieldAllocatorImpl(const FieldAllocatorImpl &rhs);
+      ~FieldAllocatorImpl(void);
+    public:
+      FieldAllocatorImpl& operator=(const FieldAllocatorImpl &rhs);
+    public:
+      inline FieldSpace get_field_space(void) const { return field_space; }
+    public:
+      FieldID allocate_field(size_t field_size, 
+                             FieldID desired_fieldid,
+                             CustomSerdezID serdez_id, bool local);
+      void free_field(FieldID fid);
+    public:
+      void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id, bool local);
+      void free_fields(const std::set<FieldID> &to_free);
+    public:
+      const FieldSpace field_space;
+      TaskContext *const context;
+    };
+
+    /**
      * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
@@ -2109,17 +2141,6 @@ namespace Legion {
       bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
-    public:
-      FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, 
-                             bool local, CustomSerdezID serdez);
-      void free_field(Context ctx, FieldSpace space, FieldID fid);
-      void allocate_fields(Context ctx, FieldSpace space, 
-                           const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, 
-                           bool local, CustomSerdezID serdez);
-      void free_fields(Context ctx, FieldSpace space, 
-                       const std::set<FieldID> &to_free);
     public:
       TaskID generate_dynamic_task_id(void);
       TaskID generate_library_task_ids(const char *name, size_t count);

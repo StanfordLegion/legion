@@ -255,6 +255,86 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Field Allocator Impl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx)
+      : field_space(space), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_space.exists());
+      assert(context != NULL);
+#endif
+      context->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
+      : field_space(rhs.field_space), context(rhs.context)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::~FieldAllocatorImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      context->destroy_field_allocator(field_space);
+      if (context->remove_reference())
+        delete context;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl& FieldAllocatorImpl::operator=(
+                                                  const FieldAllocatorImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+      return *this;
+    }
+    
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocatorImpl::allocate_field(size_t field_size,
+                                               FieldID desired_fieldid,
+                                               CustomSerdezID serdez_id, 
+                                               bool local)
+    //--------------------------------------------------------------------------
+    {
+      return context->allocate_field(field_space, field_size, desired_fieldid,
+                                     local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      context->free_field(field_space, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::allocate_fields(
+                                        const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+      context->allocate_fields(field_space, field_sizes, resulting_fields,
+                               local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      context->free_fields(field_space, to_free);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Impl 
     /////////////////////////////////////////////////////////////
 
@@ -11943,14 +12023,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
-                                                            FieldSpace handle)
+    FieldAllocator Runtime::create_field_allocator(Context ctx,
+                                                   FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create field allocator!");
-      return ctx->create_field_allocator(external, handle); 
+      return FieldAllocator(ctx->create_field_allocator(handle)); 
     }
 
     //--------------------------------------------------------------------------
@@ -13327,50 +13407,6 @@ namespace Legion {
     {
       return forest->retrieve_semantic_information(handle, tag, result, size,
                                                    can_fail, wait_until);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
-                                          size_t field_size, FieldID fid,
-                                          bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate field!");
-      return ctx->allocate_field(forest, space, field_size, 
-                                 fid, local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace space, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free field!");
-      ctx->free_field(space, fid); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
-                                        const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate fields!");
-      ctx->allocate_fields(forest, space, sizes, resulting_fields, 
-                           local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
-                                    const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free fields!");
-      ctx->free_fields(space, to_free); 
     }
 
     //--------------------------------------------------------------------------

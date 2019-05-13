@@ -2675,9 +2675,9 @@ namespace Legion {
       RtEvent allocate_fields(const std::vector<size_t> &sizes,
                               const std::vector<FieldID> &fids,
                               CustomSerdezID serdez_id);
-      void free_field(FieldID fid, AddressSpaceID source);
+      void free_field(FieldID fid, AddressSpaceID source, RtEvent freed);
       void free_fields(const std::vector<FieldID> &to_free,
-                       AddressSpaceID source);
+                       AddressSpaceID source, RtEvent freed);
     public:
       bool allocate_local_fields(const std::vector<FieldID> &fields,
                                  const std::vector<size_t> &sizes,
@@ -2685,7 +2685,8 @@ namespace Legion {
                                  const std::set<unsigned> &indexes,
                                  std::vector<unsigned> &new_indexes);
       void free_local_fields(const std::vector<FieldID> &to_free,
-                             const std::vector<unsigned> &indexes);
+                             const std::vector<unsigned> &indexes,
+                             RtEvent freed);
       void update_local_fields(const std::vector<FieldID> &fields,
                                const std::vector<size_t> &sizes,
                                const std::vector<CustomSerdezID> &serdez_ids,
@@ -2780,7 +2781,8 @@ namespace Legion {
             const std::vector<size_t> &sizes,
             const std::set<unsigned> &current_indexes,
                   std::vector<unsigned> &new_indexes);
-      void free_local_indexes(const std::vector<unsigned> &indexes);
+      void free_local_indexes(const std::vector<unsigned> &indexes, 
+                              RtEvent freed);
     public:
       const FieldSpace handle;
       RegionTreeForest *const context;
@@ -3013,6 +3015,7 @@ namespace Legion {
     public:
       inline FieldSpaceNode* get_column_source(void) const 
       { return column_source; }
+      void find_remote_instances(NodeSet &target_instances);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
@@ -3080,8 +3083,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
     public:
-      void find_remote_instances(NodeSet &target_instances);
-      bool destroy_node(AddressSpaceID source, bool root);
+      bool destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -3217,7 +3219,7 @@ namespace Legion {
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
       void remove_child(const LegionColor c);
-      bool destroy_node(AddressSpaceID source, bool root);
+      bool destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;

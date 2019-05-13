@@ -186,17 +186,41 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator TaskContext::create_field_allocator(
-                                   Legion::Runtime *external, FieldSpace handle)
+    FieldAllocatorImpl* TaskContext::create_field_allocator(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       AutoRuntimeCall call(this);
-      return FieldAllocator(handle, this, external);
+      // Check to see if we still have one
+      std::map<FieldSpace,FieldAllocatorImpl*>::const_iterator finder = 
+        field_allocators.find(handle);
+      if (finder == field_allocators.end())
+      {
+        // Don't have one so make a new one
+        FieldAllocatorImpl *result = new FieldAllocatorImpl(handle, this); 
+        // Save it for later
+        field_allocators[handle] = result;
+        return result;
+      }
+      else
+        return finder->second;
     }
 
     //--------------------------------------------------------------------------
-    FieldID TaskContext::allocate_field(RegionTreeForest *forest,
-                                        FieldSpace space, size_t field_size,
+    void TaskContext::destroy_field_allocator(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+      // Check to see if we still have one
+      std::map<FieldSpace,FieldAllocatorImpl*>::iterator finder = 
+        field_allocators.find(handle);
+#ifdef DEBUG_LEGION
+      assert(finder != field_allocators.end());
+#endif
+      field_allocators.erase(finder);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldID TaskContext::allocate_field(FieldSpace space, size_t field_size,
                                         FieldID fid, bool local,
                                         CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
@@ -221,10 +245,10 @@ namespace Legion {
 
       std::set<RtEvent> done_events;
       if (local)
-        allocate_local_field(forest, space, field_size, fid, 
+        allocate_local_field(space, field_size, fid, 
                              serdez_id, done_events);
       else
-        forest->allocate_field(space, field_size, fid, serdez_id);
+        runtime->forest->allocate_field(space, field_size, fid, serdez_id);
       register_field_creation(space, fid, local);
       if (!done_events.empty())
       {
@@ -235,8 +259,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::allocate_fields(RegionTreeForest *forest, 
-                                      FieldSpace space,
+    void TaskContext::allocate_fields(FieldSpace space,
                                       const std::vector<size_t> &sizes,
                                       std::vector<FieldID> &resulting_fields,
                                       bool local, CustomSerdezID serdez_id)
@@ -267,10 +290,11 @@ namespace Legion {
       }
       std::set<RtEvent> done_events;
       if (local)
-        allocate_local_fields(forest, space, sizes, resulting_fields,
+        allocate_local_fields(space, sizes, resulting_fields,
                               serdez_id, done_events);
       else
-        forest->allocate_fields(space, sizes, resulting_fields, serdez_id);
+        runtime->forest->allocate_fields(space, sizes, 
+                                         resulting_fields, serdez_id);
       register_field_creations(space, local, resulting_fields);
       if (!done_events.empty())
       {
@@ -3247,8 +3271,7 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    void InnerContext::allocate_local_field(RegionTreeForest *forest,
-                                          FieldSpace space, size_t field_size,
+    void InnerContext::allocate_local_field(FieldSpace space, size_t field_size,
                                           FieldID fid, CustomSerdezID serdez_id,
                                           std::set<RtEvent> &done_events)
     //--------------------------------------------------------------------------
@@ -3271,8 +3294,8 @@ namespace Legion {
       std::vector<FieldID> fields(1, fid);
       std::vector<size_t> sizes(1, field_size);
       std::vector<unsigned> new_indexes;
-      if (!forest->allocate_local_fields(space, fields, sizes, serdez_id, 
-                                         current_indexes, new_indexes))
+      if (!runtime->forest->allocate_local_fields(space, fields, sizes, 
+                              serdez_id, current_indexes, new_indexes))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -3309,8 +3332,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InnerContext::allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+    void InnerContext::allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resulting_fields,
                                    CustomSerdezID serdez_id,
@@ -3333,8 +3355,8 @@ namespace Legion {
             infos.begin(); it != infos.end(); it++)
         current_indexes.insert(it->index);
       std::vector<unsigned> new_indexes;
-      if (!forest->allocate_local_fields(space, resulting_fields, sizes, 
-                                serdez_id, current_indexes, new_indexes))
+      if (!runtime->forest->allocate_local_fields(space, resulting_fields, 
+                          sizes, serdez_id, current_indexes, new_indexes))
         REPORT_LEGION_ERROR(ERROR_UNABLE_ALLOCATE_LOCAL_FIELD,
           "Unable to allocate local field in context of "
                       "task %s (UID %lld) due to local field size "
@@ -3409,7 +3431,7 @@ namespace Legion {
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletion(this, space, fid);
-      const RtEvent freed = Runtime::protect_event(op->get_completion_event());
+      const RtEvent freed = op->get_commit_event();
       runtime->add_to_dependence_queue(this, executing_processor, op);
       // Then tell the forest that the field is going to be deleted
       if (is_local)
@@ -3492,7 +3514,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
       DeletionOp *op = runtime->get_available_deletion_op();
       op->initialize_field_deletions(this, space, to_free);
-      const RtEvent freed = Runtime::protect_event(op->get_completion_event());
+      const RtEvent freed = op->get_commit_event();
       runtime->add_to_dependence_queue(this, executing_processor, op);
       if (!local_free.empty())
       {
@@ -8207,8 +8229,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::allocate_local_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+    void LeafContext::allocate_local_field(FieldSpace space, size_t field_size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events)
     //--------------------------------------------------------------------------
@@ -8219,8 +8240,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void LeafContext::allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+    void LeafContext::allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -9452,14 +9472,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldID InlineContext::allocate_field(RegionTreeForest *forest,
-                                          FieldSpace space, size_t field_size,
+    FieldID InlineContext::allocate_field(FieldSpace space, size_t field_size,
                                           FieldID fid, bool local,
                                           CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-      return enclosing->allocate_field(forest, space, field_size, 
-                                       fid, local, serdez_id);
+      return enclosing->allocate_field(space, field_size, fid, local,serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9470,15 +9488,13 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::allocate_fields(RegionTreeForest *forest,
-                                        FieldSpace space,
+    void InlineContext::allocate_fields(FieldSpace space,
                                         const std::vector<size_t> &sizes,
                                         std::vector<FieldID> &resulting_fields,
                                         bool local, CustomSerdezID serdez_id)
     //--------------------------------------------------------------------------
     {
-      enclosing->allocate_fields(forest, space, sizes, resulting_fields,
-                                 local, serdez_id);
+      enclosing->allocate_fields(space, sizes,resulting_fields,local,serdez_id);
     }
 
     //--------------------------------------------------------------------------
@@ -9490,8 +9506,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_field(RegionTreeForest *forest,
-                                     FieldSpace space, size_t field_size,
+    void InlineContext::allocate_local_field(FieldSpace space,size_t size,
                                      FieldID fid, CustomSerdezID serdez_id,
                                      std::set<RtEvent> &done_events)
     //--------------------------------------------------------------------------
@@ -9501,8 +9516,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void InlineContext::allocate_local_fields(RegionTreeForest *forest,
-                                   FieldSpace space,
+    void InlineContext::allocate_local_fields(FieldSpace space,
                                    const std::vector<size_t> &sizes,
                                    const std::vector<FieldID> &resuling_fields,
                                    CustomSerdezID serdez_id,
@@ -9547,11 +9561,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator InlineContext::create_field_allocator(
-                                   Legion::Runtime *external, FieldSpace handle)
+    FieldAllocatorImpl* InlineContext::create_field_allocator(FieldSpace handle)
     //--------------------------------------------------------------------------
     {
-      return enclosing->create_field_allocator(external, handle);
+      return enclosing->create_field_allocator(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void InlineContext::destroy_field_allocator(FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      enclosing->destroy_field_allocator(handle);
     }
 
     //--------------------------------------------------------------------------
