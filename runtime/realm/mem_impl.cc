@@ -397,9 +397,11 @@ namespace Realm {
     }
 
     // attempt to allocate storage for the specified instance
-    bool MemoryImpl::allocate_instance_storage(RegionInstance i,
-					       size_t bytes, size_t alignment,
-					       Event precondition, size_t offset /*=0*/)
+    MemoryImpl::AllocationResult MemoryImpl::allocate_instance_storage(RegionInstance i,
+							   size_t bytes,
+							   size_t alignment,
+							   Event precondition,
+							   size_t offset /*=0*/)
     {
       // all allocation requests are handled by the memory's owning node for
       //  now - local caching might be possible though
@@ -409,7 +411,7 @@ namespace Realm {
 					     me, i,
 					     bytes, alignment,
 					     precondition, offset);
-	return false /*asynchronous notification*/;
+	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
       if(!precondition.has_triggered()) {
@@ -435,7 +437,8 @@ namespace Realm {
 					      ok);
       }
 
-      return true /*immediate notification*/;
+      return (ok ? ALLOC_INSTANT_SUCCESS :
+	           ALLOC_INSTANT_FAILURE) /*immediate notification*/;
     }
 
     // release storage associated with an instance

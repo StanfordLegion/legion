@@ -218,6 +218,16 @@ namespace Realm {
 	return cudaSuccess;
       }
 
+      cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream, unsigned int flags)
+      {
+        GPUProcessor *p = get_gpu_or_die("cudaStreamCreateWithFlags");
+        // Ignore the flags for now
+        // For now we always return the stream for this task in case the user actually uses it
+	// TODO: actually create sub-streams and connect them up
+	*stream = p->gpu->get_current_task_stream()->get_stream();
+	return cudaSuccess;
+      }
+
       cudaError_t cudaStreamDestroy(cudaStream_t stream)
       {
 	/*GPUProcessor *p =*/ get_gpu_or_die("cudaStreamDestroy");
@@ -587,6 +597,14 @@ namespace Realm {
         // but it appears that they do now
         CHECK_CU( cuGetErrorString((CUresult)error, &result) );
         return result;
+      }
+
+      cudaError_t cudaSetDevice(int device)
+      {
+        get_gpu_or_die("cudaSetDevice");
+        // Ignore calls to set the device here since we already
+        // know which device we are running on
+        return cudaSuccess;
       }
 
     }; // extern "C"

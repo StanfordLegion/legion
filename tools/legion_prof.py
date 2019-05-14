@@ -1596,18 +1596,18 @@ class Instance(Base, TimeRange, HasInitiationDependencies):
     def __repr__(self):
         # Check to see if we got a profiling callback
         if self.size is not None:
-            unit = 'B'
-            unit_size = self.size
-            if self.size > (1024*1024*1024):
-                unit = 'GB'
-                unit_size /= (1024*1024*1024)
-            elif self.size > (1024*1024):
-                unit = 'MB'
-                unit_size /= (1024*1024)
-            elif self.size > 1024:
-                unit = 'KB'
-                unit_size /= 1024
-            size_pretty = str(unit_size) + unit
+            if self.size >= (1024*1024*1024):
+                # GBs
+                size_pretty = '%.3f GiB' % (self.size / (1024.0*1024.0*1024.0))
+            elif self.size >= (1024*1024):
+                # MBs
+                size_pretty = '%.3f MiB' % (self.size / (1024.0*1024.0))
+            elif self.size >= 1024:
+                # KBs
+                size_pretty = '%.3f KiB' % (self.size / 1024.0)
+            else:
+                # Bytes
+                size_pretty = str(self.size) + ' B'
         else:
             size_pretty = 'Unknown'
         output_str = ""

@@ -1103,6 +1103,10 @@ function check_vectorizability.expr(cx, node)
       cx:report_error_when_demanded(node,
         error_prefix .. "a raw operator")
 
+    elseif node:is(ast.typed.expr.AddressOf) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "an address-of operator")
+
     elseif node:is(ast.typed.expr.Future) then
       cx:report_error_when_demanded(node,
         error_prefix .. "a future creation")

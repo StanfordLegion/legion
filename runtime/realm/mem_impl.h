@@ -99,13 +99,19 @@ namespace Realm {
       void release_instance(RegionInstance inst);
       
       // attempt to allocate storage for the specified instance
-      virtual bool allocate_instance_storage(RegionInstance i,
-					     size_t bytes, size_t alignment,
-					     Event precondition, 
-                                             // this will be used for zero-size allocs
+      enum AllocationResult {
+	ALLOC_INSTANT_SUCCESS,
+	ALLOC_INSTANT_FAILURE,
+	ALLOC_DEFERRED
+      };
+      virtual AllocationResult allocate_instance_storage(RegionInstance i,
+							 size_t bytes,
+							 size_t alignment,
+							 Event precondition, 
+							 // this will be used for zero-size allocs
                     // TODO: ideally use something like (size_t)-2 here, but that will
                     //  currently confuse the file read/write path in dma land
-                                             size_t offset = 0);
+							 size_t offset = 0);
 
       // release storage associated with an instance
       virtual void release_instance_storage(RegionInstance i,

@@ -35,6 +35,22 @@ local all_math_fns = terralib.newlist({
   "y0", "y1", "yn",
 })
 
+-- Slow Terra implementations for CUDA-only math functions
+local function rsqrt_cpu(arg_type)
+  if arg_type == double then
+    return terra(v : double) return cmath.pow(v, -0.5) end
+  else
+    return terra(v : float) return cmath.powf(v, -0.5) end
+  end
+end
+
+local cuda_only_math_fns = terralib.newlist({
+  {
+    name = "rsqrt",
+    default_variant = rsqrt_cpu,
+  },
+})
+
 local math_fn = {}
 math_fn.__index = math_fn
 
@@ -104,6 +120,15 @@ all_math_fns:map(function(fn_name)
   math[fn_name] = terralib.memoize(function(arg_type)
     assert(arg_type:isfloat(), "Math operations support only float types.")
     return math_fn.new_math_fn(fn_name, arg_type)
+  end)
+end)
+
+cuda_only_math_fns:map(function(fn)
+  math[fn.name] = terralib.memoize(function(arg_type)
+    assert(arg_type:isfloat(), "Math operations support only float types.")
+    local f = math_fn.new_math_fn(fn.name, arg_type)
+    f:set_variant("default", fn.default_variant(arg_type))
+    return f
   end)
 end)
 

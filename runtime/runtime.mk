@@ -98,6 +98,8 @@ endif
 GPU_ARCH ?= kepler
 #GPU_ARCH ?= k20
 #GPU_ARCH ?= pascal
+#GPU_ARCH ?= volta
+#GPU_ARCH ?= turing
 
 # if CUDA is not set, but CUDATOOLKIT_HOME or CUDA_HOME is, use that
 ifdef CUDATOOLKIT_HOME
@@ -334,6 +336,10 @@ endif
 ifeq ($(strip $(GPU_ARCH)),volta)
 NVCC_FLAGS	+= -arch=compute_70 -code=sm_70
 NVCC_FLAGS	+= -DVOLTA_ARCH
+endif
+ifeq ($(strip $(GPU_ARCH)),turing)
+NVCC_FLAGS	+= -arch=compute_75 -code=sm_75
+NVCC_FLAGS	+= -DTURING_ARCH
 endif
 NVCC_FLAGS	+= -Xptxas "-v" #-abi=no"
 endif

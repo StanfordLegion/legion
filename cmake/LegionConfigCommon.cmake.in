@@ -7,15 +7,6 @@ if((NOT @BUILD_SHARED_LIBS@) AND Legion_USE_HWLOC)
   find_package(HWLOC REQUIRED)
 endif()
 
-# GASNet is a public dependency and always needs to be pulled in
-set(Legion_USE_GASNet @Legion_USE_GASNet@)
-if(Legion_USE_GASNet)
-  set(GASNet_CONDUIT @GASNet_CONDUIT@)
-  set(GASNet_THREADING @GASNet_THREADING@)
-  set(GASNet_ROOT_DIR @GASNet_ROOT_DIR@)
-  find_package(GASNet REQUIRED)
-endif()
-
 # LLVM is a private dependency and only needs to be pulled in for static
 # builds
 set(Legion_USE_LLVM @Legion_USE_LLVM@)

@@ -193,6 +193,7 @@ local node_vars_are_valid = {
   [ast.typed.expr.Unary]                      = continue,
   [ast.typed.expr.Binary]                     = continue,
   [ast.typed.expr.Deref]                      = continue,
+  [ast.typed.expr.AddressOf]                  = continue,
   [ast.typed.expr.ImportIspace]               = continue,
   [ast.typed.expr.ImportRegion]               = continue,
   [ast.typed.expr.ImportPartition]            = continue,

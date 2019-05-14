@@ -27,6 +27,8 @@ variables:
   CXX: "clang++-3.5"
 .clang38: &clang38
   CXX: "clang++-3.8"
+.clang8: &clang8
+  CXX: "clang++-8"
 
 .terra35: &terra35
   LLVM_CONFIG: "llvm-config-3.5"
@@ -85,6 +87,9 @@ variables:
   USE_CUDA: "1"
 .gasnet: &gasnet
   USE_GASNET: "1"
+.gasnetdbg: &gasnetdbg
+  USE_GASNET: "1"
+  GASNET_DEBUG: "1"
 .gasnetex: &gasnetex
   USE_GASNET: "1"
   GASNET_VERSION: "GASNet-EX-snapshot"
@@ -136,12 +141,17 @@ before_script:
   - |
     if [[ "$USE_GASNET" -eq 1 && "$(hostname)" != n0003 ]]; then
       export CONDUIT=mpi
-      export GASNET_ROOT="$PWD/gasnet/release"
+      if [[ "$GASNET_DEBUG" -eq 1 ]]; then
+        export GASNET_ROOT="$PWD/gasnet/debug"
+      else
+        export GASNET_ROOT="$PWD/gasnet/release"
+      fi
       # OpenMPI:
       # export LAUNCHER="mpirun -n 2 -x TERRA_PATH -x INCLUDE_PATH -x LD_LIBRARY_PATH -x LG_RT_DIR -x USE_RDIR"
       # MPICH:
       export LAUNCHER="mpirun -n 2"
       unset WARN_AS_ERROR
+      export MPICH_CXX=${CXX}
       git clone https://github.com/StanfordLegion/gasnet.git gasnet
       make -C gasnet -j$THREADS
     fi
@@ -151,6 +161,7 @@ before_script:
       module load cmake/3.8.2
       module load mpi/openmpi/1.10.4
       module load cuda/8.0
+      export OMPI_CXX=${CXX}
 
       if [[ "$USE_GASNET" -eq 1 ]]; then
         module load gasnet/1.30.0-openmpi
@@ -342,6 +353,10 @@ gcc49_cxx98_debug_gasnet_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
     <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnet, *regent, *incremental]
+gcc49_cxx98_debug_gasnetdbg_regent:
+  <<: [*linux_compute, *image, *tests]
+  variables:
+    <<: [*gcc49, *terra38, *debug, *cxx98_normal, *gasnetdbg, *regent, *incremental]
 gcc49_cxx98_debug_gasnetex_regent:
   <<: [*linux_compute, *image, *tests]
   variables:
@@ -589,6 +604,10 @@ clang35_cxx98_debug_legion:
 #   <<: [*linux_compute, *image, *tests]
 #   variables:
 #     <<: [*clang35, *terra35, *debug, *cxx98_normal, *regent]
+clang8_cxx98_debug_legion:
+  <<: [*linux, *image, *tests]
+  variables:
+    <<: [*clang8, *terra38, *debug, *cxx98_normal, *llvm, *legion]
 
 # Performance tests:
 # n0004_gcc49_cxx98_release_perf:

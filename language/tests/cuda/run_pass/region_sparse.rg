@@ -13,7 +13,7 @@
 -- limitations under the License.
 
 -- runs-with:
--- [["-fopenmp", "1", "-ll:ocpu", "1", "-ll:othr", "4", "-ll:cpu", "0", "-ll:okindhack" ]]
+-- [["-fcuda", "1", "-ll:gpu", "1" ]]
 
 import "regent"
 
