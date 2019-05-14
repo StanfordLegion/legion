@@ -1056,7 +1056,68 @@ function check_vectorizability.expr(cx, node)
     return true
 
   else
-    assert(false, "unexpected node type " .. tostring(node:type()))
+    if node:is(ast.typed.expr.MethodCall) then
+      cx:report_error_when_demanded(node, error_prefix .. "a method call")
+
+    elseif node:is(ast.typed.expr.RawContext) then
+      cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
+
+    elseif node:is(ast.typed.expr.RawFields) then
+      cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
+
+    elseif node:is(ast.typed.expr.RawPhysical) then
+      cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
+
+    elseif node:is(ast.typed.expr.RawRuntime) then
+      cx:report_error_when_demanded(node, error_prefix .. "a raw expression")
+
+    elseif node:is(ast.typed.expr.Isnull) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "an isnull expression")
+
+    elseif node:is(ast.typed.expr.Null) then
+      cx:report_error_when_demanded(node, error_prefix .. "a null expression")
+
+    elseif node:is(ast.typed.expr.DynamicCast) then
+      cx:report_error_when_demanded(node, error_prefix .. "a dynamic cast")
+
+    elseif node:is(ast.typed.expr.StaticCast) then
+      cx:report_error_when_demanded(node, error_prefix .. "a static cast")
+
+    elseif node:is(ast.typed.expr.Region) then
+      cx:report_error_when_demanded(node, error_prefix .. "a region expression")
+
+    elseif node:is(ast.typed.expr.Partition) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a patition expression")
+
+    elseif node:is(ast.typed.expr.CrossProduct) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a cross product operation")
+
+    elseif node:is(ast.typed.expr.Function) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a function reference")
+
+    elseif node:is(ast.typed.expr.RawValue) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a raw operator")
+
+    elseif node:is(ast.typed.expr.AddressOf) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "an address-of operator")
+
+    elseif node:is(ast.typed.expr.Future) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future creation")
+
+    elseif node:is(ast.typed.expr.FutureGetResult) then
+      cx:report_error_when_demanded(node,
+        error_prefix .. "a future access")
+
+    else
+      assert(false, "unexpected node type " .. tostring(node:type()))
+    end
 
     return false
   end
