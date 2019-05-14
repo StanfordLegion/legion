@@ -273,6 +273,7 @@ local rewrite_accesses_expr_table = {
   [ast.typed.expr.AllocateScratchFields]      = unreachable,
   [ast.typed.expr.WithScratchFields]          = unreachable,
   [ast.typed.expr.Condition]                  = unreachable,
+  [ast.typed.expr.AddressOf]                  = unreachable,
   [ast.typed.expr.Future]                     = unreachable,
   [ast.typed.expr.FutureGetResult]            = unreachable,
   [ast.typed.expr.ParallelizerConstraint]     = unreachable,
