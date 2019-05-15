@@ -277,6 +277,10 @@ namespace Legion {
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, 
                        const std::vector<FieldID> &to_free, RtEvent freed);
+      // The final call to when the destruction of the field meta data
+      // is finally safe to be performed
+      void destroy_fields(FieldSpace handle, 
+                          const std::set<FieldID> &to_destroy);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -359,8 +363,15 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events);
+      void perform_index_space_deletion_analysis(IndexSpace handle,
+                                       std::set<ApEvent> &ready_events);
+      void perform_index_partition_deletion_analysis(IndexPartition handle,
+                                       std::set<ApEvent> &ready_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
+      void invalidate_fields(RegionTreeContext ctx, LogicalRegion handle,
+                             const std::set<FieldID> &invalidate_fields,
+                             std::set<RtEvent> &ready_events);
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const bool restricted,

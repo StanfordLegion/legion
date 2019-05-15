@@ -7112,33 +7112,112 @@ namespace Legion {
                                             req.privilege_fields);
         }
       }
-      
-      // If we're not deleting fields, then invalidate the context for any
-      // of our region requirements to free up resources
-      if (!deletion_requirements.empty())
+#ifdef DEBUG_LEGION
+      if (kind == LOGICAL_REGION_DELETION)
       {
+        // Still need to clean up these contexts in debug mode in case the
+        // deletion doesn't happen before the context gets deleted and the
+        // runtime tries to check that the context is empty for all region
+        // trees. The check is only in debug mode so we only need to do this
+        // in debug mode.
+        bool has_outermost = false;
         RegionTreeContext outermost_ctx;
-        if (kind != FIELD_DELETION)
+        const RegionTreeContext tree_context = parent_ctx->get_context();
+        for (std::vector<RegionRequirement>::const_iterator it = 
+              deletion_requirements.begin(); it != 
+              deletion_requirements.end(); it++)
         {
-
-        }
-        else
-        {
-
+          if (it->flags & RETURNABLE_FLAG)
+          {
+            if (!has_outermost)
+            {
+              TaskContext *outermost = 
+                parent_ctx->find_outermost_local_context();
+              outermost_ctx = outermost->get_context();
+              has_outermost = true;
+            }
+            runtime->forest->invalidate_current_context(outermost_ctx,
+                                      false/*users only*/, it->region);
+          }
+          else
+            runtime->forest->invalidate_current_context(tree_context,
+                                    false/*users only*/, it->region);
         }
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
-      
+      // Clean out the physical state for these operations once we know that  
+      // all prior operations that needed the state have been done
+      std::set<RtEvent> map_applied_events;
+      if (kind == LOGICAL_REGION_DELETION)
+      {
+        // Just need to clean out the version managers which will free
+        // all the equivalence sets and allow the reference counting to
+        // clean everything up
+        bool has_outermost = false;
+        RegionTreeContext outermost_ctx;
+        const RegionTreeContext tree_context = parent_ctx->get_context();
+        for (std::vector<RegionRequirement>::const_iterator it = 
+              deletion_requirements.begin(); it != 
+              deletion_requirements.end(); it++)
+        {
+          if (it->flags & RETURNABLE_FLAG)
+          {
+            if (!has_outermost)
+            {
+              TaskContext *outermost = 
+                parent_ctx->find_outermost_local_context();
+              outermost_ctx = outermost->get_context();
+              has_outermost = true;
+            }
+            runtime->forest->invalidate_versions(outermost_ctx, it->region);
+          }
+          else
+            runtime->forest->invalidate_versions(tree_context, it->region);
+        }
+      }
+      else if (kind == FIELD_DELETION)
+      {
+        // For this case we actually need to go through and prune out any
+        // valid instances for these fields in the equivalence sets in order
+        // to be able to free up the resources.
+        bool has_outermost = false;
+        RegionTreeContext outermost_ctx;
+        const RegionTreeContext tree_context = parent_ctx->get_context();
+        for (std::vector<RegionRequirement>::const_iterator it = 
+              deletion_requirements.begin(); it != 
+              deletion_requirements.end(); it++)
+        {
+          if (it->flags & RETURNABLE_FLAG)
+          {
+            if (!has_outermost)
+            {
+              TaskContext *outermost = 
+                parent_ctx->find_outermost_local_context();
+              outermost_ctx = outermost->get_context();
+              has_outermost = true;
+            }
+            runtime->forest->invalidate_fields(outermost_ctx, it->region,
+                                it->privilege_fields, map_applied_events);
+          }
+          else
+            runtime->forest->invalidate_fields(tree_context, it->region,
+                                it->privilege_fields, map_applied_events);
+        }
+      }
       // Mark that we're done mapping and defer the execution as appropriate
-      complete_mapping();
+      if (!map_applied_events.empty())
+        complete_mapping(Runtime::merge_events(map_applied_events));
+      else
+        complete_mapping();
       // Wait for all the operations on which this deletion depends on to
       // complete before we are officially considered done execution
-      std::set<ApEvent> completion_preconditions;
+      std::set<ApEvent> execution_preconditions;
       if (!incoming.empty())
       {
         for (std::map<Operation*,GenerationID>::const_iterator it = 
@@ -7149,21 +7228,26 @@ namespace Legion {
           const ApEvent done = it->first->get_completion_event();
           __sync_synchronize();
           if (it->second == it->first->get_generation())
-            completion_preconditions.insert(done);
+            execution_preconditions.insert(done);
         }
       }
       // If we're deleting parts of an index space tree then we also need 
       // to make sure all the dependent partitioning operations are done
-
-      if (!completion_preconditions.empty())
+      if (kind == INDEX_SPACE_DELETION)
+        runtime->forest->perform_index_space_deletion_analysis(index_space,
+                                                  execution_preconditions);
+      else if (kind == INDEX_PARTITION_DELETION)
+        runtime->forest->perform_index_partition_deletion_analysis(index_part,
+                                                  execution_preconditions);
+      if (!execution_preconditions.empty())
         complete_execution(Runtime::protect_event(
-            Runtime::merge_events(NULL, completion_preconditions)));
+            Runtime::merge_events(NULL, execution_preconditions)));
       else
         complete_execution();
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::trigger_commit(void)
+    void DeletionOp::trigger_complete(void)
     //--------------------------------------------------------------------------
     {
       // We put these operations in the commit stage to make sure that there
@@ -7189,11 +7273,17 @@ namespace Legion {
             break;
           }
         case FIELD_DELETION:
-          // Nothing to do for the field deletion as the forest was
-          // already made aware of the deletion operation
-          break;
+          {
+            // Remove all deleted fields from the context privileges
+            parent_ctx->remove_field_requirements(destroy_indexes, free_fields);
+            // Now we can tell the runtime that the fields are destroyed
+            runtime->forest->destroy_fields(field_space, free_fields);
+            break;
+          }
         case LOGICAL_REGION_DELETION:
           {
+            // Remove all the deleted requirements from the context
+            parent_ctx->remove_privilege_requirements(destroy_indexes);
             // Now we can do the call to the runtime for the deletion
             runtime->forest->destroy_logical_region(logical_region, 
                                             runtime->address_space);
@@ -7209,7 +7299,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      commit_operation(true/*deactivate*/);
+      complete_operation();
     }
 
     //--------------------------------------------------------------------------

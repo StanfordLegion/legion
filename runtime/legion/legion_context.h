@@ -446,11 +446,15 @@ namespace Legion {
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
                                   std::vector<unsigned> &destroy_indexes);
+      // No destroy indexes because we can't delete privileges with this call
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes);
-      // No destroy indexes because we can't delete privileges with this call
-      void destroy_privilege_requirements(const std::vector<unsigned> &indexes);
+      // Remove any privilege requirements from the context
+      void remove_privilege_requirements(const std::vector<unsigned> &indexes);
+      // Remove any field requirements from the context
+      void remove_field_requirements(const std::vector<unsigned> &indexes,
+                                     const std::set<FieldID> &remove_fields);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);

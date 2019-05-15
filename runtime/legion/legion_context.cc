@@ -6124,9 +6124,6 @@ namespace Legion {
         TaskContext *outermost = find_outermost_local_context();
         const bool is_outermost = (outermost == this);
         RegionTreeContext outermost_ctx = outermost->get_context();
-#if 0
-        RegionTreeContext top_ctx = find_top_context()->get_context();
-#endif
         for (std::map<unsigned,RegionRequirement>::const_iterator it = 
               created_requirements.begin(); it != 
               created_requirements.end(); it++)
@@ -6134,28 +6131,12 @@ namespace Legion {
           // See if we're a returnable privilege or not
           if (it->second.flags & RETURNABLE_FLAG)
           {
-#if 0
-            // If we're the outermost context or the requirement was
-            // deleted, then we can invalidate everything
-            // Otherwiswe we only invalidate the users
-            const bool was_deleted = 
-              was_created_requirement_deleted(created_requirements[idx]);
-            const bool users_only = !is_outermost && !was_deleted;
-            runtime->forest->invalidate_current_context(outermost_ctx,
-                        users_only, created_requirements[idx].region);
-            // If it was deleted then we need to invalidate the versions
-            // in the outermost context
-            if (was_deleted)
-              runtime->forest->invalidate_versions(top_ctx,
-                                      created_requirements[idx].region);
-#else
             // If we're the outermost context or the requirement was
             // deleted, then we can invalidate everything
             // Otherwiswe we only invalidate the users
             const bool users_only = !is_outermost;
             runtime->forest->invalidate_current_context(outermost_ctx,
                                         users_only, it->second.region);
-#endif
           }
           else // Not returning so invalidate the full thing 
           {
