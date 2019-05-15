@@ -3552,9 +3552,10 @@ function type_check.stat_for_list(cx, node)
   local value_type = std.check_read(cx, value)
 
   if not (std.is_ispace(value_type) or std.is_region(value_type) or
+          std.is_rect_type(value_type) or
             (std.is_list(value_type) and not value_type:is_list_of_regions()))
   then
-    report.error(node, "iterator for loop expected ispace, region or list, got " ..
+    report.error(node, "iterator for loop expected ispace, region, rect or list, got " ..
                 tostring(value_type))
   end
 
@@ -3576,6 +3577,8 @@ function type_check.stat_for_list(cx, node)
   elseif std.is_region(value_type) then
     local index_type = value_type:ispace().index_type
     expected_var_type = index_type(value_type:fspace(), bound)
+  elseif std.is_rect_type(value_type) then
+    expected_var_type = value_type.index_type
   elseif std.is_list(value_type) then
     expected_var_type = value_type.element_type
   else
