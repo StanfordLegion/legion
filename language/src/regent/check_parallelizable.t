@@ -102,7 +102,8 @@ function loop_context:__newindex (field, value)
 end
 
 function loop_context.new_scope(task, loop, loop_var)
-  local needs_iterator = loop_var and loop:is(ast.typed.stat.ForList)
+  local needs_iterator = loop_var and loop:is(ast.typed.stat.ForList) and
+                         not std.is_rect_type(std.as_read(loop.value.expr_type))
   local cx = {
     loop = loop,
     loop_var = loop_var,
