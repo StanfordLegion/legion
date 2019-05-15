@@ -33,6 +33,7 @@ namespace Legion {
     TaskContext::TaskContext(Runtime *rt, TaskOp *owner, int d,
                              const std::vector<RegionRequirement> &reqs)
       : runtime(rt), owner_task(owner), regions(reqs), depth(d),
+        next_created_index(reqs.size()), 
         executing_processor(Processor::NO_PROC), total_tunable_count(0), 
         overhead_tracker(NULL), task_executed(false),
         has_inline_accessor(false), mutable_priority(false),
@@ -325,8 +326,6 @@ namespace Legion {
       forest->create_logical_region(region);
       // Register the creation of a top-level region with the context
       register_region_creation(region, task_local);
-      if (task_local)
-        record_task_local_region(region); 
       return region;
     }
 
@@ -379,13 +378,13 @@ namespace Legion {
     {
       // Already hold the lock from the caller
       RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
+      // Created regions always return privileges that they make
+      if (!task_local)
+        new_req.flags |= RETURNABLE_FLAG;
       // Put a region requirement with no fields in the list of
       // created requirements, we know we can add any fields for
       // this field space in the future since we own all privileges
-      // Now make a new region requirement and physical region
-      created_requirements.push_back(new_req);
-      // Created regions always return privileges that they make
-      returnable_privileges.push_back(!task_local);
+      created_requirements[next_created_index++] = new_req;
     }
 
     //--------------------------------------------------------------------------
@@ -395,23 +394,21 @@ namespace Legion {
       std::vector<MappingInstance> instances(1, 
             Mapping::PhysicalInstance::get_virtual_instance());
       const UniqueID unique_op_id = get_unique_id();
-      const size_t original_size = 
-        (owner_task == NULL) ? 0 : owner_task->regions.size();
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        TaskOp::log_requirement(unique_op_id, original_size + idx,
-                                created_requirements[idx]);
+        TaskOp::log_requirement(unique_op_id, it->first, it->second);
         // Skip it if there are no privilege fields
-        if (created_requirements[idx].privilege_fields.empty())
+        if (it->second.privilege_fields.empty())
           continue;
         InstanceSet instance_set;
         std::vector<PhysicalManager*> unacquired;  
         RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
         runtime->forest->physical_convert_mapping(owner_task, 
-            created_requirements[idx], instances, instance_set, bad_tree, 
+            it->second, instances, instance_set, bad_tree, 
             missing_fields, NULL, unacquired, false/*do acquire_checks*/);
         runtime->forest->log_mapping_decision(unique_op_id,
-            original_size + idx, created_requirements[idx], instance_set);
+            it->first, it->second, instance_set);
       }
     } 
 
@@ -429,7 +426,13 @@ namespace Legion {
       assert(created_regions.find(handle) == created_regions.end());
 #endif
       if (task_local)
+      {
+        if (is_leaf_context())
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
+              "Illegal task-local region creation performed in leaf task %s "
+                           "(ID %lld)", get_task_name(), get_unique_id())
         local_regions.insert(handle);
+      }
       else
         created_regions.insert(handle);
       add_created_region(handle, task_local);
@@ -525,19 +528,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool TaskContext::was_created_requirement_deleted(
-                                             const RegionRequirement &req) const
-    //--------------------------------------------------------------------------
-    {
-      // No need to worry about deleted field creation requirements here
-      // since this method is only called for requirements with returnable
-      // privileges and therefore we just need to see if the region is
-      // still in the set of created regions. 
-      // Same thing applies to local_regions
-      return (created_regions.find(req.region) == created_regions.end());
-    }
-
-    //--------------------------------------------------------------------------
     void TaskContext::register_region_creations(
                                             const std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
@@ -619,146 +609,286 @@ namespace Legion {
       }
     }
 
+#if 0
     //--------------------------------------------------------------------------
-    void TaskContext::analyze_destroy_fields(FieldSpace handle,
-                                             const std::set<FieldID> &to_delete,
+    void TaskContext::analyze_destroy_index_space(IndexSpace handle,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &destroy_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_leaf_context());
 #endif
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
-      {
-        if (it->region.get_field_space() != handle)
-          continue;
-        std::set<FieldID> overlapping_fields;
-        for (std::set<FieldID>::const_iterator fit = to_delete.begin();
-              fit != to_delete.end(); fit++)
-        {
-          if (it->privilege_fields.find(*fit) != it->privilege_fields.end())
-            overlapping_fields.insert(*fit);
-        }
-        if (overlapping_fields.empty())
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = overlapping_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
-      }
+      // If we're deleting a top-level index space then we can't be deleting
+      // any of the original requirements, only requirements that we created
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            created_requirements.begin(); it != 
-            created_requirements.end(); it++, parent_index++)
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        if (it->region.get_field_space() != handle)
+        // Different index space trees means we can skip it
+        if (handle.get_tree_id() !=
+            it->second.region.get_index_space().get_tree_id())
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();  
+        req.region = it->second.region;
+        req.parent = it->second.region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->second.privilege_fields;
+        req.handle_type = SINGULAR;
+        req.flags = it->second.flags;
+        parent_req_indexes.push_back(it->first); 
+        destroy_indexes.push_back(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_index_partition(IndexPartition index_part,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &destroy_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // Cache for ancestor tests of index spaces against the index partition
+      std::map<IndexSpace,bool> ancestors;
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        const RegionRequirement &req = regions[idx];
+        const IndexSpace region_space = req.region.get_index_space();
+        // Different index space trees means we can skip
+        if (index_part.get_tree_id() != region_space.get_tree_id())
+          continue;
+        // Next check to see if this partition is below the index space for
+        // the logical region
+        std::map<IndexSpace,bool>::const_iterator finder = 
+          ancestors.find(region_space);
+        if (finder == ancestors.end())
+        {
+          // Haven't done this test before so do it now
+          const bool is_ancestor = 
+            runtime->forest->is_dominated_tree_only(index_part, region_space);
+          // Save the result for the future
+          ancestors[region_space] = is_ancestor;
+          if (!is_ancestor)
+            continue;
+        }
+        else if (!finder->second) // Not an ancestor so doesn't matter
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &delete_req = delete_reqs.back();
+        delete_req.partition = LogicalPartition(req.region.get_tree_id(), 
+                         index_part, req.region.get_field_space());
+        delete_req.handle_type = PART_PROJECTION;
+        delete_req.parent = req.region;
+        delete_req.privilege = READ_WRITE;
+        delete_req.prop = EXCLUSIVE;
+        delete_req.privilege_fields = req.privilege_fields;
+        delete_req.handle_type = SINGULAR;
+        delete_req.flags = req.flags;
+        parent_req_indexes.push_back(idx);
+        // Not going to destroy this because its a parent region
+      }
+      // Now do all the created requirements, there are two cases here
+      // 1. the created requirement could be a sub-region of the 
+      //    index partition being deleted
+      // 2. the partition is a sub-partition of one of the created
+      //    requirements and needs a basic deletion
+      std::map<IndexSpace,bool> dominators;
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        const IndexSpace region_space = it->second.region.get_index_space();
+        // Different index space trees means we can skip
+        if (index_part.get_tree_id() != region_space.get_tree_id())
+          continue;
+        // Next check to see if this partition is below the index space for
+        // the logical region
+        std::map<IndexSpace,bool>::const_iterator finder = 
+          ancestors.find(region_space);
+        if (finder == ancestors.end())
+        {
+          // Haven't done this test before so do it now
+          const bool is_ancestor = 
+            runtime->forest->is_dominated_tree_only(index_part, region_space);
+          // Save the result for the future
+          ancestors[region_space] = is_ancestor;
+          finder = ancestors.find(region_space);
+        }
+        if (finder->second)
+        {
+          // Region requirement is an ancestor of the partition being deleted
+          delete_reqs.resize(delete_reqs.size()+1);
+          RegionRequirement &req = delete_reqs.back();
+          req.partition = LogicalPartition(it->second.region.get_tree_id(), 
+                           index_part, it->second.region.get_field_space());
+          req.handle_type = PART_PROJECTION;
+          req.parent = it->second.region;
+          req.privilege = READ_WRITE;
+          req.prop = EXCLUSIVE;
+          req.privilege_fields = it->second.privilege_fields;
+          req.handle_type = SINGULAR;
+          req.flags = it->second.flags;
+          parent_req_indexes.push_back(it->first);
+          // No need to delete this since just a part of the privilege
+          // has been removed in the sub-tree
+          // Continue to avoid the next part
+          continue;
+        }
+        // If we get here we need to see if the partition dominates this
+        // logical region in which case the privilege is going to go away
+        finder = dominators.find(region_space);
+        if (finder != dominators.end())
+        {
+          const bool is_dominator = 
+            runtime->forest->is_dominated_tree_only(region_space, index_part);
+          // Save the result for the future
+          dominators[region_space] = is_dominator;
+          finder = dominators.find(region_space);
+        }
+        if (finder->second)
+        {
+          // The index part dominates the region so the privilege is
+          // going to be deleted
+          delete_reqs.resize(delete_reqs.size()+1);
+          RegionRequirement &req = delete_reqs.back();
+          req.region = it->second.region;
+          req.parent = it->second.region;
+          req.privilege = READ_WRITE;
+          req.prop = EXCLUSIVE;
+          req.privilege_fields = it->second.privilege_fields;
+          req.handle_type = SINGULAR;
+          req.flags = it->second.flags;
+          parent_req_indexes.push_back(it->first);
+          destroy_indexes.push_back(it->first);
+        }
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_field_space(FieldSpace handle,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &destroy_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // If we're deleting a field space then we can't be deleting any of the 
+      // original requirements, only requirements that we created
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        if (handle != it->second.region.get_field_space())
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->second.region;
+        req.parent = it->second.region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->second.privilege_fields;
+        req.handle_type = SINGULAR;
+        req.flags = it->second.flags;
+        parent_req_indexes.push_back(it->first);
+        destroy_indexes.push_back(it->first);
+      }
+    }
+#endif
+
+    //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_fields(FieldSpace handle,
+                                             const std::set<FieldID> &to_delete,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &destroy_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // We can't destroy any fields from our original regions because we
+      // were not the ones that made them.
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        // Skip any regions which have been destroyed
+        if (it->second.flags & DESTROYED_FLAG)
+          continue;
+        if (it->second.region.get_field_space() != handle)
           continue;
         std::set<FieldID> overlapping_fields;
         for (std::set<FieldID>::const_iterator fit = to_delete.begin();
               fit != to_delete.end(); fit++)
         {
-          if (it->privilege_fields.find(*fit) != it->privilege_fields.end())
+          if (it->second.privilege_fields.find(*fit) != 
+              it->second.privilege_fields.end())
             overlapping_fields.insert(*fit);
         }
         if (overlapping_fields.empty())
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        req.region = it->region;
-        req.parent = it->region;
+        req.region = it->second.region;
+        req.parent = it->second.region;
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
         req.privilege_fields = overlapping_fields;
         req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
+        req.flags = it->second.flags; 
+        parent_req_indexes.push_back(it->first);
+        destroy_indexes.push_back(it->first);
       }
     }
 
     //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_logical_region(LogicalRegion handle,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &destroy_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(!is_leaf_context());
 #endif
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
+      // If we're deleting a field space then we can't be deleting any of the 
+      // original requirements, only requirements that we created
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.get_tree_id())
+        // Skip any regions which have been destroyed
+        if (it->second.flags & DESTROYED_FLAG)
           continue;
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(handle.get_index_space(), 
-                                          it->region.index_space))
+        // Has to match precisely
+        if (handle.get_tree_id() != it->second.region.get_tree_id())
           continue;
+#ifdef DEBUG_LEGION
+        // Should be the same region
+        assert(handle == it->second.region);
+#endif
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_index_path(it->region.index_space,
-                                  handle.get_index_space(), dummy_path))
-          req.region = handle;
-        else
-          req.region = it->region;
-        req.parent = it->region;
+        req.region = it->second.region;
+        req.parent = it->second.region;
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
+        req.privilege_fields = it->second.privilege_fields;
         req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_index);
-      }
-      std::deque<RegionRequirement> local_requirements;
-      std::deque<unsigned> parent_indexes;
-      {
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        for (std::deque<RegionRequirement>::const_iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++, parent_index++)
-        {
-          // Different index space trees means we can skip
-          if (handle.get_tree_id() != it->region.get_tree_id())
-            continue;
-          local_requirements.push_back(*it);
-          parent_indexes.push_back(parent_index);
-        }
-      }
-      if (local_requirements.empty())
-        return;
-      unsigned local_index = 0;
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            local_requirements.begin(); it != 
-            local_requirements.end(); it++, local_index++)
-      {
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(handle.get_index_space(), 
-                                          it->region.index_space))
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_index_path(it->region.index_space,
-                                  handle.get_index_space(), dummy_path))
-          req.region = handle;
-        else
-          req.region = it->region;
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        req.handle_type = SINGULAR;
-        parent_req_indexes.push_back(parent_indexes[local_index]);
+        req.flags = it->second.flags;
+        // Now mark that the flag indicating that this privileges has
+        // been destroyed by the application
+        it->second.flags |= DESTROYED_FLAG;
+        parent_req_indexes.push_back(it->first);
+        destroy_indexes.push_back(it->first);
       }
     }
 
@@ -771,87 +901,80 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(!is_leaf_context());
 #endif
-      unsigned parent_index = 0;
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, parent_index++)
+      // Cache for ancestor tests of index spaces agains the index partition
+      std::map<IndexSpace,bool> ancestors;
+      const IndexPartition index_part = handle.get_index_partition();
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.get_tree_id())
+        const RegionRequirement &req = regions[idx];
+        // Different region trees means we can skip
+        if (handle.get_tree_id() != req.region.get_tree_id())
           continue;
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(it->region.index_space,
-                                          handle.get_index_partition())) 
-          continue;
-        delete_reqs.resize(delete_reqs.size()+1);
-        RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_partition_path(it->region.index_space,
-                                  handle.get_index_partition(), dummy_path))
+        // Next check to see if this partition is below the index space for
+        // the logical region
+        std::map<IndexSpace,bool>::const_iterator finder = 
+          ancestors.find(req.region.get_index_space());
+        if (finder == ancestors.end())
         {
-          req.partition = handle;
-          req.handle_type = PART_PROJECTION;
-        }
-        else
-        {
-          req.region = it->region;
-          req.handle_type = SINGULAR;
-        }
-        req.parent = it->region;
-        req.privilege = READ_WRITE;
-        req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_index);
-      }
-      std::deque<RegionRequirement> local_requirements;
-      std::deque<unsigned> parent_indexes;
-      {
-        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        for (std::deque<RegionRequirement>::const_iterator it = 
-              created_requirements.begin(); it != 
-              created_requirements.end(); it++, parent_index++)
-        {
-          // Different index space trees means we can skip
-          if (handle.get_tree_id() != it->region.get_tree_id())
+          // Haven't done this test before so do it now
+          const bool is_ancestor = 
+            runtime->forest->is_dominated_tree_only(index_part, 
+                                  req.region.get_index_space());
+          // Save the result for the future
+          ancestors[req.region.get_index_space()] = is_ancestor;
+          if (!is_ancestor)
             continue;
-          local_requirements.push_back(*it);
-          parent_indexes.push_back(parent_index);
         }
-      }
-      if (local_requirements.empty())
-        return;
-      unsigned local_index = 0;
-      for (std::deque<RegionRequirement>::const_iterator it = 
-            local_requirements.begin(); it != 
-            local_requirements.end(); it++, local_index++)
-      {
-        // Different index space trees means we can skip
-        if (handle.get_tree_id() != it->region.get_tree_id())
+        else if (!finder->second) // Not an ancestor so doesn't matter
           continue;
-        // Disjoint index spaces means we can skip
-        if (runtime->forest->are_disjoint(it->region.index_space,
-                                          handle.get_index_partition())) 
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &delete_req = delete_reqs.back();
+        delete_req.partition = handle;
+        delete_req.handle_type = PART_PROJECTION;
+        delete_req.parent = req.region;
+        delete_req.privilege = READ_WRITE;
+        delete_req.prop = EXCLUSIVE;
+        delete_req.privilege_fields = req.privilege_fields;
+        delete_req.flags = req.flags;
+        parent_req_indexes.push_back(idx);
+      }
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        // Skip any regions which have been destroyed
+        if (it->second.flags & DESTROYED_FLAG)
+          continue;
+        // Different region trees means we can skip
+        if (handle.get_tree_id() != it->second.region.get_tree_id())
+          continue;
+        // Next check to see if this partition is below the index space for
+        // the logical region
+        std::map<IndexSpace,bool>::const_iterator finder = 
+          ancestors.find(it->second.region.get_index_space());
+        if (finder == ancestors.end())
+        {
+          // Haven't done this test before so do it now
+          const bool is_ancestor = 
+            runtime->forest->is_dominated_tree_only(index_part, 
+                            it->second.region.get_index_space());
+          // Save the result for the future
+          ancestors[it->second.region.get_index_space()] = is_ancestor;
+          if (!is_ancestor)
+            continue;
+        }
+        else if (!finder->second) // Not an ancestor so doesn't matter
           continue;
         delete_reqs.resize(delete_reqs.size()+1);
         RegionRequirement &req = delete_reqs.back();
-        std::vector<LegionColor> dummy_path;
-        // See if we dominate the deleted instance
-        if (runtime->forest->compute_partition_path(it->region.index_space,
-                                  handle.get_index_partition(), dummy_path))
-        {
-          req.partition = handle;
-          req.handle_type = PART_PROJECTION;
-        }
-        else
-        {
-          req.region = it->region;
-          req.handle_type = SINGULAR;
-        }
-        req.parent = it->region;
+        req.partition = handle;
+        req.handle_type = PART_PROJECTION;
+        req.parent = it->second.region;
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
-        req.privilege_fields = it->privilege_fields;
-        parent_req_indexes.push_back(parent_indexes[local_index]);
+        req.privilege_fields = it->second.privilege_fields;
+        req.flags = it->second.flags;
+        parent_req_indexes.push_back(it->first);
       }
     }
 
@@ -1283,12 +1406,13 @@ namespace Legion {
     {
       if (idx >= regions.size())
       {
-        idx -= regions.size();
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<unsigned,RegionRequirement>::const_iterator finder = 
+          created_requirements.find(idx);
 #ifdef DEBUG_LEGION
-        assert(idx < created_requirements.size());
+        assert(finder != created_requirements.end());
 #endif
-        target = created_requirements[idx];
+        target = finder->second;
       }
       else
         target = regions[idx];
@@ -1333,9 +1457,10 @@ namespace Legion {
       // the lock since they are subject to mutation by the application
       // We might also mutate it so we take the lock in exclusive mode
       AutoLock priv_lock(privilege_lock);
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      for (std::map<unsigned,RegionRequirement>::iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        RegionRequirement &our_req = created_requirements[idx];
+        RegionRequirement &our_req = it->second;
         // First check that the regions match
         if (our_req.region != req.parent)
           continue;
@@ -1346,11 +1471,11 @@ namespace Legion {
         // If this is a returnable privilege requiremnt that means
         // that we made this region so we always have privileges
         // on any fields for that region, just add them and be done
-        if (returnable_privileges[idx])
+        if (it->second.flags & RETURNABLE_FLAG)
         {
           our_req.privilege_fields.insert(req.privilege_fields.begin(),
                                           req.privilege_fields.end());
-          return int(regions.size() + idx);
+          return it->first;
         }
         // Finally check that all the fields are contained
         bool dominated = true;
@@ -1378,7 +1503,7 @@ namespace Legion {
         if (!dominated)
           continue;
         // Include the offset by the number of base requirements
-        return int(regions.size() + idx);
+        return it->first;
       }
       // Method of last resort, check to see if we made all the fields
       // if we did, then we can make a new requirement for all the fields
@@ -1394,14 +1519,15 @@ namespace Legion {
       // which has non-returnable privileges
       // Get the top level region for the region tree
       RegionNode *top = runtime->forest->get_tree(req.parent.get_tree_id());
-      RegionRequirement new_req(top->handle, READ_WRITE, EXCLUSIVE,top->handle);
-      created_requirements.push_back(new_req);
+      const unsigned index = next_created_index++;
+      RegionRequirement &new_req = created_requirements[index];
+      new_req = RegionRequirement(top->handle, READ_WRITE, 
+                                  EXCLUSIVE, top->handle);
       // Add our fields
-      created_requirements.back().privilege_fields.insert(
+      new_req.privilege_fields.insert(
           req.privilege_fields.begin(), req.privilege_fields.end());
-      // This is not a returnable privilege requirement
-      returnable_privileges.push_back(false);
-      return int(regions.size() + created_requirements.size() - 1);
+      // This is not a returnable privilege requirement so don't set the flag
+      return index;
     }
 
     //--------------------------------------------------------------------------
@@ -1416,10 +1542,11 @@ namespace Legion {
           return idx;
       }
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        if (created_requirements[idx].region == child->regions[index].parent)
-          return (regions.size() + idx);
+        if (it->second.region == child->regions[index].parent)
+          return it->first;
       }
       REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
                           "Parent task %s (ID %lld) of inline task %s "
@@ -1453,20 +1580,6 @@ namespace Legion {
                             child->get_task_name(), child->get_unique_id(),
                             child->indexes[index].handle.id, index)
       return 0;
-    }
-
-    //--------------------------------------------------------------------------
-    PrivilegeMode TaskContext::find_parent_privilege_mode(unsigned idx)
-    //--------------------------------------------------------------------------
-    {
-      if (idx < regions.size())
-        return regions[idx].privilege;
-      idx -= regions.size();
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-#ifdef DEBUG_LEGION
-      assert(idx < created_requirements.size());
-#endif
-      return created_requirements[idx].privilege;
     }
 
     //--------------------------------------------------------------------------
@@ -1527,14 +1640,12 @@ namespace Legion {
         return NO_ERROR;
       // Copy privilege fields for check
       std::set<FieldID> privilege_fields(req.privilege_fields);
-      unsigned index = 0;
       // Try our original region requirements first
-      for (std::vector<RegionRequirement>::const_iterator it = 
-            regions.begin(); it != regions.end(); it++, index++)
+      for (unsigned idx = 0; idx < regions.size(); idx++)
       {
         LegionErrorType et = 
-          check_privilege_internal(req, *it, privilege_fields, bad_field,
-                                   index, bad_index, skip_privilege);
+          check_privilege_internal(req, regions[idx], privilege_fields, 
+                                   bad_field, idx, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1545,12 +1656,16 @@ namespace Legion {
       }
       // If none of that worked, we now get to try the created requirements
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++, index++)
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+            created_requirements.begin(); it != 
+            created_requirements.end(); it++)
       {
-        const RegionRequirement &created_req = created_requirements[idx];
+        const RegionRequirement &created_req = it->second;
+        if (created_req.flags & DESTROYED_FLAG)
+          return ERROR_BAD_PARENT_REGION;
         LegionErrorType et = 
           check_privilege_internal(req, created_req, privilege_fields, 
-                                   bad_field, index, bad_index, skip_privilege);
+                      bad_field, it->first, bad_index, skip_privilege);
         // No error so we are done
         if (et == NO_ERROR)
           return et;
@@ -1660,12 +1775,13 @@ namespace Legion {
     {
       if (index < regions.size())
         return regions[index].region;
-      index -= regions.size();
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      std::map<unsigned,RegionRequirement>::const_iterator finder = 
+        created_requirements.find(index);
 #ifdef DEBUG_LEGION
-      assert(index < created_requirements.size());
+      assert(finder != created_requirements.end());
 #endif
-      return created_requirements[index].region;
+      return finder->second.region;
     } 
 
     //--------------------------------------------------------------------------
@@ -2102,22 +2218,25 @@ namespace Legion {
     {
       // If this is one of our original region requirements then
       // we can do the analysis in our original context
-      const size_t owner_size = regions.size();
-      if (index < owner_size)
+      if (index < regions.size())
         return this;
       // Otherwise we need to see if this going to be one of our
       // region requirements that returns privileges or not. If
       // it is then we do the analysis in the outermost context
       // otherwise we do it locally in our own context. We need
       // to hold the operation lock to look at this data structure.
-      index -= owner_size;
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      {
+        AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+        std::map<unsigned,RegionRequirement>::const_iterator finder = 
+          created_requirements.find(index);
 #ifdef DEBUG_LEGION
-      assert(index < returnable_privileges.size());
+        assert(finder != created_requirements.end());
 #endif
-      if (returnable_privileges[index])
-        return find_outermost_local_context();
-      return this;
+        if ((finder->second.flags & RETURNABLE_FLAG) == 0)
+          return this;
+      }
+      // Fall through and return the outermost conext
+      return find_outermost_local_context();
     }
 
     //--------------------------------------------------------------------------
@@ -2129,8 +2248,7 @@ namespace Legion {
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == parent_req_indexes.size());
 #endif     
-      const unsigned owner_size = virtual_mapped.size();
-      if (index < owner_size)
+      if (index < virtual_mapped.size())
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -2151,18 +2269,19 @@ namespace Legion {
         // otherwise if they are returnable then the top-level
         // context has to provide global guidance about which
         // node manages the meta-data.
-        index -= owner_size;
         AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
-        if ((index >= returnable_privileges.size()) || 
-            returnable_privileges[index])
-          return find_top_context();
-        else
+        std::map<unsigned,RegionRequirement>::const_iterator finder = 
+          created_requirements.find(index);
+        if ((finder != created_requirements.end()) &&
+            ((finder->second.flags & RETURNABLE_FLAG) == 0))
         {
           if (handle != NULL)
-            *handle = created_requirements[index].region;
+            *handle = finder->second.region;
           return this;
         }
       }
+      // All through and return the top context
+      return find_top_context();
     }
 
     //--------------------------------------------------------------------------
@@ -2243,18 +2362,13 @@ namespace Legion {
     {
       if (created_requirements.empty())
         return;
-#ifdef DEBUG_LEGION
-      assert(created_requirements.size() == returnable_privileges.size());
-#endif
       UniqueID target_context_uid = find_parent_context()->get_context_uid();
-      for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
       {
+        const RegionRequirement &req = it->second;
         // Skip anything that doesn't have returnable privileges
-        if (!returnable_privileges[idx])
-          continue;
-        const RegionRequirement &req = created_requirements[idx];
-        // If it was deleted then we don't care
-        if (was_created_requirement_deleted(req))
+        if ((req.flags & RETURNABLE_FLAG) == 0)
           continue;
         runtime->forest->send_back_logical_state(tree_context, 
                         target_context_uid, req, target);
@@ -2284,6 +2398,19 @@ namespace Legion {
           created_index_spaces.erase(finder);
         else
           has_created = false;
+        // Also remove any index partitions for this index space tree
+        for (std::set<IndexPartition>::iterator it = 
+              created_index_partitions.begin(); it !=
+              created_index_partitions.end(); it++)
+        {
+          if (it->get_tree_id() == handle.get_tree_id()) 
+          {
+            std::set<IndexPartition>::iterator to_delete = it++;
+            created_index_partitions.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
@@ -2296,7 +2423,9 @@ namespace Legion {
       log_index.debug("Destroying index space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_index_space(handle, runtime->address_space); 
+      DeletionOp *op = runtime->get_available_deletion_op();
+      op->initialize_index_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
     //--------------------------------------------------------------------------
@@ -2311,7 +2440,23 @@ namespace Legion {
         std::set<IndexPartition>::iterator finder = 
           created_index_partitions.find(handle);
         if (finder != created_index_partitions.end())
+        {
           created_index_partitions.erase(finder);
+          // Remove any other partitions that this partition dominates
+          for (std::set<IndexPartition>::iterator it = 
+                created_index_partitions.begin(); it !=
+                created_index_partitions.end(); /*nothing*/)
+          {
+            if ((handle.get_tree_id() == it->get_tree_id()) &&
+                runtime->forest->is_dominated_tree_only(*it, handle))
+            {
+              std::set<IndexPartition>::iterator to_delete = it++;
+              created_index_partitions.erase(to_delete);
+            }
+            else
+              it++;
+          }
+        }
         else
           has_created = false;
       }
@@ -2326,7 +2471,9 @@ namespace Legion {
       log_index.debug("Destroying index partition %x in task %s (ID %lld)",
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_index_partition(handle, runtime->address_space);
+      DeletionOp *op = runtime->get_available_deletion_op();
+      op->initialize_index_part_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
     }
 
     //--------------------------------------------------------------------------
@@ -3255,6 +3402,18 @@ namespace Legion {
           created_field_spaces.erase(finder);
         else
           has_created = false;
+        // Also remove any field allocations for this field space
+        for (std::set<std::pair<FieldSpace,FieldID> >::iterator it = 
+              created_fields.begin(); it != created_fields.end(); /*nothing*/)
+        {
+          if (it->first == handle)
+          {
+            std::set<std::pair<FieldSpace,FieldID> >::iterator to_delete = it++;
+            created_fields.erase(to_delete);
+          }
+          else
+            it++;
+        }
       }
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
@@ -3267,7 +3426,9 @@ namespace Legion {
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
                       handle.id, get_task_name(), get_unique_id());
 #endif
-      runtime->forest->destroy_field_space(handle, runtime->address_space);
+      DeletionOp *op = runtime->get_available_deletion_op();
+      op->initialize_field_space_deletion(this, handle);
+      runtime->add_to_dependence_queue(this, executing_processor, op);
     } 
 
     //--------------------------------------------------------------------------
@@ -3552,16 +3713,6 @@ namespace Legion {
       }
       if (!global_free.empty())
         runtime->forest->free_fields(space, global_free, freed);
-    }
-
-    //--------------------------------------------------------------------------
-    void InnerContext::record_task_local_region(LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-#ifdef DEBUG_LEGION
-      assert(local_regions.find(region) == local_regions.end());
-#endif
-      local_regions.insert(region);
     }
 
     //--------------------------------------------------------------------------
@@ -5933,18 +6084,19 @@ namespace Legion {
           if (!created_requirements.empty())
           {
             std::map<unsigned,LogicalRegion> to_invalidate;
-            for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+            for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+                  created_requirements.begin(); it !=
+                  created_requirements.end(); it++)
             {
-              if (!returnable_privileges[idx] || 
-                  was_created_requirement_deleted(created_requirements[idx]))
-                to_invalidate[idx] = created_requirements[idx].region;
+              if ((it->second.flags & RETURNABLE_FLAG) == 0)
+                to_invalidate[it->first] = it->second.region;
             }
             rez.serialize<size_t>(to_invalidate.size());
             for (std::map<unsigned,LogicalRegion>::const_iterator it = 
                   to_invalidate.begin(); it != to_invalidate.end(); it++)
             {
               // Add the size of the original regions to the index
-              rez.serialize<unsigned>(it->first + regions.size());
+              rez.serialize<unsigned>(it->first);
               rez.serialize(it->second);
             }
           }
@@ -5972,12 +6124,17 @@ namespace Legion {
         TaskContext *outermost = find_outermost_local_context();
         const bool is_outermost = (outermost == this);
         RegionTreeContext outermost_ctx = outermost->get_context();
+#if 0
         RegionTreeContext top_ctx = find_top_context()->get_context();
-        for (unsigned idx = 0; idx < created_requirements.size(); idx++)
+#endif
+        for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+              created_requirements.begin(); it != 
+              created_requirements.end(); it++)
         {
           // See if we're a returnable privilege or not
-          if (returnable_privileges[idx])
+          if (it->second.flags & RETURNABLE_FLAG)
           {
+#if 0
             // If we're the outermost context or the requirement was
             // deleted, then we can invalidate everything
             // Otherwiswe we only invalidate the users
@@ -5991,18 +6148,26 @@ namespace Legion {
             if (was_deleted)
               runtime->forest->invalidate_versions(top_ctx,
                                       created_requirements[idx].region);
+#else
+            // If we're the outermost context or the requirement was
+            // deleted, then we can invalidate everything
+            // Otherwiswe we only invalidate the users
+            const bool users_only = !is_outermost;
+            runtime->forest->invalidate_current_context(outermost_ctx,
+                                        users_only, it->second.region);
+#endif
           }
           else // Not returning so invalidate the full thing 
           {
             runtime->forest->invalidate_current_context(tree_context,
-                false/*users only*/, created_requirements[idx].region);
+                              false/*users only*/, it->second.region);
             // Little tricky here, this is safe to invaliate the whole
             // tree even if we only had privileges on a field because
             // if we had privileges on the whole region in this context
             // it would have merged the created_requirement and we wouldn't
             // have a non returnable privilege requirement in this context
-            runtime->forest->invalidate_versions(tree_context,
-                                     created_requirements[idx].region);
+            runtime->forest->invalidate_versions(tree_context, 
+                                                 it->second.region);
           }
         }
       }
@@ -7294,8 +7459,7 @@ namespace Legion {
       assert(regions.size() == virtual_mapped.size());
       assert(regions.size() == parent_req_indexes.size());
 #endif     
-      const unsigned owner_size = virtual_mapped.size();
-      if (index < owner_size)
+      if (index < virtual_mapped.size())
       {
         // See if it is virtual mapped
         if (virtual_mapped[index])
@@ -7810,7 +7974,23 @@ namespace Legion {
         std::set<IndexPartition>::iterator finder = 
           created_index_partitions.find(handle);
         if (finder != created_index_partitions.end())
+        {
           created_index_partitions.erase(finder);
+          // Remove any other partitions that this partition dominates
+          for (std::set<IndexPartition>::iterator it = 
+                created_index_partitions.begin(); it !=
+                created_index_partitions.end(); /*nothing*/)
+          {
+            if ((handle.get_tree_id() == it->get_tree_id()) &&
+                runtime->forest->is_dominated_tree_only(*it, handle))
+            {
+              std::set<IndexPartition>::iterator to_delete = it++;
+              created_index_partitions.erase(to_delete);
+            }
+            else
+              it++;
+          }
+        }
         else
           has_created = false;
       }
@@ -8250,15 +8430,6 @@ namespace Legion {
       REPORT_LEGION_ERROR(ERROR_ILLEGAL_NONLOCAL_FIELD_ALLOCATION2,
           "Illegal local field allocations performed in leaf task %s (ID %lld)",
           get_task_name(), get_unique_id())
-    }
-
-    //--------------------------------------------------------------------------
-    void LeafContext::record_task_local_region(LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      REPORT_LEGION_ERROR(ERROR_ILLEGAL_REGION_CREATION,
-        "Illegal task-local region creation performed in leaf task %s "
-                     "(ID %lld)", get_task_name(), get_unique_id())
     }
 
     //--------------------------------------------------------------------------
@@ -9536,14 +9707,6 @@ namespace Legion {
     {
       return enclosing->create_logical_region(forest, index_space, field_space,
                                               task_local);
-    }
-
-    //--------------------------------------------------------------------------
-    void InlineContext::record_task_local_region(LogicalRegion region)
-    //--------------------------------------------------------------------------
-    {
-      // Should never get here
-      assert(false);
     }
 
     //--------------------------------------------------------------------------

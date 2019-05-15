@@ -634,6 +634,9 @@ namespace Legion {
     public:
       bool are_compatible(IndexSpace left, IndexSpace right);
       bool is_dominated(IndexSpace src, IndexSpace dst);
+      bool is_dominated_tree_only(IndexSpace test, IndexPartition dominator);
+      bool is_dominated_tree_only(IndexPartition test, IndexSpace dominator);
+      bool is_dominated_tree_only(IndexPartition test,IndexPartition dominator);
     public:
       bool compute_index_path(IndexSpace parent, IndexSpace child,
                               std::vector<LegionColor> &path);

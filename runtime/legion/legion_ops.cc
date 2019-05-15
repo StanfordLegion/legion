@@ -6939,6 +6939,45 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DeletionOp::initialize_index_space_deletion(TaskContext *ctx,
+                                                     IndexSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      kind = INDEX_SPACE_DELETION;
+      index_space = handle;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::initialize_index_part_deletion(TaskContext *ctx,
+                                                    IndexPartition handle)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      kind = INDEX_PARTITION_DELETION;
+      index_part = handle;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::initialize_field_space_deletion(TaskContext *ctx,
+                                                     FieldSpace handle)
+    //--------------------------------------------------------------------------
+    {
+      initialize_operation(ctx, true/*track*/);
+      kind = FIELD_SPACE_DELETION;
+      field_space = handle;
+      if (runtime->legion_spy_enabled)
+        LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
+                                          unique_op_id);
+    }
+
+    //--------------------------------------------------------------------------
     void DeletionOp::initialize_field_deletion(TaskContext *ctx, 
                                                 FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
@@ -6961,6 +7000,8 @@ namespace Legion {
       kind = FIELD_DELETION;
       field_space = handle;
       free_fields = to_free;
+      ctx->analyze_destroy_fields(field_space, free_fields, 
+          deletion_requirements, parent_req_indexes, destroy_indexes);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -6974,6 +7015,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_REGION_DELETION;
       logical_region = handle;
+      ctx->analyze_destroy_logical_region(logical_region,
+          deletion_requirements, parent_req_indexes, destroy_indexes);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -6987,6 +7030,8 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
       logical_part = handle;
+      ctx->analyze_destroy_logical_partition(logical_part,
+          deletion_requirements, parent_req_indexes);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7006,6 +7051,8 @@ namespace Legion {
       deactivate_operation();
       free_fields.clear();
       parent_req_indexes.clear();
+      destroy_indexes.clear();
+      deletion_requirements.clear();
       // Return this to the available deletion ops on the queue
       runtime->free_deletion_op(this);
     }
@@ -7028,37 +7075,18 @@ namespace Legion {
     void DeletionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
-      std::vector<RegionRequirement> deletion_requirements;
-      switch (kind)
-      {
-        case FIELD_DELETION:
-          {
-            parent_ctx->analyze_destroy_fields(field_space, free_fields, 
-                                               deletion_requirements,
-                                               parent_req_indexes);
-            break;
-          }
-        case LOGICAL_REGION_DELETION:
-          {
-            parent_ctx->analyze_destroy_logical_region(logical_region,
-                                                       deletion_requirements,
-                                                       parent_req_indexes);
-            break;
-          }
-        case LOGICAL_PARTITION_DELETION:
-          {
-            parent_ctx->analyze_destroy_logical_partition(logical_part, 
-                                                         deletion_requirements,
-                                                         parent_req_indexes);
-            break;
-          }
-        default:
-          // should never get here
-          assert(false);
-      }
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
+      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      {
+        RegionRequirement &req = deletion_requirements[idx];
+        // Perform the normal region requirement analysis
+        RegionTreePath privilege_path;
+        initialize_privilege_path(privilege_path, req);
+        runtime->forest->perform_deletion_analysis(this, idx, req, 
+                                                   privilege_path);
+      }
       if (runtime->legion_spy_enabled)
       {
         for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
@@ -7084,31 +7112,52 @@ namespace Legion {
                                             req.privilege_fields);
         }
       }
-      for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+      
+      // If we're not deleting fields, then invalidate the context for any
+      // of our region requirements to free up resources
+      if (!deletion_requirements.empty())
       {
-        RegionRequirement &req = deletion_requirements[idx];
-        // Perform the normal region requirement analysis
-        RegionTreePath privilege_path;
-        initialize_privilege_path(privilege_path, req);
-        runtime->forest->perform_deletion_analysis(this, idx, req, 
-                                                   privilege_path);
+        RegionTreeContext outermost_ctx;
+        if (kind != FIELD_DELETION)
+        {
+
+        }
+        else
+        {
+
+        }
       }
-      // We treat this as a fence on everything that came before it since
-      // we don't know which prior operations might need the names of the
-      // region before it is deleted
-      completion_precondition = parent_ctx->perform_fence_analysis(this, 
-                                    false/*mapping*/, true/*execution*/);
     }
 
     //--------------------------------------------------------------------------
     void DeletionOp::trigger_mapping(void)
     //--------------------------------------------------------------------------
     { 
+      
       // Mark that we're done mapping and defer the execution as appropriate
       complete_mapping();
-      if (completion_precondition.exists() && 
-          !completion_precondition.has_triggered())
-        complete_execution(Runtime::protect_event(completion_precondition));
+      // Wait for all the operations on which this deletion depends on to
+      // complete before we are officially considered done execution
+      std::set<ApEvent> completion_preconditions;
+      if (!incoming.empty())
+      {
+        for (std::map<Operation*,GenerationID>::const_iterator it = 
+              incoming.begin(); it != incoming.end(); it++)
+        {
+          // Do this first and then check to see if it is for
+          // the same generation of the operation
+          const ApEvent done = it->first->get_completion_event();
+          __sync_synchronize();
+          if (it->second == it->first->get_generation())
+            completion_preconditions.insert(done);
+        }
+      }
+      // If we're deleting parts of an index space tree then we also need 
+      // to make sure all the dependent partitioning operations are done
+
+      if (!completion_preconditions.empty())
+        complete_execution(Runtime::protect_event(
+            Runtime::merge_events(NULL, completion_preconditions)));
       else
         complete_execution();
     }
@@ -7121,6 +7170,24 @@ namespace Legion {
       // is no mis-speculation or faults that could potentially affect them
       switch (kind)
       {
+        case INDEX_SPACE_DELETION:
+          {
+            runtime->forest->destroy_index_space(index_space,
+                                                 runtime->address_space);
+            break;
+          }
+        case INDEX_PARTITION_DELETION:
+          {
+            runtime->forest->destroy_index_partition(index_part,
+                                                     runtime->address_space);
+            break;
+          }
+        case FIELD_SPACE_DELETION:
+          {
+            runtime->forest->destroy_field_space(field_space,
+                                                 runtime->address_space);
+            break;
+          }
         case FIELD_DELETION:
           // Nothing to do for the field deletion as the forest was
           // already made aware of the deletion operation

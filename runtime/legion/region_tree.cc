@@ -4444,6 +4444,75 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_dominated_tree_only(IndexSpace test,
+                                                  IndexPartition dominator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(test.get_tree_id() == dominator.get_tree_id());
+#endif
+      IndexSpaceNode *node = get_node(test);
+      IndexPartNode *const dom = get_node(dominator);
+      while (node->depth < (dom->depth + 1))
+      {
+#ifdef DEBUG_LEGION
+        assert(node->parent != NULL);
+#endif
+        node = node->parent->parent;
+      }
+      if (node->parent == dom)
+        return true;
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_dominated_tree_only(IndexPartition test,
+                                                  IndexSpace dominator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(test.get_tree_id() == dominator.get_tree_id());
+#endif
+      IndexPartNode *node = get_node(test);
+      IndexSpaceNode *const dom = get_node(dominator);
+      while (node->depth < (dom->depth + 1))
+      {
+#ifdef DEBUG_LEGION
+        assert(node->parent != NULL);
+#endif
+        node = node->parent->parent;
+      }
+      if (node->parent == dom)
+        return true;
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
+    bool RegionTreeForest::is_dominated_tree_only(IndexPartition test,
+                                                  IndexPartition dominator)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(test.get_tree_id() == dominator.get_tree_id());
+#endif
+      IndexPartNode *node = get_node(test);
+      IndexPartNode *const dom = get_node(dominator);
+      while (node->depth < dom->depth)
+      {
+#ifdef DEBUG_LEGION
+        assert(node->parent != NULL);
+#endif
+        node = node->parent->parent;
+      }
+      if (node == dom)
+        return true;
+      else
+        return false;
+    }
+
+    //--------------------------------------------------------------------------
     bool RegionTreeForest::compute_index_path(IndexSpace parent, 
                                IndexSpace child, std::vector<LegionColor> &path)
     //--------------------------------------------------------------------------
@@ -14086,11 +14155,12 @@ namespace Legion {
       // If we're the root then release our tree instances
       if (parent == NULL)
       {
-        // Remove ourselves from the parent to prevent future deletions
-        parent->remove_child(row_source->color);
         context->runtime->release_tree_instances(handle.get_tree_id());
         column_source->remove_nested_valid_ref(did);
       }
+      else 
+        // Remove ourselves from the parent to prevent future deletions
+        parent->remove_child(row_source->color);
       row_source->remove_nested_valid_ref(did);
       // Remove our reference
       return remove_base_gc_ref(APPLICATION_REF);

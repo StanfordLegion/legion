@@ -262,7 +262,6 @@ namespace Legion {
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
-      virtual void record_task_local_region(LogicalRegion region) = 0;
       virtual void destroy_logical_region(LogicalRegion handle) = 0;
       virtual void destroy_logical_partition(LogicalPartition handle) = 0;
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);
@@ -421,21 +420,37 @@ namespace Legion {
     public:
       void register_index_partition_creation(IndexPartition handle);
     public:
-      bool was_created_requirement_deleted(const RegionRequirement &req) const;
-    public:
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
+#if 0
+      void analyze_destroy_index_space(IndexSpace handle,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &destroy_indexes);
+      void analyze_destroy_index_partition(IndexPartition handle,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &destroy_indexes);
+      void analyze_destroy_field_space(FieldSpace handle,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &destroy_indexes);
+#endif
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &destroy_indexes);
       void analyze_destroy_logical_region(LogicalRegion handle, 
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &destroy_indexes);
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes);
+      // No destroy indexes because we can't delete privileges with this call
+      void destroy_privilege_requirements(const std::vector<unsigned> &indexes);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);
@@ -473,7 +488,6 @@ namespace Legion {
                                  bool check_privilege = true);
       unsigned find_parent_region(unsigned idx, TaskOp *task);
       unsigned find_parent_index_region(unsigned idx, TaskOp *task);
-      PrivilegeMode find_parent_privilege_mode(unsigned idx);
       LegionErrorType check_privilege(const IndexSpaceRequirement &req) const;
       LegionErrorType check_privilege(const RegionRequirement &req, 
                                       FieldID &bad_field, int &bad_index, 
@@ -511,17 +525,15 @@ namespace Legion {
     protected:
       mutable LocalLock                         privilege_lock;
       int                                       depth;
-      // Application tasks can manipulate these next two data
-      // structures by creating regions and fields, make sure you are
-      // holding the operation lock when you are accessing them
+      unsigned                                  next_created_index;
+      // Application tasks can manipulate this next data
+      // structure by creating regions and fields, make sure you are
+      // holding the operation lock when you are accessing it 
       // We use a region requirement with an empty privilege_fields
       // set to indicate regions on which we have privileges for 
       // all fields because this is a created region instead of
       // a created field.
-      std::deque<RegionRequirement>             created_requirements;
-      // Track whether the created region requirements have
-      // privileges to be returned or not
-      std::vector<bool>                         returnable_privileges;
+      std::map<unsigned,RegionRequirement>      created_requirements;
     protected:
       // These next two data structure don't need a lock becaue
       // they are only mutated by the application task 
@@ -865,7 +877,6 @@ namespace Legion {
       virtual void free_field(FieldSpace space, FieldID fid);
       virtual void free_fields(FieldSpace space, 
                                const std::set<FieldID> &to_free);
-      virtual void record_task_local_region(LogicalRegion region);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
@@ -1466,7 +1477,6 @@ namespace Legion {
       virtual void free_field(FieldSpace space, FieldID fid);
       virtual void free_fields(FieldSpace space, 
                                const std::set<FieldID> &to_free);
-      virtual void record_task_local_region(LogicalRegion region);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
@@ -1779,7 +1789,6 @@ namespace Legion {
                                             IndexSpace index_space,
                                             FieldSpace field_space,
                                             bool task_local);
-      virtual void record_task_local_region(LogicalRegion region);
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
       virtual FieldAllocatorImpl* create_field_allocator(FieldSpace handle);

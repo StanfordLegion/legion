@@ -1314,6 +1314,9 @@ namespace Legion {
       static const AllocationType alloc_type = DELETION_OP_ALLOC;
     public:
       enum DeletionKind {
+        INDEX_SPACE_DELETION,
+        INDEX_PARTITION_DELETION,
+        FIELD_SPACE_DELETION,
         FIELD_DELETION,
         LOGICAL_REGION_DELETION,
         LOGICAL_PARTITION_DELETION,
@@ -1325,6 +1328,11 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
+      void initialize_index_space_deletion(TaskContext *ctx, IndexSpace handle);
+      void initialize_index_part_deletion(TaskContext *ctx,
+                                          IndexPartition handle);
+      void initialize_field_space_deletion(TaskContext *ctx,
+                                           FieldSpace handle);
       void initialize_field_deletion(TaskContext *ctx, FieldSpace handle,
                                       FieldID fid);
       void initialize_field_deletions(TaskContext *ctx, FieldSpace handle,
@@ -1345,12 +1353,15 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
     protected:
       DeletionKind kind;
+      IndexSpace index_space;
+      IndexPartition index_part;
       FieldSpace field_space;
       LogicalRegion logical_region;
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
       std::vector<unsigned> parent_req_indexes;
-      ApEvent completion_precondition;
+      std::vector<unsigned> destroy_indexes;
+      std::vector<RegionRequirement> deletion_requirements;
     }; 
 
     /**

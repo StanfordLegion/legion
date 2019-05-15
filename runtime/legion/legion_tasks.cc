@@ -56,6 +56,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
+#if 0
       assert(created_regions.empty());
       assert(local_regions.empty());
       assert(created_fields.empty());
@@ -63,6 +64,7 @@ namespace Legion {
       assert(created_field_spaces.empty());
       assert(created_index_spaces.empty());
       assert(created_index_partitions.empty());
+#endif
 #endif
     }
 

@@ -1236,6 +1236,14 @@ typedef enum legion_region_flags_t {
   // break the correctness of your code so be sure
   // you know what you are doing
   COMPLETE_PROJECTION_WRITE_FLAG = 0x00000010,
+  // Internal runtime flag for checking when the
+  // privileges for a region requirement can be
+  // returned to parent contexts
+  RETURNABLE_FLAG     = 0x00000020,
+  // Internal runtime flag for marking when the
+  // privileges associated with a region requirement
+  // have been destroyed by the application
+  DESTROYED_FLAG      = 0x00000004,
 } legion_region_flags_t;
 
 typedef enum legion_projection_type_t {
