@@ -59,6 +59,12 @@ def main():
     R.u32.fill(123456)
     R.u64.fill(123456789)
 
+    print('value of R.c64[0] after local fill %s' % R.c64[0])
+
+    legion.fill(R, 'c64', 5+6j)
+
+    print('value of R.c64[0] after remote fill %s' % R.c64[1])
+
     x = complex_plus_one(3+4j)
     print(x.get())
 
