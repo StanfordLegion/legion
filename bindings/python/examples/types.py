@@ -20,6 +20,10 @@ from __future__ import print_function
 import legion
 from legion import task
 
+@task(return_type=legion.complex64)
+def complex_plus_one(x):
+    return x + 1
+
 @task
 def main():
     R = legion.Region.create(
@@ -27,6 +31,7 @@ def main():
         {
             'b': legion.bool_,
             'c64': legion.complex64,
+            'c128': legion.complex128,
             'f16': legion.float16,
             'f32': legion.float32,
             'f64': legion.float64,
@@ -41,6 +46,7 @@ def main():
         })
     R.b.fill(False)
     R.c64.fill(1+2j)
+    R.c128.fill(3+4j)
     R.f16.fill(1.23)
     R.f32.fill(3.45)
     R.f64.fill(6.78)
@@ -52,3 +58,9 @@ def main():
     R.u16.fill(123)
     R.u32.fill(123456)
     R.u64.fill(123456789)
+
+    x = complex_plus_one(3+4j)
+    print(x.get())
+
+if __name__ == '__legion_main__':
+    main()
