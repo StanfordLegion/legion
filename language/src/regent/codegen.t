@@ -1587,7 +1587,7 @@ function aref:get_index(cx, node, index, result_type)
 end
 
 function aref:address()
-  assert(false)
+  return values.value(self.node, self.expr, self.value_type)
 end
 
 function aref:read(cx, expr_type)

@@ -1132,23 +1132,6 @@ function cudahelper.codegen_kernel_call(kernel_id, count, args, shared_mem_size,
   end
 end
 
-local builtin_gpu_fns = {
-  acos  = externcall_builtin("__nv_acos"  , double -> double),
-  asin  = externcall_builtin("__nv_asin"  , double -> double),
-  atan  = externcall_builtin("__nv_atan"  , double -> double),
-  cbrt  = externcall_builtin("__nv_cbrt"  , double -> double),
-  ceil  = externcall_builtin("__nv_ceil"  , double -> double),
-  cos   = externcall_builtin("__nv_cos"   , double -> double),
-  fabs  = externcall_builtin("__nv_fabs"  , double -> double),
-  floor = externcall_builtin("__nv_floor" , double -> double),
-  fmod  = externcall_builtin("__nv_fmod"  , {double, double} -> double),
-  log   = externcall_builtin("__nv_log"   , double -> double),
-  pow   = externcall_builtin("__nv_pow"   , {double, double} -> double),
-  sin   = externcall_builtin("__nv_sin"   , double -> double),
-  sqrt  = externcall_builtin("__nv_sqrt"  , double -> double),
-  tan   = externcall_builtin("__nv_tan"   , double -> double),
-}
-
 local function get_nv_fn_name(name, type)
   lua_assert(type:isfloat())
   local nv_name = "__nv_" .. name
