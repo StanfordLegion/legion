@@ -280,7 +280,10 @@ function infer_constraints.expr_index_access(cx, expr, privilege, field_path)
   cx:record_index_of_range(index_range, expr.index)
 
   local field_type = std.get_field_path(std.as_read(expr.expr_type), field_path)
-  if std.is_index_type(field_type) or std.is_bounded_type(field_type) then
+  if std.is_index_type(field_type) or
+     std.is_bounded_type(field_type) or
+     std.is_rect_type(field_type)
+  then
     return cx:find_or_create_image_constraint(index_range, region_symbol, field_path)
   else
     return ranges.range_complex
@@ -391,12 +394,17 @@ end
 
 function infer_constraints.stat_for_list(cx, stat)
   if stat.metadata and stat.metadata.parallelizable then
-    local region_symbol = stat.value.value
-    local range = cx:find_or_create_source_range(region_symbol)
-    cx:set_range(stat.symbol, range)
-    local disjoint = stat.metadata.reductions and #stat.metadata.reductions > 0
-    cx:update_partition(range, partition_info.new(region_symbol, disjoint, true))
-    cx:add_loop_range(stat.symbol, range)
+    if std.is_region(std.as_read(stat.value.expr_type)) then
+      local region_symbol = stat.value.value
+      local range = cx:find_or_create_source_range(region_symbol)
+      cx:set_range(stat.symbol, range)
+      local disjoint = stat.metadata.reductions and #stat.metadata.reductions > 0
+      cx:update_partition(range, partition_info.new(region_symbol, disjoint, true))
+      cx:add_loop_range(stat.symbol, range)
+    else
+      local range = cx:get_range(stat.value.value)
+      cx:set_range(stat.symbol, range)
+    end
   end
   infer_constraints.block(cx, stat.block)
 end
