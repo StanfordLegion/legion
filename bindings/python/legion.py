@@ -416,7 +416,8 @@ class Type(object):
 # Pre-defined Types
 void = Type(None, None)
 bool_ = Type(numpy.bool_, 'bool')
-complex64 = Type(numpy.complex64, 'complex')
+complex64 = Type(numpy.complex64, 'float _Complex')
+complex128 = Type(numpy.complex128, 'double _Complex')
 float16 = Type(numpy.float16, 'short float')
 float32 = Type(numpy.float32, 'float')
 float64 = Type(numpy.float64, 'double')
