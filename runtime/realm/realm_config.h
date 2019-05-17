@@ -24,9 +24,9 @@
 #endif
 
 // Turning this on in nopaint since tracing with nopaint seems to break it
-#ifndef DISABLE_BARRIER_MIGRATION
-#define DISABLE_BARRIER_MIGRATION
-#endif
+//#ifndef DISABLE_BARRIER_MIGRATION
+//#define DISABLE_BARRIER_MIGRATION
+//#endif
 
 // Control the maximum number of dimensions for Realm
 #ifndef REALM_MAX_DIM
