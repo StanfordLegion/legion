@@ -1570,28 +1570,28 @@ namespace Legion {
         }
         // Finally check that all the fields are contained
         bool dominated = true;
-        for (std::set<FieldID>::const_iterator it = 
-              req.privilege_fields.begin(); it !=
-              req.privilege_fields.end(); it++)
+        for (std::set<FieldID>::const_iterator fit = 
+              req.privilege_fields.begin(); fit !=
+              req.privilege_fields.end(); fit++)
         {
-          if (our_req.privilege_fields.find(*it) ==
+          if (our_req.privilege_fields.find(*fit) ==
               our_req.privilege_fields.end())
           {
             // Check to see if this is a field we made
             // and haven't destroyed yet
-            std::pair<FieldSpace,FieldID> key(fs, *it);
+            std::pair<FieldSpace,FieldID> key(fs, *fit);
             if (created_fields.find(key) != created_fields.end())
             {
               // We made it so we can add it to the requirement
               // and continue on our way
-              our_req.privilege_fields.insert(*it);
+              our_req.privilege_fields.insert(*fit);
               continue;
             }
             if (local_fields.find(key) != local_fields.end())
             {
               // We made it so we can add it to the requirement
               // and continue on our way
-              our_req.privilege_fields.insert(*it);
+              our_req.privilege_fields.insert(*fit);
               continue;
             }
             // Otherwise we don't have privileges
