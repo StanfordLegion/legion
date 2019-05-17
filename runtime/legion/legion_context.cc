@@ -2557,10 +2557,6 @@ namespace Legion {
         else
           has_created = false;
       }
-      // TODO: can we detect the difference between partitions that 
-      // have already been deleted by deleting the index space versus
-      // invalid deletions in another part of the system
-      // For now we're just silently ignoring them
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to destroy index partition %x in task %s (UID %lld) "
