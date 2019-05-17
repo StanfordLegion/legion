@@ -15584,10 +15584,11 @@ namespace Legion {
           }
           else
           {
-            for (LegionColor c = 0; c < row_source->max_linearized_color; c++)
+            ColorSpaceIterator *itr = 
+              row_source->color_space->create_color_space_iterator();
+            while (itr->is_valid())
             {
-              if (!row_source->color_space->contains_color(c))
-                continue;
+              const LegionColor c = itr->yield_color();
               bool result = get_child(c)->visit_node(traverser);
               continue_traversal = continue_traversal && result;
               if (!result && break_early)
