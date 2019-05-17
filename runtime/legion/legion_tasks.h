@@ -46,32 +46,35 @@ namespace Legion {
       ResourceTracker& operator=(const ResourceTracker &rhs);
     public:
       virtual void register_region_creations(
-                     const std::set<LogicalRegion> &regions) = 0;
+                     std::set<LogicalRegion> &regions) = 0;
     public:
       virtual void register_field_creations(
-            const std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
+            std::set<std::pair<FieldSpace,FieldID> > &fields) = 0;
     public:
       virtual void register_field_space_creations(
-                          const std::set<FieldSpace> &spaces) = 0;
+                          std::set<FieldSpace> &spaces) = 0;
+      virtual void register_latent_field_spaces(
+                          std::map<FieldSpace,unsigned> &spaces) = 0;
     public:
       virtual void register_index_space_creations(
-                          const std::set<IndexSpace> &spaces) = 0;
+                          std::set<IndexSpace> &spaces) = 0;
     public:
       virtual void register_index_partition_creations(
-                          const std::set<IndexPartition> &parts) = 0;
+                          std::set<IndexPartition> &parts) = 0;
     public:
       void return_resources(ResourceTracker *target);
       void pack_resources_return(Serializer &rez, AddressSpaceID target);
       static void unpack_resources_return(Deserializer &derez,
                                           ResourceTracker *target);
     protected:
-      std::set<LogicalRegion>                   created_regions;
-      std::set<LogicalRegion>                   local_regions;
-      std::set<std::pair<FieldSpace,FieldID> >  created_fields;
-      std::set<std::pair<FieldSpace,FieldID> >  local_fields;
-      std::set<FieldSpace>                      created_field_spaces;
-      std::set<IndexSpace>                      created_index_spaces;
-      std::set<IndexPartition>                  created_index_partitions;
+      std::set<LogicalRegion>                       created_regions;
+      std::map<LogicalRegion,bool>                  local_regions;
+      std::set<std::pair<FieldSpace,FieldID> >      created_fields;
+      std::map<std::pair<FieldSpace,FieldID>,bool>  local_fields;
+      std::set<FieldSpace>                          created_field_spaces;
+      std::map<FieldSpace,unsigned>                 latent_field_spaces;
+      std::set<IndexSpace>                          created_index_spaces;
+      std::set<IndexPartition>                      created_index_partitions;
     };
 
     /**
@@ -653,7 +656,6 @@ namespace Legion {
     public:
       Future initialize_task(TaskContext *ctx,
                              const TaskLauncher &launcher, 
-                             bool check_privileges,
                              bool track = true);
       void set_top_level(void);
     public:
@@ -841,14 +843,12 @@ namespace Legion {
       FutureMap initialize_task(TaskContext *ctx,
                                 const IndexTaskLauncher &launcher,
                                 IndexSpace launch_space,
-                                bool check_privileges,
                                 bool track = true);
       Future initialize_task(TaskContext *ctx,
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
                              ReductionOpID redop,
                              bool deterministic,
-                             bool check_privileges,
                              bool track = true);
       void initialize_predicate(const Future &pred_future,
                                 const TaskArgument &pred_arg);
@@ -1029,15 +1029,17 @@ namespace Legion {
       static void handle_slice_return(Runtime *rt, Deserializer &derez);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                     const std::set<LogicalRegion> &regions);
+                     std::set<LogicalRegion> &regions);
       virtual void register_field_creations(
-            const std::set<std::pair<FieldSpace,FieldID> > &fields);
+            std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_space_creations(
-                          const std::set<FieldSpace> &spaces);
+                          std::set<FieldSpace> &spaces);
+      virtual void register_latent_field_spaces(
+                          std::map<FieldSpace,unsigned> &spaces);
       virtual void register_index_space_creations(
-                          const std::set<IndexSpace> &spaces);
+                          std::set<IndexSpace> &spaces);
       virtual void register_index_partition_creations(
-                          const std::set<IndexPartition> &parts);
+                          std::set<IndexPartition> &parts);
     public:
       // From MemoizableOp
       virtual void replay_analysis(void);

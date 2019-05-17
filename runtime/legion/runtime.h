@@ -1512,6 +1512,8 @@ namespace Legion {
             logical_logging_only(false),
             physical_logging_only(false),
             check_privileges(true),
+#else
+            check_privileges(false),
 #endif
             num_profiling_nodes(0),
             serializer_type("binary"),
@@ -1560,8 +1562,8 @@ namespace Legion {
         bool verbose_logging;
         bool logical_logging_only;
         bool physical_logging_only;
-        bool check_privileges;
 #endif
+        bool check_privileges;
       public:
         unsigned num_profiling_nodes;
         const char *serializer_type;
@@ -1699,8 +1701,8 @@ namespace Legion {
       const bool verbose_logging;
       const bool logical_logging_only;
       const bool physical_logging_only;
-      const bool check_privileges;
 #endif
+      const bool check_privileges;
     public:
       const unsigned num_profiling_nodes;
     public:

@@ -353,9 +353,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index) = 0;
       virtual InnerContext* find_parent_physical_context(unsigned index,
-                                          LogicalRegion *handle = NULL) = 0;
-      // No-op for most contexts except remote ones
-      virtual void record_using_physical_context(LogicalRegion handle) { }
+                                                  LogicalRegion parent) = 0;
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL) = 0;
@@ -397,15 +395,17 @@ namespace Legion {
       void log_created_requirements(void);
     public: // Privilege tracker methods
       virtual void register_region_creations(
-                     const std::set<LogicalRegion> &regions);
+                     std::set<LogicalRegion> &regions);
       virtual void register_field_creations(
-            const std::set<std::pair<FieldSpace,FieldID> > &fields);
+            std::set<std::pair<FieldSpace,FieldID> > &fields);
       virtual void register_field_space_creations(
-                          const std::set<FieldSpace> &spaces);
+                          std::set<FieldSpace> &spaces);
+      virtual void register_latent_field_spaces(
+                          std::map<FieldSpace,unsigned> &spaces);
       virtual void register_index_space_creations(
-                          const std::set<IndexSpace> &spaces);
+                          std::set<IndexSpace> &spaces);
       virtual void register_index_partition_creations(
-                          const std::set<IndexPartition> &parts);
+                          std::set<IndexPartition> &parts);
     public:
       void register_region_creation(LogicalRegion handle, bool task_local);
     public:
@@ -423,38 +423,25 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
-#if 0
-      void analyze_destroy_index_space(IndexSpace handle,
-                                  std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes);
-      void analyze_destroy_index_partition(IndexPartition handle,
-                                  std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes);
-      void analyze_destroy_field_space(FieldSpace handle,
-                                  std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes);
-#endif
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes);
-      void analyze_destroy_logical_region(LogicalRegion handle, 
+                                  std::vector<FieldID> &global_to_free,
+                                  std::vector<FieldID> &local_to_free,
+                                  std::vector<FieldID> &local_field_indexes);
+      void analyze_destroy_logical_region(LogicalRegion handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes);
-      // No destroy indexes because we can't delete privileges with this call
+                                  std::vector<unsigned> &destroy_indexes,
+                                  std::vector<bool> &returnable_privileges);
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes);
-      // Remove any privilege requirements from the context
-      void remove_privilege_requirements(const std::vector<unsigned> &indexes);
-      // Remove any field requirements from the context
-      void remove_field_requirements(const std::vector<unsigned> &indexes,
-                                     const std::set<FieldID> &remove_fields);
+      virtual void analyze_free_local_fields(FieldSpace handle,
+                                  const std::vector<FieldID> &local_to_free,
+                                  std::vector<unsigned> &local_field_indexes);
+      void remove_returnable_privileges(const std::vector<unsigned> &indexes);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);
@@ -530,14 +517,15 @@ namespace Legion {
       mutable LocalLock                         privilege_lock;
       int                                       depth;
       unsigned                                  next_created_index;
-      // Application tasks can manipulate this next data
+      // Application tasks can manipulate these next two data
       // structure by creating regions and fields, make sure you are
-      // holding the operation lock when you are accessing it 
+      // holding the operation lock when you are accessing them
       // We use a region requirement with an empty privilege_fields
       // set to indicate regions on which we have privileges for 
       // all fields because this is a created region instead of
       // a created field.
       std::map<unsigned,RegionRequirement>      created_requirements;
+      std::map<unsigned,bool>                   returnable_privileges;
     protected:
       // These next two data structure don't need a lock becaue
       // they are only mutated by the application task 
@@ -723,6 +711,9 @@ namespace Legion {
       virtual bool attempt_children_commit(void);
       virtual void inline_child_task(TaskOp *child);
       virtual VariantImpl* select_inline_variant(TaskOp *child) const;
+      virtual void analyze_free_local_fields(FieldSpace handle,
+                                  const std::vector<FieldID> &local_to_free,
+                                  std::vector<unsigned> &local_field_indexes);
     public:
       // Interface to operations performed by a context
       virtual void destroy_index_space(IndexSpace handle);
@@ -963,7 +954,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
-                                          LogicalRegion *handle = NULL);
+                                                  LogicalRegion parent);
     public:
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
@@ -1218,10 +1209,11 @@ namespace Legion {
       public:
         RemotePhysicalRequestArgs(UniqueID uid, RemoteContext *ctx,
                                   InnerContext *loc, unsigned idx, 
-                                  AddressSpaceID src, RtUserEvent trig)
+                                  AddressSpaceID src, RtUserEvent trig,
+                                  LogicalRegion par)
           : LgTaskArgs<RemotePhysicalRequestArgs>(implicit_provenance), 
             context_uid(uid), target(ctx), local(loc), index(idx), 
-            source(src), to_trigger(trig) { }
+            source(src), to_trigger(trig), parent(par) { }
       public:
         const UniqueID context_uid;
         RemoteContext *const target;
@@ -1229,6 +1221,7 @@ namespace Legion {
         const unsigned index;
         const AddressSpaceID source;
         const RtUserEvent to_trigger;
+        const LogicalRegion parent;
       };
       struct RemotePhysicalResponseArgs : 
         public LgTaskArgs<RemotePhysicalResponseArgs> {
@@ -1236,14 +1229,13 @@ namespace Legion {
         static const LgTaskID TASK_ID = LG_REMOTE_PHYSICAL_RESPONSE_TASK_ID;
       public:
         RemotePhysicalResponseArgs(RemoteContext *ctx, InnerContext *res, 
-                                   unsigned idx, LogicalRegion r)
+                                   unsigned idx)
           : LgTaskArgs<RemotePhysicalResponseArgs>(implicit_provenance), 
-            target(ctx), result(res), index(idx), handle(r) { }
+            target(ctx), result(res), index(idx) { }
       public:
         RemoteContext *const target;
         InnerContext *const result;
         const unsigned index;
-        const LogicalRegion handle;
       };
     public:
       RemoteContext(Runtime *runtime, UniqueID context_uid);
@@ -1266,8 +1258,7 @@ namespace Legion {
                         IndexSpaceExpression *expr, const FieldMask &mask,
                         AddressSpaceID source);
       virtual InnerContext* find_parent_physical_context(unsigned index,
-                                                LogicalRegion *handle = NULL);
-      virtual void record_using_physical_context(LogicalRegion handle);
+                                                  LogicalRegion parent);
       virtual void invalidate_region_tree_contexts(void);
       virtual void invalidate_remote_tree_contexts(Deserializer &derez);
     public:
@@ -1278,8 +1269,7 @@ namespace Legion {
                       Runtime *runtime, AddressSpaceID source);
       static void defer_physical_request(const void *args, Runtime *runtime);
       void set_physical_context_result(unsigned index, 
-                                       InnerContext *result,
-                                       LogicalRegion handle);
+                                       InnerContext *result);
       static void handle_physical_response(Deserializer &derez, 
                                            Runtime *runtime);
       static void defer_physical_response(const void *args);
@@ -1296,7 +1286,6 @@ namespace Legion {
     protected:
       // Cached physical contexts recorded from the owner
       std::map<unsigned/*index*/,InnerContext*> physical_contexts;
-      std::map<unsigned/*index*/,LogicalRegion> physical_handles;
       std::map<unsigned,RtEvent> pending_physical_contexts;
       std::set<LogicalRegion> local_physical_contexts;
     };
@@ -1560,7 +1549,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
-                                          LogicalRegion *handle = NULL);
+                                                  LogicalRegion parent);
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);
       virtual InnerContext* find_top_context(void);
@@ -1874,7 +1863,7 @@ namespace Legion {
     public:
       virtual InnerContext* find_parent_logical_context(unsigned index);
       virtual InnerContext* find_parent_physical_context(unsigned index,
-                                          LogicalRegion *handle = NULL);
+                                                  LogicalRegion parent);
       // Override by RemoteTask and TopLevelTask
       virtual InnerContext* find_outermost_local_context(
                           InnerContext *previous = NULL);

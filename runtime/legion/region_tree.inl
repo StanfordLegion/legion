@@ -2002,10 +2002,6 @@ namespace Legion {
           if ((*it)->remove_reference())
             delete (*it);
       }
-      // If we have a parent then remove ourselves from them to prevent
-      // future destructions from continuing to traverse our node
-      if (parent != NULL)
-        parent->remove_child(color);
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())
@@ -2040,7 +2036,7 @@ namespace Legion {
         {
           for (std::vector<IndexPartNode*>::const_iterator it = 
                 color_map_copy.begin(); it != color_map_copy.end(); it++)
-            (*it)->destroy_node(local_space);
+            (*it)->destroy_node(local_space, false/*top*/);
         }
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
       }
@@ -4067,19 +4063,22 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
+    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source, bool top) 
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(registered_with_runtime);
+      assert(partition_ready.has_triggered());
 #endif
       if (destroyed)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
-            "Duplicate deletion of Index Partition %d", handle.get_id())
+      {
+        if (top)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
+              "Duplicate deletion of Index Partition %d", handle.get_id())
+        else
+          return false;
+      }
       destroyed = true;
-      // Remove ourselves from our parent to prevent future destructions
-      // from continuing to traverse our node
-      parent->remove_child(color); 
       // If we're not the owner send a message to do the destruction
       // otherwise we can do it here
       if (!is_owner())

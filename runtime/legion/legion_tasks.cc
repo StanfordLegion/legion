@@ -96,6 +96,11 @@ namespace Legion {
         target->register_field_space_creations(created_field_spaces);
         created_field_spaces.clear();
       }
+      if (!latent_field_spaces.empty())
+      {
+        target->register_latent_field_spaces(latent_field_spaces);
+        latent_field_spaces.clear();
+      }
       if (!created_index_spaces.empty())
       {
         target->register_index_space_creations(created_index_spaces);
@@ -143,6 +148,18 @@ namespace Legion {
               created_field_spaces.end(); it++)
           rez.serialize(*it);
         created_field_spaces.clear();
+      }
+      rez.serialize<size_t>(latent_field_spaces.size());
+      if (!latent_field_spaces.empty())
+      {
+        for (std::map<FieldSpace,unsigned>::const_iterator it = 
+              latent_field_spaces.begin(); it !=
+              latent_field_spaces.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        latent_field_spaces.clear();
       }
       rez.serialize<size_t>(created_index_spaces.size());
       if (!created_index_spaces.empty())
@@ -212,6 +229,19 @@ namespace Legion {
           created_field_spaces.insert(sp);
         }
         target->register_field_space_creations(created_field_spaces);
+      }
+      size_t num_latent_field_spaces;
+      derez.deserialize(num_latent_field_spaces);
+      if (num_latent_field_spaces > 0)
+      {
+        std::map<FieldSpace,unsigned> latent_field_spaces;
+        for (unsigned idx = 0; idx < num_latent_field_spaces; idx++)
+        {
+          FieldSpace sp;
+          derez.deserialize(sp);
+          derez.deserialize(latent_field_spaces[sp]);
+        }
+        target->register_latent_field_spaces(latent_field_spaces);
       }
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
@@ -3717,9 +3747,6 @@ namespace Legion {
             // initialized the local contexts and received
             // back the local instance references
           }
-          // Make sure you have the metadata for the region with no access priv
-          if (no_access_regions[idx] && regions[idx].region.exists())
-            runtime->forest->get_node(clone_requirements[idx].region);
         }
         // Initialize any region tree contexts
         execution_context->initialize_region_tree_contexts(clone_requirements,
@@ -4522,7 +4549,6 @@ namespace Legion {
     //--------------------------------------------------------------------------
     Future IndividualTask::initialize_task(TaskContext *ctx,
                                            const TaskLauncher &launcher,
-                                           bool check_privileges,
                                            bool track /*=true*/)
     //--------------------------------------------------------------------------
     {
@@ -4599,9 +4625,7 @@ namespace Legion {
                    predicate_false_size);
           }
         }
-      }
-      if (check_privileges)
-        perform_privilege_checks();
+      } 
       // Get a future from the parent context to use as the result
       result = Future(new FutureImpl(runtime, true/*register*/,
             runtime->get_available_distributed_id(), 
@@ -4684,6 +4708,8 @@ namespace Legion {
       assert(memo_state != MEMO_REQ);
       assert(privilege_paths.size() == regions.size());
 #endif
+      if (runtime->check_privileges && !is_top_level_task())
+        perform_privilege_checks();
       // If we have a trace we do our alias analysis now
       if (need_intra_task_alias_analysis)
       {
@@ -6164,7 +6190,6 @@ namespace Legion {
     FutureMap IndexTask::initialize_task(TaskContext *ctx,
                                          const IndexTaskLauncher &launcher,
                                          IndexSpace launch_sp, 
-                                         bool check_privileges, 
                                          bool track /*= true*/)
     //--------------------------------------------------------------------------
     {
@@ -6215,9 +6240,7 @@ namespace Legion {
       future_map.impl->add_valid_domain(index_domain);
 #endif
       check_empty_field_requirements(); 
-
-      if (check_privileges)
-        perform_privilege_checks();
+ 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
@@ -6240,7 +6263,6 @@ namespace Legion {
                                       IndexSpace launch_sp,
                                       ReductionOpID redop_id, 
                                       bool deterministic,
-                                      bool check_privileges,
                                       bool track /*= true*/)
     //--------------------------------------------------------------------------
     {
@@ -6299,8 +6321,6 @@ namespace Legion {
             true/*register*/, runtime->get_available_distributed_id(), 
             runtime->address_space, this));
       check_empty_field_requirements();
-      if (check_privileges)
-        perform_privilege_checks();
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_index_task(parent_ctx->get_unique_id(),
@@ -6434,6 +6454,8 @@ namespace Legion {
       assert(memo_state != MEMO_REQ);
       assert(privilege_paths.size() == regions.size());
 #endif 
+      if (runtime->check_privileges)
+        perform_privilege_checks();
       if (need_intra_task_alias_analysis)
       {
         // If we have a trace we do our alias analysis now
@@ -8285,84 +8307,128 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_region_creations(
-                                            const std::set<LogicalRegion> &regs)
+    void SliceTask::register_region_creations(std::set<LogicalRegion> &regs)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<LogicalRegion>::const_iterator it = regs.begin();
-            it != regs.end(); it++)
+      if (!created_regions.empty())
       {
+        for (std::set<LogicalRegion>::const_iterator it = regs.begin();
+              it != regs.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(created_regions.find(*it) == created_regions.end());
+          assert(created_regions.find(*it) == created_regions.end());
 #endif
-        created_regions.insert(*it);
+          created_regions.insert(*it);
+        }
       }
+      else
+        created_regions.swap(regs);
     }
 
     //--------------------------------------------------------------------------
     void SliceTask::register_field_creations(
-                         const std::set<std::pair<FieldSpace,FieldID> > &fields)
+                               std::set<std::pair<FieldSpace,FieldID> > &fields)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
-            fields.begin(); it != fields.end(); it++)
+      if (!created_fields.empty())
       {
+        for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+              fields.begin(); it != fields.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(created_fields.find(*it) == created_fields.end());
+          assert(created_fields.find(*it) == created_fields.end());
 #endif
-        created_fields.insert(*it);
+          created_fields.insert(*it);
+        }
       }
+      else
+        created_fields.swap(fields);
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_field_space_creations(
-                                            const std::set<FieldSpace> &spaces)
+    void SliceTask::register_field_space_creations(std::set<FieldSpace> &spaces)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<FieldSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
+      if (!created_field_spaces.empty())
       {
+        for (std::set<FieldSpace>::const_iterator it = spaces.begin();
+              it != spaces.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(created_field_spaces.find(*it) == created_field_spaces.end());
+          assert(created_field_spaces.find(*it) == created_field_spaces.end());
 #endif
-        created_field_spaces.insert(*it);
+          created_field_spaces.insert(*it);
+        }
       }
+      else
+        created_field_spaces.swap(spaces);
     }
 
     //--------------------------------------------------------------------------
-    void SliceTask::register_index_space_creations(
-                                            const std::set<IndexSpace> &spaces)
+    void SliceTask::register_latent_field_spaces(
+                                          std::map<FieldSpace,unsigned> &spaces)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<IndexSpace>::const_iterator it = spaces.begin();
-            it != spaces.end(); it++)
+      if (!latent_field_spaces.empty())
       {
+        for (std::map<FieldSpace,unsigned>::const_iterator it = 
+              spaces.begin(); it != spaces.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(created_index_spaces.find(*it) == created_index_spaces.end());
+          assert(latent_field_spaces.find(it->first) == 
+                  latent_field_spaces.end());
 #endif
-        created_index_spaces.insert(*it);
+          latent_field_spaces.insert(*it);
+        }
       }
+      else
+        latent_field_spaces.swap(spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_space_creations(std::set<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!created_index_spaces.empty())
+      {
+        for (std::set<IndexSpace>::const_iterator it = spaces.begin();
+              it != spaces.end(); it++)
+        {
+#ifdef DEBUG_LEGION
+          assert(created_index_spaces.find(*it) == created_index_spaces.end());
+#endif
+          created_index_spaces.insert(*it);
+        }
+      }
+      else
+        created_index_spaces.swap(spaces);
     }
 
     //--------------------------------------------------------------------------
     void SliceTask::register_index_partition_creations(
-                                          const std::set<IndexPartition> &parts)
+                                                std::set<IndexPartition> &parts)
     //--------------------------------------------------------------------------
     {
       AutoLock o_lock(op_lock);
-      for (std::set<IndexPartition>::const_iterator it = parts.begin();
-            it != parts.end(); it++)
+      if (!created_index_partitions.empty())
       {
+        for (std::set<IndexPartition>::const_iterator it = parts.begin();
+              it != parts.end(); it++)
+        {
 #ifdef DEBUG_LEGION
-        assert(created_index_partitions.find(*it) == 
-               created_index_partitions.end());
+          assert(created_index_partitions.find(*it) == 
+                 created_index_partitions.end());
 #endif
-        created_index_partitions.insert(*it);
+          created_index_partitions.insert(*it);
+        }
       }
+      else
+        created_index_partitions.swap(parts);
     }
 
     //--------------------------------------------------------------------------

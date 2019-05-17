@@ -9628,8 +9628,8 @@ namespace Legion {
         verbose_logging(config.verbose_logging),
         logical_logging_only(config.logical_logging_only),
         physical_logging_only(config.physical_logging_only),
-        check_privileges(config.check_privileges),
 #endif
+        check_privileges(config.check_privileges),
         num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         legion_collective_log_radix(config.legion_collective_log_radix),
@@ -9813,8 +9813,8 @@ namespace Legion {
         verbose_logging(rhs.verbose_logging),
         logical_logging_only(rhs.logical_logging_only),
         physical_logging_only(rhs.physical_logging_only),
-        check_privileges(rhs.check_privileges),
 #endif
+        check_privileges(rhs.check_privileges),
         num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         legion_collective_log_radix(rhs.legion_collective_log_radix),
@@ -10607,8 +10607,7 @@ namespace Legion {
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
         // Mark that this task is the top-level task
         top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
+        top_task->initialize_task(top_context, launcher, false/*track parent*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -10670,7 +10669,7 @@ namespace Legion {
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
-                                   false/*check priv*/, false/*track parent*/);
+                                              false/*track parent*/);
       mapper_task->set_current_proc(proc);
       mapper_task->select_task_options();
       // Create a temporary event to name the result since we 

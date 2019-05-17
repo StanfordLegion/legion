@@ -1188,10 +1188,12 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    InnerContext* Operation::find_physical_context(unsigned index)
+    InnerContext* Operation::find_physical_context(unsigned index,
+                                                   const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
-      return parent_ctx->find_parent_physical_context(find_parent_index(index));
+      return parent_ctx->find_parent_physical_context(
+                find_parent_index(index), req.parent);
     }
 
     //--------------------------------------------------------------------------
@@ -1313,7 +1315,7 @@ namespace Legion {
           (req->handle_type != PART_PROJECTION &&
            req->region == LogicalRegion::NO_REGION))
         return;
-      InnerContext *context = find_physical_context(idx);
+      InnerContext *context = find_physical_context(idx, *req);
       RegionTreeContext ctx = context->get_context();
       RegionTreeNode *child_node = req->handle_type == PART_PROJECTION ? 
         static_cast<RegionTreeNode*>(runtime->forest->get_node(req->partition)) :
@@ -2303,8 +2305,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion MapOp::initialize(TaskContext *ctx, 
-                                     const InlineLauncher &launcher,
-                                     bool check_privileges)
+                                     const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -2345,8 +2346,6 @@ namespace Legion {
                               completion_event, true/*mapped*/, ctx, 
                               map_id, tag, false/*leaf*/, 
                               false/*virtual mapped*/, runtime));
-      if (check_privileges)
-        check_privilege();
       if (runtime->legion_spy_enabled)
         LegionSpy::log_mapping_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
@@ -2449,7 +2448,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void MapOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute our parent region requirement
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -2473,6 +2472,8 @@ namespace Legion {
     void MapOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_privilege();
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -3377,8 +3378,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::initialize(TaskContext *ctx,
-                            const CopyLauncher &launcher, bool check_privileges)
+    void CopyOp::initialize(TaskContext *ctx, const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -3488,147 +3488,7 @@ namespace Legion {
 #endif
       map_id = launcher.map_id;
       tag = launcher.tag;
-      index_point = launcher.point;
-      if (check_privileges)
-      {
-        if (src_requirements.size() != dst_requirements.size())
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SOURCE_REQUIREMENTS,
-                        "Number of source requirements (%zd) does not "
-                        "match number of destination requirements (%zd) "
-                        "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)",
-                        src_requirements.size(), dst_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        if (!src_indirect_requirements.empty() && 
-            (src_indirect_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
-                        "Number of source indirect requirements (%zd) does not "
-                        "match number of source requirements (%zd) "
-                        "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)", src_indirect_requirements.size(),
-                        src_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        if (!dst_indirect_requirements.empty() &&
-            (dst_indirect_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
-                        "Number of destination indirect requirements (%zd) "
-                        "does not match number of source requriements (%zd) "
-                        "for copy operation ID (%lld) with parent "
-                        "task %s (ID %lld)", dst_indirect_requirements.size(),
-                        src_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          if (src_requirements[idx].privilege_fields.size() != 
-              src_requirements[idx].instance_fields.size())
-            REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
-                          "Copy source requirement %d for copy operation "
-                          "(ID %lld) in parent task %s (ID %lld) has %zd "
-                          "privilege fields and %zd instance fields.  "
-                          "Copy requirements must have exactly the same "
-                          "number of privilege and instance fields.",
-                          idx, get_unique_id(), 
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          src_requirements[idx].privilege_fields.size(),
-                          src_requirements[idx].instance_fields.size())
-          if (!IS_READ_ONLY(src_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
-                          "Copy source requirement %d for copy operation "
-                          "(ID %lld) in parent task %s (ID %lld) must "
-                          "be requested with a read-only privilege.",
-                          idx, get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-          check_copy_privilege(src_requirements[idx], idx);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          if (dst_requirements[idx].privilege_fields.size() != 
-              dst_requirements[idx].instance_fields.size())
-            REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                          "Copy destination requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields and %zd "
-                          "instance fields.  Copy requirements must "
-                          "have exactly the same number of privilege "
-                          "and instance fields.", idx, 
-                          get_unique_id(), 
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          dst_requirements[idx].privilege_fields.size(),
-                          dst_requirements[idx].instance_fields.size())
-          if (!HAS_WRITE(dst_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                          "Copy destination requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-write or write-discard privilege.",
-                          idx, get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-          check_copy_privilege(dst_requirements[idx], 
-                                src_requirements.size() + idx);
-        }
-        if (!src_indirect_requirements.empty())
-        {
-          const size_t offset = 
-            src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-          {
-            if (src_indirect_requirements[idx].privilege_fields.size() != 1)
-              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy source indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) has %zd privilege fields but "
-                        "source indirect requirements are only permitted "
-                        "to have one privilege field.", idx,
-                        get_unique_id(), parent_task->get_task_name(),
-                        parent_task->get_unique_id(),
-                        src_indirect_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(src_indirect_requirements[idx]))
-              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy source indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) must be requested with a "
-                        "read-only privilege.", idx,
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-            check_copy_privilege(src_indirect_requirements[idx], offset + idx);
-          }
-        }
-        if (!dst_indirect_requirements.empty())
-        {
-          const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + src_indirect_requirements.size();
-          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-          {
-            if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
-              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy destination indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) has %zd privilege fields but "
-                        "destination indirect requirements are only permitted "
-                        "to have one privilege field.", idx,
-                        get_unique_id(), parent_task->get_task_name(),
-                        parent_task->get_unique_id(),
-                        dst_indirect_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
-              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy destination indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) must be requested with a "
-                        "read-only privilege.", idx,
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-            check_copy_privilege(dst_indirect_requirements[idx], offset + idx);
-          } 
-        }
-        check_compatibility_properties();  
-      }
+      index_point = launcher.point; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
@@ -3961,7 +3821,7 @@ namespace Legion {
           initialize_privilege_path(scatter_privilege_paths[idx],
                                     dst_indirect_requirements[idx]);
         }
-      }
+      } 
       if (runtime->legion_spy_enabled)
         log_copy_requirements();
     }
@@ -3970,6 +3830,8 @@ namespace Legion {
     void CopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_copy_privileges(false/*permit projection*/);
       // Register a dependence on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
@@ -4815,8 +4677,153 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void CopyOp::check_copy_privileges(const bool permit_projection) 
+    //--------------------------------------------------------------------------
+    {
+      if (src_requirements.size() != dst_requirements.size())
+        REPORT_LEGION_ERROR(ERROR_NUMBER_SOURCE_REQUIREMENTS,
+                      "Number of source requirements (%zd) does not "
+                      "match number of destination requirements (%zd) "
+                      "for copy operation (ID %lld) with parent "
+                      "task %s (ID %lld)",
+                      src_requirements.size(), dst_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+      if (!src_indirect_requirements.empty() && 
+          (src_indirect_requirements.size() != src_requirements.size()))
+        REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
+                      "Number of source indirect requirements (%zd) does not "
+                      "match number of source requirements (%zd) "
+                      "for copy operation (ID %lld) with parent "
+                      "task %s (ID %lld)", src_indirect_requirements.size(),
+                      src_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+      if (!dst_indirect_requirements.empty() &&
+          (dst_indirect_requirements.size() != src_requirements.size()))
+        REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
+                      "Number of destination indirect requirements (%zd) "
+                      "does not match number of source requriements (%zd) "
+                      "for copy operation ID (%lld) with parent "
+                      "task %s (ID %lld)", dst_indirect_requirements.size(),
+                      src_requirements.size(),
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+      for (unsigned idx = 0; idx < src_requirements.size(); idx++)
+      {
+        if (src_requirements[idx].privilege_fields.size() != 
+            src_requirements[idx].instance_fields.size())
+          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
+                        "Copy source requirement %d for copy operation "
+                        "(ID %lld) in parent task %s (ID %lld) has %zd "
+                        "privilege fields and %zd instance fields.  "
+                        "Copy requirements must have exactly the same "
+                        "number of privilege and instance fields.",
+                        idx, get_unique_id(), 
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        src_requirements[idx].privilege_fields.size(),
+                        src_requirements[idx].instance_fields.size())
+        if (!IS_READ_ONLY(src_requirements[idx]))
+          REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENTS,
+                        "Copy source requirement %d for copy operation "
+                        "(ID %lld) in parent task %s (ID %lld) must "
+                        "be requested with a read-only privilege.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        check_copy_privilege(src_requirements[idx], idx, permit_projection);
+      }
+      for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
+      {
+        if (dst_requirements[idx].privilege_fields.size() != 
+            dst_requirements[idx].instance_fields.size())
+          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
+                        "Copy destination requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) has %zd privilege fields and %zd "
+                        "instance fields.  Copy requirements must "
+                        "have exactly the same number of privilege "
+                        "and instance fields.", idx, 
+                        get_unique_id(), 
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id(),
+                        dst_requirements[idx].privilege_fields.size(),
+                        dst_requirements[idx].instance_fields.size())
+        if (!HAS_WRITE(dst_requirements[idx]))
+          REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
+                        "Copy destination requirement %d for copy "
+                        "operation (ID %lld) in parent task %s "
+                        "(ID %lld) must be requested with a "
+                        "read-write or write-discard privilege.",
+                        idx, get_unique_id(),
+                        parent_ctx->get_task_name(),
+                        parent_ctx->get_unique_id())
+        check_copy_privilege(dst_requirements[idx], 
+                        src_requirements.size() + idx, permit_projection);
+      }
+      if (!src_indirect_requirements.empty())
+      {
+        const size_t offset = 
+          src_requirements.size() + dst_requirements.size();
+        for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
+        {
+          if (src_indirect_requirements[idx].privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                      "Copy source indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) has %zd privilege fields but "
+                      "source indirect requirements are only permitted "
+                      "to have one privilege field.", idx,
+                      get_unique_id(), parent_task->get_task_name(),
+                      parent_task->get_unique_id(),
+                      src_indirect_requirements[idx].privilege_fields.size())
+          if (!IS_READ_ONLY(src_indirect_requirements[idx]))
+            REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
+                      "Copy source indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) must be requested with a "
+                      "read-only privilege.", idx,
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+          check_copy_privilege(src_indirect_requirements[idx], 
+                               offset + idx, permit_projection);
+        }
+      }
+      if (!dst_indirect_requirements.empty())
+      {
+        const size_t offset = src_requirements.size() + 
+          dst_requirements.size() + src_indirect_requirements.size();
+        for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
+        {
+          if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
+            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                      "Copy destination indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) has %zd privilege fields but "
+                      "destination indirect requirements are only permitted "
+                      "to have one privilege field.", idx,
+                      get_unique_id(), parent_task->get_task_name(),
+                      parent_task->get_unique_id(),
+                      dst_indirect_requirements[idx].privilege_fields.size())
+          if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
+            REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
+                      "Copy destination indirect requirement %d for copy "
+                      "operation (ID %lld) in parent task %s "
+                      "(ID %lld) must be requested with a "
+                      "read-only privilege.", idx,
+                      get_unique_id(), parent_ctx->get_task_name(),
+                      parent_ctx->get_unique_id())
+          check_copy_privilege(dst_indirect_requirements[idx], 
+                               offset + idx, permit_projection);
+        } 
+      }
+      check_compatibility_properties();
+    }
+
+    //--------------------------------------------------------------------------
     void CopyOp::check_copy_privilege(const RegionRequirement &requirement, 
-                                      unsigned idx, bool permit_proj)
+                                      unsigned idx, const bool permit_proj)
     //--------------------------------------------------------------------------
     {
       if (!permit_proj && ((requirement.handle_type == PART_PROJECTION) ||
@@ -5415,7 +5422,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexCopyOp::initialize(TaskContext *ctx, 
                                  const IndexCopyLauncher &launcher,
-                                 IndexSpace launch_sp, bool check_privileges)
+                                 IndexSpace launch_sp)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -5531,148 +5538,7 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
 #endif
       map_id = launcher.map_id;
-      tag = launcher.tag;
-      if (check_privileges)
-      {
-        if (src_requirements.size() != dst_requirements.size())
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SOURCE_REQUIREMENTS,
-                        "Number of source requirements (%zd) does not "
-                        "match number of destination requirements (%zd) "
-                        "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)",
-                        src_requirements.size(), dst_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        if (!src_indirect_requirements.empty() && 
-            (src_indirect_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_SRC_INDIRECT_REQUIREMENTS,
-                        "Number of source indirect requirements (%zd) does not "
-                        "match number of source requirements (%zd) "
-                        "for copy operation (ID %lld) with parent "
-                        "task %s (ID %lld)", src_indirect_requirements.size(),
-                        src_requirements.size(), get_unique_id(), 
-                        parent_ctx->get_task_name(),parent_ctx->get_unique_id())
-        if (!dst_indirect_requirements.empty() &&
-            (dst_indirect_requirements.size() != src_requirements.size()))
-          REPORT_LEGION_ERROR(ERROR_NUMBER_DST_INDIRECT_REQUIREMENTS,
-                        "Number of destination indirect requirements (%zd) "
-                        "does not match number of source requriements (%zd) "
-                        "for copy operation ID (%lld) with parent "
-                        "task %s (ID %lld)", dst_indirect_requirements.size(),
-                        src_requirements.size(),
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-        for (unsigned idx = 0; idx < src_requirements.size(); idx++)
-        {
-          if (src_requirements[idx].privilege_fields.size() != 
-              src_requirements[idx].instance_fields.size())
-            REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENT,
-                          "Copy source requirement %d for copy operation "
-                          "(ID %lld) in parent task %s (ID %lld) has %zd "
-                          "privilege fields and %zd instance fields.  "
-                          "Copy requirements must have exactly the same "
-                          "number of privilege and instance fields.",
-                          idx, get_unique_id(), 
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          src_requirements[idx].privilege_fields.size(),
-                          src_requirements[idx].instance_fields.size())
-          if (!IS_READ_ONLY(src_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_SOURCE_REQUIREMENT,
-                          "Copy source requirement %d for copy operation "
-                          "(ID %lld) in parent task %s (ID %lld) must "
-                          "be requested with a read-only privilege.",
-                          idx, get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-          check_copy_privilege(src_requirements[idx], idx, 
-                               true/*permit projection*/);
-        }
-        for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
-        {
-          if (dst_requirements[idx].privilege_fields.size() != 
-              dst_requirements[idx].instance_fields.size())
-            REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                          "Copy destination requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) has %zd privilege fields and %zd "
-                          "instance fields.  Copy requirements must "
-                          "have exactly the same number of privilege "
-                          "and instance fields.", idx, 
-                          get_unique_id(), 
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id(),
-                          dst_requirements[idx].privilege_fields.size(),
-                          dst_requirements[idx].instance_fields.size())
-          if (!HAS_WRITE(dst_requirements[idx]))
-            REPORT_LEGION_ERROR(ERROR_COPY_DESTINATION_REQUIREMENT,
-                          "Copy destination requirement %d for copy "
-                          "operation (ID %lld) in parent task %s "
-                          "(ID %lld) must be requested with a "
-                          "read-write or write-discard privilege.",
-                          idx, get_unique_id(),
-                          parent_ctx->get_task_name(),
-                          parent_ctx->get_unique_id())
-          check_copy_privilege(dst_requirements[idx], 
-              src_requirements.size() + idx, true/*permit projection*/);
-        }
-        if (!src_indirect_requirements.empty())
-        {
-          const size_t offset = 
-            src_requirements.size() + dst_requirements.size();
-          for (unsigned idx = 0; idx < src_indirect_requirements.size(); idx++)
-          {
-            if (src_indirect_requirements[idx].privilege_fields.size() != 1)
-              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy source indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) has %zd privilege fields but "
-                        "source indirect requirements are only permitted "
-                        "to have one privilege field.", idx,
-                        get_unique_id(), parent_task->get_task_name(),
-                        parent_task->get_unique_id(),
-                        src_indirect_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(src_indirect_requirements[idx]))
-              REPORT_LEGION_ERROR(ERROR_COPY_GATHER_REQUIREMENT,
-                        "Copy source indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) must be requested with a "
-                        "read-only privilege.", idx,
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-            check_copy_privilege(src_indirect_requirements[idx], offset + idx,
-                                 true/*permit projection*/);
-          }
-        }
-        if (!dst_indirect_requirements.empty())
-        {
-          const size_t offset = src_requirements.size() + 
-            dst_requirements.size() + src_indirect_requirements.size();
-          for (unsigned idx = 0; idx < dst_indirect_requirements.size(); idx++)
-          {
-            if (dst_indirect_requirements[idx].privilege_fields.size() != 1)
-              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy destination indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) has %zd privilege fields but "
-                        "destination indirect requirements are only permitted "
-                        "to have one privilege field.", idx,
-                        get_unique_id(), parent_task->get_task_name(),
-                        parent_task->get_unique_id(),
-                        dst_indirect_requirements[idx].privilege_fields.size())
-            if (!IS_READ_ONLY(dst_indirect_requirements[idx]))
-              REPORT_LEGION_ERROR(ERROR_COPY_SCATTER_REQUIREMENT,
-                        "Copy destination indirect requirement %d for copy "
-                        "operation (ID %lld) in parent task %s "
-                        "(ID %lld) must be requested with a "
-                        "read-only privilege.", idx,
-                        get_unique_id(), parent_ctx->get_task_name(),
-                        parent_ctx->get_unique_id())
-            check_copy_privilege(dst_indirect_requirements[idx], offset + idx,
-                                 true/*permit projeciton*/);
-          }
-        }
-      }
+      tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
@@ -5752,7 +5618,7 @@ namespace Legion {
           initialize_privilege_path(scatter_privilege_paths[idx],
                                     dst_indirect_requirements[idx]);
         }
-      }
+      } 
       if (runtime->legion_spy_enabled)
       { 
         for (unsigned idx = 0; idx < src_requirements.size(); idx++)
@@ -5862,6 +5728,8 @@ namespace Legion {
     void IndexCopyOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_copy_privileges(true/*permit projection*/);
       // Register a dependence on our predicate
       register_predicate_dependence();
       src_versions.resize(src_requirements.size());
@@ -6940,12 +6808,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_space_deletion(TaskContext *ctx,
-                                                     IndexSpace handle)
+                           IndexSpace handle, std::vector<IndexPartition> &subs)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_SPACE_DELETION;
       index_space = handle;
+      sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -6953,12 +6822,13 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void DeletionOp::initialize_index_part_deletion(TaskContext *ctx,
-                                                    IndexPartition handle)
+                       IndexPartition handle, std::vector<IndexPartition> &subs)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
       kind = INDEX_PARTITION_DELETION;
       index_part = handle;
+      sub_partitions.swap(subs);
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -6999,9 +6869,7 @@ namespace Legion {
       initialize_operation(ctx, true/*track*/);
       kind = FIELD_DELETION;
       field_space = handle;
-      free_fields = to_free;
-      ctx->analyze_destroy_fields(field_space, free_fields, 
-          deletion_requirements, parent_req_indexes, destroy_indexes);
+      free_fields = to_free; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7014,9 +6882,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_REGION_DELETION;
-      logical_region = handle;
-      ctx->analyze_destroy_logical_region(logical_region,
-          deletion_requirements, parent_req_indexes, destroy_indexes);
+      logical_region = handle; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7029,9 +6895,7 @@ namespace Legion {
     {
       initialize_operation(ctx, true/*track*/);
       kind = LOGICAL_PARTITION_DELETION;
-      logical_part = handle;
-      ctx->analyze_destroy_logical_partition(logical_part,
-          deletion_requirements, parent_req_indexes);
+      logical_part = handle; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_deletion_operation(parent_ctx->get_unique_id(),
                                           unique_op_id);
@@ -7049,10 +6913,16 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       deactivate_operation();
+      sub_partitions.clear();
       free_fields.clear();
+      local_fields.clear();
+      global_fields.clear();
+      local_field_indexes.clear();
       parent_req_indexes.clear();
       destroy_indexes.clear();
+      returnable_privileges.clear();
       deletion_requirements.clear();
+      version_infos.clear();
       // Return this to the available deletion ops on the queue
       runtime->free_deletion_op(this);
     }
@@ -7075,6 +6945,37 @@ namespace Legion {
     void DeletionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      switch (kind)
+      {
+        // These cases do not need any kind of analysis to construct
+        // any region requirements
+        case INDEX_SPACE_DELETION:
+        case INDEX_PARTITION_DELETION:
+        case FIELD_SPACE_DELETION:
+          break;
+        case FIELD_DELETION:
+          {
+            parent_ctx->analyze_destroy_fields(field_space, free_fields,
+                              deletion_requirements, parent_req_indexes,
+                              global_fields, local_fields, local_field_indexes);
+            break;
+          }
+        case LOGICAL_REGION_DELETION:
+          {
+            parent_ctx->analyze_destroy_logical_region(logical_region,
+                                  deletion_requirements, parent_req_indexes, 
+                                  destroy_indexes, returnable_privileges);
+            break;
+          }
+        case LOGICAL_PARTITION_DELETION:
+          {
+            parent_ctx->analyze_destroy_logical_partition(logical_part,
+                            deletion_requirements, parent_req_indexes);
+            break;
+          }
+        default:
+          assert(false);
+      }
 #ifdef DEBUG_LEGION
       assert(deletion_requirements.size() == parent_req_indexes.size());
 #endif
@@ -7115,6 +7016,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       if (kind == LOGICAL_REGION_DELETION)
       {
+        assert(deletion_requirements.size() == returnable_privileges.size());
         // Still need to clean up these contexts in debug mode in case the
         // deletion doesn't happen before the context gets deleted and the
         // runtime tries to check that the context is empty for all region
@@ -7123,11 +7025,10 @@ namespace Legion {
         bool has_outermost = false;
         RegionTreeContext outermost_ctx;
         const RegionTreeContext tree_context = parent_ctx->get_context();
-        for (std::vector<RegionRequirement>::const_iterator it = 
-              deletion_requirements.begin(); it != 
-              deletion_requirements.end(); it++)
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          if (it->flags & RETURNABLE_FLAG)
+          const RegionRequirement &req = deletion_requirements[idx];
+          if (returnable_privileges[idx])
           {
             if (!has_outermost)
             {
@@ -7137,14 +7038,37 @@ namespace Legion {
               has_outermost = true;
             }
             runtime->forest->invalidate_current_context(outermost_ctx,
-                                      false/*users only*/, it->region);
+                                      false/*users only*/, req.region);
           }
           else
             runtime->forest->invalidate_current_context(tree_context,
-                                    false/*users only*/, it->region);
+                                    false/*users only*/, req.region);
         }
       }
 #endif
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::trigger_ready(void)
+    //--------------------------------------------------------------------------
+    {
+      if (kind == FIELD_DELETION)
+      {
+        // Field deletions need to compute their version infos
+        std::set<RtEvent> preconditions;
+        version_infos.resize(deletion_requirements.size());
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          runtime->forest->perform_versioning_analysis(this, idx,
+                                            deletion_requirements[idx],
+                                            version_infos[idx],
+                                            preconditions);
+        if (!preconditions.empty())
+        {
+          enqueue_ready_operation(Runtime::merge_events(preconditions));
+          return;
+        }
+      }
+      enqueue_ready_operation();
     }
 
     //--------------------------------------------------------------------------
@@ -7162,11 +7086,10 @@ namespace Legion {
         bool has_outermost = false;
         RegionTreeContext outermost_ctx;
         const RegionTreeContext tree_context = parent_ctx->get_context();
-        for (std::vector<RegionRequirement>::const_iterator it = 
-              deletion_requirements.begin(); it != 
-              deletion_requirements.end(); it++)
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
         {
-          if (it->flags & RETURNABLE_FLAG)
+          const RegionRequirement &req = deletion_requirements[idx];
+          if (returnable_privileges[idx])
           {
             if (!has_outermost)
             {
@@ -7175,40 +7098,21 @@ namespace Legion {
               outermost_ctx = outermost->get_context();
               has_outermost = true;
             }
-            runtime->forest->invalidate_versions(outermost_ctx, it->region);
+            runtime->forest->invalidate_versions(outermost_ctx, req.region);
           }
           else
-            runtime->forest->invalidate_versions(tree_context, it->region);
+            runtime->forest->invalidate_versions(tree_context, req.region);
         }
+        parent_ctx->remove_returnable_privileges(destroy_indexes);
       }
       else if (kind == FIELD_DELETION)
       {
         // For this case we actually need to go through and prune out any
         // valid instances for these fields in the equivalence sets in order
         // to be able to free up the resources.
-        bool has_outermost = false;
-        RegionTreeContext outermost_ctx;
-        const RegionTreeContext tree_context = parent_ctx->get_context();
-        for (std::vector<RegionRequirement>::const_iterator it = 
-              deletion_requirements.begin(); it != 
-              deletion_requirements.end(); it++)
-        {
-          if (it->flags & RETURNABLE_FLAG)
-          {
-            if (!has_outermost)
-            {
-              TaskContext *outermost = 
-                parent_ctx->find_outermost_local_context();
-              outermost_ctx = outermost->get_context();
-              has_outermost = true;
-            }
-            runtime->forest->invalidate_fields(outermost_ctx, it->region,
-                                it->privilege_fields, map_applied_events);
-          }
-          else
-            runtime->forest->invalidate_fields(tree_context, it->region,
-                                it->privilege_fields, map_applied_events);
-        }
+        for (unsigned idx = 0; idx < deletion_requirements.size(); idx++)
+          runtime->forest->invalidate_fields(this, idx, version_infos[idx],
+                                             map_applied_events);
       }
       // Mark that we're done mapping and defer the execution as appropriate
       if (!map_applied_events.empty())
@@ -7233,12 +7137,20 @@ namespace Legion {
       }
       // If we're deleting parts of an index space tree then we also need 
       // to make sure all the dependent partitioning operations are done
-      if (kind == INDEX_SPACE_DELETION)
-        runtime->forest->perform_index_space_deletion_analysis(index_space,
-                                                  execution_preconditions);
-      else if (kind == INDEX_PARTITION_DELETION)
-        runtime->forest->perform_index_partition_deletion_analysis(index_part,
-                                                  execution_preconditions);
+      if (kind == INDEX_PARTITION_DELETION)
+      {
+        IndexPartNode *node = runtime->forest->get_node(index_part);
+        execution_preconditions.insert(node->partition_ready);
+      }
+      if (!sub_partitions.empty())
+      {
+        for (std::vector<IndexPartition>::const_iterator it = 
+              sub_partitions.begin(); it != sub_partitions.end(); it++)
+        {
+          IndexPartNode *node = runtime->forest->get_node(*it);
+          execution_preconditions.insert(node->partition_ready);
+        }
+      }
       if (!execution_preconditions.empty())
         complete_execution(Runtime::protect_event(
             Runtime::merge_events(NULL, execution_preconditions)));
@@ -7274,24 +7186,22 @@ namespace Legion {
           }
         case FIELD_DELETION:
           {
-            // Remove all deleted fields from the context privileges
-            parent_ctx->remove_field_requirements(destroy_indexes, free_fields);
-            // Now we can tell the runtime that the fields are destroyed
-            runtime->forest->destroy_fields(field_space, free_fields);
+            if (!local_fields.empty())
+              runtime->forest->free_local_fields(field_space, 
+                  get_commit_event(), local_fields, local_field_indexes);
+            if (!global_fields.empty())
+              runtime->forest->free_fields(field_space, global_fields, 
+                                           get_commit_event());
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
-            // Remove all the deleted requirements from the context
-            parent_ctx->remove_privilege_requirements(destroy_indexes);
-            // Now we can do the call to the runtime for the deletion
             runtime->forest->destroy_logical_region(logical_region, 
                                             runtime->address_space);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
           {
-            // Now we can do the call to the runtime for the deletion
             runtime->forest->destroy_logical_partition(logical_part,
                                             runtime->address_space);
             break;
@@ -7310,6 +7220,14 @@ namespace Legion {
       assert(idx < parent_req_indexes.size());
 #endif
       return parent_req_indexes[idx];
+    }
+
+    //--------------------------------------------------------------------------
+    void DeletionOp::pack_remote_operation(Serializer &rez,
+                                           AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);
     }
 
     /////////////////////////////////////////////////////////////
@@ -8251,9 +8169,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::initialize(Context ctx, 
-                               const AcquireLauncher &launcher,
-                               bool check_privileges)
+    void AcquireOp::initialize(Context ctx, const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -8299,9 +8215,7 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
 #endif
       map_id = launcher.map_id;
-      tag = launcher.tag;
-      if (check_privileges)
-        check_acquire_privilege(); 
+      tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_acquire_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
@@ -8377,7 +8291,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void AcquireOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -8401,6 +8315,8 @@ namespace Legion {
     void AcquireOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {  
+      if (runtime->check_privileges)
+        check_acquire_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
@@ -9023,9 +8939,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::initialize(Context ctx, 
-                               const ReleaseLauncher &launcher, 
-                               bool check_privileges)
+    void ReleaseOp::initialize(Context ctx, const ReleaseLauncher &launcher) 
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -9070,9 +8984,7 @@ namespace Legion {
       arrive_barriers = launcher.arrive_barriers;
 #endif
       map_id = launcher.map_id;
-      tag = launcher.tag;
-      if (check_privileges)
-        check_release_privilege(); 
+      tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_release_operation(parent_ctx->get_unique_id(),
                                          unique_op_id);
@@ -9148,7 +9060,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void ReleaseOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -9172,6 +9084,8 @@ namespace Legion {
     void ReleaseOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {  
+      if (runtime->check_privileges)
+        check_release_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
       // First register any mapping dependences that we have
@@ -10543,8 +10457,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     FutureMap MustEpochOp::initialize(TaskContext *ctx,
-                                              const MustEpochLauncher &launcher,
-                                              bool check_privileges)
+                                      const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
@@ -10558,7 +10471,7 @@ namespace Legion {
       {
         indiv_tasks[idx] = runtime->get_available_individual_task();
         indiv_tasks[idx]->initialize_task(ctx, launcher.single_tasks[idx],
-                                          check_privileges, false/*track*/);
+                                          false/*track*/);
         indiv_tasks[idx]->set_must_epoch(this, idx, true/*register*/);
         // If we have a trace, set it for this operation as well
         if (trace != NULL)
@@ -10575,7 +10488,7 @@ namespace Legion {
                       launcher.index_tasks[idx].launch_domain);
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
-                          launch_space, check_privileges, false/*track*/);
+                                          launch_space, false/*track*/);
         index_tasks[idx]->set_must_epoch(this, indiv_tasks.size()+idx, 
                                          true/*register*/);
         if (trace != NULL)
@@ -12302,6 +12215,8 @@ namespace Legion {
     void DependentPartitionOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_privilege();
       // Before doing the dependence analysis we have to ask the
       // mapper whether it would like to make this an index space
       // operation or a single operation
@@ -13066,6 +12981,160 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void DependentPartitionOp::check_privilege(void)
+    //--------------------------------------------------------------------------
+    {
+      FieldID bad_field = AUTO_GENERATE_ID;
+      int bad_index = -1;
+      LegionErrorType et = runtime->verify_requirement(requirement, bad_field);
+      // If that worked, then check the privileges with the parent context
+      if (et == NO_ERROR)
+        et = parent_ctx->check_privilege(requirement, bad_field, bad_index);
+      switch (et)
+      {
+        case NO_ERROR:
+          break;
+        case ERROR_INVALID_REGION_HANDLE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REQUIREMENTS_INVALID_REGION,
+                             "Requirements for invalid region handle "
+                             "(%x,%d,%d) for dependent partitioning op "
+                             "(ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             unique_op_id);
+            break;
+          }
+        case ERROR_FIELD_SPACE_FIELD_MISMATCH:
+          {
+            FieldSpace sp = (requirement.handle_type == SINGULAR) ||
+            (requirement.handle_type == REG_PROJECTION)
+            ? requirement.region.field_space :
+            requirement.partition.field_space;
+            REPORT_LEGION_ERROR(ERROR_FIELD_NOT_VALID_FIELD,
+                            "Field %d is not a valid field of field "
+                             "space %d for dependent partitioning op "
+                             "(ID %lld)", bad_field, sp.id, unique_op_id)
+            break;
+          }
+        case ERROR_INVALID_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is not one of the "
+                             "privilege fields for dependent partitioning "
+                             "op (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_DUPLICATE_INSTANCE_FIELD:
+          {
+            REPORT_LEGION_ERROR(ERROR_INSTANCE_FIELD_PRIVILEGE,
+                             "Instance field %d is a duplicate for "
+                             "dependent partitioning op (ID %lld)",
+                             bad_field, unique_op_id)
+            break;
+          }
+        case ERROR_BAD_PARENT_REGION:
+          {
+            if (bad_index < 0) 
+            {
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
+                               "Parent task %s (ID %lld) of dependent "
+                               "partitioning op "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "no 'parent' region had that name.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id);
+            } 
+            else if (bad_field == AUTO_GENERATE_ID) 
+            {
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
+                               "Parent task %s (ID %lld) of dependent "
+                               "partitioning op "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "parent requirement %d did not have "
+                               "sufficent privileges.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id, bad_index);
+            } 
+            else 
+            {
+              REPORT_LEGION_ERROR(ERROR_PARENT_TASK_INLINE,
+                               "Parent task %s (ID %lld) of dependent "
+                               "partitioning op "
+                               "(ID %lld) does not have a region "
+                               "requirement for region (%x,%x,%x) "
+                               "as a parent of region requirement because "
+                               "region requirement %d was missing field %d.",
+                               parent_ctx->get_task_name(),
+                               parent_ctx->get_unique_id(),
+                               unique_op_id,
+                               requirement.region.index_space.id,
+                               requirement.region.field_space.id,
+                               requirement.region.tree_id,
+                               bad_index, bad_field);
+            }
+            break;
+          }
+        case ERROR_BAD_REGION_PATH:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_NOT_SUBREGION,
+                             "Region (%x,%x,%x) is not a "
+                             "sub-region of parent region "
+                             "(%x,%x,%x) for region requirement of "
+                             "dependent partitioning op (ID %lld)",
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             requirement.parent.index_space.id,
+                             requirement.parent.field_space.id,
+                             requirement.parent.tree_id,
+                             unique_op_id)
+            break;
+          }
+        case ERROR_BAD_REGION_TYPE:
+          {
+            REPORT_LEGION_ERROR(ERROR_REGION_REQUIREMENT_INLINE,
+                             "Region requirement of dependent partitioning "
+                             "op (ID %lld) cannot find privileges for field "
+                             "%d in parent task",
+                             unique_op_id, bad_field)
+            break;
+          }
+        case ERROR_BAD_REGION_PRIVILEGES:
+          {
+            REPORT_LEGION_ERROR(ERROR_PRIVILEGES_FOR_REGION,
+                             "Privileges %x for region "
+                             "(%x,%x,%x) are not a subset of privileges "
+                             "of parent task's privileges for region "
+                             "requirement of dependent partitioning op "
+                             "(ID %lld)", requirement.privilege,
+                             requirement.region.index_space.id,
+                             requirement.region.field_space.id,
+                             requirement.region.tree_id,
+                             unique_op_id)
+          }
+          // this should never happen with an inline mapping
+        case ERROR_NON_DISJOINT_PARTITION:
+        default:
+          assert(false); // Should never happen
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void DependentPartitionOp::compute_parent_index(void)
     //--------------------------------------------------------------------------
     {
@@ -13339,8 +13408,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, const FillLauncher &launcher,
-                            bool check_privileges)
+    void FillOp::initialize(TaskContext *ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -13363,9 +13431,7 @@ namespace Legion {
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
       map_id = launcher.map_id;
-      tag = launcher.tag;
-      if (check_privileges)
-        check_fill_privilege();
+      tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
@@ -13524,7 +13590,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void FillOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -13536,6 +13602,8 @@ namespace Legion {
     void FillOp::trigger_dependence_analysis(void) 
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_fill_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
       // If we are waiting on a future register a dependence
@@ -14050,7 +14118,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexFillOp::initialize(TaskContext *ctx,
                                  const IndexFillLauncher &launcher,
-                                 IndexSpace launch_sp, bool check_privileges)
+                                 IndexSpace launch_sp)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -14096,9 +14164,7 @@ namespace Legion {
       wait_barriers = launcher.wait_barriers;
       arrive_barriers = launcher.arrive_barriers;
       map_id = launcher.map_id;
-      tag = launcher.tag;
-      if (check_privileges)
-        check_fill_privilege();
+      tag = launcher.tag; 
       if (runtime->legion_spy_enabled)
       {
         LegionSpy::log_fill_operation(parent_ctx->get_unique_id(), 
@@ -14139,7 +14205,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void IndexFillOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -14171,6 +14237,8 @@ namespace Legion {
     void IndexFillOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_fill_privilege();
       // Register a dependence on our predicate
       register_predicate_dependence();
       // If we are waiting on a future register a dependence
@@ -14528,7 +14596,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     PhysicalRegion AttachOp::initialize(TaskContext *ctx,
-                          const AttachLauncher &launcher, bool check_privileges)
+                                        const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 1/*regions*/, 
@@ -14613,9 +14681,7 @@ namespace Legion {
       region = PhysicalRegion(new PhysicalRegionImpl(requirement,
                               completion_event, true/*mapped*/, ctx,
                               0/*map id*/, 0/*tag*/, false/*leaf*/, 
-                              false/*virtual mapped*/, runtime));
-      if (check_privileges)
-        check_privilege();
+                              false/*virtual mapped*/, runtime)); 
       if (runtime->legion_spy_enabled)
         LegionSpy::log_attach_operation(parent_ctx->get_unique_id(),
                                         unique_op_id);
@@ -14680,7 +14746,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void AttachOp::trigger_prepipeline_stage(void)
     //--------------------------------------------------------------------------
-    {
+    { 
       // First compute the parent index
       compute_parent_index();
       initialize_privilege_path(privilege_path, requirement);
@@ -14704,6 +14770,8 @@ namespace Legion {
     void AttachOp::trigger_dependence_analysis(void)
     //--------------------------------------------------------------------------
     {
+      if (runtime->check_privileges)
+        check_privilege();
       ProjectionInfo projection_info;
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/, 
                                                    requirement,
@@ -14759,7 +14827,7 @@ namespace Legion {
       const PhysicalTraceInfo trace_info(this);
       InstanceSet external(1);
       external[0] = external_instance;
-      InnerContext *context = find_physical_context(0/*index*/);
+      InnerContext *context = find_physical_context(0/*index*/, requirement);
       std::vector<InstanceView*> external_views;
       context->convert_target_views(external, external_views);
 #ifdef DEBUG_LEGION
@@ -15304,7 +15372,7 @@ namespace Legion {
                                                   false/*check initialized*/);
         requirement.privilege = READ_WRITE;
       }
-      InnerContext *context = find_physical_context(0/*index*/);
+      InnerContext *context = find_physical_context(0/*index*/, requirement);
       std::vector<InstanceView*> external_views;
       context->convert_target_views(references, external_views);
 #ifdef DEBUG_LEGION
@@ -15859,6 +15927,11 @@ namespace Legion {
         case DETACH_OP_KIND:
           {
             result = new RemoteDetachOp(runtime, remote_ptr, source);
+            break;
+          }
+        case DELETION_OP_KIND:
+          {
+            result = new RemoteDeletionOp(runtime, remote_ptr, source);
             break;
           }
         default:
@@ -16815,6 +16888,109 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void RemoteDetachOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Deletion Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteDeletionOp::RemoteDeletionOp(Runtime *rt, 
+                                       Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDeletionOp::RemoteDeletionOp(const RemoteDeletionOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDeletionOp::~RemoteDeletionOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteDeletionOp& RemoteDeletionOp::operator=(const RemoteDeletionOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteDeletionOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteDeletionOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeletionOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteDeletionOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteDeletionOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[DELETION_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteDeletionOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return DELETION_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeletionOp::select_sources(const InstanceRef &target,
+                                          const InstanceSet &sources,
+                                          std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeletionOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteDeletionOp::unpack(Deserializer &derez,ReferenceMutator &mutator)
     //--------------------------------------------------------------------------
     {
       // Nothing for the moment

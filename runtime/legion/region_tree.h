@@ -143,7 +143,8 @@ namespace Legion {
                               const std::vector<IndexSpace> &sources);
       IndexSpace find_or_create_difference_space(TaskContext *ctx,
                               IndexSpace left, IndexSpace right);
-      RtEvent create_pending_partition(IndexPartition pid,
+      RtEvent create_pending_partition(TaskContext *ctx,
+                                       IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
                                        LegionColor partition_color,
@@ -151,7 +152,8 @@ namespace Legion {
                                        DistributedID did,
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
-      void create_pending_cross_product(IndexPartition handle1,
+      void create_pending_cross_product(TaskContext *ctx,
+                                        IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
                                            PartitionKind kind,
@@ -277,10 +279,6 @@ namespace Legion {
                            CustomSerdezID serdez_id);
       void free_fields(FieldSpace handle, 
                        const std::vector<FieldID> &to_free, RtEvent freed);
-      // The final call to when the destruction of the field meta data
-      // is finally safe to be performed
-      void destroy_fields(FieldSpace handle, 
-                          const std::set<FieldID> &to_destroy);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -363,15 +361,8 @@ namespace Legion {
                                        const RegionRequirement &req,
                                        VersionInfo &version_info,
                                        std::set<RtEvent> &ready_events);
-      void perform_index_space_deletion_analysis(IndexSpace handle,
-                                       std::set<ApEvent> &ready_events);
-      void perform_index_partition_deletion_analysis(IndexPartition handle,
-                                       std::set<ApEvent> &ready_events);
       void invalidate_versions(RegionTreeContext ctx, LogicalRegion handle);
       void invalidate_all_versions(RegionTreeContext ctx);
-      void invalidate_fields(RegionTreeContext ctx, LogicalRegion handle,
-                             const std::set<FieldID> &invalidate_fields,
-                             std::set<RtEvent> &ready_events);
     public:
       void initialize_current_context(RegionTreeContext ctx,
                     const RegionRequirement &req, const bool restricted,
@@ -529,6 +520,9 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               LogicalView *registration_view = NULL);
+      void invalidate_fields(Operation *op, unsigned index,
+                             VersionInfo &version_info,
+                             std::set<RtEvent> &map_applied_events);
       // Support for tracing
       void find_invalid_instances(Operation *op, unsigned index,
                                   VersionInfo &version_info,
@@ -1641,7 +1635,7 @@ namespace Legion {
       bool has_color(const LegionColor c);
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
-      void add_child(IndexPartNode *child);
+      void add_child(IndexPartNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
@@ -2388,7 +2382,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void add_child(IndexSpaceNode *child);
+      void add_child(IndexSpaceNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
@@ -2431,7 +2425,7 @@ namespace Legion {
       bool intersects_with(IndexPartNode *other, bool compute = true); 
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
-      virtual bool destroy_node(AddressSpaceID source) = 0;
+      virtual bool destroy_node(AddressSpaceID source, bool top) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
@@ -2507,7 +2501,7 @@ namespace Legion {
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
     public:
-      virtual bool destroy_node(AddressSpaceID source); 
+      virtual bool destroy_node(AddressSpaceID source, bool top); 
     };
 
     /**
@@ -3233,7 +3227,7 @@ namespace Legion {
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
       void remove_child(const LegionColor c);
-      bool destroy_node(AddressSpaceID source);
+      bool destroy_node(AddressSpaceID source, bool top);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
