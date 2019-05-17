@@ -375,17 +375,18 @@ namespace Legion {
         }
         else
         {
-          for (LegionColor color = 0; 
-                color < base->max_linearized_color; color++)
+          ColorSpaceIterator *itr =
+            base->color_space->create_color_space_iterator();
+          while (itr->is_valid())
           {
-            if (!base->color_space->contains_color(color))
-              continue;
+            const LegionColor color = itr->yield_color();
             IndexSpaceNode *child_node = base->get_child(color);
             std::vector<LegionColor> colors;
             child_node->get_colors(colors);
             if (!colors.empty())
               existing_colors.insert(colors.begin(), colors.end());
           }
+          delete itr;
         }
         // Now we have the existing colors, so just do something dumb
         // like add our current runtime ID to the last color
@@ -421,10 +422,11 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0; color < base->max_linearized_color; color++)
+        ColorSpaceIterator *itr = 
+          base->color_space->create_color_space_iterator();
+        while (itr->is_valid())
         {
-          if (!base->color_space->contains_color(color))
-            continue;
+          const LegionColor color = itr->yield_color();
           IndexSpaceNode *child_node = base->get_child(color);
           IndexPartition pid(runtime->get_unique_index_partition_id(),
                              handle1.get_tree_id(), handle1.get_type_tag()); 
@@ -439,6 +441,7 @@ namespace Legion {
           if (finder != user_handles.end())
             finder->second = pid;
         }
+        delete itr;
       }
     }
 
@@ -566,17 +569,18 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = 0; 
-              color < base_node->max_linearized_color; color++)
+        ColorSpaceIterator *itr = 
+          base_node->color_space->create_color_space_iterator();
+        while (itr->is_valid())
         {
-          if (!base_node->color_space->contains_color(color))
-            continue;
+          const LegionColor color = itr->yield_color();
           IndexSpaceNode *child_node = base_node->get_child(color);
           IndexPartNode *part_node = child_node->get_child(part_color);
           ApEvent ready = child_node->create_by_intersection(op, part_node, 
                                                              source_node); 
           ready_events.insert(ready);
         }
+        delete itr;
       }
       return Runtime::merge_events(NULL, ready_events);
     } 
