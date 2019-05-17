@@ -6919,7 +6919,6 @@ namespace Legion {
       global_fields.clear();
       local_field_indexes.clear();
       parent_req_indexes.clear();
-      destroy_indexes.clear();
       returnable_privileges.clear();
       deletion_requirements.clear();
       version_infos.clear();
@@ -6950,9 +6949,23 @@ namespace Legion {
         // These cases do not need any kind of analysis to construct
         // any region requirements
         case INDEX_SPACE_DELETION:
+          {
+            parent_ctx->analyze_destroy_index_space(index_space,
+                            deletion_requirements, parent_req_indexes);
+            break;
+          }
         case INDEX_PARTITION_DELETION:
+          {
+            parent_ctx->analyze_destroy_index_partition(index_part,
+                            deletion_requirements, parent_req_indexes);
+            break;
+          }
         case FIELD_SPACE_DELETION:
-          break;
+          {
+            parent_ctx->analyze_destroy_field_space(field_space,
+                            deletion_requirements, parent_req_indexes);
+            break;
+          }
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields,
@@ -6964,7 +6977,7 @@ namespace Legion {
           {
             parent_ctx->analyze_destroy_logical_region(logical_region,
                                   deletion_requirements, parent_req_indexes, 
-                                  destroy_indexes, returnable_privileges);
+                                  returnable_privileges);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
@@ -7014,6 +7027,7 @@ namespace Legion {
         }
       }
 #ifdef DEBUG_LEGION
+#if 0
       if (kind == LOGICAL_REGION_DELETION)
       {
         assert(deletion_requirements.size() == returnable_privileges.size());
@@ -7045,6 +7059,7 @@ namespace Legion {
                                     false/*users only*/, req.region);
         }
       }
+#endif
 #endif
     }
 
@@ -7103,7 +7118,6 @@ namespace Legion {
           else
             runtime->forest->invalidate_versions(tree_context, req.region);
         }
-        parent_ctx->remove_returnable_privileges(destroy_indexes);
       }
       else if (kind == FIELD_DELETION)
       {
@@ -7192,12 +7206,14 @@ namespace Legion {
             if (!global_fields.empty())
               runtime->forest->free_fields(field_space, global_fields, 
                                            get_commit_event());
+            parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
             runtime->forest->destroy_logical_region(logical_region, 
                                             runtime->address_space);
+            parent_ctx->remove_deleted_requirements(parent_req_indexes);
             break;
           }
         case LOGICAL_PARTITION_DELETION:

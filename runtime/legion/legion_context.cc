@@ -660,6 +660,118 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_index_space(IndexSpace handle,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // If we're deleting a full index space it can't be for any of our
+      // initial regions because they had to be made above this context
+      // so we only need to look at our created requirements
+      const IndexTreeID tree_id = handle.get_tree_id();
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        if (it->second.privilege_fields.empty())
+          continue;
+        if (it->second.region.get_index_space().get_tree_id() != tree_id) 
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->second.region;
+        req.parent = it->second.region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->second.privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_index_partition(IndexPartition index_part,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // This is a little conservative, but its sound, we'll defer this
+      // deletion on any region that works on the same index tree
+      const IndexTreeID tree_id = index_part.get_tree_id();
+      for (unsigned idx = 0; idx < regions.size(); idx++)
+      {
+        const RegionRequirement &req = regions[idx];
+        if (req.region.get_index_space().get_tree_id() != tree_id)
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &delete_req = delete_reqs.back();
+        delete_req.region = req.region;
+        delete_req.parent = req.region;
+        delete_req.privilege = READ_WRITE;
+        delete_req.prop = EXCLUSIVE;
+        delete_req.privilege_fields = req.privilege_fields;
+        delete_req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(idx);
+      }
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        if (it->second.privilege_fields.empty())
+          continue;
+        if (it->second.region.get_index_space().get_tree_id() != tree_id) 
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->second.region;
+        req.parent = it->second.region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->second.privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::analyze_destroy_field_space(FieldSpace handle,
+                                    std::vector<RegionRequirement> &delete_reqs,
+                                    std::vector<unsigned> &parent_req_indexes)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(!is_leaf_context());
+#endif
+      // If we're deleting a full field space it can't be for any of our
+      // initial regions because they had to be made above this context
+      // so we only need to look at our created requirements
+      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      for (std::map<unsigned,RegionRequirement>::const_iterator it = 
+           created_requirements.begin(); it != created_requirements.end(); it++)
+      {
+        if (it->second.privilege_fields.empty())
+          continue;
+        if (it->second.region.get_field_space() != handle) 
+          continue;
+        delete_reqs.resize(delete_reqs.size()+1);
+        RegionRequirement &req = delete_reqs.back();
+        req.region = it->second.region;
+        req.parent = it->second.region;
+        req.privilege = READ_WRITE;
+        req.prop = EXCLUSIVE;
+        req.privilege_fields = it->second.privilege_fields;
+        req.handle_type = SINGULAR;
+        parent_req_indexes.push_back(it->first);
+      }
+    }
+
+    //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_fields(FieldSpace handle,
                                              const std::set<FieldID> &to_delete,
                                     std::vector<RegionRequirement> &delete_reqs,
@@ -711,14 +823,10 @@ namespace Legion {
           for (std::set<FieldID>::const_iterator fit = to_delete.begin();
                 fit != to_delete.end(); fit++)
           {
-            std::set<FieldID>::iterator finder = 
+            std::set<FieldID>::const_iterator finder = 
               it->second.privilege_fields.find(*fit);
             if (finder != it->second.privilege_fields.end())
-            {
               overlapping_fields.insert(*fit);
-              // Remove it so no later operations can find the privileges
-              it->second.privilege_fields.erase(finder);
-            }
           }
           if (overlapping_fields.empty())
             continue;
@@ -730,7 +838,6 @@ namespace Legion {
           req.prop = EXCLUSIVE;
           req.privilege_fields = overlapping_fields;
           req.handle_type = SINGULAR;
-          req.flags = it->second.flags; 
           parent_req_indexes.push_back(it->first);
           // We need some extra logging for legion spy
           if (runtime->legion_spy_enabled)
@@ -756,7 +863,6 @@ namespace Legion {
     void TaskContext::analyze_destroy_logical_region(LogicalRegion handle,
                                     std::vector<RegionRequirement> &delete_reqs,
                                     std::vector<unsigned> &parent_req_indexes,
-                                    std::vector<unsigned> &destroy_indexes,
                                     std::vector<bool> &returnable)
     //--------------------------------------------------------------------------
     {
@@ -805,18 +911,22 @@ namespace Legion {
               req.parent = it->second.region;
               req.privilege = READ_WRITE;
               req.prop = EXCLUSIVE;
-              req.privilege_fields.swap(it->second.privilege_fields);
+              req.privilege_fields = it->second.privilege_fields;
               req.handle_type = SINGULAR;
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
-              destroy_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
+              // Can't delete this yet since other deletions might 
+              // need to find it until it is finally applied
+              it++;
             }
             else // Can erase the returnable privileges now
+            {
               returnable_privileges.erase(it->first);
-            // Remove the requirement from the created set 
-            std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
-            created_requirements.erase(to_delete);
+              // Remove the requirement from the created set 
+              std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
+              created_requirements.erase(to_delete);
+            }
           }
           else
             it++;
@@ -896,18 +1006,21 @@ namespace Legion {
               req.parent = it->second.region;
               req.privilege = READ_WRITE;
               req.prop = EXCLUSIVE;
-              req.privilege_fields.swap(it->second.privilege_fields);
+              req.privilege_fields = it->second.privilege_fields;
               req.handle_type = SINGULAR;
-              req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
-              destroy_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
+              // Can't delete this yet until it's actually performed
+              // because other deletions might need to depend on it
+              it++;
             }
             else // Can erase the returnable privileges now
+            {
               returnable_privileges.erase(it->first);
-            // Remove the requirement from the created set 
-            std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
-            created_requirements.erase(to_delete);
+              // Remove the requirement from the created set 
+              std::map<unsigned,RegionRequirement>::iterator to_delete = it++;
+              created_requirements.erase(to_delete);
+            }
           }
           else
             it++;
@@ -1007,7 +1120,6 @@ namespace Legion {
         delete_req.privilege = READ_WRITE;
         delete_req.prop = EXCLUSIVE;
         delete_req.privilege_fields = req.privilege_fields;
-        delete_req.flags = req.flags;
         parent_req_indexes.push_back(idx);
       }
       AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
@@ -1042,13 +1154,12 @@ namespace Legion {
         req.privilege = READ_WRITE;
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->second.privilege_fields;
-        req.flags = it->second.flags;
         parent_req_indexes.push_back(it->first);
       }
     }
 
     //--------------------------------------------------------------------------
-    void TaskContext::remove_returnable_privileges(
+    void TaskContext::remove_deleted_requirements(
                                            const std::vector<unsigned> &indexes)
     //--------------------------------------------------------------------------
     {
@@ -1056,12 +1167,35 @@ namespace Legion {
       for (std::vector<unsigned>::const_iterator it = 
             indexes.begin(); it != indexes.end(); it++) 
       {
-        std::map<unsigned,bool>::iterator finder = 
-          returnable_privileges.find(*it);
 #ifdef DEBUG_LEGION
-        assert(finder != returnable_privileges.end());
+        assert(created_requirements.find(*it) != created_requirements.end());
+        assert(returnable_privileges.find(*it) != returnable_privileges.end());
 #endif
-        returnable_privileges.erase(finder);
+        created_requirements.erase(*it);
+        returnable_privileges.erase(*it);
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void TaskContext::remove_deleted_fields(const std::set<FieldID> &to_free,
+                                           const std::vector<unsigned> &indexes)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock priv_lock(privilege_lock);
+      for (std::vector<unsigned>::const_iterator it = 
+            indexes.begin(); it != indexes.end(); it++) 
+      {
+        std::map<unsigned,RegionRequirement>::iterator req_finder = 
+          created_requirements.find(*it);
+#ifdef DEBUG_LEGION
+        assert(req_finder != created_requirements.end());
+#endif
+        std::set<FieldID> &priv_fields = req_finder->second.privilege_fields;
+        if (priv_fields.empty())
+          continue;
+        for (std::set<FieldID>::const_iterator fit = 
+              to_free.begin(); fit != to_free.end(); fit++)
+          priv_fields.erase(*fit);
       }
     }
 

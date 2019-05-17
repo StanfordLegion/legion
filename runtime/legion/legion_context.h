@@ -423,6 +423,15 @@ namespace Legion {
       void destroy_user_lock(Reservation r);
       void destroy_user_barrier(ApBarrier b);
     public:
+      void analyze_destroy_index_space(IndexSpace handle,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
+      void analyze_destroy_index_partition(IndexPartition index_partition,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
+      void analyze_destroy_field_space(FieldSpace handle,
+                                  std::vector<RegionRequirement> &delete_reqs,
+                                  std::vector<unsigned> &parent_req_indexes);
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,
@@ -433,7 +442,6 @@ namespace Legion {
       void analyze_destroy_logical_region(LogicalRegion handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
-                                  std::vector<unsigned> &destroy_indexes,
                                   std::vector<bool> &returnable_privileges);
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                   std::vector<RegionRequirement> &delete_reqs,
@@ -441,7 +449,9 @@ namespace Legion {
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
                                   std::vector<unsigned> &local_field_indexes);
-      void remove_returnable_privileges(const std::vector<unsigned> &indexes);
+      void remove_deleted_requirements(const std::vector<unsigned> &indexes);
+      void remove_deleted_fields(const std::set<FieldID> &to_free,
+                                 const std::vector<unsigned> &indexes);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);

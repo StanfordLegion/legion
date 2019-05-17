@@ -6656,6 +6656,32 @@ namespace Legion {
       }
       else // Remove the valid reference that we have on the owner
         send_remote_valid_decrement(owner_space, RtEvent::NO_RT_EVENT, mutator);
+      // Traverse upwards for any parent operations
+      std::vector<IndexSpaceOperation*> parents;
+      {
+        AutoLock n_lock(node_lock,1,false/*exclusive*/);
+        if (!parent_operations.empty())
+        {
+          parents.resize(parent_operations.size());
+          unsigned idx = 0;
+          for (std::set<IndexSpaceOperation*>::const_iterator it = 
+                parent_operations.begin(); it != 
+                parent_operations.end(); it++, idx++)
+          {
+            (*it)->add_reference();
+            parents[idx] = (*it);
+          }
+        }
+      }
+      if (!parents.empty())
+      {
+        context->invalidate_index_space_expression(parents);
+        // Remove any references that we have on the parents
+        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
+              parents.begin(); it != parents.end(); it++)
+          if ((*it)->remove_reference())
+            delete (*it);
+      }
     }
 
     //--------------------------------------------------------------------------
