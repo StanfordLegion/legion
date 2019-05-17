@@ -2347,16 +2347,20 @@ namespace Legion {
       else
       {
         unsigned subspace_index = 0;
-        for (LegionColor color = 0; 
-              color < partition->max_linearized_color; color++)
+        // Always use the partitions color space
+        ColorSpaceIterator *itr = 
+          partition->color_space->create_color_space_iterator();
+        // Skip ahead if necessary for our shard
+        for (unsigned idx = 0; idx < shard; idx++)
         {
-          if (!partition->color_space->contains_color(color))
-            continue;
-          if ((color % total_shards) != shard)
-          {
-            subspace_index++;
-            continue;
-          }
+          subspace_index++;
+          itr->yield_color();
+          if (!itr->is_valid())
+            break;
+        }
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
           Realm::ProfilingRequestSet requests;
           if (context->runtime->profiler != NULL)
             context->runtime->profiler->add_partition_request(requests,
@@ -2370,7 +2374,16 @@ namespace Legion {
           child->set_realm_index_space(context->runtime->address_space,
                                        subspace);
           done_events.insert(result);
+          // Skip ahead for the next color if necessary
+          for (unsigned idx = 0; idx < (total_shards-1); idx++)
+          {
+            subspace_index++;
+            itr->yield_color();
+            if (!itr->is_valid())
+              break;
+          }
         }
+        delete itr;
       }
       if (!done_events.empty())
         return Runtime::merge_events(NULL, done_events);
@@ -2545,11 +2558,19 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = shard;
-              color < partition->max_linearized_color; color += total_shards)
+        // Always use the partitions color space
+        ColorSpaceIterator *itr = 
+          partition->color_space->create_color_space_iterator();
+        // Skip ahead if necessary for our shard
+        for (unsigned idx = 0; idx < shard; idx++)
         {
-          if (!partition->color_space->contains_color(color))
-            continue;
+          itr->yield_color();
+          if (!itr->is_valid())
+            break;
+        }
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
           IndexSpaceNodeT<DIM,T> *left_child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
           IndexSpaceNodeT<DIM,T> *right_child = 
@@ -2567,7 +2588,15 @@ namespace Legion {
             preconditions.insert(left_ready);
           if (!right_ready.has_triggered())
             preconditions.insert(right_ready);
+          // Skip ahead for the next color if necessary
+          for (unsigned idx = 0; idx < (total_shards-1); idx++)
+          {
+            itr->yield_color();
+            if (!itr->is_valid())
+              break;
+          }
         }
+        delete itr;
       }
       if (colors.empty())
         return ApEvent::NO_AP_EVENT;
@@ -2758,11 +2787,19 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = shard;
-              color < partition->max_linearized_color; color += total_shards)
+        // Always use the partitions color space
+        ColorSpaceIterator *itr = 
+          partition->color_space->create_color_space_iterator();
+        // Skip ahead if necessary for our shard
+        for (unsigned idx = 0; idx < shard; idx++)
         {
-          if (!partition->color_space->contains_color(color))
-            continue;
+          itr->yield_color();
+          if (!itr->is_valid())
+            break;
+        }
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
           IndexSpaceNodeT<DIM,T> *left_child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
           IndexSpaceNodeT<DIM,T> *right_child = 
@@ -2780,7 +2817,15 @@ namespace Legion {
             preconditions.insert(left_ready);
           if (!right_ready.has_triggered())
             preconditions.insert(right_ready);
+          // Skip ahead for the next color if necessary
+          for (unsigned idx = 0; idx < (total_shards-1); idx++)
+          {
+            itr->yield_color();
+            if (!itr->is_valid())
+              break;
+          }
         }
+        delete itr;
       }
       if (colors.empty())
         return ApEvent::NO_AP_EVENT;
@@ -3128,11 +3173,19 @@ namespace Legion {
       }
       else
       {
-        for (LegionColor color = shard;
-              color < partition->max_linearized_color; color += total_shards)
+        // Always use the partitions color space
+        ColorSpaceIterator *itr = 
+          partition->color_space->create_color_space_iterator();
+        // Skip ahead if necessary for our shard
+        for (unsigned idx = 0; idx < shard; idx++)
         {
-          if (!partition->color_space->contains_color(color))
-            continue;
+          itr->yield_color();
+          if (!itr->is_valid())
+            break;
+        }
+        while (itr->is_valid())
+        {
+          const LegionColor color = itr->yield_color();
           IndexSpaceNodeT<DIM,T> *left_child = 
             static_cast<IndexSpaceNodeT<DIM,T>*>(partition->get_child(color));
           IndexSpaceNodeT<DIM,T> *right_child = 
@@ -3151,6 +3204,7 @@ namespace Legion {
           if (!right_ready.has_triggered())
             preconditions.insert(right_ready);
         }
+        delete itr;
       }
       if (colors.empty())
         return ApEvent::NO_AP_EVENT;
@@ -3417,11 +3471,9 @@ namespace Legion {
       if (partition->total_children == partition->max_linearized_color)
       {
         // Always use the partitions color space
-        for (LegionColor color = 0; color < partition->total_children; color++)
+        for (LegionColor color = shard; 
+              color < partition->total_children; color+=total_shards)
         {
-          // If we're sharding this then see if this is one of our children
-          if ((total_shards > 1) && ((color % total_shards) != shard))
-            continue;
           child_colors.push_back(color);
           // Get the child of the projection partition
           IndexSpaceNodeT<DIM2,T2> *child = 
@@ -3581,11 +3633,9 @@ namespace Legion {
       if (partition->total_children == partition->max_linearized_color)
       {
         // Always use the partitions color space
-        for (LegionColor color = 0; color < partition->total_children; color++)
+        for (LegionColor color = shard; 
+              color < partition->total_children; color+=total_shards)
         {
-          // If we're sharding this then see if this is one of our children
-          if ((total_shards > 1) && ((color % total_shards) != shard))
-            continue;
           child_colors.push_back(color);
           // Get the child of the projection partition
           IndexSpaceNodeT<DIM2,T2> *child = 
