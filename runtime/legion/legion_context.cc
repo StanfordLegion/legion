@@ -7000,7 +7000,7 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         bool found = false;
 #endif
-        for (std::vector<LocalFieldInfo>::const_iterator it = 
+        for (std::vector<LocalFieldInfo>::iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           if (it->fid == local_to_free[idx])
