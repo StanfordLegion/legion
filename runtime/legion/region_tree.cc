@@ -10299,10 +10299,8 @@ namespace Legion {
       {
         std::map<FieldID,FieldInfo>::iterator finder = 
           fields.find(to_remove[idx]);
-#ifdef DEBUG_LEGION
-        assert(finder != fields.end());
-#endif
-        fields.erase(finder);
+        if (finder != fields.end())
+          fields.erase(finder);
       }
     }
 

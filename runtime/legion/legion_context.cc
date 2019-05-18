@@ -1213,6 +1213,15 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void TaskContext::remove_deleted_local_fields(FieldSpace space,
+                                          const std::vector<FieldID> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      // Should only be implemented by derived classes
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
     int TaskContext::has_conflicting_regions(MapOp *op, bool &parent_conflict,
                                              bool &inline_conflict)
     //--------------------------------------------------------------------------
@@ -7148,8 +7157,8 @@ namespace Legion {
                                      std::vector<unsigned> &local_field_indexes)
     //--------------------------------------------------------------------------
     {
-      AutoLock local_lock(local_field_lock);
-      std::map<FieldSpace,std::vector<LocalFieldInfo> >::iterator 
+      AutoLock local_lock(local_field_lock,1,false/*exclusive*/);
+      std::map<FieldSpace,std::vector<LocalFieldInfo> >::const_iterator 
         finder = local_field_infos.find(handle);
 #ifdef DEBUG_LEGION
       assert(finder != local_field_infos.end());
@@ -7159,13 +7168,46 @@ namespace Legion {
 #ifdef DEBUG_LEGION
         bool found = false;
 #endif
-        for (std::vector<LocalFieldInfo>::iterator it = 
+        for (std::vector<LocalFieldInfo>::const_iterator it = 
               finder->second.begin(); it != finder->second.end(); it++)
         {
           if (it->fid == local_to_free[idx])
           {
+            // Can't remove it yet
             local_field_indexes.push_back(it->index);
-            // Remove this from the data structure
+#ifdef DEBUG_LEGION
+            found = true;
+#endif
+            break;
+          }
+        }
+#ifdef DEBUG_LEGION
+        assert(found);
+#endif
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void InnerContext::remove_deleted_local_fields(FieldSpace space,
+                                          const std::vector<FieldID> &to_remove)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock local_lock(local_field_lock);
+      std::map<FieldSpace,std::vector<LocalFieldInfo> >::iterator 
+        finder = local_field_infos.find(space);
+#ifdef DEBUG_LEGION
+      assert(finder != local_field_infos.end());
+#endif
+      for (unsigned idx = 0; idx < to_remove.size(); idx++)
+      {
+#ifdef DEBUG_LEGION
+        bool found = false;
+#endif
+        for (std::vector<LocalFieldInfo>::iterator it = 
+              finder->second.begin(); it != finder->second.end(); it++)
+        {
+          if (it->fid == to_remove[idx])
+          {
             finder->second.erase(it);
 #ifdef DEBUG_LEGION
             found = true;

@@ -452,6 +452,8 @@ namespace Legion {
       void remove_deleted_requirements(const std::vector<unsigned> &indexes);
       void remove_deleted_fields(const std::set<FieldID> &to_free,
                                  const std::vector<unsigned> &indexes);
+      virtual void remove_deleted_local_fields(FieldSpace space,
+                                 const std::vector<FieldID> &to_remove);
     public:
       int has_conflicting_regions(MapOp *map, bool &parent_conflict,
                                   bool &inline_conflict);
@@ -724,6 +726,8 @@ namespace Legion {
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
                                   std::vector<unsigned> &local_field_indexes);
+      virtual void remove_deleted_local_fields(FieldSpace space,
+                                 const std::vector<FieldID> &to_remove);
     public:
       // Interface to operations performed by a context
       virtual void destroy_index_space(IndexSpace handle);

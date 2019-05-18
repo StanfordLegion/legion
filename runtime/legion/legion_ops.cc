@@ -7206,6 +7206,8 @@ namespace Legion {
             if (!global_fields.empty())
               runtime->forest->free_fields(field_space, global_fields); 
             parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
+            if (!local_fields.empty())
+              parent_ctx->remove_deleted_local_fields(field_space,local_fields);
             break;
           }
         case LOGICAL_REGION_DELETION:
