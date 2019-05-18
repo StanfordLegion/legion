@@ -7202,10 +7202,9 @@ namespace Legion {
           {
             if (!local_fields.empty())
               runtime->forest->free_local_fields(field_space, 
-                  get_commit_event(), local_fields, local_field_indexes);
+                            local_fields, local_field_indexes);
             if (!global_fields.empty())
-              runtime->forest->free_fields(field_space, global_fields, 
-                                           get_commit_event());
+              runtime->forest->free_fields(field_space, global_fields); 
             parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
             break;
           }

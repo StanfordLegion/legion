@@ -378,6 +378,8 @@ namespace Legion {
     {
       // Already hold the lock from the caller
       RegionRequirement new_req(handle, READ_WRITE, EXCLUSIVE, handle);
+      if (runtime->legion_spy_enabled)
+        TaskOp::log_requirement(get_unique_id(), next_created_index, new_req);
       // Put a region requirement with no fields in the list of
       // created requirements, we know we can add any fields for
       // this field space in the future since we own all privileges
@@ -396,7 +398,7 @@ namespace Legion {
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
-        TaskOp::log_requirement(unique_op_id, it->first, it->second);
+        // We already logged the requirement when we made it
         // Skip it if there are no privilege fields
         if (it->second.privilege_fields.empty())
           continue;
@@ -841,8 +843,20 @@ namespace Legion {
           parent_req_indexes.push_back(it->first);
           // We need some extra logging for legion spy
           if (runtime->legion_spy_enabled)
+          {
             LegionSpy::log_requirement_fields(get_unique_id(),
                                               it->first, overlapping_fields);
+            std::vector<MappingInstance> instances(1, 
+                          Mapping::PhysicalInstance::get_virtual_instance());
+            InstanceSet instance_set;
+            std::vector<PhysicalManager*> unacquired;  
+            RegionTreeID bad_tree; std::vector<FieldID> missing_fields;
+            runtime->forest->physical_convert_mapping(owner_task, 
+                req, instances, instance_set, bad_tree, 
+                missing_fields, NULL, unacquired, false/*do acquire_checks*/);
+            runtime->forest->log_mapping_decision(get_unique_id(),
+                it->first, req, instance_set);
+          }
         }
       }
       if (!local_to_free.empty())
@@ -891,7 +905,6 @@ namespace Legion {
             assert(returnable_privileges.find(it->first) !=
                     returnable_privileges.end());
 #endif
-            TaskOp::log_requirement(unique_op_id, it->first, it->second);
             // Only need to record this if there are privilege fields
             if (!it->second.privilege_fields.empty())
             {
@@ -1757,6 +1770,8 @@ namespace Legion {
       RegionRequirement &new_req = created_requirements[index];
       new_req = RegionRequirement(top->handle, READ_WRITE, 
                                   EXCLUSIVE, top->handle);
+      if (runtime->legion_spy_enabled)
+        TaskOp::log_requirement(get_unique_id(), index, new_req);
       // Add our fields
       new_req.privilege_fields.insert(
           req.privilege_fields.begin(), req.privilege_fields.end());
@@ -2645,9 +2660,11 @@ namespace Legion {
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to destroy index space %x in task %s (UID %lld) "
-            "which is not the task that made the index space or one of its "
-            "ancestor tasks. Index space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
+            "because one of two conditions has been violated: either this "
+            "index space was already deleted or this is not the task that made "
+            "the index space or one of its ancestor tasks. Duplicated deletions"
+            " and deletions that are not lexicographically scoped by the task "
+            "tree are illegal.", handle.get_id(), 
             get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_index.debug("Destroying index space %x in task %s (ID %lld)", 
@@ -2694,9 +2711,11 @@ namespace Legion {
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to destroy index partition %x in task %s (UID %lld) "
-            "which is not the task that made the index partition or one of its "
-            "ancestor tasks. Index partition deletions must be " 
-            "lexicographically scoped by the task tree.", handle.get_id(), 
+            "because one of two conditions has been violated: either this "
+            "index partition was already deleted or this is not the task that "
+            "made the index partition or one of its ancestor tasks. Duplicated "
+            "deletions and deletions that are not lexicographically scoped by "
+            "the task tree are illegal.", handle.get_id(), 
             get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_index.debug("Destroying index partition %x in task %s (ID %lld)",
@@ -3671,9 +3690,11 @@ namespace Legion {
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to destroy field space %x in task %s (UID %lld) "
-            "which is not the task that made the field space or one of its "
-            "ancestor tasks. Field space deletions must be lexicographically "
-            "scoped by the task tree.", handle.get_id(), 
+            "because one of two conditions has been violated: either this "
+            "field space was already deleted or this is not the task that made "
+            "the field space or one of its ancestor tasks. Duplicated deletions"
+            " and deletions that are not lexicographically scoped by the task "
+            "tree are illegal.", handle.get_id(), 
             get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_field.debug("Destroying field space %x in task %s (ID %lld)", 
@@ -3834,9 +3855,11 @@ namespace Legion {
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to deallocate field %d in field space %x in task %s "
-            "(UID %lld) which is not the task that allocated the field "
-            "or one of its ancestor tasks. Field deallocations must be " 
-            "lexicographically scoped by the task tree.", fid, space.id,
+            "(UID %lld) because one of two conditions has been violated: "
+            "either this field was already deleted or this is not the task "
+            "that made the field or one of its ancestor tasks. Duplicated "
+            "deletions and deletions that are not lexicographically scoped by "
+            "the task tree are illegal.", fid, space.id,
             get_task_name(), get_unique_id())
       // Launch off the deletion operation
       DeletionOp *op = runtime->get_available_deletion_op();
@@ -3923,10 +3946,12 @@ namespace Legion {
       if (!has_created)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_RESOURCE_DESTRUCTION,
             "Illegal call to destroy logical region (%x,%x,%x) in task %s "
-            "(UID %lld) which is not the task that made the logical region "
-            "or one of its ancestor tasks. Logical region deletions must be " 
-            "lexicographically scoped by the task tree.", handle.index_space.id,
-            handle.field_space.id, handle.tree_id,
+            "(UID %lld) because one of two conditions has been violated: "
+            "either this logical region was already deleted or this is not "
+            "the task that made the logical region or one of its ancestor "
+            "tasks. Duplicated deletions and deletions that are not "
+            "lexicographically scoped by the task tree are illegal.", 
+            handle.index_space.id, handle.field_space.id, handle.tree_id,
             get_task_name(), get_unique_id())
 #ifdef DEBUG_LEGION
       log_region.debug("Deleting logical region (%x,%x) in task %s (ID %lld)",
@@ -8477,7 +8502,7 @@ namespace Legion {
             "lexicographically scoped by the task tree.", fid, space.id,
             get_task_name(), get_unique_id())
       // We can free this field immediately
-      runtime->forest->free_field(space, fid, RtEvent::NO_RT_EVENT);
+      runtime->forest->free_field(space, fid);
     }
 
     //--------------------------------------------------------------------------
@@ -8515,7 +8540,7 @@ namespace Legion {
             get_task_name(), get_unique_id())
       // We can free these fields immediately
       const std::vector<FieldID> field_vec(to_free.begin(), to_free.end());
-      runtime->forest->free_fields(space, field_vec, RtEvent::NO_RT_EVENT);
+      runtime->forest->free_fields(space, field_vec);
     }
 
     //--------------------------------------------------------------------------
