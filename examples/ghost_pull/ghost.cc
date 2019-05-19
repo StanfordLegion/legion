@@ -249,8 +249,6 @@ void top_level_task(const Task *task,
     for (unsigned idx = 0; idx < right_empty_barriers.size(); idx++)
         runtime->destroy_phase_barrier(ctx, right_empty_barriers[idx]);
 
-    for (int color = 0; color < num_subregions; color++)
-        runtime->destroy_logical_region(ctx, disjoint_subregions[color]);
     disjoint_subregions.clear();
     left_ready_barriers.clear();
     left_empty_barriers.clear();
@@ -490,6 +488,7 @@ void spmd_task(const Task *task,
         }
     }
 
+    runtime->destroy_logical_region(ctx, local_lr);
     runtime->destroy_index_space(ctx, ghost_color_left_is);
     runtime->destroy_index_space(ctx, ghost_color_right_is);
 }
