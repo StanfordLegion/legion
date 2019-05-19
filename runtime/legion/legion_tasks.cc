@@ -55,17 +55,6 @@ namespace Legion {
     ResourceTracker::~ResourceTracker(void)
     //--------------------------------------------------------------------------
     {
-#ifdef DEBUG_LEGION
-#if 0
-      assert(created_regions.empty());
-      assert(local_regions.empty());
-      assert(created_fields.empty());
-      assert(local_fields.empty());
-      assert(created_field_spaces.empty());
-      assert(created_index_spaces.empty());
-      assert(created_index_partitions.empty());
-#endif
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -86,10 +75,20 @@ namespace Legion {
         target->register_region_creations(created_regions);
         created_regions.clear();
       }
+      if (!deleted_regions.empty())
+      {
+        target->register_region_deletions(deleted_regions);
+        deleted_regions.clear();
+      }
       if (!created_fields.empty())
       {
         target->register_field_creations(created_fields);
         created_fields.clear();
+      }
+      if (!deleted_fields.empty())
+      {
+        target->register_field_deletions(deleted_fields);
+        deleted_fields.clear();
       }
       if (!created_field_spaces.empty())
       {
@@ -101,15 +100,30 @@ namespace Legion {
         target->register_latent_field_spaces(latent_field_spaces);
         latent_field_spaces.clear();
       }
+      if (!deleted_field_spaces.empty())
+      {
+        target->register_field_space_deletions(deleted_field_spaces);
+        deleted_field_spaces.clear();
+      }
       if (!created_index_spaces.empty())
       {
         target->register_index_space_creations(created_index_spaces);
         created_index_spaces.clear();
       }
+      if (!deleted_index_spaces.empty())
+      {
+        target->register_index_space_deletions(deleted_index_spaces);
+        deleted_index_spaces.clear();
+      }
       if (!created_index_partitions.empty())
       {
         target->register_index_partition_creations(created_index_partitions);
         created_index_partitions.clear();
+      }
+      if (!deleted_index_partitions.empty())
+      {
+        target->register_index_partition_deletions(deleted_index_partitions);
+        deleted_index_partitions.clear();
       }
     }
 
@@ -129,6 +143,14 @@ namespace Legion {
           rez.serialize(*it);
         created_regions.clear();
       }
+      rez.serialize<size_t>(deleted_regions.size());
+      if (!deleted_regions.empty())
+      {
+        for (std::vector<LogicalRegion>::const_iterator it = 
+              deleted_regions.begin(); it != deleted_regions.end(); it++)
+          rez.serialize(*it);
+        deleted_regions.clear();
+      }
       rez.serialize<size_t>(created_fields.size());
       if (!created_fields.empty())
       {
@@ -140,6 +162,17 @@ namespace Legion {
         }
         created_fields.clear();
       }
+      rez.serialize<size_t>(deleted_fields.size());
+      if (!deleted_fields.empty())
+      {
+        for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it =
+              deleted_fields.begin(); it != deleted_fields.end(); it++)
+        {
+          rez.serialize(it->first);
+          rez.serialize(it->second);
+        }
+        deleted_fields.clear();
+      }
       rez.serialize<size_t>(created_field_spaces.size());
       if (!created_field_spaces.empty())
       {
@@ -148,7 +181,7 @@ namespace Legion {
               created_field_spaces.end(); it++)
           rez.serialize(*it);
         created_field_spaces.clear();
-      }
+      } 
       rez.serialize<size_t>(latent_field_spaces.size());
       if (!latent_field_spaces.empty())
       {
@@ -161,6 +194,15 @@ namespace Legion {
         }
         latent_field_spaces.clear();
       }
+      rez.serialize<size_t>(deleted_field_spaces.size());
+      if (!deleted_field_spaces.empty())
+      {
+        for (std::vector<FieldSpace>::const_iterator it = 
+              deleted_field_spaces.begin(); it != 
+              deleted_field_spaces.end(); it++)
+          rez.serialize(*it);
+        deleted_field_spaces.clear();
+      }
       rez.serialize<size_t>(created_index_spaces.size());
       if (!created_index_spaces.empty())
       {
@@ -170,6 +212,15 @@ namespace Legion {
           rez.serialize(*it);
         created_index_spaces.clear();
       }
+      rez.serialize<size_t>(deleted_index_spaces.size());
+      if (!deleted_index_spaces.empty())
+      {
+        for (std::vector<IndexSpace>::const_iterator it = 
+              deleted_index_spaces.begin(); it !=
+              deleted_index_spaces.end(); it++)
+          rez.serialize(*it);
+        deleted_index_spaces.clear();
+      }
       rez.serialize<size_t>(created_index_partitions.size());
       if (!created_index_partitions.empty())
       {
@@ -178,6 +229,15 @@ namespace Legion {
               created_index_partitions.end(); it++)
           rez.serialize(*it);
         created_index_partitions.clear();
+      }
+      rez.serialize<size_t>(deleted_index_partitions.size());
+      if (!deleted_index_partitions.empty())
+      {
+        for (std::vector<IndexPartition>::const_iterator it = 
+              deleted_index_partitions.begin(); it !=
+              deleted_index_partitions.end(); it++)
+          rez.serialize(*it);
+        deleted_index_partitions.clear();
       }
     }
 
@@ -202,6 +262,15 @@ namespace Legion {
         }
         target->register_region_creations(created_regions);
       }
+      size_t num_deleted_regions;
+      derez.deserialize(num_deleted_regions);
+      if (num_deleted_regions > 0)
+      {
+        std::vector<LogicalRegion> deleted_regions(num_deleted_regions);
+        for (unsigned idx = 0; idx < num_deleted_regions; idx++)
+          derez.deserialize(deleted_regions[idx]);
+        target->register_region_deletions(deleted_regions);
+      }
       size_t num_created_fields;
       derez.deserialize(num_created_fields);
       if (num_created_fields > 0)
@@ -216,6 +285,19 @@ namespace Legion {
           created_fields.insert(std::pair<FieldSpace,FieldID>(sp,fid));
         }
         target->register_field_creations(created_fields);
+      }
+      size_t num_deleted_fields;
+      derez.deserialize(num_deleted_fields);
+      if (num_deleted_fields > 0)
+      {
+        std::vector<std::pair<FieldSpace,FieldID> > 
+          deleted_fields(num_deleted_fields);
+        for (unsigned idx = 0; idx < num_deleted_fields; idx++)
+        {
+          derez.deserialize(deleted_fields[idx].first);
+          derez.deserialize(deleted_fields[idx].second);
+        }
+        target->register_field_deletions(deleted_fields);
       }
       size_t num_created_field_spaces;
       derez.deserialize(num_created_field_spaces);
@@ -243,6 +325,15 @@ namespace Legion {
         }
         target->register_latent_field_spaces(latent_field_spaces);
       }
+      size_t num_deleted_field_spaces;
+      derez.deserialize(num_deleted_field_spaces);
+      if (num_deleted_field_spaces > 0)
+      {
+        std::vector<FieldSpace> deleted_field_spaces(num_deleted_field_spaces);
+        for (unsigned idx = 0; idx < num_deleted_field_spaces; idx++)
+          derez.deserialize(deleted_field_spaces[idx]);
+        target->register_field_space_deletions(deleted_field_spaces);
+      }
       size_t num_created_index_spaces;
       derez.deserialize(num_created_index_spaces);
       if (num_created_index_spaces > 0)
@@ -256,6 +347,15 @@ namespace Legion {
         }
         target->register_index_space_creations(created_index_spaces);
       }
+      size_t num_deleted_index_spaces;
+      derez.deserialize(num_deleted_index_spaces);
+      if (num_deleted_index_spaces > 0)
+      {
+        std::vector<IndexSpace> deleted_index_spaces(num_deleted_index_spaces);
+        for (unsigned idx = 0; idx < num_deleted_index_spaces; idx++)
+          derez.deserialize(deleted_index_spaces[idx]);
+        target->register_index_space_deletions(deleted_index_spaces);
+      }
       size_t num_created_index_partitions;
       derez.deserialize(num_created_index_partitions);
       if (num_created_index_partitions > 0)
@@ -268,6 +368,16 @@ namespace Legion {
           created_index_partitions.insert(ip);
         }
         target->register_index_partition_creations(created_index_partitions);
+      }
+      size_t num_deleted_index_partitions;
+      derez.deserialize(num_deleted_index_partitions);
+      if (num_deleted_index_partitions > 0)
+      {
+        std::vector<IndexPartition> 
+          deleted_index_partitions(num_deleted_index_partitions);
+        for (unsigned idx = 0; idx < num_deleted_index_partitions; idx++)
+          derez.deserialize(deleted_index_partitions[idx]);
+        target->register_index_partition_deletions(deleted_index_partitions);
       }
     }
 
@@ -5051,8 +5161,13 @@ namespace Legion {
       if (!is_remote())
       {
         // Pass back our created and deleted operations
-        if (!top_level_task && (execution_context != NULL))
-          execution_context->return_resources(parent_ctx);
+        if (execution_context != NULL)
+        {
+          if (top_level_task)
+            execution_context->report_leaks_and_duplicates();
+          else
+            execution_context->return_resources(parent_ctx);
+        }
         // The future has already been set so just trigger it
         result.impl->complete_future();
       }
@@ -8327,6 +8442,17 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::register_region_deletions(std::vector<LogicalRegion> &regs)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!deleted_regions.empty())
+        deleted_regions.insert(deleted_regions.end(), regs.begin(), regs.end());
+      else
+        deleted_regions.swap(regs);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::register_field_creations(
                                std::set<std::pair<FieldSpace,FieldID> > &fields)
     //--------------------------------------------------------------------------
@@ -8345,6 +8471,19 @@ namespace Legion {
       }
       else
         created_fields.swap(fields);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_deletions(
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!deleted_fields.empty())
+        deleted_fields.insert(deleted_fields.end(), 
+                              fields.begin(), fields.end());
+      else
+        deleted_fields.swap(fields);
     }
 
     //--------------------------------------------------------------------------
@@ -8378,15 +8517,28 @@ namespace Legion {
         for (std::map<FieldSpace,unsigned>::const_iterator it = 
               spaces.begin(); it != spaces.end(); it++)
         {
-#ifdef DEBUG_LEGION
-          assert(latent_field_spaces.find(it->first) == 
-                  latent_field_spaces.end());
-#endif
-          latent_field_spaces.insert(*it);
+          std::map<FieldSpace,unsigned>::iterator finder = 
+            latent_field_spaces.find(it->first);
+          if (finder == latent_field_spaces.end())
+            latent_field_spaces.insert(*it);
+          else
+            finder->second += it->second;
         }
       }
       else
         latent_field_spaces.swap(spaces);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_field_space_deletions(std::vector<FieldSpace> &sps)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!deleted_field_spaces.empty())
+        deleted_field_spaces.insert(deleted_field_spaces.end(), 
+                                    sps.begin(), sps.end());
+      else
+        deleted_field_spaces.swap(sps);
     }
 
     //--------------------------------------------------------------------------
@@ -8410,6 +8562,18 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void SliceTask::register_index_space_deletions(std::vector<IndexSpace> &sps)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!deleted_index_spaces.empty())
+        deleted_index_spaces.insert(deleted_index_spaces.end(), 
+                                    sps.begin(), sps.end());
+      else
+        deleted_index_spaces.swap(sps);
+    }
+
+    //--------------------------------------------------------------------------
     void SliceTask::register_index_partition_creations(
                                                 std::set<IndexPartition> &parts)
     //--------------------------------------------------------------------------
@@ -8429,6 +8593,19 @@ namespace Legion {
       }
       else
         created_index_partitions.swap(parts);
+    }
+
+    //--------------------------------------------------------------------------
+    void SliceTask::register_index_partition_deletions(
+                                             std::vector<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      AutoLock o_lock(op_lock);
+      if (!deleted_index_partitions.empty())
+        deleted_index_partitions.insert(deleted_index_partitions.end(),
+                                        parts.begin(), parts.end());
+      else
+        deleted_index_partitions.swap(parts);
     }
 
     //--------------------------------------------------------------------------
