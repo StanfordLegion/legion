@@ -17,7 +17,6 @@
 
 #ifndef REALM_TIMERS_H
 #define REALM_TIMERS_H
-
 #ifdef DETAILED_TIMING
 #include "realm/activemsg.h"
 #endif
@@ -138,49 +137,30 @@ namespace Realm {
 
 #ifdef DETAILED_TIMING
   struct ClearTimersMessage {
-    struct RequestArgs {
-      int sender;
-      int dummy;
-    };
+    int dummy;
 
-    static void handle_request(RequestArgs args);
-     
-    typedef ActiveMessageShortNoReply<CLEAR_TIMER_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target);
+    static void handle_message(NodeID sender,
+			       const ClearTimersMessage &args,
+			       const void *data,
+			       size_t datalen);
   };
 
   struct TimerDataRequestMessage {
-    struct RequestArgs {
-      int sender;
-      void *rollup_ptr;
-    };
+    void *rollup_ptr;
 
-    static void handle_request(RequestArgs args);
-     
-    typedef ActiveMessageShortNoReply<ROLL_UP_TIMER_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target, void *rollup_ptr);
+    static void handle_message(NodeID sender,
+			       const TimeDataRequestMessage &args,
+			       const void *data,
+			       size_t datalen);
   };
   
   struct TimerDataResponseMessage {
-    struct RequestArgs : public BaseMedium {
-      int sender;
-      void *rollup_ptr;
-    };
+    void *rollup_ptr;
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-     
-    typedef ActiveMessageMediumNoReply<ROLL_UP_TIMER_MSGID,
-			 	       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, void *rollup_ptr,
-			     const void *data, size_t datalen, int payload_mode);
+    static void handle_message(NodeID sender,
+			       const TimerDataResponseMessage &args,
+			       const void *data,
+			       size_t datalen);
   };
 #endif
   

@@ -299,7 +299,10 @@ namespace Realm {
 
       // a lock has to be destroyed on the node that created it
       if(NodeID(ID(*this).rsrv_creator_node()) != my_node_id) {
-	DestroyLockMessage::send_request(ID(*this).rsrv_creator_node(), *this);
+	ActiveMessage<DestroyLockMessage> amsg(ID(*this).rsrv_creator_node());
+	amsg->actual = *this;
+	amsg->dummy = *this;
+	amsg.commit();
 	return;
       }
 
@@ -347,147 +350,15 @@ namespace Realm {
       }
     }
 
-    /*static*/ void LockRequestMessage::send_request(NodeID target,
-						     NodeID req_node,
-						     Reservation lock,
-						     unsigned mode)
-    {
-      RequestArgs args;
-
-      args.node = req_node; // NOT my_node_id - may be forwarding a request
-      args.lock = lock;
-      args.mode = mode;
-      Message::request(target, args);
-    }
-
-    /*static*/ void LockRequestMessage::handle_request(LockRequestMessage::RequestArgs args)
-    {
-      DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
-
-      log_reservation.debug("reservation request: reservation=" IDFMT ", node=%d, mode=%d",
-	       args.lock.id, args.node, args.mode);
-
-      // can't send messages while holding mutex, so remember args and who
-      //  (if anyone) to send to
-      int req_forward_target = -1;
-      int grant_target = -1;
-      NodeSet copy_waiters;
-
-      do {
-	AutoHSLLock a(impl->mutex);
-
-	// case 1: we don't even own the lock any more - pass the request on
-	//  to whoever we think the owner is
-	if(impl->owner != my_node_id) {
-	  // can reuse the args we were given
-	  log_reservation.debug(              "forwarding reservation request: reservation=" IDFMT ", from=%d, to=%d, mode=%d",
-		   args.lock.id, args.node, impl->owner, args.mode);
-	  req_forward_target = impl->owner;
-	  break;
-	}
-
-	// it'd be bad if somebody tried to take a lock that had been 
-	//   deleted...  (info is only valid on a lock's home node)
-	assert((NodeID(ID(impl->me).rsrv_creator_node()) != my_node_id) ||
-	       impl->in_use);
-
-	// case 2: we're the owner, and nobody is holding the lock, so grant
-	//  it to the (original) requestor
-	if((impl->count == ReservationImpl::ZERO_COUNT) && 
-           (impl->remote_sharer_mask.empty())) {
-          assert(impl->remote_waiter_mask.empty());
-
-	  log_reservation.debug("granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
-				args.lock.id, args.node, args.mode);
-	  grant_target = args.node;
-          copy_waiters = impl->remote_waiter_mask;
-
-	  impl->owner = args.node;
-	  break;
-	}
-
-	// case 3: we're the owner, but we can't grant the lock right now -
-	//  just set a bit saying that the node is waiting and get back to
-	//  work
-	log_reservation.debug("deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
-			      args.lock.id, args.node, args.mode, impl->count, impl->mode);
-        impl->remote_waiter_mask.add(args.node);
-      } while(0);
-
-      if(req_forward_target != -1)
-      {
-	LockRequestMessage::send_request(req_forward_target, args.node,
-					 args.lock, args.mode);
-#ifdef LOCK_TRACING
-        {
-          LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
-          item.lock_id = impl->me.id;
-          item.owner = req_forward_target;
-          item.action = LockTraceItem::ACT_FORWARD_REQUEST;
-        }
-#endif
-      }
-
-      if(grant_target != -1)
-      {
-        // Make a buffer for storing our waiter mask and the the local data
-	size_t waiter_count = copy_waiters.size();
-        size_t payload_size = ((waiter_count+1) * sizeof(int)) + impl->local_data_size;
-        int *payload = (int*)malloc(payload_size);
-	int *pos = payload;
-	*pos++ = waiter_count;
-	// TODO: switch to iterator
-        ReservationImpl::PackFunctor functor(pos);
-        copy_waiters.map(functor);
-        pos = functor.pos;
-	//for(int i = 0; i < MAX_NUM_NODES; i++)
-	//  if(copy_waiters.contains(i))
-	//    *pos++ = i;
-        memcpy(pos, impl->local_data, impl->local_data_size);
-	LockGrantMessage::send_request(grant_target, args.lock,
-				       0, // always grant exclusive for now
-				       payload, payload_size, PAYLOAD_FREE);
-#ifdef LOCK_TRACING
-        {
-          LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
-          item.lock_id = impl->me.id;
-          item.owner = grant_target;
-          item.action = LockTraceItem::ACT_REMOTE_GRANT;
-        }
-#endif
-      }
-    }
-
-    /*static*/ void LockReleaseMessage::send_request(NodeID target,
-						     Reservation lock)
-    {
-      RequestArgs args;
-
-      args.node = my_node_id;
-      args.lock = lock;
-      Message::request(target, args);
-    }
-
-    /*static*/ void LockReleaseMessage::handle_request(RequestArgs args)
+    /*static*/ void LockReleaseMessage::handle_message(NodeID sender, const LockReleaseMessage &msg,
+						       const void *data, size_t datalen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
       assert(0);
     }
 
-    /*static*/ void LockGrantMessage::send_request(NodeID target,
-						   Reservation lock, unsigned mode,
-						   const void *data, size_t datalen,
-						   int payload_mode)
-    {
-      RequestArgs args;
 
-      args.lock = lock;
-      args.mode = mode;
-      Message::request(target, args, data, datalen, payload_mode);
-    }
-
-    /*static*/ void LockGrantMessage::handle_request(RequestArgs args,
+    /*static*/ void LockGrantMessage::handle_message(NodeID sender, const LockGrantMessage &args,
 						     const void *data, size_t datalen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
@@ -713,8 +584,12 @@ namespace Realm {
 
       if(lock_request_target != -1)
       {
-	LockRequestMessage::send_request(lock_request_target, my_node_id,
-					 me, new_mode);
+	ActiveMessage<LockRequestMessage> amsg(lock_request_target);
+	amsg->node = my_node_id;
+	amsg->lock = me;
+	amsg->mode = new_mode;
+	amsg.commit();
+
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -875,7 +750,10 @@ namespace Realm {
       {
 	log_reservation.debug("releasing reservation " IDFMT " back to owner %d",
 			      me.id, release_target);
-	LockReleaseMessage::send_request(release_target, me);
+	ActiveMessage<LockReleaseMessage> amsg(release_target);
+	amsg->lock = me;
+	amsg.commit();
+
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -902,9 +780,11 @@ namespace Realm {
 	//  if(copy_waiters.contains(i))
 	//    *pos++ = i;
         memcpy(pos, local_data, local_data_size);
-	LockGrantMessage::send_request(grant_target, me,
-				       0, // TODO: figure out shared cases
-				       payload, payload_size, PAYLOAD_FREE);
+	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
+	amsg->lock = me;
+	amsg->mode = 0; // TODO: figure out shared cases
+	amsg.add_payload(payload, payload_size);
+	amsg.commit();
 #ifdef LOCK_TRACING
         {
           LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
@@ -974,19 +854,11 @@ namespace Realm {
       get_runtime()->local_reservation_free_list->free_entry(this);
     }
 
-    /*static*/ void DestroyLockMessage::send_request(NodeID target,
-						     Reservation lock)
+    /*static*/ void DestroyLockMessage::handle_message(NodeID sender,const DestroyLockMessage &args,
+						       const void *data, size_t datalen)
     {
-      RequestArgs args;
-
-      args.actual = lock;
-      args.dummy = lock;
-      Message::request(target, args);
-    }
-
-    /*static*/ void DestroyLockMessage::handle_request(RequestArgs args)
-    {
-      args.actual.destroy_reservation();
+      Reservation a = args.actual;
+      a.destroy_reservation();
     }
 
 
@@ -1706,5 +1578,116 @@ namespace Realm {
     pthread_mutex_unlock(&frs.mutex);
   }
 
+  /* static */
+  void LockRequestMessage::handle_message(NodeID sender, const LockRequestMessage &args,
+					     const void *data, size_t datalen)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    ReservationImpl *impl = get_runtime()->get_lock_impl(args.lock);
+
+    log_reservation.debug("reservation request: reservation=" IDFMT ", node=%d, mode=%d",
+			  args.lock.id, args.node, args.mode);
+
+      // can't send messages while holding mutex, so remember args and who
+      //  (if anyone) to send to
+      int req_forward_target = -1;
+      int grant_target = -1;
+      NodeSet copy_waiters;
+
+      do {
+	AutoHSLLock a(impl->mutex);
+
+	// case 1: we don't even own the lock any more - pass the request on
+	//  to whoever we think the owner is
+	if(impl->owner != my_node_id) {
+	  // can reuse the args we were given
+	  log_reservation.debug(              "forwarding reservation request: reservation=" IDFMT ", from=%d, to=%d, mode=%d",
+		   args.lock.id, args.node, impl->owner, args.mode);
+	  req_forward_target = impl->owner;
+	  break;
+	}
+
+	// it'd be bad if somebody tried to take a lock that had been
+	//   deleted...  (info is only valid on a lock's home node)
+	assert((NodeID(ID(impl->me).rsrv_creator_node()) != my_node_id) ||
+	       impl->in_use);
+
+	// case 2: we're the owner, and nobody is holding the lock, so grant
+	//  it to the (original) requestor
+	if((impl->count == ReservationImpl::ZERO_COUNT) &&
+           (impl->remote_sharer_mask.empty())) {
+          assert(impl->remote_waiter_mask.empty());
+
+	  log_reservation.debug("granting reservation request: reservation=" IDFMT ", node=%d, mode=%d",
+				args.lock.id, args.node, args.mode);
+	  grant_target = args.node;
+          copy_waiters = impl->remote_waiter_mask;
+
+	  impl->owner = args.node;
+	  break;
+	}
+
+	// case 3: we're the owner, but we can't grant the lock right now -
+	//  just set a bit saying that the node is waiting and get back to
+	//  work
+	log_reservation.debug("deferring reservation request: reservation=" IDFMT ", node=%d, mode=%d (count=%d cmode=%d)",
+			      args.lock.id, args.node, args.mode, impl->count, impl->mode);
+        impl->remote_waiter_mask.add(args.node);
+      } while(0);
+
+      if(req_forward_target != -1)
+      {
+	ActiveMessage<LockRequestMessage> amsg(req_forward_target);
+	amsg->node = args.node;
+	amsg->lock = args.lock;
+	amsg->mode = args.mode;
+	amsg.commit();
+
+#ifdef LOCK_TRACING
+        {
+          LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
+          item.lock_id = impl->me.id;
+          item.owner = req_forward_target;
+          item.action = LockTraceItem::ACT_FORWARD_REQUEST;
+        }
+#endif
+      }
+
+      if(grant_target != -1)
+      {
+        // Make a buffer for storing our waiter mask and the the local data
+	size_t waiter_count = copy_waiters.size();
+        size_t payload_size = ((waiter_count+1) * sizeof(int)) + impl->local_data_size;
+        int *payload = (int*)malloc(payload_size);
+	int *pos = payload;
+	*pos++ = waiter_count;
+	// TODO: switch to iterator
+        ReservationImpl::PackFunctor functor(pos);
+        copy_waiters.map(functor);
+        pos = functor.pos;
+	//for(int i = 0; i < MAX_NUM_NODES; i++)
+	//  if(copy_waiters.contains(i))
+	//    *pos++ = i;
+        memcpy(pos, impl->local_data, impl->local_data_size);
+	ActiveMessage<LockGrantMessage> amsg(grant_target, payload_size);
+	amsg->lock = args.lock;
+	amsg->mode = 0; // always grant exclusive for now
+	amsg.add_payload(payload, payload_size);
+	amsg.commit();
+#ifdef LOCK_TRACING
+        {
+          LockTraceItem &item = Tracer<LockTraceItem>::trace_item();
+          item.lock_id = impl->me.id;
+          item.owner = grant_target;
+          item.action = LockTraceItem::ACT_REMOTE_GRANT;
+        }
+#endif
+      }
+  }
+
+  ActiveMessageHandlerReg<LockRequestMessage> lock_request_message_handler;
+  ActiveMessageHandlerReg<LockReleaseMessage> lock_release_message_handler;
+  ActiveMessageHandlerReg<LockGrantMessage> lock_grant_message_handler;
+  ActiveMessageHandlerReg<DestroyLockMessage> destroy_lock_message_handler;
 
 }; // namespace Realm

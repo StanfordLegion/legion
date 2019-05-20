@@ -22,6 +22,7 @@
 #include "realm/runtime_impl.h"
 #include "realm/profiling.h"
 #include "realm/utils.h"
+#include "realm/activemsg.h"
 
 #ifdef USE_GASNET
 #ifndef GASNET_PAR
@@ -273,7 +274,17 @@ namespace Realm {
     off_t MemoryImpl::alloc_bytes_remote(size_t size)
     {
       // RPC over to owner's node for allocation
-      return RemoteMemAllocRequest::send_request(ID(me).memory_owner_node(), me, size);
+      ActiveMessage<RemoteMemAllocRequest> amsg(ID(me).memory_owner_node());
+      HandlerReplyFuture<off_t> result;
+
+      amsg->resp_ptr = &result;
+      amsg->memory = me;
+      amsg->size = size;
+      amsg.commit();
+      // Request::request(target, args);
+      // wait for result to come back
+      result.wait();
+      return result.get();
     }
 
     void MemoryImpl::free_bytes_remote(off_t offset, size_t size)
@@ -407,10 +418,14 @@ namespace Realm {
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
       if(target != my_node_id) {
-	MemStorageAllocRequest::send_request(target,
-					     me, i,
-					     bytes, alignment,
-					     precondition, offset);
+	ActiveMessage<MemStorageAllocRequest> amsg(target);
+	amsg->memory = me;
+	amsg->inst = i;
+	amsg->bytes = bytes;
+	amsg->alignment = alignment;
+	amsg->precondition = precondition;
+	assert(offset==0);
+	amsg.commit();
 	return ALLOC_DEFERRED /*asynchronous notification*/;
       }
 
@@ -430,11 +445,12 @@ namespace Realm {
 	get_instance(i)->notify_allocation(ok, offset, bytes);
       } else {
 	// remote notification
-	MemStorageAllocResponse::send_request(ID(i).instance_creator_node(),
-					      i,
-					      offset,
-                                              bytes,
-					      ok);
+	ActiveMessage<MemStorageAllocResponse> amsg(ID(i).instance_creator_node());
+	amsg->inst = i;
+	amsg->offset = offset;
+	amsg->footprint = bytes;
+	amsg->success = ok;
+	amsg.commit();
       }
 
       return (ok ? ALLOC_INSTANT_SUCCESS :
@@ -449,9 +465,11 @@ namespace Realm {
       //  now - local caching might be possible though
       NodeID target = ID(me).memory_owner_node();
       if(target != my_node_id) {
-	MemStorageReleaseRequest::send_request(target,
-					       me, i,
-					       precondition);
+	ActiveMessage<MemStorageReleaseRequest> amsg(target);
+	amsg->memory = me;
+	amsg->inst = i;
+	amsg->precondition = precondition;
+	amsg.commit();
 	return;
       }
 
@@ -473,8 +491,9 @@ namespace Realm {
 	get_instance(i)->notify_deallocation();
       } else {
 	// remote notification
-	MemStorageReleaseResponse::send_request(ID(i).instance_creator_node(),
-						i);
+	ActiveMessage<MemStorageReleaseResponse> amsg(ID(i).instance_creator_node());
+	amsg->inst = i;
+	amsg.commit();
       }
     }
 
@@ -870,30 +889,14 @@ namespace Realm {
   // class MemStorageAllocRequest
   //
 
-  /*static*/ void MemStorageAllocRequest::handle_request(RequestArgs args)
+  /*static*/ void MemStorageAllocRequest::handle_message(NodeID sender, const MemStorageAllocRequest &args,
+							 const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
 
     impl->allocate_instance_storage(args.inst,
 				    args.bytes, args.alignment,
-				    args.precondition, args.offset);
-  }
-
-  /*static*/ void MemStorageAllocRequest::send_request(NodeID target,
-						       Memory memory, RegionInstance inst,
-						       size_t bytes, size_t alignment,
-						       Event precondition, size_t offset)
-  {
-    RequestArgs args;
-
-    args.memory = memory;
-    args.inst = inst;
-    args.bytes = bytes;
-    args.alignment = alignment;
-    args.precondition = precondition;
-    args.offset = offset;
-
-    Message::request(target, args);
+				    args.precondition);
   }
 
 
@@ -902,27 +905,12 @@ namespace Realm {
   // class MemStorageAllocResponse
   //
 
-  /*static*/ void MemStorageAllocResponse::handle_request(RequestArgs args)
+  /*static*/ void MemStorageAllocResponse::handle_message(NodeID sender, const MemStorageAllocResponse &args,
+							  const void *data, size_t datalen)
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
     impl->notify_allocation(args.success, args.offset, args.footprint);
-  }
-
-  /*static*/ void MemStorageAllocResponse::send_request(NodeID target,
-							RegionInstance inst,
-							size_t offset,
-                                                        size_t footprint,
-							bool success)
-  {
-    RequestArgs args;
-
-    args.inst = inst;
-    args.offset = offset;
-    args.footprint = footprint;
-    args.success = success;
-
-    Message::request(target, args);
   }
 
 
@@ -931,26 +919,13 @@ namespace Realm {
   // class MemStorageReleaseRequest
   //
 
-  /*static*/ void MemStorageReleaseRequest::handle_request(RequestArgs args)
+  /*static*/ void MemStorageReleaseRequest::handle_message(NodeID sender, const MemStorageReleaseRequest &args,
+							   const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
 
     impl->release_instance_storage(args.inst,
 				   args.precondition);
-  }
-
-  /*static*/ void MemStorageReleaseRequest::send_request(NodeID target,
-							 Memory memory,
-							 RegionInstance inst,
-							 Event precondition)
-  {
-    RequestArgs args;
-
-    args.memory = memory;
-    args.inst = inst;
-    args.precondition = precondition;
-
-    Message::request(target, args);
   }
 
 
@@ -959,67 +934,40 @@ namespace Realm {
   // class MemStorageReleaseResponse
   //
 
-  /*static*/ void MemStorageReleaseResponse::handle_request(RequestArgs args)
+  /*static*/ void MemStorageReleaseResponse::handle_message(NodeID sender, const MemStorageReleaseResponse &args,
+							    const void *data, size_t datalen)
   {
     RegionInstanceImpl *impl = get_runtime()->get_instance_impl(args.inst);
 
     impl->notify_deallocation();
   }
 
-  /*static*/ void MemStorageReleaseResponse::send_request(NodeID target,
-							  RegionInstance inst)
-  {
-    RequestArgs args;
-
-    args.inst = inst;
-
-    Message::request(target, args);
-  }
-
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteMemAllocRequest
   //
 
-  /*static*/ void RemoteMemAllocRequest::handle_request(RequestArgs args)
+  /*static*/ void RemoteMemAllocRequest::handle_message(NodeID sender, const RemoteMemAllocRequest &args,
+							const void *data, size_t datalen)
   {
     DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
     //printf("[%d] handling remote alloc of size %zd\n", my_node_id, args.size);
     off_t offset = get_runtime()->get_memory_impl(args.memory)->alloc_bytes(args.size);
-    //printf("[%d] remote alloc will return %d\n", my_node_id, result);
+    //printf("[%d] remote alloc will return %d\n", my_node_id, offset);
 
-    ResponseArgs r_args;
-    r_args.resp_ptr = args.resp_ptr;
-    r_args.offset = offset;
-    Response::request(args.sender, r_args);
+    ActiveMessage<RemoteMemAllocResponse> amsg(sender);
+    amsg->resp_ptr = args.resp_ptr;
+    amsg->offset = offset;
+    amsg.commit();
   }
   
-  /*static*/ void RemoteMemAllocRequest::handle_response(ResponseArgs args)
+  /*static*/ void RemoteMemAllocResponse::handle_message(NodeID sender, const RemoteMemAllocResponse &args,
+							 const void *data, size_t datalen)
   {
     HandlerReplyFuture<off_t> *f = static_cast<HandlerReplyFuture<off_t> *>(args.resp_ptr);
     f->set(args.offset);
   }
 
-  /*static*/ off_t RemoteMemAllocRequest::send_request(NodeID target,
-						       Memory memory,
-						       size_t size)
-  {
-    HandlerReplyFuture<off_t> result;
-
-    RequestArgs args;
-    args.sender = my_node_id;
-    args.resp_ptr = &result;
-    args.memory = memory;
-    args.size = size;
-
-    Request::request(target, args);
-
-    // wait for result to come back
-    result.wait();
-    return result.get();
-  }
-  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1046,7 +994,7 @@ namespace Realm {
   static PartialWriteMap partial_remote_writes;
   static GASNetHSL partial_remote_writes_lock;
 
-  /*static*/ void RemoteWriteMessage::handle_request(RequestArgs args,
+  /*static*/ void RemoteWriteMessage::handle_message(NodeID sender, const RemoteWriteMessage &args,
 						     const void *data,
 						     size_t datalen)
   {
@@ -1054,11 +1002,11 @@ namespace Realm {
 
     log_copy.debug() << "received remote write request: mem=" << args.mem
 		     << ", offset=" << args.offset << ", size=" << datalen
-		     << ", seq=" << args.sender << '/' << args.sequence_id;
+		     << ", seq=" << sender << '/' << args.sequence_id;
 #ifdef DEBUG_REMOTE_WRITES
     printf("received remote write request: mem=" IDFMT ", offset=%zd, size=%zd, seq=%d/%d",
 	   args.mem.id, args.offset, datalen,
-	   args.sender, args.sequence_id);
+	   sender, args.sequence_id);
     printf("  data[%p]: %08x %08x %08x %08x %08x %08x %08x %08x\n",
 	   data,
 	   ((unsigned *)(data))[0], ((unsigned *)(data))[1],
@@ -1092,7 +1040,7 @@ namespace Realm {
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
       PartialWriteKey key;
-      key.sender = args.sender;
+      key.sender = sender;
       key.sequence_id = args.sequence_id;
       partial_remote_writes_lock.lock();
       PartialWriteMap::iterator it = partial_remote_writes.find(key);
@@ -1120,8 +1068,9 @@ namespace Realm {
 	if(entry.remaining_count == 0) {
 	  // we're the last write, and we've already got the fence, so 
 	  //  respond
-          RemoteWriteFenceAckMessage::send_request(args.sender,
-                                                   entry.fence);
+	  ActiveMessage<RemoteWriteFenceAckMessage> amsg(sender);
+	  amsg->fence = entry.fence;
+	  amsg.commit();
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
 	  return;
@@ -1135,13 +1084,13 @@ namespace Realm {
   //
   // class RemoteSerdezMessage
   //
-  /*static*/ void RemoteSerdezMessage::handle_request(RequestArgs args,
+  /*static*/ void RemoteSerdezMessage::handle_message(NodeID sender, const RemoteSerdezMessage &args,
                                                       const void *data,
                                                       size_t datalen)
   {
     log_copy.debug() << "received remote serdez request: mem=" << args.mem
 		     << ", offset=" << args.offset << ", size=" << datalen
-		     << ", seq=" << args.sender << '/' << args.sequence_id;
+		     << ", seq=" << sender << '/' << args.sequence_id;
 
     const CustomSerdezUntyped *serdez_op = get_runtime()->custom_serdez_table[args.serdez_id];
     size_t field_size = serdez_op->sizeof_field_type;
@@ -1158,7 +1107,7 @@ namespace Realm {
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
       PartialWriteKey key;
-      key.sender = args.sender;
+      key.sender = sender;
       key.sequence_id = args.sequence_id;
       partial_remote_writes_lock.lock();
       PartialWriteMap::iterator it = partial_remote_writes.find(key);
@@ -1186,8 +1135,9 @@ namespace Realm {
 	if(entry.remaining_count == 0) {
 	  // we're the last write, and we've already got the fence, so
 	  //  respond
-          RemoteWriteFenceAckMessage::send_request(args.sender,
-                                                   entry.fence);
+	  ActiveMessage<RemoteWriteFenceAckMessage> amsg(sender);
+	  amsg->fence = entry.fence;
+	  amsg.commit();
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
 	  return;
@@ -1202,7 +1152,7 @@ namespace Realm {
   // class RemoteReduceMessage
   //
 
-  /*static*/ void RemoteReduceMessage::handle_request(RequestArgs args,
+  /*static*/ void RemoteReduceMessage::handle_message(NodeID sender, const RemoteReduceMessage &args,
 						      const void *data,
 						      size_t datalen)
   {
@@ -1222,7 +1172,7 @@ namespace Realm {
     log_copy.debug("received remote reduce request: mem=" IDFMT ", offset=%zd+%zd, size=%zd, redop=%d(%s), seq=%d/%d",
 		   args.mem.id, (ssize_t)args.offset, (ssize_t)args.stride, datalen,
 		   redop_id, (red_fold ? "fold" : "apply"),
-		   args.sender, args.sequence_id);
+		   sender, args.sequence_id);
 
     const ReductionOpUntyped *redop = get_runtime()->reduce_op_table[redop_id];
 
@@ -1241,7 +1191,7 @@ namespace Realm {
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
       PartialWriteKey key;
-      key.sender = args.sender;
+      key.sender = sender;
       key.sequence_id = args.sequence_id;
       partial_remote_writes_lock.lock();
       PartialWriteMap::iterator it = partial_remote_writes.find(key);
@@ -1269,8 +1219,9 @@ namespace Realm {
 	if(entry.remaining_count == 0) {
 	  // we're the last write, and we've already got the fence, so 
 	  //  respond
-          RemoteWriteFenceAckMessage::send_request(args.sender,
-                                                   entry.fence);
+	  ActiveMessage<RemoteWriteFenceAckMessage> amsg(sender);
+	  amsg->fence = entry.fence;
+	  amsg.commit();
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
 	  return;
@@ -1286,9 +1237,9 @@ namespace Realm {
   // class RemoteReduceListMessage
   //
 
-  /*static*/ void RemoteReduceListMessage::handle_request(RequestArgs args,
-							  const void *data,
-							  size_t datalen)
+  /*static*/ void RemoteReduceListMessage::handle_message(NodeID sender,
+							  const RemoteReduceListMessage &args,
+							  const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.mem);
     
@@ -1312,22 +1263,6 @@ namespace Realm {
 				   data);
       }
     }
-  }
-
-  /*static*/ void RemoteReduceListMessage::send_request(NodeID target,
-							Memory mem,
-							off_t offset,
-							ReductionOpID redopid,
-							const void *data,
-							size_t datalen,
-							int payload_mode)
-  {
-    RequestArgs args;
-
-    args.mem = mem;
-    args.offset = offset;
-    args.redopid = redopid;
-    Message::request(target, args, data, datalen, payload_mode);
   }
   
 
@@ -1356,16 +1291,17 @@ namespace Realm {
   // class RemoteWriteFenceMessage
   //
 
-  /*static*/ void RemoteWriteFenceMessage::handle_request(RequestArgs args)
+  /*static*/ void RemoteWriteFenceMessage::handle_message(NodeID sender, const RemoteWriteFenceMessage &args,
+							  const void *data, size_t datalen)
   {
     log_copy.debug("remote write fence (mem = " IDFMT ", seq = %d/%d, count = %d, fence = %p",
-		   args.mem.id, args.sender, args.sequence_id, args.num_writes, args.fence);
+		   args.mem.id, sender, args.sequence_id, args.num_writes, args.fence);
     
     assert(args.sequence_id != 0);
     // track the sequence ID to know when the full RDMA is done
     if(args.sequence_id > 0) {
       PartialWriteKey key;
-      key.sender = args.sender;
+      key.sender = sender;
       key.sequence_id = args.sequence_id;
       partial_remote_writes_lock.lock();
       PartialWriteMap::iterator it = partial_remote_writes.find(key);
@@ -1396,8 +1332,9 @@ namespace Realm {
 	assert(entry.remaining_count >= 0);
 	if(entry.remaining_count == 0) {
 	  // this fence came after all the writes, so respond
-          RemoteWriteFenceAckMessage::send_request(args.sender,
-                                                   entry.fence);
+	  ActiveMessage<RemoteWriteFenceAckMessage> amsg(sender);
+	  amsg->fence = entry.fence;
+	  amsg.commit();
 	  partial_remote_writes.erase(it);
 	  partial_remote_writes_lock.unlock();
 	  return;
@@ -1407,45 +1344,20 @@ namespace Realm {
     }
   }
 
-  /*static*/ void RemoteWriteFenceMessage::send_request(NodeID target,
-							Memory memory,
-							unsigned sequence_id,
-							unsigned num_writes,
-                                                        RemoteWriteFence *fence)
-  {
-    RequestArgs args;
-
-    args.mem = memory;
-    args.sender = my_node_id;
-    args.sequence_id = sequence_id;
-    args.num_writes = num_writes;
-    args.fence = fence;
-    Message::request(target, args);
-  }
-  
-
   ////////////////////////////////////////////////////////////////////////
   //
   // class RemoteWriteFenceAckMessage
   //
 
-  /*static*/ void RemoteWriteFenceAckMessage::handle_request(RequestArgs args)
+  /*static*/ void RemoteWriteFenceAckMessage::handle_message(NodeID sender,
+							     const RemoteWriteFenceAckMessage &args,
+							     const void *data, size_t datalen)
   {
     log_copy.debug("remote write fence ack: fence = %p",
 		   args.fence);
 
     args.fence->mark_finished(true /*successful*/);
   }
-
-  /*static*/ void RemoteWriteFenceAckMessage::send_request(NodeID target,
-                                                           RemoteWriteFence *fence)
-  {
-    RequestArgs args;
-
-    args.fence = fence;
-    Message::request(target, args);
-  }
-  
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1477,27 +1389,28 @@ namespace Realm {
 	if(datalen > max_xfer_size) {
 	  log_copy.info("breaking large send into pieces");
 	  const char *pos = (const char *)data;
-	  RemoteWriteMessage::RequestArgs args;
-	  args.mem = mem;
-	  args.offset = offset;
-	  args.sender = my_node_id;
-	  args.sequence_id = sequence_id;
 
 	  int count = 1;
 	  while(datalen > max_xfer_size) {
-	    RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-						 pos, max_xfer_size,
-						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	    args.offset += max_xfer_size;
+	    ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node());
+	    amsg->mem = mem;
+	    amsg->offset = offset;
+	    amsg->sequence_id = sequence_id;
+	    amsg.add_payload(pos,max_xfer_size, make_copy? PAYLOAD_COPY: PAYLOAD_KEEP);
+	    amsg.commit();
+	    offset += max_xfer_size;
 	    pos += max_xfer_size;
 	    datalen -= max_xfer_size;
 	    count++;
 	  }
 
 	  // last send includes whatever's left
-	  RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-					       pos, datalen, 
-					       make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node());
+	  amsg->mem = mem;
+	  amsg->offset = offset;
+	  amsg->sequence_id = sequence_id;
+	  amsg.add_payload(pos,datalen,make_copy? PAYLOAD_COPY: PAYLOAD_KEEP);
+	  amsg.commit();
 	  return count;
 	}
       }
@@ -1505,15 +1418,12 @@ namespace Realm {
       // we get here with either a valid destination pointer (so no size limit)
       //  or a write smaller than the LMB
       {
-	RemoteWriteMessage::RequestArgs args;
-	args.mem = mem;
-	args.offset = offset;
-        args.sender = my_node_id;
-	args.sequence_id = sequence_id;
-	RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-					     data, datalen,
-					     (make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP),
-					     dstptr);
+	ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node(), datalen, dstptr);
+	amsg->mem = mem;
+	amsg->offset = offset;
+	amsg->sequence_id = sequence_id;
+	amsg.add_payload(data,datalen,make_copy? PAYLOAD_COPY: PAYLOAD_KEEP);
+	amsg.commit();
 	return 1;
       }
     }
@@ -1545,28 +1455,37 @@ namespace Realm {
 	if(lines > max_lines_per_xfer) {
 	  log_copy.info("breaking large send into pieces");
 	  const char *pos = (const char *)data;
-	  RemoteWriteMessage::RequestArgs args;
-	  args.mem = mem;
-	  args.offset = offset;
-	  args.sender = my_node_id;
-	  args.sequence_id = sequence_id;
-
 	  int count = 1;
 	  while(lines > max_lines_per_xfer) {
-	    RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-						 pos, datalen,
-						 stride, max_lines_per_xfer,
-						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	    args.offset += datalen * max_lines_per_xfer;
+	    size_t payload_size = datalen*max_lines_per_xfer;
+	    ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node(), payload_size, dstptr);
+	    amsg->mem = mem;
+	    amsg->offset = offset;
+	    amsg->sequence_id = sequence_id;
+	    if (payload_size) {
+	      PayloadSource *payload_src = new TwoDPayload(pos, datalen, max_lines_per_xfer,
+							   stride, PAYLOAD_COPY);
+	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	    }
+	    amsg.commit();
+	    offset += datalen * max_lines_per_xfer;
 	    pos += stride * max_lines_per_xfer;
 	    lines -= max_lines_per_xfer;
 	    count++;
 	  }
 
 	  // last send includes whatever's left
-	  RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-					       pos, datalen, stride, lines,
-					       make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  size_t payload_size = datalen*lines;
+	  ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node(), payload_size, dstptr);
+	  amsg->mem = mem;
+	  amsg->offset = offset;
+	  amsg->sequence_id = sequence_id;
+	  if (payload_size) {
+	    PayloadSource *payload_src = new TwoDPayload(pos, datalen,lines,
+							 stride, PAYLOAD_COPY);
+	    payload_src->copy_data(amsg.payload_ptr(payload_size));
+	  }
+	  amsg.commit();
 	  return count;
 	}
       }
@@ -1574,17 +1493,17 @@ namespace Realm {
       // we get here with either a valid destination pointer (so no size limit)
       //  or a write smaller than the LMB
       {
-	RemoteWriteMessage::RequestArgs args;
-	args.mem = mem;
-	args.offset = offset;
-        args.sender = my_node_id;
-	args.sequence_id = sequence_id;
-
-	RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-					     data, datalen, stride, lines,
-					     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
-					     dstptr);
-
+	size_t payload_size = datalen*lines;
+	ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node(), payload_size, dstptr);
+	amsg->mem = mem;
+	amsg->offset = offset;
+	amsg->sequence_id = sequence_id;
+	if (payload_size) {
+	  PayloadSource *payload_src = new TwoDPayload(data, datalen,lines,
+						       stride,PAYLOAD_COPY);
+	  payload_src->copy_data(amsg.payload_ptr(payload_size));
+	}
+	amsg.commit();
 	return 1;
       }
     }
@@ -1612,11 +1531,6 @@ namespace Realm {
 
 	if(datalen > max_xfer_size) {
 	  log_copy.info("breaking large send into pieces");
-	  RemoteWriteMessage::RequestArgs args;
-	  args.mem = mem;
-	  args.offset = offset;
-	  args.sender = my_node_id;
-	  args.sequence_id = sequence_id;
 
 	  int count = 0;
 	  // this is trickier because we don't actually know how much will fit
@@ -1630,18 +1544,24 @@ namespace Realm {
               const char *pos = (const char *)(it->first);
               size_t left = it->second;
               while(left > max_xfer_size) {
-		RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-						     pos, max_xfer_size,
-						     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-		args.offset += max_xfer_size;
+		ActiveMessage<RemoteWriteMessage> amsg1(ID(mem).memory_owner_node(), max_xfer_size);
+		amsg1->mem = mem;
+		amsg1->offset = offset;
+		amsg1->sequence_id = sequence_id;
+		amsg1.add_payload(pos, max_xfer_size, make_copy? PAYLOAD_COPY: PAYLOAD_KEEP);
+		amsg1.commit();
+		offset += max_xfer_size;
 		pos += max_xfer_size;
 		left -= max_xfer_size;
 		count++;
 	      }
-	      RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-						   pos, left,
-						   make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	      args.offset += left;
+	      ActiveMessage<RemoteWriteMessage> amsg(ID(mem).memory_owner_node(), left);
+	      amsg->mem = mem;
+	      amsg->offset = offset;
+	      amsg->sequence_id = sequence_id;
+	      amsg.add_payload(pos, left, make_copy? PAYLOAD_COPY: PAYLOAD_KEEP);
+	      amsg.commit();
+	      offset += left;
 	      count++;
 	      datalen -= it->second;
 	      it++;
@@ -1661,11 +1581,16 @@ namespace Realm {
 	    }
 	    // if we didn't get at least one span, we won't make forward progress
 	    assert(!subspans.empty());
-
-	    RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-						 subspans, xfer_size,
-						 make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	    args.offset += xfer_size;
+	    ActiveMessage<RemoteWriteMessage> amsg2(ID(mem).memory_owner_node(), xfer_size);
+	    amsg2->mem = mem;
+	    amsg2->offset = offset;
+	    amsg2->sequence_id = sequence_id;
+	    if (xfer_size) {
+	      PayloadSource *payload_src = new SpanPayload(subspans, xfer_size,PAYLOAD_COPY);
+	      payload_src->copy_data(amsg2.payload_ptr(xfer_size));
+	    }
+	    amsg2.commit();
+	    offset += xfer_size;
 	    datalen -= xfer_size;
 	    count++;
 	  }
@@ -1677,17 +1602,15 @@ namespace Realm {
       // we get here with either a valid destination pointer (so no size limit)
       //  or a write smaller than the LMB
       {
-	RemoteWriteMessage::RequestArgs args;
-	args.mem = mem;
-	args.offset = offset;
-        args.sender = my_node_id;
-	args.sequence_id = sequence_id;
-
-	RemoteWriteMessage::Message::request(ID(mem).memory_owner_node(), args,
-					     spans, datalen,
-					     make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP,
-					     dstptr);
-	
+	ActiveMessage<RemoteWriteMessage> amsg2(ID(mem).memory_owner_node(), datalen, dstptr);
+	amsg2->mem = mem;
+	amsg2->offset = offset;
+	amsg2->sequence_id = sequence_id;
+	if (datalen) {
+	  PayloadSource *payload_src = new SpanPayload(spans, datalen, PAYLOAD_COPY);
+	  payload_src->copy_data(amsg2.payload_ptr(datalen));
+	}
+	amsg2.commit();
 	return 1;
       }
     }
@@ -1748,16 +1671,15 @@ namespace Realm {
           }
           assert(cur_size > 0);
         }
-        RemoteSerdezMessage::RequestArgs args;
-        args.mem = mem;
-        args.offset = offset;
+	ActiveMessage<RemoteSerdezMessage> amsg(ID(mem).memory_owner_node(), cur_size);
+	amsg->mem = mem;
+	amsg->offset = offset;
+	amsg->count = cur_count;
+	amsg->serdez_id = serdez_id;
+	amsg->sequence_id = sequence_id;
+	amsg.add_payload(buffer_start, cur_size, PAYLOAD_COPY); // TODO: copy directly
+	amsg.commit();
         offset = new_offset;
-        args.count = cur_count;
-        args.serdez_id = serdez_id;
-        args.sender = my_node_id;
-        args.sequence_id = sequence_id;
-        RemoteSerdezMessage::Message::request(ID(mem).memory_owner_node(), args,
-                                              buffer_start, cur_size, PAYLOAD_COPY);
         xfers ++;
       }
       free(buffer_start);
@@ -1788,54 +1710,60 @@ namespace Realm {
 	if(count > max_elmts_per_xfer) {
 	  log_copy.info("breaking large reduction into pieces");
 	  const char *pos = (const char *)data;
-	  RemoteReduceMessage::RequestArgs args;
-	  args.mem = mem;
-	  args.offset = offset;
-	  args.stride = dst_stride;
-	  assert(((off_t)(args.stride)) == dst_stride); // did it fit?
-	  // fold encoded as a negation of the redop_id
-	  args.redop_id = red_fold ? -redop_id : redop_id;
-	  //args.red_fold = red_fold;
-	  args.sender = my_node_id;
-	  args.sequence_id = sequence_id;
-
 	  int xfers = 1;
 	  while(count > max_elmts_per_xfer) {
-	    RemoteReduceMessage::Message::request(ID(mem).memory_owner_node(), args,
-						  pos, rhs_size,
-						  src_stride, max_elmts_per_xfer,
-						  make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-	    args.offset += dst_stride * max_elmts_per_xfer;
+	    size_t payload_size = rhs_size*max_elmts_per_xfer;
+	    ActiveMessage<RemoteReduceMessage> amsg(ID(mem).memory_owner_node(), payload_size);
+	    if (payload_size) {
+	      PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,max_elmts_per_xfer,
+							   src_stride, PAYLOAD_COPY);
+	      payload_src->copy_data(amsg.payload_ptr(payload_size));
+	    }
+	    amsg->mem = mem;
+	    amsg->offset = offset;
+	    amsg->stride = dst_stride;
+	    amsg->redop_id = red_fold ? -redop_id : redop_id;
+	    amsg->sequence_id = sequence_id;
+	    amsg.commit();
+	    offset += dst_stride * max_elmts_per_xfer;
 	    pos += src_stride * max_elmts_per_xfer;
 	    count -= max_elmts_per_xfer;
 	    xfers++;
 	  }
 
 	  // last send includes whatever's left
-	  RemoteReduceMessage::Message::request(ID(mem).memory_owner_node(), args,
-						pos, rhs_size, src_stride, count,
-						make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
+	  size_t payload_size = rhs_size*count;
+	  ActiveMessage<RemoteReduceMessage> amsg1(ID(mem).memory_owner_node(), payload_size);
+	  amsg1->mem = mem;
+	  amsg1->offset = offset;
+	  amsg1->stride = dst_stride;
+	  amsg1->redop_id = red_fold ? -redop_id : redop_id;
+	  amsg1->sequence_id = sequence_id;
+	  if (payload_size) {
+	    PayloadSource *payload_src = new TwoDPayload(pos, rhs_size,count,
+							 src_stride, PAYLOAD_COPY);
+	    payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	  }
+	  amsg1.commit();
 	  return xfers;
 	}
       }
 
       // we get here with a write smaller than the LMB
       {
-	RemoteReduceMessage::RequestArgs args;
-	args.mem = mem;
-	args.offset = offset;
-	args.stride = dst_stride;
-	assert(((off_t)(args.stride)) == dst_stride); // did it fit?
-	// fold encoded as a negation of the redop_id
-	args.redop_id = red_fold ? -redop_id : redop_id;
-	//args.red_fold = red_fold;
-	args.sender = my_node_id;
-	args.sequence_id = sequence_id;
-
-	RemoteReduceMessage::Message::request(ID(mem).memory_owner_node(), args,
-					      data, rhs_size, src_stride, count,
-					      make_copy ? PAYLOAD_COPY : PAYLOAD_KEEP);
-
+	size_t payload_size = rhs_size*count;
+	ActiveMessage<RemoteReduceMessage> amsg1(ID(mem).memory_owner_node(), payload_size);
+	amsg1->mem = mem;
+	amsg1->offset = offset;
+	amsg1->stride = dst_stride;
+	amsg1->redop_id = red_fold ? -redop_id : redop_id;
+	amsg1->sequence_id = sequence_id;
+	if (payload_size) {
+	  PayloadSource *payload_src = new TwoDPayload(data, rhs_size,count,
+						       src_stride, PAYLOAD_COPY);
+	  payload_src->copy_data(amsg1.payload_ptr(payload_size));
+	}
+	amsg1.commit();
 	return 1;
       }
     }
@@ -1844,8 +1772,12 @@ namespace Realm {
 				  ReductionOpID redopid,
 				  const void *data, size_t datalen)
     {
-      RemoteReduceListMessage::send_request(node, mem, offset, redopid,
-					    data, datalen, PAYLOAD_COPY);
+      ActiveMessage<RemoteReduceListMessage> amsg(node, datalen);
+      amsg->mem = mem;
+      amsg->offset = offset;
+      amsg->redopid = redopid;
+      amsg.add_payload(data, datalen);
+      amsg.commit();
     }
 
     void do_remote_fence(Memory mem, unsigned sequence_id, unsigned num_writes,
@@ -1855,8 +1787,27 @@ namespace Realm {
       //  probably indicative of badness elsewhere, barf on it for now
       assert(num_writes > 0);
 
-      RemoteWriteFenceMessage::send_request(ID(mem).memory_owner_node(), mem, sequence_id,
-					    num_writes, fence);
+      ActiveMessage<RemoteWriteFenceMessage> amsg(ID(mem).memory_owner_node());
+      amsg->mem = mem;
+      amsg->sequence_id = sequence_id;
+      amsg->num_writes = num_writes;
+      amsg->fence = fence;
+      amsg.commit();
     }
+
+  ActiveMessageHandlerReg<RemoteMemAllocRequest> remote_mem_alloc_request_handler;
+  ActiveMessageHandlerReg<RemoteMemAllocResponse> remote_mem_alloc_response_handler;
+  ActiveMessageHandlerReg<RemoteWriteMessage> remote_write_message_handler;
+  ActiveMessageHandlerReg<RemoteReduceMessage> remote_reduce_message_handler;
+  ActiveMessageHandlerReg<RemoteSerdezMessage> remote_serdez_message_handler;
+  ActiveMessageHandlerReg<RemoteWriteFenceMessage> remote_write_fence_message_handler;
+  ActiveMessageHandlerReg<RemoteWriteFenceAckMessage> remote_write_fence_ack_message_handler;
+
+  ActiveMessageHandlerReg<MemStorageAllocRequest> mem_storage_alloc_request_handler;
+  ActiveMessageHandlerReg<MemStorageAllocResponse>mem_storage_alloc_response_handler;
+  ActiveMessageHandlerReg<MemStorageReleaseRequest> mem_storage_release_request_handler;
+  ActiveMessageHandlerReg<MemStorageReleaseResponse> mem_storage_release_response_handler;
+
+  ActiveMessageHandlerReg<RemoteReduceListMessage> mem_remote_reduce_list_handler;
   
 }; // namespace Realm

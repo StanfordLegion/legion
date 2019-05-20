@@ -30,10 +30,6 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    static const Opcode OPCODE = UOPCODE_PREIMAGE;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     PreimageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N,T> _inst_space,
 		    RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~PreimageMicroOp(void);
@@ -45,7 +41,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<PreimageMicroOp<N,T,N2,T2> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<PreimageMicroOp<N,T,N2,T2> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 
@@ -67,9 +65,17 @@ namespace Realm {
     std::vector<SparsityMap<N,T> > sparsity_outputs;
   };
 
+  template <typename T>
+  struct ApproxImageResponseMessage;
+
   template <int N, typename T, int N2, typename T2>
   class PreimageOperation : public PartitioningOperation {
   public:
+    static const int DIM = N;
+    typedef T IDXTYPE;
+    static const int DIM2 = N2;
+    typedef T2 IDXTYPE2;
+
     PreimageOperation(const IndexSpace<N,T>& _parent,
 		      const std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > >& _field_data,
 		      const ProfilingRequestSet &reqs,
@@ -93,6 +99,8 @@ namespace Realm {
     void provide_sparse_image(int index, const Rect<N2,T2> *rects, size_t count);
 
   protected:
+    static ActiveMessageHandlerReg<ApproxImageResponseMessage<PreimageOperation<N,T,N2,T2> > > areg;
+    
     IndexSpace<N,T> parent;
     std::vector<FieldDataDescriptor<IndexSpace<N,T>,Point<N2,T2> > > ptr_data;
     std::vector<FieldDataDescriptor<IndexSpace<N,T>,Rect<N2,T2> > > range_data;
@@ -105,44 +113,17 @@ namespace Realm {
     std::vector<int> contrib_counts;
     AsyncMicroOp *dummy_overlap_uop;
   };
-    
+
+  template <typename T>
   struct ApproxImageResponseMessage {
-    struct RequestArgs : public BaseMedium {
-      DynamicTemplates::TagType type_tag;
-      intptr_t approx_output_op;
-      int approx_output_index;
-    };
+    intptr_t approx_output_op;
+    int approx_output_index;
 
-    struct DecodeHelper {
-      template <typename NT, typename T, typename N2T, typename T2>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<APPROX_IMAGE_RESPONSE_MSGID,
-                                       RequestArgs,
-                                       handle_request> Message;
-
-    template <int N, typename T, int N2, typename T2>
-    static void send_request(NodeID target, intptr_t output_op, int output_index,
-			     const Rect<N2,T2> *rects, size_t count);
+    static void handle_message(NodeID sender,
+			       const ApproxImageResponseMessage<T> &msg,
+			       const void *data, size_t datalen);
   };
 
-  template <int N, typename T, int N2, typename T2>
-  /*static*/ void ApproxImageResponseMessage::send_request(NodeID target, 
-							   intptr_t output_op, int output_index,
-							   const Rect<N2,T2> *rects, size_t count)
-  {
-    RequestArgs args;
-
-    args.type_tag = NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-    args.approx_output_op = output_op;
-    args.approx_output_index = output_index;
-
-    Message::request(target, args, rects, count * sizeof(Rect<N2,T2>), PAYLOAD_COPY);
-  }
-    
 };
 
 #endif // REALM_DEPPART_PREIMAGE_H

@@ -544,10 +544,13 @@ namespace Realm {
   void PartitioningMicroOp::mark_finished(void)
   {
     if(async_microop) {
-      if(requestor == my_node_id)
+      if(requestor == my_node_id) {
 	async_microop->mark_finished(true /*successful*/);
-      else
-	RemoteMicroOpCompleteMessage::send_request(requestor, async_microop);
+      } else {
+	ActiveMessage<RemoteMicroOpCompleteMessage> amsg(requestor);
+	amsg->async_microop = async_microop;
+	amsg.commit();
+      }
     }
   }
 
@@ -670,168 +673,17 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteMicroOpMessage
-
-  template <typename NT, typename T, typename FT>
-  inline /*static*/ void RemoteMicroOpMessage::ByFieldDecoder::demux(const RequestArgs *args,
-								     const void *data,
-								     size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    ByFieldMicroOp<NT::N,T,FT> *uop = new ByFieldMicroOp<NT::N,T,FT>(args->sender,
-								     args->async_microop,
-								     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void RemoteMicroOpMessage::ImageDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    ImageMicroOp<NT::N,T,N2T::N,T2> *uop = new ImageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
-									       args->async_microop,
-									       fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void RemoteMicroOpMessage::PreimageDecoder::demux(const RequestArgs *args,
-								      const void *data,
-								      size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    PreimageMicroOp<NT::N,T,N2T::N,T2> *uop = new PreimageMicroOp<NT::N,T,N2T::N,T2>(args->sender,
-										     args->async_microop,
-										     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::UnionDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    UnionMicroOp<NT::N,T> *uop = new UnionMicroOp<NT::N,T>(args->sender,
-							   args->async_microop,
-							   fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::IntersectionDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    IntersectionMicroOp<NT::N,T> *uop = new IntersectionMicroOp<NT::N,T>(args->sender,
-									 args->async_microop,
-									 fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteMicroOpMessage::DifferenceDecoder::demux(const RequestArgs *args,
-								   const void *data,
-								   size_t datalen)
-  {
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    DifferenceMicroOp<NT::N,T> *uop = new DifferenceMicroOp<NT::N,T>(args->sender,
-								     args->async_microop,
-								     fbd);
-    uop->dispatch(args->operation, false /*not ok to run in this thread*/);
-  }
-
-  /*static*/ void RemoteMicroOpMessage::handle_request(RequestArgs args,
-						       const void *data, size_t datalen)
-  {
-    log_part.info() << "received remote micro op message: tag=" 
-		    << std::hex << args.type_tag << std::dec
-		    << " opcode=" << args.opcode;
-
-    // switch on the opcode first, since they use different numbers of template arguments
-    switch(args.opcode) {
-    case PartitioningMicroOp::UOPCODE_BY_FIELD:
-      {
-	NTF_TemplateHelper::demux<ByFieldDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_IMAGE:
-      {
-	NTNT_TemplateHelper::demux<ImageDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_PREIMAGE:
-      {
-	NTNT_TemplateHelper::demux<PreimageDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_UNION:
-      {
-	NT_TemplateHelper::demux<UnionDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_INTERSECTION:
-      {
-	NT_TemplateHelper::demux<IntersectionDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    case PartitioningMicroOp::UOPCODE_DIFFERENCE:
-      {
-	NT_TemplateHelper::demux<DifferenceDecoder>(args.type_tag, &args, data, datalen);
-	break;
-      }
-    default:
-      assert(0);
-    }
-  }
-  
-#if 0
-  template <typename T>
-  /*static*/ void RemoteMicroOpMessage::send_request(NodeID target, 
-						     PartitioningOperation *operation,
-						     const T& microop)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = T::type_tag();
-    args.opcode = T::OPCODE;
-    args.operation = operation;
-    args.async_microop = microop.async_microop;
-
-    Serialization::DynamicBufferSerializer dbs(256);
-    microop.serialize_params(dbs);
-    ByteArray b = dbs.detach_bytearray();
-
-    Message::request(target, args, b.base(), b.size(), PAYLOAD_FREE);
-    b.detach();
-  }
-#endif
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class RemoteMicroOpCompleteMessage
 
-  struct RequestArgs {
-    AsyncMicroOp *async_microop;
-  };
-  
-  /*static*/ void RemoteMicroOpCompleteMessage::handle_request(RequestArgs args)
+  /*static*/ void RemoteMicroOpCompleteMessage::handle_message(NodeID sender,
+							       const RemoteMicroOpCompleteMessage &msg,
+							       const void *data, size_t datalen)
   {
-    log_part.info() << "received remote micro op complete message: " << args.async_microop;
-    args.async_microop->mark_finished(true /*successful*/);
+    log_part.info() << "received remote micro op complete message: " << msg.async_microop;
+    msg.async_microop->mark_finished(true /*successful*/);
   }
 
-  /*static*/ void RemoteMicroOpCompleteMessage::send_request(NodeID target,
-							     AsyncMicroOp *async_microop)
-  {
-    RequestArgs args;
-    args.async_microop = async_microop;
-    Message::request(target, args);
-  }
+  ActiveMessageHandlerReg<RemoteMicroOpCompleteMessage> RemoteMicroOpCompleteMessage::areg;
 
 
   ////////////////////////////////////////////////////////////////////////

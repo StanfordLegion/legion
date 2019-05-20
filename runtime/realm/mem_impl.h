@@ -308,179 +308,120 @@ namespace Realm {
     // active messages
 
     struct MemStorageAllocRequest {
-      struct RequestArgs {
-	Memory memory;
-	RegionInstance inst;
-	size_t bytes;
-	size_t alignment;
-        size_t offset;
-	Event precondition;
-      };
+      Memory memory;
+      RegionInstance inst;
+      size_t bytes;
+      size_t alignment;
+      Event precondition;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender, const MemStorageAllocRequest &msg,
+				 const void *data, size_t datalen);
 
-      typedef ActiveMessageShortNoReply<MEM_STORAGE_ALLOC_REQ_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       Memory memory, RegionInstance inst,
-			       size_t bytes, size_t alignment,
-			       Event precondition, size_t offset);
     };
 
     struct MemStorageAllocResponse {
-      struct RequestArgs {
-	RegionInstance inst;
-	size_t offset;
-        size_t footprint;
-	bool success;
-      };
+      RegionInstance inst;
+      size_t offset;
+      size_t footprint;
+      bool success;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender, const MemStorageAllocResponse &msg,
+				 const void *data, size_t datalen);
 
-      typedef ActiveMessageShortNoReply<MEM_STORAGE_ALLOC_RESP_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       RegionInstance inst, size_t offset, 
-                               size_t footprint, bool success);
     };
 
     struct MemStorageReleaseRequest {
-      struct RequestArgs {
-	Memory memory;
-	RegionInstance inst;
-	Event precondition;
-      };
+      Memory memory;
+      RegionInstance inst;
+      Event precondition;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<MEM_STORAGE_RELEASE_REQ_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       Memory memory,
-			       RegionInstance inst,
-			       Event precondition);
+      static void handle_message(NodeID sender, const MemStorageReleaseRequest &msg,
+				 const void *data, size_t datalen);
     };
 
     struct MemStorageReleaseResponse {
-      struct RequestArgs {
-	RegionInstance inst;
-      };
+      RegionInstance inst;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<MEM_STORAGE_RELEASE_RESP_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       RegionInstance inst);
+      static void handle_message(NodeID sender, const MemStorageReleaseResponse &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RemoteMemAllocRequest {
-      struct RequestArgs {
-	int sender;
-	void *resp_ptr;
-	Memory memory;
-	size_t size;
-      };
+      void *resp_ptr;
+      Memory memory;
+      size_t size;
 
-      struct ResponseArgs {
-	void *resp_ptr;
-	off_t offset;
-      };
+      static void handle_message(NodeID sender, const RemoteMemAllocRequest &msg,
+				 const void *data, size_t datalen);
+    };
 
-      static void handle_request(RequestArgs args);
-      static void handle_response(ResponseArgs args);
+    struct RemoteMemAllocResponse {
+      void *resp_ptr;
+      off_t offset;
 
-      typedef ActiveMessageShortNoReply<REMOTE_MALLOC_MSGID,
- 	                                RequestArgs,
-	                                handle_request> Request;
-
-      typedef ActiveMessageShortNoReply<REMOTE_MALLOC_RPLID,
- 	                                ResponseArgs,
-	                                handle_response> Response;
-
-      static off_t send_request(NodeID target, Memory memory, size_t size);
+      static void handle_message(NodeID sender, const RemoteMemAllocResponse &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RemoteWriteMessage {
-      struct RequestArgs : public BaseMedium {
-	Memory mem;
-	off_t offset;
-	unsigned sender;
-	unsigned sequence_id;
-      };
+      Memory mem;
+      off_t offset;
+      unsigned sequence_id;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<REMOTE_WRITE_MSGID,
-				         RequestArgs,
-				         handle_request> Message;
-
+      static void handle_message(NodeID sender, const RemoteWriteMessage &msg,
+				 const void *data, size_t datalen);
       // no simple send_request method here - see below
     };
 
     struct RemoteSerdezMessage {
-      struct RequestArgs : public BaseMedium {
-        Memory mem;
-        off_t offset;
-        size_t count;
-        CustomSerdezID serdez_id;
-        unsigned sender;
-        unsigned sequence_id;
-      };
+      Memory mem;
+      off_t offset;
+      size_t count;
+      CustomSerdezID serdez_id;
+      unsigned sequence_id;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<REMOTE_SERDEZ_MSGID,
-                                         RequestArgs,
-                                         handle_request> Message;
-
+      static void handle_message(NodeID sender, const RemoteSerdezMessage &msg,
+				 const void *data, size_t datalen);
       // no simple send_request method here - see below
     };
 
     struct RemoteReduceMessage {
-      struct RequestArgs : public BaseMedium {
-	Memory mem;
-	off_t offset;
-	int stride;
-	ReductionOpID redop_id;
-	//bool red_fold;
-	unsigned sender;
-	unsigned sequence_id;
-      };
-      
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
+      Memory mem;
+      off_t offset;
+      int stride;
+      ReductionOpID redop_id;
+      unsigned sequence_id;
 
-      typedef ActiveMessageMediumNoReply<REMOTE_REDUCE_MSGID,
-				         RequestArgs,
-				         handle_request> Message;
-
+      static void handle_message(NodeID sender, const RemoteReduceMessage &msg,
+				 const void *data, size_t datalen);
       // no simple send_request method here - see below
+    };
+    class RemoteWriteFence;
+    struct RemoteWriteFenceMessage {
+      Memory mem;
+      unsigned sequence_id;
+      unsigned num_writes;
+      RemoteWriteFence *fence;
+
+      static void handle_message(NodeID sender, const RemoteWriteFenceMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct RemoteWriteFenceAckMessage {
+      RemoteWriteFence *fence;
+      // TODO: success/failure
+
+      static void handle_message(NodeID sender, const RemoteWriteFenceAckMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RemoteReduceListMessage {
-      struct RequestArgs : public BaseMedium {
-	Memory mem;
-	off_t offset;
-	ReductionOpID redopid;
-      };
+      Memory mem;
+      off_t offset;
+      ReductionOpID redopid;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-      
-      typedef ActiveMessageMediumNoReply<REMOTE_REDLIST_MSGID,
-				         RequestArgs,
-				         handle_request> Message;
-
-      static void send_request(NodeID target, Memory mem, off_t offset,
-			       ReductionOpID redopid,
-			       const void *data, size_t datalen, int payload_mode);
+      static void handle_message(NodeID sender, const RemoteReduceListMessage &msg,
+				 const void *data, size_t datalen);
     };
     
     class RemoteWriteFence : public Operation::AsyncWorkItem {
@@ -492,42 +433,6 @@ namespace Realm {
       virtual void print(std::ostream& os) const;
     };
 
-    struct RemoteWriteFenceMessage {
-      struct RequestArgs {
-	Memory mem;
-	unsigned sender;
-	unsigned sequence_id;
-	unsigned num_writes;
-	RemoteWriteFence *fence;
-      };
-       
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, Memory memory,
-			       unsigned sequence_id, unsigned num_writes,
-			       RemoteWriteFence *fence);
-    };
-    
-    struct RemoteWriteFenceAckMessage {
-      struct RequestArgs {
-	RemoteWriteFence *fence;
-        // TODO: success/failure
-      };
-       
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_WRITE_FENCE_ACK_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target,
-			       RemoteWriteFence *fence);
-    };
-    
     // remote memory writes
 
     extern unsigned do_remote_write(Memory mem, off_t offset,

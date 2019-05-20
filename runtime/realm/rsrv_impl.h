@@ -194,69 +194,37 @@ namespace Realm {
     };
 
   // active messages
-
   struct LockRequestMessage {
-    struct RequestArgs {
-      NodeID node;
-      Reservation lock;
-      unsigned mode;
-    };
+    NodeID node;
+    Reservation lock;
+    unsigned mode;
 
-    static void handle_request(RequestArgs args);
-
-    typedef ActiveMessageShortNoReply<LOCK_REQUEST_MSGID, 
-				      RequestArgs, 
-				      handle_request> Message;
-
-    static void send_request(NodeID target, NodeID req_node,
-			     Reservation lock, unsigned mode);
+    static void handle_message(NodeID sender,const LockRequestMessage &msg,
+			       const void *data, size_t datalen);
   };
 
   struct LockReleaseMessage {
-    struct RequestArgs {
-      NodeID node;
-      Reservation lock;
-    };
+    NodeID node;
+    Reservation lock;
     
-    static void handle_request(RequestArgs args);
-
-    typedef ActiveMessageShortNoReply<LOCK_RELEASE_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target, Reservation lock);
+    static void handle_message(NodeID sender,const LockReleaseMessage &msg,
+			       const void *data, size_t datalen);
   };
 
   struct LockGrantMessage {
-    struct RequestArgs : public BaseMedium {
-      Reservation lock;
-      unsigned mode;
-    };
+    Reservation lock;
+    unsigned mode;
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<LOCK_GRANT_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, Reservation lock,
-			     unsigned mode, const void *data, size_t datalen,
-			     int payload_mode);
+    static void handle_message(NodeID sender,const LockGrantMessage &msg,
+			       const void *data, size_t datalen);
   };
 
   struct DestroyLockMessage {
-    struct RequestArgs {
-      Reservation actual;
-      Reservation dummy;
-    };
+    Reservation actual;
+    Reservation dummy;
 
-    static void handle_request(RequestArgs args);
-
-    typedef ActiveMessageShortNoReply<DESTROY_LOCK_MSGID,
-				      RequestArgs,
-				      handle_request> Message;
-
-    static void send_request(NodeID target, Reservation lock);
+    static void handle_message(NodeID sender,const DestroyLockMessage &msg,
+			       const void *data, size_t datalen);
   };
 
 }; // namespace Realm

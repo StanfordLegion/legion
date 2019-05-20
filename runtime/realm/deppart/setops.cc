@@ -530,16 +530,11 @@ namespace Realm {
   // class UnionMicroOp<N,T>
 
   template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType UnionMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
-
-  template <int N, typename T>
   UnionMicroOp<N,T>::UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1027,7 +1022,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<UnionMicroOp<N,T> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -1067,22 +1067,20 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<UnionMicroOp<N,T> > > UnionMicroOp<N,T>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class IntersectionMicroOp<N,T>
 
   template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType IntersectionMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
-
-  template <int N, typename T>
   IntersectionMicroOp<N,T>::IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs)
     : inputs(_inputs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1197,7 +1195,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -1237,16 +1240,13 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > IntersectionMicroOp<N,T>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class DifferenceMicroOp<N,T>
-
-  template <int N, typename T>
-  inline /*static*/ DynamicTemplates::TagType DifferenceMicroOp<N,T>::type_tag(void)
-  {
-    return NT_TemplateHelper::encode_tag<N,T>();
-  }
 
   template <int N, typename T>
   DifferenceMicroOp<N,T>::DifferenceMicroOp(IndexSpace<N,T> _lhs,
@@ -1254,6 +1254,7 @@ namespace Realm {
     : lhs(_lhs), rhs(_rhs)
   {
     sparsity_output.id = 0;
+    areg.force_instantiation();
   }
 
   template <int N, typename T>
@@ -1438,7 +1439,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -1483,6 +1489,9 @@ namespace Realm {
 	       (s >> sparsity_output));
     assert(ok);
   }
+
+  template <int N, typename T>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > DifferenceMicroOp<N,T>::areg;
 
 
   ////////////////////////////////////////////////////////////////////////
