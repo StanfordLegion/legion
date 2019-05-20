@@ -150,4 +150,9 @@ task main()
   print_summary(time, config)
 end
 
-regentlib.start(main)
+if os.getenv('SAVEOBJ') == '1' then
+  local exe = os.getenv('OBJNAME') or "spmv_sequential"
+  regentlib.saveobj(main, exe, "executable")
+else
+  regentlib.start(main)
+end
