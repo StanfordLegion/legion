@@ -8996,7 +8996,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner())
-        local_field_sizes.resize(runtime->max_local_fields, 0);
+        local_index_infos.resize(runtime->max_local_fields, 
+            std::pair<size_t,CustomSerdezID>(0, 0));
 #ifdef LEGION_GC
       log_garbage.info("GC Field Space %lld %d %d",
           LEGION_DISTRIBUTED_ID_FILTER(did), local_space, handle.id);
@@ -9013,7 +9014,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (is_owner())
-        local_field_sizes.resize(runtime->max_local_fields, 0);
+        local_index_infos.resize(runtime->max_local_fields, 
+            std::pair<size_t,CustomSerdezID>(0, 0));
       size_t num_fields;
       derez.deserialize(num_fields);
       for (unsigned idx = 0; idx < num_fields; idx++)
@@ -9803,7 +9805,7 @@ namespace Legion {
                           "application in field space %d", fid, handle.id)
         // Find an index in which to allocate this field  
         RtEvent ready_event;
-        int result = allocate_index(size, ready_event);
+        int result = allocate_index(size, serdez_id, ready_event);
         if (result < 0)
           REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
                           "Exceeded maximum number of allocated fields for "
@@ -9891,7 +9893,7 @@ namespace Legion {
                             "application in field space %d", fid, handle.id)
           // Find an index in which to allocate this field  
           RtEvent ready_event;
-          int result = allocate_index(sizes[idx], ready_event);
+          int result = allocate_index(sizes[idx], serdez_id, ready_event);
           if (result < 0)
             REPORT_LEGION_ERROR(ERROR_EXCEEDED_MAXIMUM_NUMBER_ALLOCATED_FIELDS,
               "Exceeded maximum number of allocated fields for "
@@ -10132,7 +10134,7 @@ namespace Legion {
       {
         // We're the owner so do the field allocation
         AutoLock n_lock(node_lock);
-        if (!allocate_local_indexes(sizes, indexes, new_indexes))
+        if (!allocate_local_indexes(serdez_id, sizes, indexes, new_indexes))
           return false;
         for (unsigned idx = 0; idx < fids.size(); idx++)
         {
@@ -11072,18 +11074,20 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    int FieldSpaceNode::allocate_index(size_t field_size, RtEvent &ready_event)
+    int FieldSpaceNode::allocate_index(size_t field_size, CustomSerdezID serdez,
+                                       RtEvent &ready_event)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
       assert(is_owner());
 #endif
       // Check to see if we still have spots
-      if (field_sizes.size() < (LEGION_MAX_FIELDS - runtime->max_local_fields))
+      if (index_infos.size() < (LEGION_MAX_FIELDS - runtime->max_local_fields))
       {
         // We still have unallocated indexes so use those first
-        int result = field_sizes.size();
-        field_sizes.push_back(field_size);
+        int result = index_infos.size();
+        index_infos.push_back(
+            std::pair<size_t,CustomSerdezID>(field_size, serdez));
         return result;
       }
       // If there are no available indexes then we are done
@@ -11095,10 +11099,12 @@ namespace Legion {
             available_indexes.begin(); it != available_indexes.end(); it++)
       {
 #ifdef DEBUG_LEGION
-        assert(it->first < field_sizes.size());
+        assert(it->first < index_infos.size());
 #endif
         // skip any entires without the right size
-        if (field_sizes[it->first] != field_size)
+        if (index_infos[it->first].first != field_size)
+          continue;
+        if (index_infos[it->first].second != serdez)
           continue;
         if (!it->second.exists() || it->second.has_triggered())
         {
@@ -11176,7 +11182,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    bool FieldSpaceNode::allocate_local_indexes(
+    bool FieldSpaceNode::allocate_local_indexes(CustomSerdezID serdez,
                                       const std::vector<size_t> &sizes,
                                       const std::set<unsigned> &current_indexes,
                                             std::vector<unsigned> &new_indexes)
@@ -11194,17 +11200,18 @@ namespace Legion {
         int chosen_index = -1;
         unsigned global_idx = LEGION_MAX_FIELDS - runtime->max_local_fields;
         for (unsigned local_idx = 0; 
-              local_idx < local_field_sizes.size(); local_idx++, global_idx++)
+              local_idx < local_index_infos.size(); local_idx++, global_idx++)
         {
           // If it's already been allocated in this context then
           // we can't use it
           if (current_indexes.find(global_idx) != current_indexes.end())
             continue;
           // Check if the current local field index is used
-          if (local_field_sizes[local_idx] > 0)
+          if (local_index_infos[local_idx].first > 0)
           {
             // Already in use, check to see if the field sizes are the same
-            if (local_field_sizes[local_idx] == field_size)
+            if ((local_index_infos[local_idx].first == field_size) &&
+                (local_index_infos[local_idx].second == serdez))
             {
               // Same size so we can use it
               chosen_index = global_idx;
@@ -11216,7 +11223,8 @@ namespace Legion {
           {
             // Not in use, so we can assign the size and make
             // ourselves the first user
-            local_field_sizes[local_idx] = field_size;
+            local_index_infos[local_idx] = 
+              std::pair<size_t,CustomSerdezID>(field_size, serdez);
             chosen_index = global_idx;
             break;
           }

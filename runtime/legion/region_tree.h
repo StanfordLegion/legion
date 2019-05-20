@@ -2769,10 +2769,11 @@ namespace Legion {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(size_t field_size, RtEvent &ready_event);
+      int allocate_index(size_t field_size, CustomSerdezID serdez, 
+                         RtEvent &ready_event);
       void free_index(unsigned index, RtEvent free_event);
     protected:
-      bool allocate_local_indexes(
+      bool allocate_local_indexes(CustomSerdezID serdez,
             const std::vector<size_t> &sizes,
             const std::set<unsigned> &current_indexes,
                   std::vector<unsigned> &new_indexes);
@@ -2788,9 +2789,9 @@ namespace Legion {
       // Once allocated all indexes have to have the same field size
       // for now because it's too hard to go through and prune out all 
       // the data structures that depend on field sizes being the same.
-      std::vector<size_t> field_sizes;
+      std::vector<std::pair<size_t,CustomSerdezID> > index_infos;
       // Local field sizes
-      std::vector<size_t> local_field_sizes;
+      std::vector<std::pair<size_t,CustomSerdezID> > local_index_infos;
       // Use a list here so that we cycle through all the indexes
       // that have been freed before we reuse to avoid false aliasing
       // We may pull things out from the middle though
