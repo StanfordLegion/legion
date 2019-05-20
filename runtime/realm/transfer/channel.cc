@@ -3215,9 +3215,10 @@ namespace Realm {
 #endif
 
       /*static*/
-      void XferDesRemoteWriteMessage::handle_request(RequestArgs args,
-                                                     const void *data,
-                                                     size_t datalen)
+      void XferDesRemoteWriteMessage::handle_message(NodeID sender,
+						     const XferDesRemoteWriteMessage &args,
+						     const void *data,
+						     size_t datalen)
       {
         // assert data copy is in right position
         //assert(data == args.dst_buf);
@@ -3231,11 +3232,14 @@ namespace Realm {
 
 	// don't ack empty requests
 	if(datalen > 0)
-	  XferDesRemoteWriteAckMessage::send_request(args.sender, args.req);
+	  XferDesRemoteWriteAckMessage::send_request(sender, args.req);
       }
 
       /*static*/
-      void XferDesRemoteWriteAckMessage::handle_request(RequestArgs args)
+      void XferDesRemoteWriteAckMessage::handle_message(NodeID sender,
+							const XferDesRemoteWriteAckMessage &args,
+							const void *data,
+							size_t datalen)
       {
         RemoteWriteRequest* req = args.req;
         req->xd->notify_request_read_done(req);
@@ -3244,9 +3248,10 @@ namespace Realm {
       }
 
       /*static*/
-      void XferDesCreateMessage::handle_request(RequestArgs args,
-                                                const void *msgdata,
-                                                size_t msglen)
+      void XferDesCreateMessage::handle_message(NodeID sender,
+						const XferDesCreateMessage &args,
+						const void *msgdata,
+						size_t msglen)
       {
 #if 0
         const Payload *payload = (const Payload *)msgdata;
@@ -3365,66 +3370,45 @@ namespace Realm {
                                XferDesFence* fence,
 			       RegionInstance inst /*= RegionInstance::NO_INST*/)
       {
-#if 0
-        size_t payload_size = sizeof(Payload);// + sizeof(OffsetsAndSize) * oas_vec.size();
-        Payload *payload = (Payload*) malloc(payload_size);
-        payload->dma_request = dma_request;
-        payload->launch_node = launch_node;
-        payload->guid = guid;
-        payload->pre_xd_guid = pre_xd_guid;
-        payload->next_xd_guid = next_xd_guid;
-        payload->mark_started = mark_started;
-        payload->max_req_size = max_req_size;
-        payload->max_nr = max_nr;
-        payload->priority = priority;
-        payload->order = order;
-        payload->kind = kind;
-        //payload->domain = domain;
-        //src_buf.serialize(payload->src_buf_bits);
-        //dst_buf.serialize(payload->dst_buf_bits);
-        //payload->oas_vec_size = oas_vec.size();
-        //for (unsigned i = 0; i < oas_vec.size(); i++)
-        //  payload->oas_vec(i) = oas_vec[i];
-#else
-	Realm::Serialization::DynamicBufferSerializer dbs(128);
-	bool ok = ((dbs << reinterpret_cast<intptr_t>(dma_request)) &&
-		   (dbs << launch_node) &&
-		   (dbs << guid) &&
-		   (dbs << pre_xd_guid) &&
-		   (dbs << next_xd_guid) &&
-		   (dbs << next_max_rw_gap) &&
-		   (dbs << src_ib_offset) &&
-		   (dbs << src_ib_size) &&
-		   (dbs << mark_started) &&
-		   (dbs << max_req_size) &&
-		   (dbs << max_nr) &&
-		   (dbs << priority) &&
-		   (dbs << order) &&
-		   (dbs << kind) &&
-		   (dbs << _src_serdez_id) &&
-		   (dbs << _dst_serdez_id) &&
-		   (dbs << *_src_iter) &&
-		   (dbs << *_dst_iter));
+	ActiveMessage<XferDesCreateMessage> amsg(target, 65536);
+	bool ok = ((amsg << reinterpret_cast<intptr_t>(dma_request)) &&
+		   (amsg << launch_node) &&
+		   (amsg << guid) &&
+		   (amsg << pre_xd_guid) &&
+		   (amsg << next_xd_guid) &&
+		   (amsg << next_max_rw_gap) &&
+		   (amsg << src_ib_offset) &&
+		   (amsg << src_ib_size) &&
+		   (amsg << mark_started) &&
+		   (amsg << max_req_size) &&
+		   (amsg << max_nr) &&
+		   (amsg << priority) &&
+		   (amsg << order) &&
+		   (amsg << kind) &&
+		   (amsg << _src_serdez_id) &&
+		   (amsg << _dst_serdez_id) &&
+		   (amsg << *_src_iter) &&
+		   (amsg << *_dst_iter));
 	assert(ok);
-	
-	size_t payload_size = dbs.bytes_used();
-	void *payload = dbs.detach_buffer(-1 /*no trim*/);
-#endif
-
-        RequestArgs args;
-        args.inst = inst;
-        args.src_mem = _src_mem; //src_buf.memory;
-        args.dst_mem = _dst_mem; //dst_buf.memory;
-        args.fence = fence;
-        Message::request(target, args, payload, payload_size, PAYLOAD_FREE);
+	amsg->inst = inst;
+	amsg->src_mem = _src_mem;
+	amsg->dst_mem = _dst_mem;
+	amsg->fence = fence;
+	amsg.commit();
       }
 
-      /*static*/ void XferDesDestroyMessage::handle_request(RequestArgs args)
+      /*static*/ void XferDesDestroyMessage::handle_message(NodeID sender,
+							    const XferDesDestroyMessage &args,
+							    const void *msgdata,
+							    size_t msglen)
       {
         xferDes_queue->destroy_xferDes(args.guid);
       }
 
-      /*static*/ void UpdateBytesWriteMessage::handle_request(RequestArgs args)
+      /*static*/ void UpdateBytesWriteMessage::handle_message(NodeID sender,
+							      const UpdateBytesWriteMessage &args,
+							      const void *msgdata,
+							      size_t msglen)
       {
         xferDes_queue->update_pre_bytes_write(args.guid,
 					      args.span_start,
@@ -3432,7 +3416,10 @@ namespace Realm {
 					      args.pre_bytes_total);
       }
 
-      /*static*/ void UpdateBytesReadMessage::handle_request(RequestArgs args)
+      /*static*/ void UpdateBytesReadMessage::handle_message(NodeID sender,
+							    const UpdateBytesReadMessage &args,
+							    const void *msgdata,
+							    size_t msglen)
       {
         xferDes_queue->update_next_bytes_read(args.guid,
 					      args.span_start,
@@ -3998,6 +3985,13 @@ namespace Realm {
       }
     }
 
+ActiveMessageHandlerReg<NotifyXferDesCompleteMessage> notify_xfer_des_complete_handler;
+ActiveMessageHandlerReg<XferDesRemoteWriteMessage> xfer_des_remote_write_handler;
+ActiveMessageHandlerReg<XferDesRemoteWriteAckMessage> xfer_des_remote_write_ack_handler;
+ActiveMessageHandlerReg<XferDesCreateMessage> xfer_des_create_message_handler;
+ActiveMessageHandlerReg<XferDesDestroyMessage> xfer_des_destroy_message_handler;
+ActiveMessageHandlerReg<UpdateBytesWriteMessage> update_bytes_write_message_handler;
+ActiveMessageHandlerReg<UpdateBytesReadMessage> update_bytes_read_message_handler;
 }; // namespace Realm
 
 

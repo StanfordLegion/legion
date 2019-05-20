@@ -21,7 +21,7 @@
 #include "realm/serialize.h"
 #include "realm/profiling.h"
 #include "realm/utils.h"
-
+#include "realm/activemsg.h"
 #include <sys/types.h>
 #include <dirent.h>
 
@@ -267,10 +267,14 @@ namespace Realm {
 	NodeID target = it->first;
 	RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	tro->add_async_work_item(reg_op);
-	RegisterTaskMessage::send_request(target, func_id, NO_KIND, it->second,
-					  tro->codedesc,
-					  tro->userdata.base(), tro->userdata.size(),
-					  reg_op);
+	ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	amsg->func_id = func_id;
+	amsg->kind = NO_KIND;
+	amsg->reg_op = reg_op;
+	amsg << it->second;
+	amsg << tro->codedesc;
+	amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	amsg.commit();
       }
 
       tro->mark_finished(true /*successful*/);
@@ -333,10 +337,14 @@ namespace Realm {
 
 	  RemoteTaskRegistration *reg_op = new RemoteTaskRegistration(tro, target);
 	  tro->add_async_work_item(reg_op);
-	  RegisterTaskMessage::send_request(target, func_id, target_kind, std::vector<Processor>(),
-					    tro->codedesc,
-					    tro->userdata.base(), tro->userdata.size(),
-					    reg_op);
+	  ActiveMessage<RegisterTaskMessage> amsg(target, 65536);
+	  amsg->func_id = func_id;
+	  amsg->kind = target_kind;
+	  amsg->reg_op = reg_op;
+	  amsg << std::vector<Processor>();
+	  amsg << tro->codedesc;
+	  amsg << ByteArrayRef(tro->userdata.base(), tro->userdata.size());
+	  amsg.commit();
 	}
       }
 
@@ -530,10 +538,21 @@ namespace Realm {
 			 << " finish=" << finish_event;
 
 	get_runtime()->optable.add_remote_operation(finish_event, target);
-
-	SpawnTaskMessage::send_request(target, me, func_id,
-				       args, arglen, &reqs,
-				       start_event, finish_event, priority);
+	// if profiling data need DynamicBufferSerializer?
+	size_t len = reqs.empty() ? arglen: arglen+512;
+	ActiveMessage<SpawnTaskMessage> amsg(target, len);
+	amsg->proc = me;
+	amsg->start_event = start_event;
+	amsg->finish_event = finish_event;
+	amsg->user_arglen = arglen;
+	amsg->priority = priority;
+	amsg->func_id = func_id;
+	amsg.add_payload(args, arglen);
+	// if profiling data
+	if (!reqs.empty()) {
+	  amsg << reqs;
+	}
+	amsg.commit();
 	return;
       }
 
@@ -585,77 +604,11 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class SpawnTaskMessage
-  //
-
-  /*static*/ void SpawnTaskMessage::handle_request(RequestArgs args,
-						   const void *data,
-						   size_t datalen)
-  {
-    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-    ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
-
-    log_task.debug() << "received remote spawn request:"
-		     << " func=" << args.func_id
-		     << " proc=" << args.proc
-		     << " finish=" << args.finish_event;
-
-    Serialization::FixedBufferDeserializer fbd(data, datalen);
-    fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
-
-    // profiling requests are optional - extract only if there's data
-    ProfilingRequestSet prs;
-    if(fbd.bytes_left() > 0)
-      fbd >> prs;
-      
-    p->spawn_task(args.func_id, data, args.user_arglen, prs,
-		  args.start_event, args.finish_event, args.priority);
-  }
-
-  /*static*/ void SpawnTaskMessage::send_request(NodeID target, Processor proc,
-						 Processor::TaskFuncID func_id,
-						 const void *args, size_t arglen,
-						 const ProfilingRequestSet *prs,
-						 Event start_event, Event finish_event,
-						 int priority)
-  {
-    RequestArgs r_args;
-
-    r_args.proc = proc;
-    r_args.func_id = func_id;
-    r_args.start_event = start_event;
-    r_args.finish_event = finish_event;
-    r_args.priority = priority;
-    r_args.user_arglen = arglen;
-    
-    if(!prs || prs->empty()) {
-      // no profiling, so task args are the only payload
-      Message::request(target, r_args, args, arglen, PAYLOAD_COPY);
-    } else {
-      // need to serialize both the task args and the profiling request
-      //  into a single payload
-      // allocate a little extra initial space for the profiling requests, but not too
-      //  much in case the copy sits around outside the srcdatapool for a long time
-      // (if we need more than this, we'll pay for a realloc during serialization, but it
-      //  will still work correctly)
-      Serialization::DynamicBufferSerializer dbs(arglen + 512);
-
-      dbs.append_bytes(args, arglen);
-      dbs << *prs;
-
-      size_t datalen = dbs.bytes_used();
-      void *data = dbs.detach_buffer(-1);  // don't trim - this buffer has a short life
-      Message::request(target, r_args, data, datalen, PAYLOAD_FREE);
-    }
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
   // class RegisterTaskMessage
   //
 
-  /*static*/ void RegisterTaskMessage::handle_request(RequestArgs args, const void *data, size_t datalen)
+  /*static*/ void RegisterTaskMessage::handle_message(NodeID sender, const RegisterTaskMessage &args,
+						      const void *data, size_t datalen)
   {
     std::vector<Processor> procs;
     CodeDescriptor codedesc;
@@ -689,59 +642,23 @@ namespace Realm {
     }
 
     // TODO: include status/profiling eventually
-    RegisterTaskCompleteMessage::send_request(args.sender, args.reg_op,
-					      true /*successful*/);
+    ActiveMessage<RegisterTaskCompleteMessage> amsg(sender);
+    amsg->reg_op = args.reg_op;
+    amsg->successful = true;
+    amsg.commit();
   }
-
-  /*static*/ void RegisterTaskMessage::send_request(NodeID target,
-						    Processor::TaskFuncID func_id,
-						    Processor::Kind kind,
-						    const std::vector<Processor>& procs,
-						    const CodeDescriptor& codedesc,
-						    const void *userdata, size_t userlen,
-						    RemoteTaskRegistration *reg_op)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.func_id = func_id;
-    args.kind = kind;
-    args.reg_op = reg_op;
-
-    Serialization::DynamicBufferSerializer dbs(1024);
-    dbs << procs;
-    dbs << codedesc;
-    dbs << ByteArrayRef(userdata, userlen);
-
-    size_t datalen = dbs.bytes_used();
-    void *data = dbs.detach_buffer(-1 /*no trim*/);
-    Message::request(target, args, data, datalen, PAYLOAD_FREE);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
   // class RegisterTaskCompleteMessage
   //
 
-  /*static*/ void RegisterTaskCompleteMessage::handle_request(RequestArgs args)
+  /*static*/ void RegisterTaskCompleteMessage::handle_message(NodeID sender,
+							      const RegisterTaskCompleteMessage &args,
+							      const void *data, size_t datalen)
   {
     args.reg_op->mark_finished(args.successful);
   }
-
-  /*static*/ void RegisterTaskCompleteMessage::send_request(NodeID target,
-							    RemoteTaskRegistration *reg_op,
-							    bool successful)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.reg_op = reg_op;
-    args.successful = successful;
-
-    Message::request(target, args);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -792,10 +709,21 @@ namespace Realm {
       }
 
       get_runtime()->optable.add_remote_operation(finish_event, target);
-
-      SpawnTaskMessage::send_request(target, me, func_id,
-				     args, arglen, &reqs,
-				     start_event, finish_event, priority);
+      // if profiling data need DynamicBufferSerializer?
+      size_t len = reqs.empty() ? arglen: arglen+512;
+      ActiveMessage<SpawnTaskMessage> amsg(target,len);
+      amsg->proc = me;
+      amsg->start_event = start_event;
+      amsg->finish_event = finish_event;
+      amsg->user_arglen = arglen;
+      amsg->priority = priority;
+      amsg->func_id = func_id;
+      amsg.add_payload(args, arglen);
+      // if profiling data
+      if (!reqs.empty()) {
+	amsg << reqs;
+      }
+      amsg.commit();
     }
 
   
@@ -1141,5 +1069,38 @@ namespace Realm {
     os << "RemoteTaskRegistration(node=" << target_node << ")";
   }
 
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SpawnTaskMessage
+  //
+  /*static*/ void SpawnTaskMessage::handle_message(NodeID sender,
+						      const SpawnTaskMessage &args,
+						      const void *data,
+						      size_t datalen)
+  {
+    DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
+    ProcessorImpl *p = get_runtime()->get_processor_impl(args.proc);
+
+    log_task.debug() << "received remote spawn request:"
+		     << " func=" << args.func_id
+		     << " proc=" << args.proc
+		     << " finish=" << args.finish_event;
+
+    Serialization::FixedBufferDeserializer fbd(data, datalen);
+    fbd.extract_bytes(0, args.user_arglen);  // skip over task args - we'll access those directly
+
+    // profiling requests are optional - extract only if there's data
+    ProfilingRequestSet prs;
+    if(fbd.bytes_left() > 0)
+      fbd >> prs;
+
+    p->spawn_task(args.func_id, data, args.user_arglen, prs,
+		  args.start_event, args.finish_event, args.priority);
+  }
+
+  ActiveMessageHandlerReg<SpawnTaskMessage> spawn_task_message_handler;
+  ActiveMessageHandlerReg<RegisterTaskMessage> register_task_message_handler;
+  ActiveMessageHandlerReg<RegisterTaskCompleteMessage> register_task_complete_message_handler;
 
 }; // namespace Realm

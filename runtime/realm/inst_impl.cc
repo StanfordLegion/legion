@@ -526,10 +526,10 @@ namespace Realm {
       metadata.mark_valid(early_reqs);
       if(!early_reqs.empty()) {
 	log_inst.debug() << "sending instance metadata to early requestors: isnt=" << me;
-	size_t datalen = 0;
-	void *data = metadata.serialize(datalen);
-	MetadataResponseMessage::broadcast_request(early_reqs, ID(me).id, data, datalen);
-	free(data);
+	ActiveMessage<MetadataResponseMessage> amsg(early_reqs,65536);
+	metadata.serialize_msg(amsg);
+	amsg->id = ID(me).id;
+	amsg.commit();
       }
 
       if(measurements.wants_measurement<ProfilingMeasurements::InstanceAllocResult>()) {
@@ -704,6 +704,24 @@ namespace Realm {
 
       out_size = dbs.bytes_used();
       return dbs.detach_buffer(0 /*trim*/);
+    }
+
+  template <typename T>
+  void RegionInstanceImpl::Metadata::serialize_msg(T& fbs) const
+    {
+      bool ok = ((fbs << alloc_offset) &&
+		 (fbs << size) &&
+		 (fbs << redopid) &&
+		 (fbs << count_offset) &&
+		 (fbs << red_list_size) &&
+		 (fbs << block_size) &&
+		 (fbs << elmt_size) &&
+		 (fbs << field_sizes) &&
+		 (fbs << parent_inst) &&
+		 (fbs << inst_offset) &&
+		 (fbs << filename) &&
+		 (fbs << *layout));
+      assert(ok);
     }
 
     void RegionInstanceImpl::Metadata::deserialize(const void *in_data, size_t in_size)

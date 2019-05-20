@@ -318,52 +318,6 @@ void deferred_free(void *ptr)
   }
 }
 
-class PayloadSource {
-public:
-  PayloadSource(void) { }
-  virtual ~PayloadSource(void) { }
-public:
-  virtual void copy_data(void *dest) = 0;
-  virtual void *get_contig_pointer(void) { assert(false); return 0; }
-  virtual int get_payload_mode(void) { return PAYLOAD_KEEP; }
-};
-
-class ContiguousPayload : public PayloadSource {
-public:
-  ContiguousPayload(void *_srcptr, size_t _size, int _mode);
-  virtual ~ContiguousPayload(void) { }
-  virtual void copy_data(void *dest);
-  virtual void *get_contig_pointer(void) { return srcptr; }
-  virtual int get_payload_mode(void) { return mode; }
-protected:
-  void *srcptr;
-  size_t size;
-  int mode;
-};
-
-class TwoDPayload : public PayloadSource {
-public:
-  TwoDPayload(const void *_srcptr, size_t _line_size, size_t _line_count,
-	      ptrdiff_t _line_stride, int _mode);
-  virtual ~TwoDPayload(void) { }
-  virtual void copy_data(void *dest);
-protected:
-  const void *srcptr;
-  size_t line_size, line_count;
-  ptrdiff_t line_stride;
-  int mode;
-};
-
-class SpanPayload : public PayloadSource {
-public:
-  SpanPayload(const SpanList& _spans, size_t _size, int _mode);
-  virtual ~SpanPayload(void) { }
-  virtual void copy_data(void *dest);
-protected:
-  SpanList spans;
-  size_t size;
-  int mode;
-};
 
 struct OutgoingMessage {
   OutgoingMessage(unsigned _msgid, unsigned _num_args, const void *_args);
@@ -2458,18 +2412,119 @@ static void handle_flip_ack(gasnet_token_t token,
   endpoint_manager->handle_flip_ack(src, ack_buffer);
 }
 
-static const int MAX_HANDLERS = 128;
-static gasnet_handlerentry_t handlers[MAX_HANDLERS];
-static int hcount = 0;
+class IncomingMessageNew : public IncomingMessage {
+ public:
+  IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
+		     ActiveMessageHandlerTable::MessageHandler _handler);
 
-void add_handler_entry(int msgid, void (*fnptr)())
+  virtual void run_handler(void);
+
+  virtual int get_peer(void);
+  virtual int get_msgid(void);
+  virtual size_t get_msgsize(void);
+
+  NodeID src;
+  void *buf;
+  size_t nbytes;
+  ActiveMessageHandlerTable::MessageHandler handler;
+  union {
+    struct {
+      BaseMedium base;
+      unsigned short msgid;
+      unsigned short sender;
+      unsigned payload_len;
+    } hdr;
+    gasnet_handlerarg_t args[16];
+  } header;
+};
+
+IncomingMessageNew::IncomingMessageNew(NodeID _src, void *_buf, size_t _nbytes,
+				       ActiveMessageHandlerTable::MessageHandler _handler)
+  : src(_src)
+  , buf(_buf)
+  , nbytes(_nbytes)
+  , handler(_handler)
+{}
+
+void IncomingMessageNew::run_handler(void)
 {
-  assert(hcount < MAX_HANDLERS);
-  handlers[hcount].index = msgid;
-  handlers[hcount].fnptr = fnptr;
-  hcount++;
+  (*handler)(header.hdr.sender, header.args+6, buf, nbytes);
+  handle_long_msgptr(src, buf);
 }
-			   
+
+int IncomingMessageNew::get_peer(void)
+{
+  return src;
+}
+
+int IncomingMessageNew::get_msgid(void)
+{
+  return header.hdr.msgid;
+}
+
+size_t IncomingMessageNew::get_msgsize(void)
+{
+  return nbytes;
+}
+
+static void handle_new_activemsg(gasnet_token_t token,
+				 void *buf, size_t nbytes,
+				 gasnet_handlerarg_t arg0,
+				 gasnet_handlerarg_t arg1,
+				 gasnet_handlerarg_t arg2,
+				 gasnet_handlerarg_t arg3,
+				 gasnet_handlerarg_t arg4,
+				 gasnet_handlerarg_t arg5,
+				 gasnet_handlerarg_t arg6,
+				 gasnet_handlerarg_t arg7,
+				 gasnet_handlerarg_t arg8,
+				 gasnet_handlerarg_t arg9,
+				 gasnet_handlerarg_t arg10,
+				 gasnet_handlerarg_t arg11,
+				 gasnet_handlerarg_t arg12,
+				 gasnet_handlerarg_t arg13,
+				 gasnet_handlerarg_t arg14,
+				 gasnet_handlerarg_t arg15)
+{
+  NodeID src = get_message_source(token);
+  bool handle_now = adjust_long_msgsize(src, buf, nbytes, arg0, arg1);
+  if(handle_now) {
+    unsigned short msgid = arg4 & 0xffff;
+
+    ActiveMessageHandlerTable::MessageHandler handler = activemsg_handler_table.lookup_message_handler(msgid);
+
+    IncomingMessageNew *imsg = new IncomingMessageNew(src, buf, nbytes, handler);
+    imsg->header.args[0] = arg0;
+    imsg->header.args[1] = arg1;
+    imsg->header.args[2] = arg2;
+    imsg->header.args[3] = arg3;
+    imsg->header.args[4] = arg4;
+    imsg->header.args[5] = arg5;
+    imsg->header.args[6] = arg6;
+    imsg->header.args[7] = arg7;
+    imsg->header.args[8] = arg8;
+    imsg->header.args[9] = arg9;
+    imsg->header.args[10] = arg10;
+    imsg->header.args[11] = arg11;
+    imsg->header.args[12] = arg12;
+    imsg->header.args[13] = arg13;
+    imsg->header.args[14] = arg14;
+    imsg->header.args[15] = arg15;
+    /* save a copy of the srcptr - imsg may be freed any time*/
+    /*  after we enqueue it */
+    uint64_t srcptr = reinterpret_cast<uintptr_t>(imsg->header.hdr.base.srcptr);
+    enqueue_incoming(src, imsg);
+    /* we can (and should) release the srcptr immediately */
+    if(srcptr) {
+      assert(nbytes > 0);
+      record_message(src, true);
+      send_srcptr_release(token, srcptr);
+    } else
+      record_message(src, false);
+  } else
+    record_message(src, false);
+}
+
 void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
@@ -2539,7 +2594,13 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   }
 #endif
 
-  assert(hcount < (MAX_HANDLERS - 3));
+  const int MAX_HANDLERS = 4;
+  gasnet_handlerentry_t handlers[MAX_HANDLERS];
+  int hcount = 0;
+
+  handlers[hcount].index = MSGID_NEW_ACTIVEMSG;
+  handlers[hcount].fnptr = (void (*)())handle_new_activemsg;
+  hcount++;
   handlers[hcount].index = MSGID_FLIP_REQ;
   handlers[hcount].fnptr = (void (*)())handle_flip_req;
   hcount++;
@@ -2549,11 +2610,14 @@ void init_endpoints(int gasnet_mem_size_in_mb,
   handlers[hcount].index = MSGID_RELEASE_SRCPTR;
   handlers[hcount].fnptr = (void (*)())SrcDataPool::release_srcptr_handler;
   hcount++;
+  assert(hcount <= MAX_HANDLERS);
 #ifdef ACTIVE_MESSAGE_TRACE
   record_am_handler(MSGID_FLIP_REQ, "Flip Request AM");
   record_am_handler(MSGID_FLIP_ACK, "Flip Acknowledgement AM");
   record_am_handler(MSGID_RELEASE_SRCPTR, "Release Source Pointer AM");
 #endif
+
+  activemsg_handler_table.construct_handler_table();
 
   CHECK_GASNET( gasnet_attach(handlers, hcount,
 			      attach_size, 0) );
@@ -2819,54 +2883,6 @@ void handle_long_msgptr(NodeID source, const void *ptr)
 #endif
 }
 
-ContiguousPayload::ContiguousPayload(void *_srcptr, size_t _size, int _mode)
-  : srcptr(_srcptr), size(_size), mode(_mode)
-{}
-
-void ContiguousPayload::copy_data(void *dest)
-{
-  log_sdp.info("contig copy %p <- %p (%zd bytes)", dest, srcptr, size);
-  memcpy(dest, srcptr, size);
-  if(mode == PAYLOAD_FREE)
-    free(srcptr);
-}
-
-TwoDPayload::TwoDPayload(const void *_srcptr, size_t _line_size,
-			 size_t _line_count,
-			 ptrdiff_t _line_stride, int _mode)
-  : srcptr(_srcptr), line_size(_line_size), line_count(_line_count),
-    line_stride(_line_stride), mode(_mode)
-{}
-
-void TwoDPayload::copy_data(void *dest)
-{
-  char *dst_c = (char *)dest;
-  const char *src_c = (const char *)srcptr;
-
-  for(size_t i = 0; i < line_count; i++) {
-    memcpy(dst_c, src_c, line_size);
-    dst_c += line_size;
-    src_c += line_stride;
-  }
-}
-
-SpanPayload::SpanPayload(const SpanList&_spans, size_t _size, int _mode)
-  : spans(_spans), size(_size), mode(_mode)
-{}
-
-void SpanPayload::copy_data(void *dest)
-{
-  char *dst_c = (char *)dest;
-  size_t bytes_left = size;
-  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
-    assert(it->second <= (size_t)bytes_left);
-    memcpy(dst_c, it->first, it->second);
-    dst_c += it->second;
-    bytes_left -= it->second;
-    assert(bytes_left >= 0);
-  }
-  assert(bytes_left == 0);
-}
 
 extern bool adjust_long_msgsize(NodeID source, void *&ptr, size_t &buffer_size,
 				int message_id, int chunks)
@@ -2960,11 +2976,6 @@ void handle_long_msgptr(NodeID source, const void *ptr)
   assert(0 && "compiled without USE_GASNET - active messages not available!");
 }
 
-void add_handler_entry(int msgid, void (*fnptr)())
-{
-  // ignored
-}
-
 void init_endpoints(int gasnet_mem_size_in_mb,
 		    int registered_mem_size_in_mb,
 		    int registered_ib_mem_size_in_mb,
@@ -2987,3 +2998,99 @@ void stop_activemsg_threads(void)
 }
 
 #endif
+
+ContiguousPayload::ContiguousPayload(void *_srcptr, size_t _size, int _mode)
+  : srcptr(_srcptr), size(_size), mode(_mode)
+{}
+
+void ContiguousPayload::copy_data(void *dest)
+{
+  //  log_sdp.info("contig copy %p <- %p (%zd bytes)", dest, srcptr, size);
+  memcpy(dest, srcptr, size);
+  if(mode == PAYLOAD_FREE)
+    free(srcptr);
+}
+
+TwoDPayload::TwoDPayload(const void *_srcptr, size_t _line_size,
+			 size_t _line_count,
+			 ptrdiff_t _line_stride, int _mode)
+  : srcptr(_srcptr), line_size(_line_size), line_count(_line_count),
+    line_stride(_line_stride), mode(_mode)
+{}
+
+void TwoDPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  const char *src_c = (const char *)srcptr;
+
+  for(size_t i = 0; i < line_count; i++) {
+    memcpy(dst_c, src_c, line_size);
+    dst_c += line_size;
+    src_c += line_stride;
+  }
+}
+
+SpanPayload::SpanPayload(const SpanList&_spans, size_t _size, int _mode)
+  : spans(_spans), size(_size), mode(_mode)
+{}
+
+void SpanPayload::copy_data(void *dest)
+{
+  char *dst_c = (char *)dest;
+  size_t bytes_left = size;
+  for(SpanList::const_iterator it = spans.begin(); it != spans.end(); it++) {
+    assert(it->second <= (size_t)bytes_left);
+    memcpy(dst_c, it->first, it->second);
+    dst_c += it->second;
+    bytes_left -= it->second;
+    assert(bytes_left >= 0);
+  }
+  assert(bytes_left == 0);
+}
+
+////////////////////////////////////////////////////////////////////////
+//
+// class ActiveMessageHandlerTable
+//
+
+ActiveMessageHandlerTable::ActiveMessageHandlerTable(void)
+{}
+
+ActiveMessageHandlerTable::~ActiveMessageHandlerTable(void)
+{}
+
+ActiveMessageHandlerTable::MessageHandler ActiveMessageHandlerTable::lookup_message_handler(ActiveMessageHandlerTable::MessageID id)
+{
+  assert(id < handlers.size());
+  return handlers[id].handler;
+}
+
+/*static*/ void ActiveMessageHandlerTable::append_handler_reg(ActiveMessageHandlerRegBase *new_reg)
+{
+  new_reg->next_handler = pending_handlers;
+  pending_handlers = new_reg;
+}
+
+static inline bool hash_less(const ActiveMessageHandlerTable::HandlerEntry &a,
+			     const ActiveMessageHandlerTable::HandlerEntry &b)
+{
+  return (a.hash < b.hash);
+}
+
+void ActiveMessageHandlerTable::construct_handler_table(void)
+{
+  for(ActiveMessageHandlerRegBase *nextreg = pending_handlers;
+      nextreg;
+      nextreg = nextreg->next_handler) {
+    HandlerEntry e;
+    e.hash = nextreg->hash;
+    e.handler = nextreg->get_handler();
+    handlers.push_back(e);
+  }
+
+  std::sort(handlers.begin(), handlers.end(), hash_less);
+}
+
+/*static*/ ActiveMessageHandlerRegBase *ActiveMessageHandlerTable::pending_handlers = 0;
+
+/*extern*/ ActiveMessageHandlerTable activemsg_handler_table;

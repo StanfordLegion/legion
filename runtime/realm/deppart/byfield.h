@@ -29,10 +29,6 @@ namespace Realm {
     typedef T IDXTYPE;
     typedef FT FIELDTYPE;
 
-    static const Opcode OPCODE = UOPCODE_BY_FIELD;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     ByFieldMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N,T> _inst_space,
 		   RegionInstance _inst, size_t _field_offset);
     virtual ~ByFieldMicroOp(void);
@@ -46,7 +42,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<ByFieldMicroOp<N,T,FT> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 

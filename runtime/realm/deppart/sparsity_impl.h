@@ -61,9 +61,41 @@ namespace Realm {
 
     SparsityMap<N,T> me;
 
+    struct RemoteSparsityRequest {
+      SparsityMap<N,T> sparsity;
+      bool send_precise;
+      bool send_approx;
+
+      static void handle_message(NodeID sender,
+				 const RemoteSparsityRequest &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct RemoteSparsityContrib {
+      SparsityMap<N,T> sparsity;
+      size_t sequence_id, sequence_count;
+
+      static void handle_message(NodeID sender,
+				 const RemoteSparsityContrib &msg,
+				 const void *data, size_t datalen);
+    };
+
+    struct SetContribCountMessage {
+      SparsityMap<N,T> sparsity;
+      size_t count;
+
+      static void handle_message(NodeID sender,
+				 const SetContribCountMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
   protected:
     void finalize(void);
-    
+
+    static ActiveMessageHandlerReg<RemoteSparsityRequest> remote_sparsity_request_reg;
+    static ActiveMessageHandlerReg<RemoteSparsityContrib> remote_sparsity_contrib_reg;
+    static ActiveMessageHandlerReg<SetContribCountMessage> set_contrib_count_msg_reg;
+
     int remaining_contributor_count;
     GASNetHSL mutex;
     std::vector<PartitioningMicroOp *> approx_waiters, precise_waiters;
@@ -119,78 +151,6 @@ namespace Realm {
     std::map<NodeID, std::map<int, int> > fragments;
   };
 
-  struct RemoteSparsityRequestMessage {
-    struct RequestArgs {
-      NodeID sender;
-      DynamicTemplates::TagType type_tag;
-      ID::IDType sparsity_id;
-      bool send_precise;
-      bool send_approx;
-    };
-
-    struct DecodeHelper {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args);
-    };
-
-    static void handle_request(RequestArgs args);
-
-    typedef ActiveMessageShortNoReply<REMOTE_SPARSITY_REQUEST_MSGID,
-                                      RequestArgs,
-                                      handle_request> Message;
-
-    template <int N, typename T>
-    static void send_request(NodeID target, SparsityMap<N,T> sparsity,
-			     bool send_precise, bool send_approx);
-  };
-
-  struct SetContribCountMessage {
-    struct RequestArgs {
-      DynamicTemplates::TagType type_tag;
-      ID::IDType sparsity_id;
-      int count;
-    };
-
-    struct DecodeHelper {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args);
-    };
-
-    static void handle_request(RequestArgs args);
-
-    typedef ActiveMessageShortNoReply<SET_CONTRIB_COUNT_MSGID,
-                                      RequestArgs,
-                                      handle_request> Message;
-
-    template <int N, typename T>
-    static void send_request(NodeID target, SparsityMap<N,T> sparsity, int count);
-  };
-    
-  struct RemoteSparsityContribMessage {
-    struct RequestArgs : public BaseMedium {
-      NodeID sender;
-      DynamicTemplates::TagType type_tag;
-      ID::IDType sparsity_id;
-      int sequence_id;
-      int sequence_count;
-    };
-
-    struct DecodeHelper {
-      template <typename NT, typename T>
-      static void demux(const RequestArgs *args, const void *data, size_t datalen);
-    };
-
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<REMOTE_SPARSITY_CONTRIB_MSGID,
-                                       RequestArgs,
-                                       handle_request> Message;
-
-    template <int N, typename T>
-    static void send_request(NodeID target, SparsityMap<N,T> sparsity,
-			     int sequence_id, int sequence_count,
-			     const Rect<N,T> *rects, size_t count);
-  };
 
 }; // namespace Realm
 

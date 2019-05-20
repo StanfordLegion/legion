@@ -80,6 +80,10 @@ namespace Realm {
       class Metadata : public MetadataBase {
       public:
 	void *serialize(size_t& out_size) const;
+
+	template<typename T>
+	  void serialize_msg(T &fbd) const;
+
 	void deserialize(const void *in_data, size_t in_size);
 
 	off_t alloc_offset;

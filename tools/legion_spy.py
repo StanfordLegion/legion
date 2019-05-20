@@ -6118,7 +6118,8 @@ class Operation(object):
                         return False
                 return True
             # Compute our version numbers first
-            self.compute_current_version_numbers()
+            if perform_checks:
+                self.compute_current_version_numbers()
             num_reqs = len(self.reqs)
             assert num_reqs % 2 == 0
             num_copies = num_reqs / 2
@@ -6134,7 +6135,8 @@ class Operation(object):
                         return False
                 return True
             # Compute our version numbers first
-            self.compute_current_version_numbers()
+            if perform_checks:
+                self.compute_current_version_numbers()
             for index,req in self.reqs.iteritems():
                 if not self.verify_fill_requirement(index, req, perform_checks):
                     return False
@@ -6180,7 +6182,8 @@ class Operation(object):
         else:
             if self.reqs:
                 # Compute our version numbers first
-                self.compute_current_version_numbers()
+                if perform_checks:
+                    self.compute_current_version_numbers()
                 for index,req in self.reqs.iteritems():
                     if not self.verify_physical_requirement(index, req, perform_checks):
                         return False

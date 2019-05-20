@@ -30,10 +30,6 @@ namespace Realm {
     static const int DIM2 = N2;
     typedef T2 IDXTYPE2;
 
-    static const Opcode OPCODE = UOPCODE_IMAGE;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     ImageMicroOp(IndexSpace<N,T> _parent_space, IndexSpace<N2,T2> _inst_space,
 		 RegionInstance _inst, size_t _field_offset, bool _is_ranged);
     virtual ~ImageMicroOp(void);
@@ -49,7 +45,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 
