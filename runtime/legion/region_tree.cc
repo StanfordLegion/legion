@@ -74,6 +74,7 @@ namespace Legion {
     void RegionTreeForest::prepare_for_shutdown(void)
     //--------------------------------------------------------------------------
     {
+#if 0
       // Remove valid references from any resources that haven't been deleted
       // First delete any region tree nodes that we own
       std::vector<RegionNode*> regions_to_delete;
@@ -153,6 +154,7 @@ namespace Legion {
         if ((*it)->remove_base_resource_ref(REGION_TREE_REF))
           delete (*it);
       }
+#endif
     }
 
     //--------------------------------------------------------------------------
