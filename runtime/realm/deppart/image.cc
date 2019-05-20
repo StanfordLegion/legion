@@ -111,12 +111,6 @@ namespace Realm {
   // class ImageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  inline /*static*/ DynamicTemplates::TagType ImageMicroOp<N,T,N2,T2>::type_tag(void)
-  {
-    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-  }
-
-  template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::ImageMicroOp(IndexSpace<N,T> _parent_space,
 					IndexSpace<N2,T2> _inst_space,
 					RegionInstance _inst,
@@ -129,7 +123,9 @@ namespace Realm {
     , is_ranged(_is_ranged)
     , approx_output_index(-1)
     , approx_output_op(0)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   ImageMicroOp<N,T,N2,T2>::~ImageMicroOp(void)
@@ -316,8 +312,12 @@ namespace Realm {
 	PreimageOperation<N2,T2,N,T> *op = reinterpret_cast<PreimageOperation<N2,T2,N,T> *>(approx_output_op);
 	op->provide_sparse_image(approx_output_index, &approx_rects.rects[0], approx_rects.rects.size());
       } else {
-	ApproxImageResponseMessage::send_request<N2,T2,N,T>(requestor, approx_output_op, approx_output_index,
-							    &approx_rects.rects[0], approx_rects.rects.size());
+	size_t payload_size = approx_rects.rects.size() * sizeof(Rect<N2,T2>);
+	ActiveMessage<ApproxImageResponseMessage<PreimageOperation<N2,T2,N,T> > > amsg(requestor, payload_size);
+	amsg->approx_output_op = approx_output_op;
+	amsg->approx_output_index = approx_output_index;
+	amsg.add_payload(&approx_rects.rects[0], payload_size);
+	amsg.commit();
       }
     }
   }
@@ -334,7 +334,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -410,6 +415,9 @@ namespace Realm {
 	       (s >> approx_output_op));
     assert(ok);
   }
+
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<ImageMicroOp<N,T,N2,T2> > > ImageMicroOp<N,T,N2,T2>::areg;
 
 
   ////////////////////////////////////////////////////////////////////////

@@ -85,12 +85,6 @@ namespace Realm {
   // class PreimageMicroOp<N,T,N2,T2>
 
   template <int N, typename T, int N2, typename T2>
-  inline /*static*/ DynamicTemplates::TagType PreimageMicroOp<N,T,N2,T2>::type_tag(void)
-  {
-    return NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-  }
-
-  template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N,T,N2,T2>::PreimageMicroOp(IndexSpace<N,T> _parent_space,
 					 IndexSpace<N,T> _inst_space,
 					 RegionInstance _inst,
@@ -101,7 +95,9 @@ namespace Realm {
     , inst(_inst)
     , field_offset(_field_offset)
     , is_ranged(_is_ranged)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   PreimageMicroOp<N,T,N2,T2>::~PreimageMicroOp(void)
@@ -216,7 +212,12 @@ namespace Realm {
       async_microop = new AsyncMicroOp(op, this);
       op->add_async_work_item(async_microop);
 
-      RemoteMicroOpMessage::send_request(exec_node, op, *this);
+      ActiveMessage<RemoteMicroOpMessage<PreimageMicroOp<N,T,N2,T2> > > msg(exec_node, 4096);
+      msg->operation = op;
+      msg->async_microop = async_microop;
+      this->serialize_params(msg);
+      msg.commit();
+
       delete this;
       return;
     }
@@ -276,6 +277,9 @@ namespace Realm {
     assert(ok);
   }
 
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<RemoteMicroOpMessage<PreimageMicroOp<N,T,N2,T2> > > PreimageMicroOp<N,T,N2,T2>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -291,7 +295,9 @@ namespace Realm {
     , ptr_data(_field_data)
     , overlap_tester(0)
     , dummy_overlap_uop(0)
-  {}
+  {
+    areg.force_instantiation();
+  }
 
   template <int N, typename T, int N2, typename T2>
   PreimageOperation<N,T,N2,T2>::PreimageOperation(const IndexSpace<N,T>& _parent,
@@ -557,45 +563,24 @@ namespace Realm {
     os << "PreimageOperation(" << parent << ")";
   }
 
+  template <int N, typename T, int N2, typename T2>
+  ActiveMessageHandlerReg<ApproxImageResponseMessage<PreimageOperation<N,T,N2,T2> > > PreimageOperation<N,T,N2,T2>::areg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class ApproxImageResponseMessage
-  
-  template <typename NT, typename T, typename N2T, typename T2>
-  inline /*static*/ void ApproxImageResponseMessage::DecodeHelper::demux(const RequestArgs *args,
-									 const void *data, size_t datalen)
+  // class ApproxImageResponseMessage<T>
+
+  template <typename T>
+  /*static*/ void ApproxImageResponseMessage<T>::handle_message(NodeID sender,
+								const ApproxImageResponseMessage<T> &msg,
+								const void *data, size_t datalen)
   {
-    PreimageOperation<NT::N,T,N2T::N,T2> *op = reinterpret_cast<PreimageOperation<NT::N,T,N2T::N,T2> *>(args->approx_output_op);
-    op->provide_sparse_image(args->approx_output_index,
-			     static_cast<const Rect<N2T::N,T2> *>(data),
-			     datalen / sizeof(Rect<N2T::N,T2>));
+    T *op = reinterpret_cast<T *>(msg.approx_output_op);
+    op->provide_sparse_image(msg.approx_output_index,
+			     static_cast<const Rect<T::DIM2, typename T::IDXTYPE2> *>(data),
+			     datalen / sizeof(Rect<T::DIM2, typename T::IDXTYPE2>));
   }
-
-  /*static*/ void ApproxImageResponseMessage::handle_request(RequestArgs args,
-							     const void *data, size_t datalen)
-  {
-    log_part.info() << "received approx image response: tag=" << std::hex << args.type_tag << std::dec
-		    << " op=" << args.approx_output_op;
-
-    NTNT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
-  }
-
-#if 0  
-  template <int N, typename T, int N2, typename T2>
-  /*static*/ void ApproxImageResponseMessage::send_request(NodeID target, 
-							   intptr_t output_op, int output_index,
-							   const Rect<N2,T2> *rects, size_t count)
-  {
-    RequestArgs args;
-
-    args.type_tag = NTNT_TemplateHelper::encode_tag<N,T,N2,T2>();
-    args.approx_output_op = output_op;
-    args.approx_output_index = output_index;
-
-    Message::request(target, args, rects, count * sizeof(Rect<N2,T2>), PAYLOAD_COPY);
-  }
-#endif
 
 
 #define DOIT(N1,T1,N2,T2) \

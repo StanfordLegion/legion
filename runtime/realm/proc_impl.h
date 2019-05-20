@@ -264,72 +264,37 @@ namespace Realm {
     };
 
     // active messages
-
-    struct SpawnTaskMessage {
-      // Employ some fancy struct packing here to fit in 64 bytes
-      struct RequestArgs : public BaseMedium {
-	Processor proc;
-	Event start_event;
-	Event finish_event;
-	size_t user_arglen;
-	int priority;
-	Processor::TaskFuncID func_id;
-      };
-
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<SPAWN_TASK_MSGID,
- 	                                 RequestArgs,
- 	                                 handle_request> Message;
-
-      static void send_request(NodeID target, Processor proc,
-			       Processor::TaskFuncID func_id,
-			       const void *args, size_t arglen,
-			       const ProfilingRequestSet *prs,
-			       Event start_event, Event finish_event,
-			       int priority);
-    };
-    
     struct RegisterTaskMessage {
-      struct RequestArgs : public BaseMedium {
-	NodeID sender;
-	Processor::TaskFuncID func_id;
-	Processor::Kind kind;
-	RemoteTaskRegistration *reg_op;
-      };
+      NodeID sender;
+      Processor::TaskFuncID func_id;
+      Processor::Kind kind;
+      RemoteTaskRegistration *reg_op;
 
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<REGISTER_TASK_MSGID,
- 	                                 RequestArgs,
- 	                                 handle_request> Message;
-
-      static void send_request(NodeID target,
-			       Processor::TaskFuncID func_id,
-			       Processor::Kind kind,
-			       const std::vector<Processor>& procs,
-			       const CodeDescriptor& codedesc,
-			       const void *userdata, size_t userlen,
-			       RemoteTaskRegistration *reg_op);
+      static void handle_message(NodeID sender,const RegisterTaskMessage &msg,
+				 const void *data, size_t datalen);
     };
     
     struct RegisterTaskCompleteMessage {
-      struct RequestArgs {
-	NodeID sender;
-	RemoteTaskRegistration *reg_op;
-	bool successful;
-      };
+      RemoteTaskRegistration *reg_op;
+      bool successful;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender,const RegisterTaskCompleteMessage &msg,
+				 const void *data, size_t datalen);
 
-      typedef ActiveMessageShortNoReply<REGISTER_TASK_COMPLETE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target,
-			       RemoteTaskRegistration *reg_op,
-			       bool successful);
     };
+
+    struct SpawnTaskMessage {
+      Processor proc;
+      Event start_event;
+      Event finish_event;
+      size_t user_arglen;
+      int priority;
+      Processor::TaskFuncID func_id;
+
+      static void handle_message(NodeID sender,const SpawnTaskMessage &msg,
+				 const void *data, size_t datalen);
+    };
+
 
 }; // namespace Realm
 

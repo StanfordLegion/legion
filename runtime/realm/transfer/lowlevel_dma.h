@@ -29,90 +29,58 @@ namespace Realm {
   class CoreReservationSet;
 
     struct RemoteIBAllocRequestAsync {
-      struct RequestArgs {
-        int node;
-        Memory memory;
-        void* req;
-        int idx;
-        ID::IDType src_inst_id, dst_inst_id;
-        size_t size;
-      };
+      Memory memory;
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
 
-      static void handle_request(RequestArgs args);
+      static void handle_message(NodeID sender, const RemoteIBAllocRequestAsync &args,
+				 const void *data, size_t msglen);
 
-      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_REQUEST_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, Memory tgt_mem, void* req,
-                               int idx, ID::IDType src_id, ID::IDType dst_id, size_t size);
     };
 
     struct RemoteIBAllocResponseAsync {
-      struct RequestArgs {
-        void* req;
-        int idx;
-        ID::IDType src_inst_id, dst_inst_id;
-        size_t size;
-        off_t offset;
-      };
+      void* req;
+      int idx;
+      ID::IDType src_inst_id, dst_inst_id;
+      off_t offset;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_IB_ALLOC_RESPONSE_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, void* req, int idx, ID::IDType src_id,
-                               ID::IDType dst_id, size_t ib_size, off_t ib_offset);
+      static void handle_message(NodeID sender, const RemoteIBAllocResponseAsync &args,
+				 const void *data, size_t msglen);
     };
 
     struct RemoteIBFreeRequestAsync {
-      struct RequestArgs {
-        Memory memory;
-        off_t ib_offset;
-        size_t ib_size;
-      };
+      Memory memory;
+      off_t ib_offset;
+      size_t ib_size;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_IB_FREE_REQUEST_MSGID,
-                                        RequestArgs,
-                                        handle_request> Message;
-
-      static void send_request(NodeID target, Memory tgt_mem,
-                               off_t ib_offset, size_t ib_size);
+      static void handle_message(NodeID sender, const RemoteIBFreeRequestAsync &args,
+				 const void *data, size_t msglen);
     };
 
     void find_shortest_path(Memory src_mem, Memory dst_mem,
 			    CustomSerdezID serdez_id, std::vector<Memory>& path);
 
-    struct RemoteCopyArgs : public BaseMedium {
+    struct RemoteCopyMessage {
       ReductionOpID redop_id;
       bool red_fold;
       Event before_copy, after_copy;
       int priority;
+
+      static void handle_message(NodeID sender, const RemoteCopyMessage &args,
+				 const void *data, size_t msglen);
     };
 
-    struct RemoteFillArgs : public BaseMedium {
+    struct RemoteFillMessage {
       RegionInstance inst;
       FieldID field_id;
       unsigned size;
       Event before_fill, after_fill;
       //int priority;
+
+      static void handle_message(NodeID sender, const RemoteFillMessage &args,
+				 const void *data, size_t msglen);
     };
-
-    extern void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen);
-
-    extern void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen);
-
-    typedef ActiveMessageMediumNoReply<REMOTE_COPY_MSGID,
-				       RemoteCopyArgs,
-				       handle_remote_copy> RemoteCopyMessage;
-
-    typedef ActiveMessageMediumNoReply<REMOTE_FILL_MSGID,
-                                       RemoteFillArgs,
-                                       handle_remote_fill> RemoteFillMessage;
 
     extern void init_dma_handler(void);
 

@@ -67,66 +67,30 @@ namespace Realm {
     // active messages
     
     struct MetadataRequestMessage {
-      struct RequestArgs {
-	int node;
-	ID::IDType id;
-      };
+      ID::IDType id;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<METADATA_REQUEST_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType id);
+      static void handle_message(NodeID sender,const MetadataRequestMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct MetadataResponseMessage {
-      struct RequestArgs : public BaseMedium {
-	ID::IDType id;
-      };
-	
-      static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-      typedef ActiveMessageMediumNoReply<METADATA_RESPONSE_MSGID,
-					 RequestArgs,
-					 handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType id, 
-			       const void *data, size_t datalen, int payload_mode);
-      static void broadcast_request(const NodeSet& targets, ID::IDType id,
-				    const void *data, size_t datalen);
+      ID::IDType id;
+      static void handle_message(NodeID sender,const MetadataResponseMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct MetadataInvalidateMessage {
-      struct RequestArgs {
-	int owner;
-	ID::IDType id;
-      };
+      ID::IDType id;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<METADATA_INVALIDATE_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType id);
-      static void broadcast_request(const NodeSet& targets, ID::IDType id);
+      static void handle_message(NodeID sender,const MetadataInvalidateMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct MetadataInvalidateAckMessage {
-      struct RequestArgs {
-	NodeID node;
-	ID::IDType id;
-      };
+      ID::IDType id;
 
-      static void handle_request(RequestArgs args);
-    
-      typedef ActiveMessageShortNoReply<METADATA_INVALIDATE_ACK_MSGID,
-					RequestArgs,
-					handle_request> Message;
-
-      static void send_request(NodeID target, ID::IDType id);
+      static void handle_message(NodeID sender,const MetadataInvalidateAckMessage &msg,
+				 const void *data, size_t datalen);
     };
     
 }; // namespace Realm

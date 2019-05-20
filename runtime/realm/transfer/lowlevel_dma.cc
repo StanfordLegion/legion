@@ -192,8 +192,14 @@ namespace Realm {
           cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
-              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner,8);
+	  amsg->req = req->req;
+	  amsg->idx = req->idx;
+	  amsg->src_inst_id = req->src_inst_id;
+	  amsg->dst_inst_id = req->dst_inst_id;
+	  amsg->offset = ib_offset;
+	  amsg << req->ib_size;
+	  amsg.commit();
         }
         // Remember to free IBAllocRequest
         delete req;
@@ -240,8 +246,14 @@ namespace Realm {
           cr->handle_ib_response(req->idx, inst_pair, req->ib_size, ib_offset);
         } else {
           // remote ib alloc request
-          RemoteIBAllocResponseAsync::send_request(req->owner, req->req, req->idx,
-              req->src_inst_id, req->dst_inst_id, req->ib_size, ib_offset); 
+	  ActiveMessage<RemoteIBAllocResponseAsync> amsg(req->owner, 8);
+	  amsg->req = req->req;
+	  amsg->idx = req->idx;
+	  amsg->src_inst_id = req->src_inst_id;
+	  amsg->dst_inst_id = req->dst_inst_id;
+	  amsg->offset = ib_offset;
+	  amsg << req->ib_size;
+	  amsg.commit();
         }
         it->second->pop();
         // Remember to free IBAllocRequest
@@ -450,25 +462,17 @@ namespace Realm {
 
     void CopyRequest::forward_request(NodeID target_node)
     {
-      RemoteCopyArgs args;
-      args.redop_id = 0;
-      args.red_fold = false;
-      args.before_copy = before_copy;
-      args.after_copy = finish_event;
-      args.priority = priority;
-
-      Serialization::DynamicBufferSerializer dbs(128);
-      bool ok = ((dbs << *domain) &&
-		 (dbs << *oas_by_inst) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
+      ActiveMessage<RemoteCopyMessage> amsg(target_node, 65536);
+      amsg->redop_id = 0;
+      amsg->red_fold = false;
+      amsg->before_copy = before_copy;
+      amsg->after_copy = finish_event;
+      amsg->priority = priority;
+      amsg << *domain;
+      amsg << *oas_by_inst;
+      amsg << requests;
+      amsg.commit();
       log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
-      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
       clear_profiling();
     }
 
@@ -518,26 +522,16 @@ namespace Realm {
     // class RemoteIBAllocRequestAsync
     //
 
-    /*static*/ void RemoteIBAllocRequestAsync::handle_request(RequestArgs args)
+  /*static*/ void RemoteIBAllocRequestAsync::handle_message(NodeID sender,
+							    const RemoteIBAllocRequestAsync &args,
+							    const void *data, size_t msglen)
     {
       assert(NodeID(ID(args.memory).memory_owner_node()) == my_node_id);
+      size_t size = *((size_t*)data);
       IBAllocRequest* ib_req
-          = new IBAllocRequest(args.node, args.req, args.idx,
-                               args.src_inst_id, args.dst_inst_id, args.size);
+	  = new IBAllocRequest(sender, args.req, args.idx,
+                               args.src_inst_id, args.dst_inst_id, size);
       ib_req_queue->enqueue_request(args.memory, ib_req);
-    }
-
-    /*static*/ void RemoteIBAllocRequestAsync::send_request(NodeID target, Memory tgt_mem, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size)
-    {
-      RequestArgs args;
-      args.node = my_node_id;
-      args.memory = tgt_mem;
-      args.req = req;
-      args.idx = idx;
-      args.src_inst_id = src_inst_id;
-      args.dst_inst_id = dst_inst_id;
-      args.size = ib_size;
-      Message::request(target, args);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -545,48 +539,32 @@ namespace Realm {
     // class RemoteIBAllocResponseAsync
     //
 
-    /*static*/ void RemoteIBAllocResponseAsync::handle_request(RequestArgs args)
+    /*static*/ void RemoteIBAllocResponseAsync::handle_message(NodeID sender,
+							       const RemoteIBAllocResponseAsync &args,
+							       const void *data, size_t msglen)
     {
       CopyRequest* req = (CopyRequest*) args.req;
       RegionInstanceImpl *src_impl = get_runtime()->get_instance_impl(args.src_inst_id);
       RegionInstanceImpl *dst_impl = get_runtime()->get_instance_impl(args.dst_inst_id);
       InstPair inst_pair(src_impl->me, dst_impl->me);
-      req->handle_ib_response(args.idx, inst_pair, args.size, args.offset);
+      size_t size = *((size_t*)data);
+      req->handle_ib_response(args.idx, inst_pair, size, args.offset);
     }
 
-    /*static*/ void RemoteIBAllocResponseAsync::send_request(NodeID target, void* req, int idx, ID::IDType src_inst_id, ID::IDType dst_inst_id, size_t ib_size, off_t ib_offset)
-    {
-      RequestArgs args;
-      args.req = req;
-      args.idx = idx;
-      args.src_inst_id = src_inst_id;
-      args.dst_inst_id = dst_inst_id;
-      args.size = ib_size;
-      args.offset = ib_offset;
-      Message::request(target, args);
-    }
 
     ////////////////////////////////////////////////////////////////////////
     //
     // class RemoteIBFreeRequestAsync
     //
 
-    /*static*/ void RemoteIBFreeRequestAsync::handle_request(RequestArgs args)
+    /*static*/ void RemoteIBFreeRequestAsync::handle_message(NodeID sender,
+							     const RemoteIBFreeRequestAsync &args,
+							     const void *data, size_t msglen)
     {
       assert(NodeID(ID(args.memory).memory_owner_node()) == my_node_id);
       get_runtime()->get_memory_impl(args.memory)->free_bytes(args.ib_offset, args.ib_size);
       ib_req_queue->dequeue_request(args.memory);
     }
-
-    /*static*/ void RemoteIBFreeRequestAsync::send_request(NodeID target, Memory tgt_mem, off_t ib_offset, size_t ib_size)
-    {
-      RequestArgs args;
-      args.memory = tgt_mem;
-      args.ib_offset = ib_offset;
-      args.ib_size = ib_size;
-      Message::request(target, args);
-    }
-
 
 #define IB_MAX_SIZE size_t(64 * 1024 * 1024)
 
@@ -598,8 +576,11 @@ namespace Realm {
         get_runtime()->get_memory_impl(mem)->free_bytes(offset, size);
         ib_req_queue->dequeue_request(mem);
       } else {
-        RemoteIBFreeRequestAsync::send_request(ID(mem).memory_owner_node(),
-            mem, offset, size);
+	ActiveMessage<RemoteIBFreeRequestAsync> amsg(ID(mem).memory_owner_node());
+	amsg->memory = mem;
+	amsg->ib_offset = offset;
+	amsg->ib_size = size;
+	amsg.commit();
       }
     }
 
@@ -649,7 +630,14 @@ namespace Realm {
         ib_req_queue->enqueue_request(tgt_mem, ib_req);
       } else {
         // create remote intermediate buffer
-        RemoteIBAllocRequestAsync::send_request(ID(tgt_mem).memory_owner_node(), tgt_mem, this, idx, inst_pair.first.id, inst_pair.second.id, ib_size);
+	ActiveMessage<RemoteIBAllocRequestAsync> amsg(ID(tgt_mem).memory_owner_node(), 8);
+	amsg->memory = tgt_mem;
+	amsg->req = this;
+	amsg->idx = idx;
+	amsg->src_inst_id = inst_pair.first.id;
+	amsg->dst_inst_id = inst_pair.second.id;
+	amsg << ib_size;
+	amsg.commit();
       }
     }
 
@@ -1939,27 +1927,19 @@ namespace Realm {
 
     void ReduceRequest::forward_request(NodeID target_node)
     {
-      RemoteCopyArgs args;
-      args.redop_id = redop_id;
-      args.red_fold = red_fold;
-      args.before_copy = before_copy;
-      args.after_copy = finish_event;
-      args.priority = priority;
-
-      Serialization::DynamicBufferSerializer dbs(128);
-      bool ok = ((dbs << *domain) &&
-		 (dbs << srcs) &&
-		 (dbs << dst) &&
-		 (dbs << inst_lock_needed) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
+      ActiveMessage<RemoteCopyMessage> amsg(target_node,65536);
+      amsg->redop_id = redop_id;
+      amsg->red_fold = red_fold;
+      amsg->before_copy = before_copy;
+      amsg->after_copy = finish_event;
+      amsg->priority = priority;
+      amsg << *domain;
+      amsg << srcs;
+      amsg << dst;
+      amsg << inst_lock_needed;
+      amsg << requests;
+      amsg.commit();
       log_dma.debug() << "forwarding copy: target=" << target_node << " finish=" << finish_event;
-      RemoteCopyMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
       clear_profiling();
     }
 
@@ -2335,28 +2315,19 @@ namespace Realm {
 
     void FillRequest::forward_request(NodeID target_node)
     {
-      RemoteFillArgs args;
-      args.inst = dst.inst;
-      args.field_id = dst.field_id;
-      assert(dst.subfield_offset == 0);
-      args.size = fill_size; // redundant!
-      args.before_fill = before_fill;
-      args.after_fill = finish_event;
-      //args.priority = 0;
-
-      Serialization::DynamicBufferSerializer dbs(128);
       ByteArray ba(fill_buffer, fill_size); // TODO
-      bool ok = ((dbs << *domain) &&
-		 (dbs << ba) &&
-		 (dbs << requests));
-      assert(ok);
-
-      size_t msglen = dbs.bytes_used();
-      void *msgdata = dbs.detach_buffer(-1 /*no trim*/);
-
+      ActiveMessage<RemoteFillMessage> amsg(target_node,65536);
+      amsg->inst = dst.inst;
+      amsg->field_id = dst.field_id;
+      assert(dst.subfield_offset == 0);
+      amsg->size = fill_size;
+      amsg->before_fill = before_fill;
+      amsg->after_fill = finish_event;
+      amsg << *domain;
+      amsg << ba;
+      amsg << requests;
+      amsg.commit();
       log_dma.debug() << "forwarding fill: target=" << target_node << " finish=" << finish_event;
-      RemoteFillMessage::request(target_node, args, msgdata, msglen, PAYLOAD_FREE);
-
       clear_profiling();
     }
 
@@ -2794,7 +2765,8 @@ namespace Realm {
       aio_context = 0;
     }
 
-    void handle_remote_copy(RemoteCopyArgs args, const void *data, size_t msglen)
+  /*static*/ void RemoteCopyMessage::handle_message(NodeID sender, const RemoteCopyMessage &args,
+						    const void *data, size_t msglen)
     {
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
 
@@ -2822,7 +2794,8 @@ namespace Realm {
       }
     }
 
-    void handle_remote_fill(RemoteFillArgs args, const void *data, size_t msglen)
+  /*static*/ void RemoteFillMessage::handle_message(NodeID sender, const RemoteFillMessage &args,
+						    const void *data, size_t msglen)
     {
       FillRequest *r = new FillRequest(data, msglen,
                                        args.inst,
@@ -2835,5 +2808,11 @@ namespace Realm {
 
       r->check_readiness(false, dma_queue);
     }
+
+  ActiveMessageHandlerReg<RemoteFillMessage> remote_fill_message_handler;
+  ActiveMessageHandlerReg<RemoteCopyMessage> remote_copy_message_handler;
+  ActiveMessageHandlerReg<RemoteIBAllocRequestAsync> remote_ib_alloc_request_async_handler;
+  ActiveMessageHandlerReg<RemoteIBAllocResponseAsync> remote_ib_alloc_response_async_handler;
+  ActiveMessageHandlerReg<RemoteIBFreeRequestAsync> remote_ib_free_request_async_handler;
 
 };

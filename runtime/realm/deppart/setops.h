@@ -28,10 +28,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_UNION;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     UnionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
     UnionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~UnionMicroOp(void);
@@ -43,7 +39,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<UnionMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<UnionMicroOp<N,T> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 
@@ -64,10 +62,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_INTERSECTION;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     IntersectionMicroOp(const std::vector<IndexSpace<N,T> >& _inputs);
     IntersectionMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~IntersectionMicroOp(void);
@@ -79,7 +73,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<IntersectionMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<IntersectionMicroOp<N,T> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 
@@ -100,10 +96,6 @@ namespace Realm {
     static const int DIM = N;
     typedef T IDXTYPE;
 
-    static const Opcode OPCODE = UOPCODE_DIFFERENCE;
-
-    static DynamicTemplates::TagType type_tag(void);
-
     DifferenceMicroOp(IndexSpace<N,T> _lhs, IndexSpace<N,T> _rhs);
     virtual ~DifferenceMicroOp(void);
 
@@ -114,7 +106,9 @@ namespace Realm {
     void dispatch(PartitioningOperation *op, bool inline_ok);
 
   protected:
-    friend struct RemoteMicroOpMessage;
+    friend struct RemoteMicroOpMessage<DifferenceMicroOp<N,T> >;
+    static ActiveMessageHandlerReg<RemoteMicroOpMessage<DifferenceMicroOp<N,T> > > areg;
+
     template <typename S>
     bool serialize_params(S& s) const;
 
