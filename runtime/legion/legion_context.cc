@@ -1139,8 +1139,8 @@ namespace Legion {
               created_regions.begin(); it != created_regions.end(); it++)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Logical region (%x,%x,%x) was leaked out of task %s",
-              it->index_space.id, it->field_space.id, it->tree_id, 
+              "Logical region (%x,%x,%x) was leaked out of task tree rooted "
+              "by task %s", it->index_space.id, it->field_space.id, it->tree_id,
               get_task_name())
           runtime->forest->destroy_logical_region(*it, runtime->address_space);
         }
@@ -1152,8 +1152,8 @@ namespace Legion {
               created_fields.begin(); it != created_fields.end(); it++)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field %d of field space %x was leaked out of task %s",
-              it->second, it->first.id, get_task_name())
+              "Field %d of field space %x was leaked out of task tree rooted "
+              "by task %s", it->second, it->first.id, get_task_name())
           runtime->forest->free_field(it->first, it->second);
         }
         created_fields.clear();
@@ -1165,7 +1165,7 @@ namespace Legion {
               created_field_spaces.end(); it++)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Field space %x was leaked out of task %s", 
+              "Field space %x was leaked out of task tree rooted by task %s",
               it->id, get_task_name())
           runtime->forest->destroy_field_space(*it, runtime->address_space);
         }
@@ -1178,7 +1178,7 @@ namespace Legion {
               created_index_spaces.end(); it++)
         {
           REPORT_LEGION_WARNING(LEGION_WARNING_LEAKED_RESOURCE,
-              "Index space %x was leaked out of task %s", 
+              "Index space %x was leaked out of task tree rooted by task %s",
               it->id, get_task_name());
           runtime->forest->destroy_index_space(*it, runtime->address_space);
         }

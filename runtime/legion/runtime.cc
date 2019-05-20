@@ -17584,7 +17584,6 @@ namespace Legion {
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
-      forest->prepare_for_shutdown();
       prepared_for_shutdown = true;
     }
 

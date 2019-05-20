@@ -133,8 +133,6 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void prepare_for_shutdown(void);
-    public:
       void create_index_space(IndexSpace handle, const void *realm_is,
                               DistributedID did);
       IndexSpace find_or_create_union_space(TaskContext *ctx,
