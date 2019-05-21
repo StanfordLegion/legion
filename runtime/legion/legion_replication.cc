@@ -2012,10 +2012,13 @@ namespace Legion {
             }
           case LOGICAL_REGION_DELETION:
             {
-              runtime->forest->destroy_logical_region(logical_region, 
-                                              runtime->address_space,
-                                              true/*collective*/);
-              parent_ctx->remove_deleted_requirements(parent_req_indexes);
+              // Only do something here if we don't have any parent req indexes
+              // If we had no deletion requirements then we know there is
+              // nothing to race with and we can just do our deletion
+              if (parent_req_indexes.empty())
+                runtime->forest->destroy_logical_region(logical_region, 
+                                                runtime->address_space,
+                                                true/*collective*/);
               break;
             }
           case LOGICAL_PARTITION_DELETION:
@@ -2068,9 +2071,12 @@ namespace Legion {
             }
           case LOGICAL_REGION_DELETION:
             {
-              runtime->forest->destroy_logical_region(logical_region, 
-                                              runtime->address_space);
-              parent_ctx->remove_deleted_requirements(parent_req_indexes);
+              // Only do something here if we don't have any parent req indexes
+              // If we had no deletion requirements then we know there is
+              // nothing to race with and we can just do our deletion
+              if (parent_req_indexes.empty())
+                runtime->forest->destroy_logical_region(logical_region, 
+                                                runtime->address_space);
               break;
             }
           case LOGICAL_PARTITION_DELETION:
@@ -2081,6 +2087,31 @@ namespace Legion {
             }
           default:
             assert(false);
+        }
+      }
+      // Always need to remove the references that we put on the regions
+      std::vector<LogicalRegion> regions_to_destroy;
+      if (!deletion_req_indexes.empty())
+        parent_ctx->remove_deleted_requirements(deletion_req_indexes, 
+                                                regions_to_destroy);
+      else if ((kind == LOGICAL_REGION_DELETION) && !parent_req_indexes.empty())
+        parent_ctx->remove_deleted_requirements(parent_req_indexes,
+                                                regions_to_destroy);
+      if (!regions_to_destroy.empty())
+      {
+        // Only selectively delete depending on our configuration
+        if (is_total_sharding && is_first_local_shard)
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
+            runtime->forest->destroy_logical_region(*it,
+                runtime->address_space, true/*collective*/);
+        }
+        else if (repl_ctx->owner_shard->shard_id == 0)
+        {
+          for (std::vector<LogicalRegion>::const_iterator it =
+               regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
+            runtime->forest->destroy_logical_region(*it,runtime->address_space);
         }
       }
       complete_operation();
