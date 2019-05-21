@@ -7230,7 +7230,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!destroyed);
+      assert(!destroyed || !is_owner());
 #endif
       // If we're the owner we also add a nested reference to the 
       // child to prevent it being deleted until any associated regions
@@ -8413,7 +8413,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!destroyed);
+      assert(!destroyed || !is_owner());
 #endif
       // If we're the owner we add a nested valid ref to prevent collection
       // of any part of the index sub-tree until all regions associated with
