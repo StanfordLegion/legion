@@ -255,6 +255,86 @@ namespace Legion {
     }
 
     /////////////////////////////////////////////////////////////
+    // Field Allocator Impl
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(FieldSpace space, TaskContext *ctx)
+      : field_space(space), context(ctx)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(field_space.exists());
+      assert(context != NULL);
+#endif
+      context->add_reference();
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::FieldAllocatorImpl(const FieldAllocatorImpl &rhs)
+      : field_space(rhs.field_space), context(rhs.context)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl::~FieldAllocatorImpl(void)
+    //--------------------------------------------------------------------------
+    {
+      context->destroy_field_allocator(field_space);
+      if (context->remove_reference())
+        delete context;
+    }
+
+    //--------------------------------------------------------------------------
+    FieldAllocatorImpl& FieldAllocatorImpl::operator=(
+                                                  const FieldAllocatorImpl &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+      return *this;
+    }
+    
+    //--------------------------------------------------------------------------
+    FieldID FieldAllocatorImpl::allocate_field(size_t field_size,
+                                               FieldID desired_fieldid,
+                                               CustomSerdezID serdez_id, 
+                                               bool local)
+    //--------------------------------------------------------------------------
+    {
+      return context->allocate_field(field_space, field_size, desired_fieldid,
+                                     local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_field(FieldID fid)
+    //--------------------------------------------------------------------------
+    {
+      context->free_field(field_space, fid);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::allocate_fields(
+                                        const std::vector<size_t> &field_sizes,
+                                        std::vector<FieldID> &resulting_fields,
+                                        CustomSerdezID serdez_id, bool local)
+    //--------------------------------------------------------------------------
+    {
+      context->allocate_fields(field_space, field_sizes, resulting_fields,
+                               local, serdez_id);
+    }
+
+    //--------------------------------------------------------------------------
+    void FieldAllocatorImpl::free_fields(const std::set<FieldID> &to_free)
+    //--------------------------------------------------------------------------
+    {
+      context->free_fields(field_space, to_free);
+    }
+
+    /////////////////////////////////////////////////////////////
     // Future Impl 
     /////////////////////////////////////////////////////////////
 
@@ -9548,8 +9628,8 @@ namespace Legion {
         verbose_logging(config.verbose_logging),
         logical_logging_only(config.logical_logging_only),
         physical_logging_only(config.physical_logging_only),
-        check_privileges(config.check_privileges),
 #endif
+        check_privileges(config.check_privileges),
         num_profiling_nodes(config.num_profiling_nodes),
         legion_collective_radix(config.legion_collective_radix),
         legion_collective_log_radix(config.legion_collective_log_radix),
@@ -9733,8 +9813,8 @@ namespace Legion {
         verbose_logging(rhs.verbose_logging),
         logical_logging_only(rhs.logical_logging_only),
         physical_logging_only(rhs.physical_logging_only),
-        check_privileges(rhs.check_privileges),
 #endif
+        check_privileges(rhs.check_privileges),
         num_profiling_nodes(rhs.num_profiling_nodes),
         legion_collective_radix(rhs.legion_collective_radix),
         legion_collective_log_radix(rhs.legion_collective_log_radix),
@@ -10527,8 +10607,7 @@ namespace Legion {
         TaskLauncher launcher(Runtime::legion_main_id, TaskArgument());
         // Mark that this task is the top-level task
         top_task->set_top_level();
-        top_task->initialize_task(top_context, launcher, 
-                                  false/*check priv*/, false/*track parent*/);
+        top_task->initialize_task(top_context, launcher, false/*track parent*/);
         // Set up the input arguments
         top_task->arglen = sizeof(InputArgs);
         top_task->args = malloc(top_task->arglen);
@@ -10590,7 +10669,7 @@ namespace Legion {
       map_context->set_executing_processor(proc);
       TaskLauncher launcher(tid, arg, Predicate::TRUE_PRED, map_id);
       Future f = mapper_task->initialize_task(map_context, launcher, 
-                                   false/*check priv*/, false/*track parent*/);
+                                              false/*track parent*/);
       mapper_task->set_current_proc(proc);
       mapper_task->select_task_options();
       // Create a temporary event to name the result since we 
@@ -10681,13 +10760,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_index_space_destroy(IndexSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
     void Runtime::destroy_index_partition(Context ctx, 
                                                    IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -10695,13 +10767,6 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT("Illegal dummy context destroy index partition!");
       ctx->destroy_index_partition(handle);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_index_partition_destroy(IndexPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_index_partition(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -11624,29 +11689,6 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Runtime::finalize_field_space_destroy(FieldSpace handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_field_space(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      forest->free_field(handle, fid);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_field_destroy(FieldSpace handle, 
-                                               const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      std::vector<FieldID> dense(to_free.begin(), to_free.end());
-      forest->free_fields(handle, dense);
-    }
-
-    //--------------------------------------------------------------------------
     LogicalRegion Runtime::create_logical_region(Context ctx, 
                 IndexSpace index_space, FieldSpace field_space, bool task_local)
     //--------------------------------------------------------------------------
@@ -11676,21 +11718,6 @@ namespace Legion {
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context destroy logical partition!");
       ctx->destroy_logical_partition(handle); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_region_destroy(LogicalRegion handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_region(handle, address_space);
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::finalize_logical_partition_destroy(
-                                                        LogicalPartition handle)
-    //--------------------------------------------------------------------------
-    {
-      forest->destroy_logical_partition(handle, address_space);
     }
 
     //--------------------------------------------------------------------------
@@ -11995,14 +12022,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FieldAllocator Runtime::create_field_allocator(Context ctx, 
-                                                            FieldSpace handle)
+    FieldAllocator Runtime::create_field_allocator(Context ctx,
+                                                   FieldSpace handle)
     //--------------------------------------------------------------------------
     {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context create field allocator!");
-      return ctx->create_field_allocator(external, handle); 
+      return FieldAllocator(ctx->create_field_allocator(handle)); 
     }
 
     //--------------------------------------------------------------------------
@@ -13379,50 +13406,6 @@ namespace Legion {
     {
       return forest->retrieve_semantic_information(handle, tag, result, size,
                                                    can_fail, wait_until);
-    }
-
-    //--------------------------------------------------------------------------
-    FieldID Runtime::allocate_field(Context ctx, FieldSpace space,
-                                          size_t field_size, FieldID fid,
-                                          bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate field!");
-      return ctx->allocate_field(forest, space, field_size, 
-                                 fid, local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_field(Context ctx, FieldSpace space, FieldID fid)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free field!");
-      ctx->free_field(space, fid); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::allocate_fields(Context ctx, FieldSpace space,
-                                        const std::vector<size_t> &sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        bool local, CustomSerdezID serdez_id)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context allocate fields!");
-      ctx->allocate_fields(forest, space, sizes, resulting_fields, 
-                           local, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    void Runtime::free_fields(Context ctx, FieldSpace space,
-                                    const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      if (ctx == DUMMY_CONTEXT)
-        REPORT_DUMMY_CONTEXT("Illegal dummy context free fields!");
-      ctx->free_fields(space, to_free); 
     }
 
     //--------------------------------------------------------------------------
@@ -17601,7 +17584,6 @@ namespace Legion {
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
-      forest->prepare_for_shutdown();
       prepared_for_shutdown = true;
     }
 

@@ -180,6 +180,38 @@ namespace Legion {
     };
 
     /**
+     * \class FieldAllocatorImpl
+     * The base implementation of a field allocator object. This
+     * tracks how many outstanding copies of a field allocator
+     * object there are for a task and once they've all been
+     * destroyed it informs the context that there are no more
+     * outstanding allocations.
+     */
+    class FieldAllocatorImpl : public Collectable {
+    public:
+      FieldAllocatorImpl(FieldSpace space, TaskContext *context);
+      FieldAllocatorImpl(const FieldAllocatorImpl &rhs);
+      ~FieldAllocatorImpl(void);
+    public:
+      FieldAllocatorImpl& operator=(const FieldAllocatorImpl &rhs);
+    public:
+      inline FieldSpace get_field_space(void) const { return field_space; }
+    public:
+      FieldID allocate_field(size_t field_size, 
+                             FieldID desired_fieldid,
+                             CustomSerdezID serdez_id, bool local);
+      void free_field(FieldID fid);
+    public:
+      void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id, bool local);
+      void free_fields(const std::set<FieldID> &to_free);
+    public:
+      const FieldSpace field_space;
+      TaskContext *const context;
+    };
+
+    /**
      * \class FutureImpl
      * The base implementation of a future object.  The runtime
      * manages future implementation objects and knows how to
@@ -1480,6 +1512,8 @@ namespace Legion {
             logical_logging_only(false),
             physical_logging_only(false),
             check_privileges(true),
+#else
+            check_privileges(false),
 #endif
             num_profiling_nodes(0),
             serializer_type("binary"),
@@ -1528,8 +1562,8 @@ namespace Legion {
         bool verbose_logging;
         bool logical_logging_only;
         bool physical_logging_only;
-        bool check_privileges;
 #endif
+        bool check_privileges;
       public:
         unsigned num_profiling_nodes;
         const char *serializer_type;
@@ -1667,8 +1701,8 @@ namespace Legion {
       const bool verbose_logging;
       const bool logical_logging_only;
       const bool physical_logging_only;
-      const bool check_privileges;
 #endif
+      const bool check_privileges;
     public:
       const unsigned num_profiling_nodes;
     public:
@@ -1703,12 +1737,8 @@ namespace Legion {
       IndexSpace subtract_index_spaces(Context ctx,
                                     IndexSpace left, IndexSpace right);
       void destroy_index_space(Context ctx, IndexSpace handle);
-      // Called from deletion op
-      void finalize_index_space_destroy(IndexSpace handle);
     public:
       void destroy_index_partition(Context ctx, IndexPartition handle);
-      // Called from deletion op
-      void finalize_index_partition_destroy(IndexPartition handle);
     public:
       IndexPartition create_equal_partition(Context ctx, IndexSpace parent,
                                             IndexSpace color_space, 
@@ -1889,19 +1919,11 @@ namespace Legion {
                                   std::vector<FieldID> &fields);
       void get_field_space_fields(FieldSpace handle, 
                                   std::vector<FieldID> &fields);
-      // Called from deletion op
-      void finalize_field_space_destroy(FieldSpace handle);
-      void finalize_field_destroy(FieldSpace handle, FieldID fid);
-      void finalize_field_destroy(FieldSpace handle, 
-                                  const std::set<FieldID> &to_free);
     public:
       LogicalRegion create_logical_region(Context ctx, IndexSpace index,
                                           FieldSpace fields, bool task_local);
       void destroy_logical_region(Context ctx, LogicalRegion handle);
       void destroy_logical_partition(Context ctx, LogicalPartition handle);
-      // Called from deletion ops
-      void finalize_logical_region_destroy(LogicalRegion handle);
-      void finalize_logical_partition_destroy(LogicalPartition handle);
     public:
       LogicalPartition get_logical_partition(Context ctx, LogicalRegion parent, 
                                              IndexPartition handle);
@@ -2121,17 +2143,6 @@ namespace Legion {
       bool retrieve_semantic_information(LogicalPartition part, SemanticTag tag,
                                          const void *&result, size_t &size,
                                          bool can_fail, bool wait_until);
-    public:
-      FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, 
-                             bool local, CustomSerdezID serdez);
-      void free_field(Context ctx, FieldSpace space, FieldID fid);
-      void allocate_fields(Context ctx, FieldSpace space, 
-                           const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, 
-                           bool local, CustomSerdezID serdez);
-      void free_fields(Context ctx, FieldSpace space, 
-                       const std::set<FieldID> &to_free);
     public:
       TaskID generate_dynamic_task_id(void);
       TaskID generate_library_task_ids(const char *name, size_t count);

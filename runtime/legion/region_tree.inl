@@ -1969,36 +1969,13 @@ namespace Legion {
     bool IndexSpaceNodeT<DIM,T>::destroy_node(AddressSpaceID source)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(registered_with_runtime);
+#endif
       if (destroyed)
         REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_SPACE_DELETION,
             "Duplicate deletion of Index Space %d", handle.get_id())
       destroyed = true;
-      // Traverse upwards for any parent operations
-      std::vector<IndexSpaceOperation*> parents;
-      {
-        AutoLock n_lock(node_lock,1,false/*exclusive*/);
-        if (!parent_operations.empty())
-        {
-          parents.resize(parent_operations.size());
-          unsigned idx = 0;
-          for (std::set<IndexSpaceOperation*>::const_iterator it = 
-                parent_operations.begin(); it != 
-                parent_operations.end(); it++, idx++)
-          {
-            (*it)->add_reference();
-            parents[idx] = (*it);
-          }
-        }
-      }
-      if (!parents.empty())
-      {
-        context->invalidate_index_space_expression(parents);
-        // Remove any references that we have on the parents
-        for (std::vector<IndexSpaceOperation*>::const_iterator it = 
-              parents.begin(); it != parents.end(); it++)
-          if ((*it)->remove_reference())
-            delete (*it);
-      }
       // If we're not the owner, send a message that we're removing
       // the application reference
       if (!is_owner())
@@ -2013,6 +1990,27 @@ namespace Legion {
         {
           DestroyNodeFunctor functor(handle, source, runtime);
           map_over_remote_instances(functor);
+        }
+        // Traverse down and destroy all of the child nodes
+        // Need to make a copy of this in case the children
+        // end up being deleted and removing themselves
+        std::vector<IndexPartNode*> color_map_copy;
+        {
+          unsigned index = 0;
+          AutoLock n_lock(node_lock,1,false/*exclusive*/);
+          if (!color_map.empty())
+          {
+            color_map_copy.resize(color_map.size());
+            for (std::map<LegionColor,IndexPartNode*>::const_iterator it = 
+                  color_map.begin(); it != color_map.end(); it++)
+              color_map_copy[index++] = it->second;
+          }
+        }
+        if (!color_map_copy.empty())
+        {
+          for (std::vector<IndexPartNode*>::const_iterator it = 
+                color_map_copy.begin(); it != color_map_copy.end(); it++)
+            (*it)->destroy_node(local_space, false/*top*/);
         }
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
       }
@@ -4039,12 +4037,25 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     template<int DIM, typename T>
-    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source) 
+    bool IndexPartNodeT<DIM,T>::destroy_node(AddressSpaceID source, bool top) 
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(registered_with_runtime);
+      assert(partition_ready.has_triggered());
+#endif
       if (destroyed)
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
-            "Duplicate deletion of Index Partition %d", handle.get_id())
+      {
+        // Deletion operations for different parts of the index space tree
+        // can actually race to get here, so we don't report any races here
+#if 0
+        if (top)
+          REPORT_LEGION_ERROR(ERROR_ILLEGAL_INDEX_PARTITION_DELETION,
+              "Duplicate deletion of Index Partition %d", handle.get_id())
+        else
+#endif
+        return false;
+      }
       destroyed = true;
       // If we're not the owner send a message to do the destruction
       // otherwise we can do it here
@@ -4054,7 +4065,30 @@ namespace Legion {
         return false;
       }
       else
+      {
+        // Traverse down and destroy all of the child nodes
+        // Need to make a copy of this in case the children
+        // end up being deleted and removing themselves
+        std::vector<IndexSpaceNode*> color_map_copy;
+        {
+          unsigned index = 0;
+          AutoLock n_lock(node_lock,1,false/*exclusive*/);
+          if (!color_map.empty())
+          {
+            color_map_copy.resize(color_map.size());
+            for (std::map<LegionColor,IndexSpaceNode*>::const_iterator it =
+                  color_map.begin(); it != color_map.end(); it++)
+              color_map_copy[index++] = it->second;
+          }
+        }
+        if (!color_map_copy.empty())
+        {
+          for (std::vector<IndexSpaceNode*>::const_iterator it = 
+                color_map_copy.begin(); it != color_map_copy.end(); it++)
+            (*it)->destroy_node(local_space);
+        }
         return remove_base_valid_ref(APPLICATION_REF, NULL/*mutator*/);
+      }
     } 
 
   }; // namespace Internal

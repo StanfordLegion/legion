@@ -133,8 +133,6 @@ namespace Legion {
     public:
       RegionTreeForest& operator=(const RegionTreeForest &rhs);
     public:
-      void prepare_for_shutdown(void);
-    public:
       void create_index_space(IndexSpace handle, const void *realm_is,
                               DistributedID did);
       IndexSpace find_or_create_union_space(TaskContext *ctx,
@@ -143,7 +141,8 @@ namespace Legion {
                               const std::vector<IndexSpace> &sources);
       IndexSpace find_or_create_difference_space(TaskContext *ctx,
                               IndexSpace left, IndexSpace right);
-      RtEvent create_pending_partition(IndexPartition pid,
+      RtEvent create_pending_partition(TaskContext *ctx,
+                                       IndexPartition pid,
                                        IndexSpace parent,
                                        IndexSpace color_space,
                                        LegionColor partition_color,
@@ -151,7 +150,8 @@ namespace Legion {
                                        DistributedID did,
                                        ApEvent partition_ready,
             ApUserEvent partial_pending = ApUserEvent::NO_AP_USER_EVENT);
-      void create_pending_cross_product(IndexPartition handle1,
+      void create_pending_cross_product(TaskContext *ctx,
+                                        IndexPartition handle1,
                                         IndexPartition handle2,
                   std::map<IndexSpace,IndexPartition> &user_handles,
                                            PartitionKind kind,
@@ -275,7 +275,8 @@ namespace Legion {
       void allocate_fields(FieldSpace handle, const std::vector<size_t> &sizes,
                            const std::vector<FieldID> &resulting_fields,
                            CustomSerdezID serdez_id);
-      void free_fields(FieldSpace handle, const std::vector<FieldID> &to_free);
+      void free_fields(FieldSpace handle, 
+                       const std::vector<FieldID> &to_free);
     public:
       bool allocate_local_fields(FieldSpace handle, 
                                  const std::vector<FieldID> &resulting_fields,
@@ -517,6 +518,9 @@ namespace Legion {
                               const PhysicalTraceInfo &trace_info,
                               std::set<RtEvent> &map_applied_events,
                               LogicalView *registration_view = NULL);
+      void invalidate_fields(Operation *op, unsigned index,
+                             VersionInfo &version_info,
+                             std::set<RtEvent> &map_applied_events);
       // Support for tracing
       void find_invalid_instances(Operation *op, unsigned index,
                                   VersionInfo &version_info,
@@ -633,6 +637,9 @@ namespace Legion {
     public:
       bool are_compatible(IndexSpace left, IndexSpace right);
       bool is_dominated(IndexSpace src, IndexSpace dst);
+      bool is_dominated_tree_only(IndexSpace test, IndexPartition dominator);
+      bool is_dominated_tree_only(IndexPartition test, IndexSpace dominator);
+      bool is_dominated_tree_only(IndexPartition test,IndexPartition dominator);
     public:
       bool compute_index_path(IndexSpace parent, IndexSpace child,
                               std::vector<LegionColor> &path);
@@ -1626,7 +1633,7 @@ namespace Legion {
       bool has_color(const LegionColor c);
       IndexPartNode* get_child(const LegionColor c, 
                                RtEvent *defer = NULL, bool can_fail = false);
-      void add_child(IndexPartNode *child);
+      void add_child(IndexPartNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
     public:
@@ -2373,7 +2380,7 @@ namespace Legion {
     public:
       bool has_color(const LegionColor c);
       IndexSpaceNode* get_child(const LegionColor c, RtEvent *defer = NULL);
-      void add_child(IndexSpaceNode *child);
+      void add_child(IndexSpaceNode *child, ReferenceMutator *mutator);
       void remove_child(const LegionColor c);
       size_t get_num_children(void) const;
       void get_subspace_preconditions(std::set<ApEvent> &preconditions);
@@ -2416,7 +2423,7 @@ namespace Legion {
       bool intersects_with(IndexPartNode *other, bool compute = true); 
       bool dominates(IndexSpaceNode *other);
       bool dominates(IndexPartNode *other);
-      virtual bool destroy_node(AddressSpaceID source) = 0;
+      virtual bool destroy_node(AddressSpaceID source, bool top) = 0;
     public:
       static void handle_disjointness_test(IndexPartNode *parent,
                                            IndexSpaceNode *left,
@@ -2492,7 +2499,7 @@ namespace Legion {
     public:
       IndexPartNodeT& operator=(const IndexPartNodeT &rhs);
     public:
-      virtual bool destroy_node(AddressSpaceID source); 
+      virtual bool destroy_node(AddressSpaceID source, bool top); 
     };
 
     /**
@@ -2564,16 +2571,6 @@ namespace Legion {
         unsigned idx;
         CustomSerdezID serdez_id;
         bool destroyed;
-      };
-      struct LocalFieldInfo {
-      public:
-        LocalFieldInfo(void)
-          : size(0), count(0) { }
-        LocalFieldInfo(size_t s)
-          : size(s), count(0) { }
-      public:
-        size_t size;
-        unsigned count;
       };
       struct FindTargetsFunctor {
       public:
@@ -2772,14 +2769,14 @@ namespace Legion {
     protected:
       // Assume we are already holding the node lock
       // when calling these methods
-      int allocate_index(RtEvent &ready_event);
+      int allocate_index(size_t field_size, CustomSerdezID serdez, 
+                         RtEvent &ready_event);
       void free_index(unsigned index, RtEvent free_event);
     protected:
-      bool allocate_local_indexes(
+      bool allocate_local_indexes(CustomSerdezID serdez,
             const std::vector<size_t> &sizes,
             const std::set<unsigned> &current_indexes,
                   std::vector<unsigned> &new_indexes);
-      void free_local_indexes(const std::vector<unsigned> &indexes);
     public:
       const FieldSpace handle;
       RegionTreeForest *const context;
@@ -2789,8 +2786,16 @@ namespace Legion {
       std::set<LogicalRegion> logical_trees;
       std::set<RegionNode*> local_trees;
       std::map<FieldID,FieldInfo> fields;
-      FieldMask available_indexes;
-      std::map<int,RtEvent> available_events;
+      // Once allocated all indexes have to have the same field size
+      // for now because it's too hard to go through and prune out all 
+      // the data structures that depend on field sizes being the same.
+      std::vector<std::pair<size_t,CustomSerdezID> > index_infos;
+      // Local field sizes
+      std::vector<std::pair<size_t,CustomSerdezID> > local_index_infos;
+      // Use a list here so that we cycle through all the indexes
+      // that have been freed before we reuse to avoid false aliasing
+      // We may pull things out from the middle though
+      std::list<std::pair<unsigned,RtEvent> > available_indexes;
     private:
       // Keep track of the layouts associated with this field space
       // Index them by their hash of their field mask to help
@@ -2801,9 +2806,6 @@ namespace Legion {
       LegionMap<SemanticTag,SemanticInfo>::aligned semantic_info;
       LegionMap<std::pair<FieldID,SemanticTag>,SemanticInfo>::aligned 
                                                     semantic_field_info;
-    private:
-      // Local field information
-      std::vector<LocalFieldInfo> local_field_infos;
     public:
       bool destroyed;
     };
@@ -3012,6 +3014,7 @@ namespace Legion {
     public:
       inline FieldSpaceNode* get_column_source(void) const 
       { return column_source; }
+      void find_remote_instances(NodeSet &target_instances);
     public:
       RegionTreeForest *const context;
       FieldSpaceNode *const column_source;
@@ -3079,8 +3082,7 @@ namespace Legion {
       void add_child(PartitionNode *child);
       void remove_child(const LegionColor p);
     public:
-      void find_remote_instances(NodeSet &target_instances);
-      bool destroy_node(AddressSpaceID source, bool root);
+      bool destroy_node(AddressSpaceID source);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
@@ -3216,7 +3218,7 @@ namespace Legion {
       RegionNode* get_child(const LegionColor c);
       void add_child(RegionNode *child);
       void remove_child(const LegionColor c);
-      bool destroy_node(AddressSpaceID source, bool root);
+      bool destroy_node(AddressSpaceID source, bool top);
     public:
       virtual unsigned get_depth(void) const;
       virtual LegionColor get_color(void) const;
