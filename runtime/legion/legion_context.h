@@ -437,31 +437,37 @@ namespace Legion {
     public:
       void analyze_destroy_index_space(IndexSpace handle,
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &deletion_req_indexes);
       void analyze_destroy_index_partition(IndexPartition index_partition,
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &deletion_req_indexes);
       void analyze_destroy_field_space(FieldSpace handle,
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &deletion_req_indexes);
       void analyze_destroy_fields(FieldSpace handle,
                                   const std::set<FieldID> &to_delete,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
                                   std::vector<FieldID> &global_to_free,
                                   std::vector<FieldID> &local_to_free,
-                                  std::vector<FieldID> &local_field_indexes);
+                                  std::vector<FieldID> &local_field_indexes,
+                                  std::vector<unsigned> &deletion_req_indexes);
       void analyze_destroy_logical_region(LogicalRegion handle,
                                   std::vector<RegionRequirement> &delete_reqs,
                                   std::vector<unsigned> &parent_req_indexes,
                                   std::vector<bool> &returnable_privileges);
       void analyze_destroy_logical_partition(LogicalPartition handle,
                                   std::vector<RegionRequirement> &delete_reqs,
-                                  std::vector<unsigned> &parent_req_indexes);
+                                  std::vector<unsigned> &parent_req_indexes,
+                                  std::vector<unsigned> &deletion_req_indexes);
       virtual void analyze_free_local_fields(FieldSpace handle,
                                   const std::vector<FieldID> &local_to_free,
                                   std::vector<unsigned> &local_field_indexes);
-      void remove_deleted_requirements(const std::vector<unsigned> &indexes);
+      void remove_deleted_requirements(const std::vector<unsigned> &indexes,
+                                  std::vector<LogicalRegion> &to_delete);
       void remove_deleted_fields(const std::set<FieldID> &to_free,
                                  const std::vector<unsigned> &indexes);
       virtual void remove_deleted_local_fields(FieldSpace space,
@@ -550,6 +556,10 @@ namespace Legion {
       // a created field.
       std::map<unsigned,RegionRequirement>      created_requirements;
       std::map<unsigned,bool>                   returnable_privileges;
+      // Number of outstanding deletions using this created requirement
+      // The last one to send the count to zero actually gets to delete
+      // the requirement and the logical region
+      std::map<unsigned,unsigned>               deletion_counts;
     protected:
       // These next two data structure don't need a lock becaue
       // they are only mutated by the application task 

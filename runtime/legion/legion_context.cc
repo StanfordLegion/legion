@@ -55,6 +55,9 @@ namespace Legion {
     TaskContext::~TaskContext(void)
     //--------------------------------------------------------------------------
     {
+#ifdef DEBUG_LEGION
+      assert(deletion_counts.empty());
+#endif
       // Clean up any local variables that we have
       if (!task_local_variables.empty())
       {
@@ -1239,7 +1242,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_index_space(IndexSpace handle,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1249,7 +1253,7 @@ namespace Legion {
       // initial regions because they had to be made above this context
       // so we only need to look at our created requirements
       const IndexTreeID tree_id = handle.get_tree_id();
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      AutoLock priv_lock(privilege_lock);
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -1266,13 +1270,22 @@ namespace Legion {
         req.privilege_fields = it->second.privilege_fields;
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(it->first);
+        std::map<unsigned,unsigned>::iterator deletion_finder =
+          deletion_counts.find(it->first);
+        // Increment the deletion count if there is one
+        if (deletion_finder != deletion_counts.end())
+        {
+          deletion_finder->second++;
+          deletion_indexes.push_back(it->first);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_index_partition(IndexPartition index_part,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1296,7 +1309,7 @@ namespace Legion {
         delete_req.handle_type = SINGULAR;
         parent_req_indexes.push_back(idx);
       }
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      AutoLock priv_lock(privilege_lock);
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -1313,13 +1326,22 @@ namespace Legion {
         req.privilege_fields = it->second.privilege_fields;
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(it->first);
+        // Increment the deletion count if there is one
+        std::map<unsigned,unsigned>::iterator deletion_finder =
+          deletion_counts.find(it->first);
+        if (deletion_finder != deletion_counts.end())
+        {
+          deletion_finder->second++;
+          deletion_indexes.push_back(it->first);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_field_space(FieldSpace handle,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1345,6 +1367,14 @@ namespace Legion {
         req.privilege_fields = it->second.privilege_fields;
         req.handle_type = SINGULAR;
         parent_req_indexes.push_back(it->first);
+        std::map<unsigned,unsigned>::iterator deletion_finder =
+          deletion_counts.find(it->first);
+        // Incement the deletion count if there is one
+        if (deletion_finder != deletion_counts.end())
+        {
+          deletion_finder->second++;
+          deletion_indexes.push_back(it->first);
+        }
       }
     }
 
@@ -1355,7 +1385,8 @@ namespace Legion {
                                     std::vector<unsigned> &parent_req_indexes,
                                     std::vector<FieldID> &global_to_free,
                                     std::vector<FieldID> &local_to_free,
-                                    std::vector<unsigned> &local_field_indexes)
+                                    std::vector<unsigned> &local_field_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1416,6 +1447,13 @@ namespace Legion {
           req.privilege_fields = overlapping_fields;
           req.handle_type = SINGULAR;
           parent_req_indexes.push_back(it->first);
+          std::map<unsigned,unsigned>::iterator deletion_finder =
+            deletion_counts.find(it->first);
+          if (deletion_finder != deletion_counts.end())
+          {
+            deletion_finder->second++;
+            deletion_indexes.push_back(it->first);
+          }
           // We need some extra logging for legion spy
           if (runtime->legion_spy_enabled)
           {
@@ -1504,6 +1542,14 @@ namespace Legion {
               req.flags = it->second.flags;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
+              // Always put a deletion index on here to mark that 
+              // the requirement is going to be deleted
+              std::map<unsigned,unsigned>::iterator deletion_finder =
+                deletion_counts.find(it->first);
+              if (deletion_finder == deletion_counts.end())
+                deletion_counts[it->first] = 1;
+              else
+                deletion_finder->second++;
               // Can't delete this yet since other deletions might 
               // need to find it until it is finally applied
               it++;
@@ -1598,6 +1644,14 @@ namespace Legion {
               req.handle_type = SINGULAR;
               parent_req_indexes.push_back(it->first);
               returnable.push_back(returnable_privileges[it->first]);
+              // Always put a deletion index on here to mark that 
+              // the requirement is going to be deleted
+              std::map<unsigned,unsigned>::iterator deletion_finder =
+                deletion_counts.find(it->first);
+              if (deletion_finder == deletion_counts.end())
+                deletion_counts[it->first] = 1;
+              else
+                deletion_finder->second++;
               // Can't delete this yet until it's actually performed
               // because other deletions might need to depend on it
               it++;
@@ -1668,7 +1722,8 @@ namespace Legion {
     //--------------------------------------------------------------------------
     void TaskContext::analyze_destroy_logical_partition(LogicalPartition handle,
                                     std::vector<RegionRequirement> &delete_reqs,
-                                    std::vector<unsigned> &parent_req_indexes)
+                                    std::vector<unsigned> &parent_req_indexes,
+                                    std::vector<unsigned> &deletion_indexes)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -1710,7 +1765,7 @@ namespace Legion {
         delete_req.privilege_fields = req.privilege_fields;
         parent_req_indexes.push_back(idx);
       }
-      AutoLock priv_lock(privilege_lock,1,false/*exclusive*/);
+      AutoLock priv_lock(privilege_lock);
       for (std::map<unsigned,RegionRequirement>::const_iterator it = 
            created_requirements.begin(); it != created_requirements.end(); it++)
       {
@@ -1743,23 +1798,45 @@ namespace Legion {
         req.prop = EXCLUSIVE;
         req.privilege_fields = it->second.privilege_fields;
         parent_req_indexes.push_back(it->first);
+        std::map<unsigned,unsigned>::iterator deletion_finder =
+          deletion_counts.find(it->first);
+        if (deletion_finder != deletion_counts.end())
+        {
+          deletion_finder->second++;
+          deletion_indexes.push_back(it->first);
+        }
       }
     }
 
     //--------------------------------------------------------------------------
     void TaskContext::remove_deleted_requirements(
-                                           const std::vector<unsigned> &indexes)
+                                          const std::vector<unsigned> &indexes,
+                                          std::vector<LogicalRegion> &to_delete)
     //--------------------------------------------------------------------------
     {
       AutoLock priv_lock(privilege_lock);
       for (std::vector<unsigned>::const_iterator it = 
             indexes.begin(); it != indexes.end(); it++) 
       {
+        std::map<unsigned,unsigned>::iterator finder = 
+          deletion_counts.find(*it);
 #ifdef DEBUG_LEGION
-        assert(created_requirements.find(*it) != created_requirements.end());
+        assert(finder != deletion_counts.end());
+        assert(finder->second > 0);
+#endif
+        finder->second--;
+        // Check to see if we're the last deletion with this region requirement
+        if (finder->second > 0)
+          continue;
+        deletion_counts.erase(finder); 
+        std::map<unsigned,RegionRequirement>::iterator req_finder = 
+          created_requirements.find(*it);
+#ifdef DEBUG_LEGION
+        assert(req_finder != created_requirements.end());
         assert(returnable_privileges.find(*it) != returnable_privileges.end());
 #endif
-        created_requirements.erase(*it);
+        to_delete.push_back(req_finder->second.parent);
+        created_requirements.erase(req_finder);
         returnable_privileges.erase(*it);
       }
     }

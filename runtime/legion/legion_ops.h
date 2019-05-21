@@ -1367,6 +1367,7 @@ namespace Legion {
       std::vector<FieldID> global_fields;
       std::vector<unsigned> local_field_indexes;
       std::vector<unsigned> parent_req_indexes;
+      std::vector<unsigned> deletion_req_indexes;
       std::vector<bool> returnable_privileges;
       std::vector<RegionRequirement> deletion_requirements;
       LegionVector<VersionInfo>::aligned version_infos;

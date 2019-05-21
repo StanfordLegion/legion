@@ -6919,6 +6919,7 @@ namespace Legion {
       global_fields.clear();
       local_field_indexes.clear();
       parent_req_indexes.clear();
+      deletion_req_indexes.clear();
       returnable_privileges.clear();
       deletion_requirements.clear();
       version_infos.clear();
@@ -6951,26 +6952,27 @@ namespace Legion {
         case INDEX_SPACE_DELETION:
           {
             parent_ctx->analyze_destroy_index_space(index_space,
-                            deletion_requirements, parent_req_indexes);
+              deletion_requirements, parent_req_indexes, deletion_req_indexes);
             break;
           }
         case INDEX_PARTITION_DELETION:
           {
             parent_ctx->analyze_destroy_index_partition(index_part,
-                            deletion_requirements, parent_req_indexes);
+              deletion_requirements, parent_req_indexes, deletion_req_indexes);
             break;
           }
         case FIELD_SPACE_DELETION:
           {
             parent_ctx->analyze_destroy_field_space(field_space,
-                            deletion_requirements, parent_req_indexes);
+              deletion_requirements, parent_req_indexes, deletion_req_indexes);
             break;
           }
         case FIELD_DELETION:
           {
             parent_ctx->analyze_destroy_fields(field_space, free_fields,
                               deletion_requirements, parent_req_indexes,
-                              global_fields, local_fields, local_field_indexes);
+                              global_fields, local_fields, 
+                              local_field_indexes, deletion_req_indexes);
             break;
           }
         case LOGICAL_REGION_DELETION:
@@ -6983,7 +6985,7 @@ namespace Legion {
         case LOGICAL_PARTITION_DELETION:
           {
             parent_ctx->analyze_destroy_logical_partition(logical_part,
-                            deletion_requirements, parent_req_indexes);
+              deletion_requirements, parent_req_indexes, deletion_req_indexes);
             break;
           }
         default:
@@ -7178,22 +7180,32 @@ namespace Legion {
     {
       // We put these operations in the commit stage to make sure that there
       // is no mis-speculation or faults that could potentially affect them
+      std::vector<LogicalRegion> regions_to_destroy;
       switch (kind)
       {
         case INDEX_SPACE_DELETION:
           {
+            if (!deletion_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                      regions_to_destroy);
             runtime->forest->destroy_index_space(index_space,
                                                  runtime->address_space);
             break;
           }
         case INDEX_PARTITION_DELETION:
           {
+            if (!deletion_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                      regions_to_destroy);
             runtime->forest->destroy_index_partition(index_part,
                                                      runtime->address_space);
             break;
           }
         case FIELD_SPACE_DELETION:
           {
+            if (!deletion_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                      regions_to_destroy);
             runtime->forest->destroy_field_space(field_space,
                                                  runtime->address_space);
             break;
@@ -7208,23 +7220,43 @@ namespace Legion {
             parent_ctx->remove_deleted_fields(free_fields, parent_req_indexes);
             if (!local_fields.empty())
               parent_ctx->remove_deleted_local_fields(field_space,local_fields);
+            if (!deletion_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                      regions_to_destroy);
             break;
           }
         case LOGICAL_REGION_DELETION:
           {
-            runtime->forest->destroy_logical_region(logical_region, 
-                                            runtime->address_space);
-            parent_ctx->remove_deleted_requirements(parent_req_indexes);
+            // In this case we just remove all our regions since we know
+            // we put a reference on all of them, if we're the last one
+            // to remove the reference on each region then we'll delete them
+            if (!parent_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(parent_req_indexes,
+                                                      regions_to_destroy);
+            else
+              // If we had no deletion requirements then we know there is
+              // nothing to race with and we can just do our deletion
+              runtime->forest->destroy_logical_region(logical_region,
+                                                      runtime->address_space);
             break;
           }
         case LOGICAL_PARTITION_DELETION:
           {
+            if (!deletion_req_indexes.empty())
+              parent_ctx->remove_deleted_requirements(deletion_req_indexes,
+                                                      regions_to_destroy);
             runtime->forest->destroy_logical_partition(logical_part,
                                             runtime->address_space);
             break;
           }
         default:
           assert(false);
+      }
+      if (!regions_to_destroy.empty())
+      {
+        for (std::vector<LogicalRegion>::const_iterator it =
+              regions_to_destroy.begin(); it != regions_to_destroy.end(); it++)
+          runtime->forest->destroy_logical_region(*it, runtime->address_space);
       }
       complete_operation();
     }
