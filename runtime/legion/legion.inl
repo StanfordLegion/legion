@@ -6497,77 +6497,14 @@ namespace Legion {
     inline bool FieldAllocator::operator==(const FieldAllocator &rhs) const
     //--------------------------------------------------------------------------
     {
-      return ((field_space == rhs.field_space) && (runtime == rhs.runtime));
+      return (impl == rhs.impl);
     }
 
     //--------------------------------------------------------------------------
     inline bool FieldAllocator::operator<(const FieldAllocator &rhs) const
     //--------------------------------------------------------------------------
     {
-      if (runtime < rhs.runtime)
-        return true;
-      else if (runtime > rhs.runtime)
-        return false;
-      else
-        return (field_space < rhs.field_space);
-    }
-
-    //--------------------------------------------------------------------------
-    inline FieldID FieldAllocator::allocate_field(size_t field_size, 
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
-                                CustomSerdezID serdez_id /*=0*/)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->allocate_field(parent, field_space, 
-                                     field_size, desired_fieldid, 
-                                     false/*local*/, serdez_id); 
-    }
-
-    //--------------------------------------------------------------------------
-    inline void FieldAllocator::free_field(FieldID id)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_field(parent, field_space, id);
-    }
-
-    //--------------------------------------------------------------------------
-    inline FieldID FieldAllocator::allocate_local_field(size_t field_size,
-                                FieldID desired_fieldid /*= AUTO_GENERATE_ID*/,
-                                CustomSerdezID serdez_id /*=0*/)
-    //--------------------------------------------------------------------------
-    {
-      return runtime->allocate_field(parent, field_space,
-                                     field_size, desired_fieldid, 
-                                     true/*local*/, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void FieldAllocator::allocate_fields(
-        const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id /*=0*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, 
-                               false/*local*/, serdez_id);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void FieldAllocator::free_fields(const std::set<FieldID> &to_free)
-    //--------------------------------------------------------------------------
-    {
-      runtime->free_fields(parent, field_space, to_free);
-    }
-
-    //--------------------------------------------------------------------------
-    inline void FieldAllocator::allocate_local_fields(
-        const std::vector<size_t> &field_sizes,
-        std::vector<FieldID> &resulting_fields, CustomSerdezID serdez_id /*=0*/)
-    //--------------------------------------------------------------------------
-    {
-      runtime->allocate_fields(parent, field_space, 
-                               field_sizes, resulting_fields, 
-                               true/*local*/, serdez_id);
+      return (impl < rhs.impl);
     }
 
     //--------------------------------------------------------------------------

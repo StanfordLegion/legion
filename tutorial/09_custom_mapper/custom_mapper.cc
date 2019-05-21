@@ -819,6 +819,7 @@ void top_level_task(const Task *task,
   runtime->destroy_field_space(ctx, input_fs);
   runtime->destroy_field_space(ctx, output_fs);
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
 }
 
 void init_field_task(const Task *task,

@@ -491,7 +491,7 @@ namespace Legion {
     protected:
       FRIEND_ALL_RUNTIME_CLASSES
       // Only the Runtime should be able to make these
-      FieldAllocator(FieldSpace f, Context p, Runtime *rt);
+      FieldAllocator(Internal::FieldAllocatorImpl *impl);
     public:
       FieldAllocator& operator=(const FieldAllocator &allocator);
       inline bool operator<(const FieldAllocator &rhs) const;
@@ -511,16 +511,18 @@ namespace Legion {
        * @param serdez_id optional parameter for specifying a
        *   custom serdez object for serializing and deserializing
        *   a field when it is moved.
+       * @param local_field whether this is a local field or not
        * @return field ID for the allocated field
        */
-      inline FieldID allocate_field(size_t field_size, 
-              FieldID desired_fieldid = AUTO_GENERATE_ID,
-              CustomSerdezID serdez_id = 0);
+      FieldID allocate_field(size_t field_size, 
+                             FieldID desired_fieldid = AUTO_GENERATE_ID,
+                             CustomSerdezID serdez_id = 0,
+                             bool local_field = false);
       /**
        * Deallocate the specified field from the field space.
        * @param fid the field ID to be deallocated
        */
-      inline void free_field(FieldID fid);
+      void free_field(FieldID fid);
 
       /**
        * Same as allocate field, but this field will only
@@ -529,9 +531,9 @@ namespace Legion {
        * implicitly destroyed once the task in which it is 
        * allocated completes.
        */
-      inline FieldID allocate_local_field(size_t field_size,
-              FieldID desired_fieldid = AUTO_GENERATE_ID,
-              CustomSerdezID serdez_id = 0);
+      FieldID allocate_local_field(size_t field_size,
+                                   FieldID desired_fieldid = AUTO_GENERATE_ID,
+                                   CustomSerdezID serdez_id = 0);
       /**
        * Allocate a collection of fields with the specified sizes.
        * Optionally pass in a set of field IDs to use when allocating
@@ -543,17 +545,19 @@ namespace Legion {
        * size with field IDs specified for all the allocated fields
        * @param field_sizes size in bytes of the fields to be allocated
        * @param resulting_fields optional field names for allocated fields
+       * @param local_fields whether these should be local fields or not
        * @return resulting_fields vector with length equivalent to
        *    the length of field_sizes with field IDs specified
        */
-      inline void allocate_fields(const std::vector<size_t> &field_sizes,
-                                  std::vector<FieldID> &resulting_fields,
-                                  CustomSerdezID serdez_id = 0);
+      void allocate_fields(const std::vector<size_t> &field_sizes,
+                           std::vector<FieldID> &resulting_fields,
+                           CustomSerdezID serdez_id = 0,
+                           bool local_fields = false);
       /**
        * Free a collection of field IDs
        * @param to_free set of field IDs to be freed
        */
-      inline void free_fields(const std::set<FieldID> &to_free);
+      void free_fields(const std::set<FieldID> &to_free);
       /**
        * Same as allocate_fields but the fields that are allocated
        * will only be available locally on the node on which 
@@ -561,17 +565,15 @@ namespace Legion {
        * will be implicitly destroyed once the task in which
        * they were created completes.
        */
-      inline void allocate_local_fields(const std::vector<size_t> &field_sizes,
-                                        std::vector<FieldID> &resulting_fields,
-                                        CustomSerdezID serdez_id = 0);
+      void allocate_local_fields(const std::vector<size_t> &field_sizes,
+                                 std::vector<FieldID> &resulting_fields,
+                                 CustomSerdezID serdez_id = 0);
       /**
        * @return field space associated with this allocator
        */
-      inline FieldSpace get_field_space(void) const { return field_space; }
+      FieldSpace get_field_space(void) const;
     private:
-      FieldSpace field_space;
-      Context parent;
-      Runtime *runtime;
+      Internal::FieldAllocatorImpl *impl;
     };
 
     //==========================================================================
@@ -7440,18 +7442,6 @@ namespace Legion {
       bool has_logical_subregion_by_color_internal(
                                       LogicalPartition parent,
                                       const void *realm_color,TypeTag type_tag);
-    private:
-      friend class FieldAllocator;
-      FieldID allocate_field(Context ctx, FieldSpace space, 
-                             size_t field_size, FieldID fid, bool local,
-                             CustomSerdezID serdez_id);
-      void free_field(Context ctx, FieldSpace space, FieldID fid);
-      void allocate_fields(Context ctx, FieldSpace space, 
-                           const std::vector<size_t> &sizes,
-                           std::vector<FieldID> &resulting_fields, 
-                           bool local, CustomSerdezID serdez_id);
-      void free_fields(Context ctx, FieldSpace space, 
-                       const std::set<FieldID> &to_free);
     private:
       // Methods for the wrapper functions to get information from the runtime
       friend class LegionTaskWrapper;

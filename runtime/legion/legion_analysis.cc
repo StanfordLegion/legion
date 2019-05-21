@@ -9756,16 +9756,19 @@ namespace Legion {
           if (!!reduce_filter)
             filter_reduction_instances(reduce_filter);
           filter_valid_instances(mask);
-          FieldMaskSet<LogicalView>::iterator finder = 
-            valid_instances.find(analysis.view);
-          if (finder == valid_instances.end())
+          if (analysis.view != NULL)
           {
-            WrapperReferenceMutator mutator(applied_events);
-            analysis.view->add_nested_valid_ref(did, &mutator);
-            valid_instances.insert(analysis.view, mask);
+            FieldMaskSet<LogicalView>::iterator finder = 
+              valid_instances.find(analysis.view);
+            if (finder == valid_instances.end())
+            {
+              WrapperReferenceMutator mutator(applied_events);
+              analysis.view->add_nested_valid_ref(did, &mutator);
+              valid_instances.insert(analysis.view, mask);
+            }
+            else
+              finder.merge(mask);
           }
-          else
-            finder.merge(mask);
         }
         else
         {
@@ -9778,16 +9781,19 @@ namespace Legion {
             if (!!reduce_filter)
               filter_reduction_instances(reduce_filter);
             filter_valid_instances(update_mask);
-            FieldMaskSet<LogicalView>::iterator finder = 
-              valid_instances.find(analysis.view);
-            if (finder == valid_instances.end())
+            if (analysis.view != NULL)
             {
-              WrapperReferenceMutator mutator(applied_events);
-              analysis.view->add_nested_valid_ref(did, &mutator);
-              valid_instances.insert(analysis.view, update_mask);
+              FieldMaskSet<LogicalView>::iterator finder = 
+                valid_instances.find(analysis.view);
+              if (finder == valid_instances.end())
+              {
+                WrapperReferenceMutator mutator(applied_events);
+                analysis.view->add_nested_valid_ref(did, &mutator);
+                valid_instances.insert(analysis.view, update_mask);
+              }
+              else
+                finder.merge(update_mask);
             }
-            else
-              finder.merge(update_mask);
           }
         }
         // Advance the version numbers
@@ -9795,6 +9801,7 @@ namespace Legion {
         if (analysis.add_restriction)
         {
 #ifdef DEBUG_LEGION
+          assert(analysis.view != NULL);
           assert(analysis.view->is_instance_view());
 #endif
           InstanceView *inst_view = analysis.view->as_instance_view();

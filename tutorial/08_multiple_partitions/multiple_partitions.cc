@@ -161,6 +161,7 @@ void top_level_task(const Task *task,
   runtime->destroy_logical_region(ctx, stencil_lr);
   runtime->destroy_field_space(ctx, fs);
   runtime->destroy_index_space(ctx, is);
+  runtime->destroy_index_space(ctx, color_is);
 }
 
 // The standard initialize field task from earlier examples

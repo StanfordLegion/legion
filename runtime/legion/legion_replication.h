@@ -1073,13 +1073,17 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void);
       virtual void trigger_complete(void);
     public:
-      void set_execution_barrier(RtBarrier execution_barrier);
+      void initialize_replication(RtBarrier &deletion_barrier, 
+                                  bool is_total, bool is_first);
     protected:
+      RtBarrier mapping_barrier;
       RtBarrier execution_barrier;
-      bool is_top_level_deletion;
+      bool is_total_sharding;
+      bool is_first_local_shard;
     };
 
     /**
@@ -1275,7 +1279,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                  IndexSpace launch_space, IndexSpace shard_space);
-      virtual void instantiate_tasks(TaskContext *ctx, bool check_privileges,
+      virtual void instantiate_tasks(TaskContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,
@@ -1540,6 +1544,8 @@ namespace Legion {
         { return *address_spaces; }
       inline AddressSpaceID get_shard_space(ShardID sid) const
         { return (*address_spaces)[sid]; }    
+      inline bool is_first_local_shard(ShardTask *task) const
+        { return (local_shards[0] == task); }
     public:
       void set_shard_mapping(const std::vector<Processor> &shard_mapping);
       ShardTask* create_shard(ShardID id, Processor target);
@@ -1551,6 +1557,8 @@ namespace Legion {
       void launch_shard(ShardTask *task,
                         RtEvent precondition = RtEvent::NO_RT_EVENT) const;
       void complete_startup_initialization(void) const;
+      // Return true if we have a shard on every address space
+      bool is_total_sharding(void);
     public:
       void handle_post_mapped(bool local, RtEvent precondition);
       void handle_post_execution(const void *res, size_t res_size, 

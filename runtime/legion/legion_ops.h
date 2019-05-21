@@ -513,7 +513,8 @@ namespace Legion {
     public:
       // Help for finding the contexts for an operation
       InnerContext* find_logical_context(unsigned index);
-      InnerContext* find_physical_context(unsigned index);
+      InnerContext* find_physical_context(unsigned index,
+                                          const RegionRequirement &req);
     public: // Support for mapping operations
       static void prepare_for_mapping(const InstanceRef &ref,
                                       MappingInstance &instance);
@@ -885,8 +886,7 @@ namespace Legion {
       MapOp& operator=(const MapOp &rhs);
     public:
       PhysicalRegion initialize(TaskContext *ctx,
-                                const InlineLauncher &launcher,
-                                bool check_privileges);
+                                const InlineLauncher &launcher);
       void initialize(TaskContext *ctx, const PhysicalRegion &region);
       inline const RegionRequirement& get_requirement(void) const
         { return requirement; }
@@ -1016,8 +1016,7 @@ namespace Legion {
       CopyOp& operator=(const CopyOp &rhs);
     public:
       void initialize(TaskContext *ctx,
-                      const CopyLauncher &launcher,
-                      bool check_privileges);
+                      const CopyLauncher &launcher);
       void activate_copy(void);
       void deactivate_copy(void);
       void log_copy_requirements(void) const;
@@ -1061,8 +1060,9 @@ namespace Legion {
       virtual void set_context_index(unsigned index);
       virtual int get_depth(void) const;
     protected:
+      void check_copy_privileges(const bool permit_projection);
       void check_copy_privilege(const RegionRequirement &req, unsigned idx,
-                                bool permit_projection = false);
+                                const bool permit_projection);
       void check_compatibility_properties(void) const;
       void compute_parent_indexes(void);
       void perform_copy_across(const unsigned index, 
@@ -1149,8 +1149,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexCopyLauncher &launcher,
-                      IndexSpace launch_space,
-                      bool check_privileges);
+                      IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void); 
@@ -1338,9 +1337,10 @@ namespace Legion {
     public:
       DeletionOp& operator=(const DeletionOp &rhs);
     public:
-      void initialize_index_space_deletion(TaskContext *ctx, IndexSpace handle);
-      void initialize_index_part_deletion(TaskContext *ctx,
-                                          IndexPartition handle);
+      void initialize_index_space_deletion(TaskContext *ctx, IndexSpace handle,
+                                   std::vector<IndexPartition> &sub_partitions);
+      void initialize_index_part_deletion(TaskContext *ctx, IndexPartition part,
+                                   std::vector<IndexPartition> &sub_partitions);
       void initialize_field_space_deletion(TaskContext *ctx,
                                            FieldSpace handle);
       void initialize_field_deletion(TaskContext *ctx, FieldSpace handle,
@@ -1361,19 +1361,28 @@ namespace Legion {
       void deactivate_deletion(void);
     public:
       virtual void trigger_dependence_analysis(void);
+      virtual void trigger_ready(void);
       virtual void trigger_mapping(void); 
       virtual void trigger_complete(void);
       virtual unsigned find_parent_index(unsigned idx);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     protected:
       DeletionKind kind;
       IndexSpace index_space;
       IndexPartition index_part;
+      std::vector<IndexPartition> sub_partitions;
       FieldSpace field_space;
       LogicalRegion logical_region;
       LogicalPartition logical_part;
       std::set<FieldID> free_fields;
+      std::vector<FieldID> local_fields;
+      std::vector<FieldID> global_fields;
+      std::vector<unsigned> local_field_indexes;
       std::vector<unsigned> parent_req_indexes;
-      ApEvent completion_precondition;
+      std::vector<bool> returnable_privileges;
+      std::vector<RegionRequirement> deletion_requirements;
+      LegionVector<VersionInfo>::aligned version_infos;
     }; 
 
     /**
@@ -1629,8 +1638,7 @@ namespace Legion {
     public:
       AcquireOp& operator=(const AcquireOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const AcquireLauncher &launcher,
-                      bool check_privileges);
+      void initialize(TaskContext *ctx, const AcquireLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -1728,8 +1736,7 @@ namespace Legion {
     public:
       ReleaseOp& operator=(const ReleaseOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const ReleaseLauncher &launcher,
-                      bool check_privileges);
+      void initialize(TaskContext *ctx, const ReleaseLauncher &launcher);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2079,13 +2086,13 @@ namespace Legion {
     public:
       FutureMap initialize(TaskContext *ctx,
                            const MustEpochLauncher &launcher,
-                           IndexSpace launch_space, bool check_privileges);
+                           IndexSpace launch_space);
       // Make this a virtual method so it can be overridden for
       // control replicated version of must epoch op
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                  IndexSpace launch_space, IndexSpace shard_space);
       // Another virtual method to override for control replication
-      virtual void instantiate_tasks(TaskContext *ctx, bool check_privileges,
+      virtual void instantiate_tasks(TaskContext *ctx,
                                      const MustEpochLauncher &launcher);
       void find_conflicted_regions(
           std::vector<PhysicalRegion> &unmapped); 
@@ -2699,6 +2706,7 @@ namespace Legion {
       virtual void pack_remote_operation(Serializer &rez,
                                          AddressSpaceID target) const;
     protected:
+      void check_privilege(void);
       void compute_parent_index(void);
       void select_partition_projection(void);
       bool invoke_mapper(InstanceSet &mapped_instances);
@@ -2801,8 +2809,7 @@ namespace Legion {
     public:
       FillOp& operator=(const FillOp &rhs);
     public:
-      void initialize(TaskContext *ctx, const FillLauncher &launcher,
-                      bool check_privileges);
+      void initialize(TaskContext *ctx, const FillLauncher &launcher);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
       void activate_fill(void);
@@ -2877,8 +2884,7 @@ namespace Legion {
     public:
       void initialize(TaskContext *ctx,
                       const IndexFillLauncher &launcher,
-                      IndexSpace launch_space,
-                      bool check_privileges);
+                      IndexSpace launch_space);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -2952,8 +2958,7 @@ namespace Legion {
       AttachOp& operator=(const AttachOp &rhs);
     public:
       PhysicalRegion initialize(TaskContext *ctx,
-                                const AttachLauncher &launcher,
-                                bool check_privileges);
+                                const AttachLauncher &launcher);
       inline const RegionRequirement& get_requirement(void) const 
         { return requirement; }
     public:
@@ -3381,6 +3386,34 @@ namespace Legion {
       virtual ~RemoteDetachOp(void);
     public:
       RemoteDetachOp& operator=(const RemoteDetachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
+    };
+
+    /**
+     * \class RemoteDeletionOp
+     * This is a remote copy of a DeletionOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteDeletionOp : public RemoteOp {
+    public:
+      RemoteDeletionOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteDeletionOp(const RemoteDeletionOp &rhs);
+      virtual ~RemoteDeletionOp(void);
+    public:
+      RemoteDeletionOp& operator=(const RemoteDeletionOp &rhs);
     public:
       virtual UniqueID get_unique_id(void) const;
       virtual unsigned get_context_index(void) const;
