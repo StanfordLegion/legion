@@ -7069,6 +7069,22 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void ShardTask::handle_resource_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+#ifdef DEBUG_LEGION
+      assert(execution_context != NULL);
+      ReplicateContext *repl_ctx = 
+        dynamic_cast<ReplicateContext*>(execution_context);
+      assert(repl_ctx != NULL);
+#else
+      ReplicateContext *repl_ctx = 
+        static_cast<ReplicateContext*>(execution_context);
+#endif
+      repl_ctx->handle_resource_update(derez);
+    }
+
+    //--------------------------------------------------------------------------
     InstanceView* ShardTask::create_instance_top_view(PhysicalManager *manager,
                                                       AddressSpaceID source)
     //--------------------------------------------------------------------------

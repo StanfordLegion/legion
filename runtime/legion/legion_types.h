@@ -720,6 +720,7 @@ namespace Legion {
       SEND_REPL_TOP_VIEW_RESPONSE,
       SEND_REPL_EQ_REQUEST,
       SEND_REPL_EQ_RESPONSE,
+      SEND_REPL_RESOURCE_UPDATE,
       SEND_MAPPER_MESSAGE,
       SEND_MAPPER_BROADCAST,
       SEND_TASK_IMPL_SEMANTIC_REQ,
@@ -884,6 +885,7 @@ namespace Legion {
         "Send Replicate Top View Response",                           \
         "Send Replicate Equivalence Set Request",                     \
         "Send Replicate Equivalence Set Response",                    \
+        "Send Replicate Resource Update",                             \
         "Send Mapper Message",                                        \
         "Send Mapper Broadcast",                                      \
         "Send Task Impl Semantic Req",                                \

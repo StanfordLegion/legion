@@ -1575,6 +1575,9 @@ namespace Legion {
       void send_equivalence_set_request(ShardID target, Serializer &rez);
       void handle_equivalence_set_request(Deserializer &derez);
     public:
+      RtEvent broadcast_resource_update(ShardTask *source, Serializer &rez);
+      void handle_resource_update(Deserializer &derez);
+    public:
       static void handle_launch(const void *args);
       static void handle_delete(const void *args);
     public:
@@ -1591,6 +1594,7 @@ namespace Legion {
                                           AddressSpaceID request_source);
       static void handle_top_view_response(Deserializer &derez, Runtime *rt);
       static void handle_eq_request(Deserializer &derez, Runtime *rt);
+      static void handle_resource_update(Deserializer &derez, Runtime *rt);
     public:
       ShardingFunction* find_sharding_function(ShardingID sid);
     public:

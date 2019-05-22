@@ -10873,7 +10873,7 @@ namespace Legion {
           resulting_fields[idx] = buffer[idx];
         // No need to do the allocation since it was already done
       }
-      register_field_creations(space, local, resulting_fields);
+      TaskContext::register_field_creations(space, local, resulting_fields);
       // Update the allocator
       field_allocator_shard++;
       if (field_allocator_shard == total_shards)
@@ -12186,6 +12186,367 @@ namespace Legion {
       if (ready.exists() && !ready.has_triggered())
         ready.wait();
       context->handle_equivalence_set_response(tree_id, set);
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::handle_resource_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      ResourceUpdateKind kind;
+      derez.deserialize(kind);
+      size_t size;
+      derez.deserialize(size);
+      switch (kind)
+      {
+        case REGION_CREATION_UPDATE:
+          {
+            std::set<LogicalRegion> regions;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              LogicalRegion handle;
+              derez.deserialize(handle);
+              regions.insert(handle);
+            }
+            TaskContext::register_region_creations(regions);
+            break;
+          }
+        case REGION_DELETION_UPDATE:
+          {
+            std::vector<LogicalRegion> regions(size);
+            for (unsigned idx = 0; idx < size; idx++)
+              derez.deserialize(regions[idx]);
+            TaskContext::register_region_deletions(regions);
+            break;
+          }
+        case FIELD_CREATION_UPDATE:
+          {
+            std::set<std::pair<FieldSpace,FieldID> > fields;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              std::pair<FieldSpace,FieldID> key;
+              derez.deserialize(key.first);
+              derez.deserialize(key.second);
+              fields.insert(key);
+            }
+            TaskContext::register_field_creations(fields);
+            break;
+          }
+        case FIELD_DELETION_UPDATE:
+          {
+            std::vector<std::pair<FieldSpace,FieldID> > fields(size);
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              derez.deserialize(fields[idx].first);
+              derez.deserialize(fields[idx].second);
+            }
+            TaskContext::register_field_deletions(fields);
+            break;
+          }
+        case FIELD_SPACE_CREATION_UPDATE:
+          {
+            std::set<FieldSpace> spaces;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              FieldSpace handle;
+              derez.deserialize(handle);
+              spaces.insert(handle);
+            }
+            TaskContext::register_field_space_creations(spaces);
+            break;
+          }
+        case FIELD_SPACE_LATENT_UPDATE:
+          {
+            std::map<FieldSpace,unsigned> spaces;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              FieldSpace handle;
+              derez.deserialize(handle);
+              derez.deserialize(spaces[handle]);
+            }
+            TaskContext::register_latent_field_spaces(spaces);
+            break;
+          }
+        case FIELD_SPACE_DELETION_UPDATE:
+          {
+            std::vector<FieldSpace> spaces(size);
+            for (unsigned idx = 0; idx < size; idx++)
+              derez.deserialize(spaces[idx]);
+            TaskContext::register_field_space_deletions(spaces);
+            break;
+          }
+        case INDEX_SPACE_CREATION_UPDATE:
+          {
+            std::set<IndexSpace> spaces;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              IndexSpace handle;
+              derez.deserialize(handle);
+              spaces.insert(handle);
+            }
+            TaskContext::register_index_space_creations(spaces);
+            break;
+          }
+        case INDEX_SPACE_DELETION_UPDATE:
+          {
+            std::vector<IndexSpace> spaces(size);
+            for (unsigned idx = 0; idx < size; idx++)
+              derez.deserialize(spaces[idx]);
+            TaskContext::register_index_space_deletions(spaces);
+            break;
+          }
+        case INDEX_PARTITION_CREATION_UPDATE:
+          {
+            std::set<IndexPartition> parts;
+            for (unsigned idx = 0; idx < size; idx++)
+            {
+              IndexPartition handle;
+              derez.deserialize(handle);
+              parts.insert(handle);
+            }
+            TaskContext::register_index_partition_creations(parts);
+            break;
+          }
+        case INDEX_PARTITION_DELETION_UPDATE:
+          {
+            std::vector<IndexPartition> parts(size);
+            for (unsigned idx = 0; idx < size; idx++)
+              derez.deserialize(parts[idx]);
+            TaskContext::register_index_partition_deletions(parts);
+            break;
+          }
+        default:
+          assert(false); // should never get here
+      }
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_region_creations(
+                                               std::set<LogicalRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      // Pack it up and send it to the other shards
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(REGION_CREATION_UPDATE);
+      rez.serialize<size_t>(regions.size());
+      for (std::set<LogicalRegion>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_region_creations(regions);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+    
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_region_deletions(
+                                            std::vector<LogicalRegion> &regions)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(REGION_DELETION_UPDATE);
+      rez.serialize<size_t>(regions.size());
+      for (std::vector<LogicalRegion>::const_iterator it = 
+            regions.begin(); it != regions.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_region_deletions(regions);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_field_creations(
+                               std::set<std::pair<FieldSpace,FieldID> > &fields)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(FIELD_CREATION_UPDATE);
+      rez.serialize<size_t>(fields.size());
+      for (std::set<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_field_creations(fields);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_field_deletions(
+                            std::vector<std::pair<FieldSpace,FieldID> > &fields)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(FIELD_DELETION_UPDATE);
+      rez.serialize<size_t>(fields.size());
+      for (std::vector<std::pair<FieldSpace,FieldID> >::const_iterator it = 
+            fields.begin(); it != fields.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_field_deletions(fields);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_field_space_creations(
+                                                   std::set<FieldSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_CREATION_UPDATE);
+      rez.serialize<size_t>(spaces.size());
+      for (std::set<FieldSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_field_space_creations(spaces);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_latent_field_spaces(
+                                          std::map<FieldSpace,unsigned> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_LATENT_UPDATE);
+      rez.serialize<size_t>(spaces.size());
+      for (std::map<FieldSpace,unsigned>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+      {
+        rez.serialize(it->first);
+        rez.serialize(it->second);
+      }
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_latent_field_spaces(spaces);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_field_space_deletions(
+                                                std::vector<FieldSpace> &spaces) 
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(FIELD_SPACE_DELETION_UPDATE);
+      rez.serialize<size_t>(spaces.size());
+      for (std::vector<FieldSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_field_space_deletions(spaces);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_index_space_creations(
+                                                   std::set<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(INDEX_SPACE_CREATION_UPDATE);
+      rez.serialize<size_t>(spaces.size());
+      for (std::set<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_index_space_creations(spaces);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_index_space_deletions(
+                                                std::vector<IndexSpace> &spaces)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(INDEX_SPACE_DELETION_UPDATE);
+      rez.serialize<size_t>(spaces.size());
+      for (std::vector<IndexSpace>::const_iterator it = 
+            spaces.begin(); it != spaces.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_index_space_deletions(spaces);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_index_partition_creations(
+                                                std::set<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(INDEX_PARTITION_CREATION_UPDATE);
+      rez.serialize<size_t>(parts.size());
+      for (std::set<IndexPartition>::const_iterator it = 
+            parts.begin(); it != parts.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_index_partition_creations(parts);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
+    }
+
+    //--------------------------------------------------------------------------
+    void ReplicateContext::register_index_partition_deletions(
+                                             std::vector<IndexPartition> &parts)
+    //--------------------------------------------------------------------------
+    {
+      Serializer rez;
+      rez.serialize<ResourceUpdateKind>(INDEX_PARTITION_DELETION_UPDATE);
+      rez.serialize<size_t>(parts.size());
+      for (std::vector<IndexPartition>::const_iterator it = 
+            parts.begin(); it != parts.end(); it++)
+        rez.serialize(*it);
+      const RtEvent done = 
+        shard_manager->broadcast_resource_update(owner_shard, rez);
+      // Now do the base call for our context
+      TaskContext::register_index_partition_deletions(parts);
+      // Wait for the remote updates to be done
+      if (done.exists() && !done.has_triggered())
+        done.wait();
     }
 
     //--------------------------------------------------------------------------

@@ -1337,7 +1337,6 @@ namespace Legion {
         { return shard_collective_participating_shards; }
       inline int get_shard_collective_last_radix(void) const
         { return shard_collective_last_radix; }
-#if 0
     public: // Privilege tracker methods
       virtual void register_region_creations(
                      std::set<LogicalRegion> &regions);
@@ -1361,7 +1360,6 @@ namespace Legion {
                           std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
                           std::vector<IndexPartition> &parts);
-#endif
     public:
       virtual void print_once(FILE *f, const char *message) const;
       virtual void log_once(Realm::LoggerMessage &message) const;
@@ -1612,6 +1610,7 @@ namespace Legion {
       void handle_equivalence_set_response(RegionTreeID tree_id, 
                                            EquivalenceSet *result);
       static void handle_eq_response(Deserializer &derez, Runtime *rt);
+      void handle_resource_update(Deserializer &derez);
     public:
       // Collective methods
       CollectiveID get_next_collective_index(CollectiveIndexLocation loc);

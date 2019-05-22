@@ -5560,6 +5560,152 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    RtEvent ShardManager::broadcast_resource_update(ShardTask *source, 
+                                                    Serializer &rez)
+    //--------------------------------------------------------------------------
+    {
+      std::vector<AddressSpaceID> shard_spaces;
+      {
+        AutoLock m_lock(manager_lock);
+        if (unique_shard_spaces.empty())
+          for (unsigned shard = 0; shard < total_shards; shard++)
+                unique_shard_spaces.insert((*address_spaces)[shard]);
+        shard_spaces.insert(shard_spaces.end(), 
+            unique_shard_spaces.begin(), unique_shard_spaces.end());
+      }
+      // First pack it out and send it out to any remote nodes 
+      std::set<RtEvent> remote_handled;
+      if (shard_spaces.size() > 1)
+      {
+        // Find the start index
+        int start_idx = -1;
+        for (unsigned idx = 0; idx < shard_spaces.size(); idx++)
+        {
+          if (shard_spaces[idx] != runtime->address_space)
+            continue;
+          start_idx = idx;
+          break;
+        }
+#ifdef DEBUG_LEGION
+        assert(start_idx >= 0);
+#endif
+        std::vector<unsigned> locals;
+        std::vector<AddressSpaceID> targets;
+        for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
+        {
+          unsigned next = idx + 1;
+          if (next >= shard_spaces.size())
+            break;
+          locals.push_back(next);
+          // Convert from relative to actual address space
+          const unsigned next_index = (start_idx + next) % shard_spaces.size();
+          targets.push_back(shard_spaces[next_index]);
+        }
+        for (unsigned idx = 0; idx < locals.size(); idx++)
+        {
+          RtEvent next_done = Runtime::create_rt_user_event();
+          Serializer rez2;
+          {
+            RezCheck z(rez2);
+            rez2.serialize(repl_id);
+            rez2.serialize<unsigned>(start_idx);
+            rez2.serialize<unsigned>(locals[idx]);
+            rez2.serialize<size_t>(rez.get_used_bytes());
+            rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
+            rez2.serialize(next_done);
+          }
+          runtime->send_control_replicate_resource_update(targets[idx], rez2);
+          remote_handled.insert(next_done);
+        }
+      }
+      // Then send it to any other local shards
+      for (std::vector<ShardTask*>::const_iterator it =
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        // Skip the source since that's where it came from
+        if ((*it) == source)
+          continue;
+        Deserializer derez(rez.get_buffer(), rez.get_used_bytes());
+        (*it)->handle_resource_update(derez);
+      }
+      if (!remote_handled.empty())
+        return Runtime::merge_events(remote_handled);
+      else
+        return RtEvent::NO_RT_EVENT;
+    }
+
+    //--------------------------------------------------------------------------
+    void ShardManager::handle_resource_update(Deserializer &derez)
+    //--------------------------------------------------------------------------
+    {
+      unsigned start_idx, local_idx;
+      derez.deserialize(start_idx);
+      derez.deserialize(local_idx);
+      size_t message_size;
+      derez.deserialize(message_size);
+      const void *message = derez.get_current_pointer();
+      derez.advance_pointer(message_size);
+      RtUserEvent done_event;
+      derez.deserialize(done_event);
+      // Send out any remote updates first
+      std::vector<AddressSpaceID> shard_spaces;
+      {
+        AutoLock m_lock(manager_lock);
+        if (unique_shard_spaces.empty())
+          for (unsigned shard = 0; shard < total_shards; shard++)
+                unique_shard_spaces.insert((*address_spaces)[shard]);
+        shard_spaces.insert(shard_spaces.end(), 
+            unique_shard_spaces.begin(), unique_shard_spaces.end());
+      }
+      // First pack it out and send it out to any remote nodes 
+      std::vector<unsigned> locals;
+      std::vector<AddressSpaceID> targets;
+      const unsigned start = local_idx * runtime->legion_collective_radix + 1;
+      for (int idx = 0; idx < runtime->legion_collective_radix; idx++)
+      {
+        unsigned next = start + idx;
+        if (next >= shard_spaces.size())
+          break;
+        locals.push_back(next);
+        // Convert from relative to actual address space
+        const unsigned next_index = (start_idx + next) % shard_spaces.size();
+        targets.push_back(shard_spaces[next_index]);
+      }
+      std::set<RtEvent> remote_handled;
+      if (!targets.empty())
+      {
+        for (unsigned idx = 0; idx < targets.size(); idx++)
+        {
+          RtEvent next_done = Runtime::create_rt_user_event();
+          Serializer rez;
+          {
+            RezCheck z(rez);
+            rez.serialize(repl_id);
+            rez.serialize<unsigned>(start_idx);
+            rez.serialize<unsigned>(locals[idx]);
+            rez.serialize<size_t>(rez.get_used_bytes());
+            rez.serialize(rez.get_buffer(), rez.get_used_bytes());
+            rez.serialize(next_done);
+          }
+          runtime->send_control_replicate_resource_update(targets[idx], rez);
+          remote_handled.insert(next_done);
+        } 
+      }
+      // Handle it on all our local shards
+      for (std::vector<ShardTask*>::const_iterator it =
+            local_shards.begin(); it != local_shards.end(); it++)
+      {
+        Deserializer derez2(message, message_size);
+        (*it)->handle_resource_update(derez2);
+      }
+      if (!remote_handled.empty())
+        Runtime::trigger_event(done_event, 
+            Runtime::merge_events(remote_handled));
+      else
+        Runtime::trigger_event(done_event);
+    }
+
+    //--------------------------------------------------------------------------
     /*static*/ void ShardManager::handle_launch(const void *args)
     //--------------------------------------------------------------------------
     {
@@ -5741,6 +5887,17 @@ namespace Legion {
       derez.deserialize(repl_id);
       ShardManager *manager = runtime->find_shard_manager(repl_id);
       manager->handle_equivalence_set_request(derez);
+    }
+
+    //--------------------------------------------------------------------------
+    /*static*/ void ShardManager::handle_resource_update(Deserializer &derez,
+                                                         Runtime *runtime)
+    //--------------------------------------------------------------------------
+    {
+      ReplicationID repl_id;
+      derez.deserialize(repl_id);
+      ShardManager *manager = runtime->find_shard_manager(repl_id);
+      manager->handle_resource_update(derez);
     }
 
     //--------------------------------------------------------------------------

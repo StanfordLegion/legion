@@ -555,6 +555,8 @@ namespace Legion {
                                                const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       IndexSpaceNode *node = get_node(handle);
       if (node->destroy_node(source, collective))
         delete node;
@@ -566,6 +568,8 @@ namespace Legion {
                                                    const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       IndexPartNode *node = get_node(handle);
       if (node->destroy_node(source, true/*top*/, collective))
         delete node;
@@ -1105,6 +1109,8 @@ namespace Legion {
                                                const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       FieldSpaceNode *node = get_node(handle);
       if (node->destroy_node(source, collective))
         delete node;
@@ -1127,6 +1133,8 @@ namespace Legion {
                                       const bool collective) 
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_field(fid, runtime->address_space, collective);
     }
@@ -1155,6 +1163,8 @@ namespace Legion {
                                        const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_fields(to_free, runtime->address_space, collective);
     }
@@ -1180,6 +1190,8 @@ namespace Legion {
                                            const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       FieldSpaceNode *node = get_node(handle);
       node->free_local_fields(to_free, indexes, collective);
     }
@@ -1248,6 +1260,8 @@ namespace Legion {
                                                   const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       RegionNode *node = get_node(handle);
       if (node->destroy_node(source, collective))
         delete node;
@@ -1259,6 +1273,8 @@ namespace Legion {
                                                      const bool collective)
     //--------------------------------------------------------------------------
     {
+      if (collective && !has_node(handle))
+        return;
       // We're the owner so we know the reference still exists
       PartitionNode *node = get_node(handle);
       if (node->destroy_node(source, true/*top*/, collective))

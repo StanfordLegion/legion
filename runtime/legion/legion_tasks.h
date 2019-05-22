@@ -39,6 +39,20 @@ namespace Legion {
      */
     class ResourceTracker {
     public:
+      enum ResourceUpdateKind {
+        REGION_CREATION_UPDATE,
+        REGION_DELETION_UPDATE,
+        FIELD_CREATION_UPDATE,
+        FIELD_DELETION_UPDATE,
+        FIELD_SPACE_CREATION_UPDATE,
+        FIELD_SPACE_LATENT_UPDATE,
+        FIELD_SPACE_DELETION_UPDATE,
+        INDEX_SPACE_CREATION_UPDATE,
+        INDEX_SPACE_DELETION_UPDATE,
+        INDEX_PARTITION_CREATION_UPDATE,
+        INDEX_PARTITION_DELETION_UPDATE,
+      };
+    public:
       ResourceTracker(void);
       ResourceTracker(const ResourceTracker &rhs);
       virtual ~ResourceTracker(void);
@@ -942,6 +956,7 @@ namespace Legion {
       void handle_collective_message(Deserializer &derez);
       void handle_future_map_request(Deserializer &derez);
       void handle_equivalence_set_request(Deserializer &derez);
+      void handle_resource_update(Deserializer &derez);
     public:
       InstanceView* create_instance_top_view(PhysicalManager *manager,
                                              AddressSpaceID source);
