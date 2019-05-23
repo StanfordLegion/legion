@@ -7246,7 +7246,7 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
-      assert(!destroyed || !is_owner());
+      assert(!destroyed);
 #endif
       // If we're the owner we also add a nested reference to the 
       // child to prevent it being deleted until any associated regions

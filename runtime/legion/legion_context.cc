@@ -12688,15 +12688,15 @@ namespace Legion {
           std::set<ApEvent> preconditions;
           if (is_total_sharding && is_first_local_shard)
           {
+            // Still need to wait on all sub partitions
+            // This is overly conservative and we could be more 
+            // precise and only wait on the sub_partitions for
+            // the index spaces or partitions we're deleting
             for (std::vector<IndexPartition>::const_iterator it = 
                   sub_partitions.begin(); it != sub_partitions.end(); it++)
             {
-              if (IndexPartNode::get_owner_space(*it, runtime) == 
-                  runtime->address_space)
-              {
-                IndexPartNode *node = runtime->forest->get_node(*it);
-                preconditions.insert(node->partition_ready);
-              }
+              IndexPartNode *node = runtime->forest->get_node(*it);
+              preconditions.insert(node->partition_ready);
             }
           }
           else if (local_shard_id == 0)
@@ -12795,15 +12795,15 @@ namespace Legion {
                 preconditions.insert(node->partition_ready);
               }
             }
+            // Still need to wait on all the sub partitions
+            // This is overly conservative and we could be more 
+            // precise and only wait on the sub_partitions for
+            // the index spaces or partitions we're deleting
             for (std::vector<IndexPartition>::const_iterator it = 
                   sub_partitions.begin(); it != sub_partitions.end(); it++)
             {
-              if (IndexPartNode::get_owner_space(*it, runtime) == 
-                  runtime->address_space)
-              {
-                IndexPartNode *node = runtime->forest->get_node(*it);
-                preconditions.insert(node->partition_ready);
-              }
+              IndexPartNode *node = runtime->forest->get_node(*it);
+              preconditions.insert(node->partition_ready);
             }
           }
           else if (local_shard_id == 0)

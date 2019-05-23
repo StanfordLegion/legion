@@ -1923,15 +1923,15 @@ namespace Legion {
         }
         if (!sub_partitions.empty())
         {
+          // Still need to wait on all sub partitions
+          // This is overly conservative and we could be more 
+          // precise and only wait on the sub_partitions for
+          // the index spaces or partitions we're deleting
           for (std::vector<IndexPartition>::const_iterator it = 
                 sub_partitions.begin(); it != sub_partitions.end(); it++)
           {
-            if (IndexPartNode::get_owner_space(*it, runtime) == 
-                runtime->address_space)
-            {
-              IndexPartNode *node = runtime->forest->get_node(*it);
-              execution_preconditions.insert(node->partition_ready);
-            }
+            IndexPartNode *node = runtime->forest->get_node(*it);
+            execution_preconditions.insert(node->partition_ready);
           }
         }
       }
