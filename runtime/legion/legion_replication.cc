@@ -5605,15 +5605,12 @@ namespace Legion {
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez2;
-          {
-            RezCheck z(rez2);
-            rez2.serialize(repl_id);
-            rez2.serialize<unsigned>(start_idx);
-            rez2.serialize<unsigned>(locals[idx]);
-            rez2.serialize<size_t>(rez.get_used_bytes());
-            rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
-            rez2.serialize(next_done);
-          }
+          rez2.serialize(repl_id);
+          rez2.serialize<unsigned>(start_idx);
+          rez2.serialize<unsigned>(locals[idx]);
+          rez2.serialize<size_t>(rez.get_used_bytes());
+          rez2.serialize(rez.get_buffer(), rez.get_used_bytes());
+          rez2.serialize(next_done);
           runtime->send_control_replicate_resource_update(targets[idx], rez2);
           remote_handled.insert(next_done);
         }
@@ -5678,15 +5675,12 @@ namespace Legion {
         {
           RtEvent next_done = Runtime::create_rt_user_event();
           Serializer rez;
-          {
-            RezCheck z(rez);
-            rez.serialize(repl_id);
-            rez.serialize<unsigned>(start_idx);
-            rez.serialize<unsigned>(locals[idx]);
-            rez.serialize<size_t>(rez.get_used_bytes());
-            rez.serialize(rez.get_buffer(), rez.get_used_bytes());
-            rez.serialize(next_done);
-          }
+          rez.serialize(repl_id);
+          rez.serialize<unsigned>(start_idx);
+          rez.serialize<unsigned>(locals[idx]);
+          rez.serialize<size_t>(rez.get_used_bytes());
+          rez.serialize(rez.get_buffer(), rez.get_used_bytes());
+          rez.serialize(next_done);
           runtime->send_control_replicate_resource_update(targets[idx], rez);
           remote_handled.insert(next_done);
         } 

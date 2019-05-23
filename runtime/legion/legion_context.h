@@ -446,6 +446,23 @@ namespace Legion {
                           std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
                           std::vector<IndexPartition> &parts);
+    protected:
+      void perform_region_deletions(const std::vector<LogicalRegion> &regions,
+                                    std::vector<LogicalRegion> &delete_now,
+                                    std::vector<bool> &returnable);
+      void perform_field_deletions(
+                    const std::vector<std::pair<FieldSpace,FieldID> > &fields,
+                    std::map<FieldSpace,std::vector<FieldID> > &delete_now,
+                    std::vector<RegionRequirement> &deletion_requirements);
+      void perform_field_space_deletions(const std::vector<FieldSpace> &spaces,
+                                         std::vector<FieldSpace> &delete_now);
+      void perform_index_space_deletions(const std::vector<IndexSpace> &spaces,
+                                   std::vector<IndexSpace> &delete_now,
+                                   std::vector<IndexPartition> &sub_partitions);
+      void perform_index_partition_deletions(
+                                   const std::vector<IndexPartition> &parts,
+                                   std::vector<IndexPartition> &delete_now,
+                                   std::vector<IndexPartition> &sub_partitions);
     public:
       void register_region_creation(LogicalRegion handle, bool task_local);
     public:
@@ -1359,6 +1376,17 @@ namespace Legion {
       virtual void register_index_partition_creations(
                           std::set<IndexPartition> &parts);
       virtual void register_index_partition_deletions(
+                          std::vector<IndexPartition> &parts);
+    public:
+      void perform_replicated_region_deletions(
+                     std::vector<LogicalRegion> &regions);
+      void perform_replicated_field_deletions(
+            std::vector<std::pair<FieldSpace,FieldID> > &fields);
+      void perform_replicated_field_space_deletions(
+                          std::vector<FieldSpace> &spaces);
+      void perform_replicated_index_space_deletions(
+                          std::vector<IndexSpace> &spaces);
+      void perform_replicated_index_partition_deletions(
                           std::vector<IndexPartition> &parts);
     public:
       virtual void print_once(FILE *f, const char *message) const;
