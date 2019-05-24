@@ -3927,7 +3927,7 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
       local execution_constraint_actions =
         make_execution_constraints_from_annotations(variant, execution_constraints)
       local registration_actions = terralib.newlist()
-      for _, proc_type in ipairs(proc_types) do
+      for i, proc_type in ipairs(proc_types) do
         registration_actions:insert(quote
           var [execution_constraints] = c.legion_execution_constraint_set_create()
           c.legion_execution_constraint_set_add_processor_constraint([execution_constraints], proc_type)
@@ -3943,7 +3943,12 @@ function std.setup(main_task, extra_setup_thunk, task_wrappers, registration_nam
 
           c.legion_runtime_preregister_task_variant_fnptr(
             [task:get_task_id()],
-            [variant:get_variant_id() or -1 --[[ AUTO_GENERATE_ID ]] ],
+            -- Hack: Only set a user-specified variant ID on the first
+            -- variant, otherwise there will be duplicate
+            -- registrations. In the future it would be better to have
+            -- explicit variant objects for the different processor
+            -- kinds.
+            [(i <= 1 and variant:get_variant_id()) or -1 --[[ AUTO_GENERATE_ID ]] ],
             [task:get_name():concat(".")],
             [variant:get_name()],
             [execution_constraints], [layout_constraints], options,

@@ -228,6 +228,7 @@ list(APPEND MAPPER_SRC
   mappers/replay_mapper.h      mappers/replay_mapper.cc
   mappers/shim_mapper.h        mappers/shim_mapper.cc
   mappers/test_mapper.h        mappers/test_mapper.cc
+  mappers/null_mapper.h        mappers/null_mapper.cc
 )
 
 # Legion runtime
