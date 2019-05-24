@@ -598,7 +598,7 @@ gcc8_cxx17_debug_regent:
 clang35_cxx98_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang35, *terra35, *debug, *cxx98_normal, *llvm, *legion]
+    <<: [*clang35, *terra35, *debug, *cxx98_normal, *legion]
 # FIXME: Breaks on attempting to split vector-op
 # clang35_cxx98_debug_regent:
 #   <<: [*linux_compute, *image, *tests]
@@ -607,7 +607,7 @@ clang35_cxx98_debug_legion:
 clang8_cxx98_debug_legion:
   <<: [*linux, *image, *tests]
   variables:
-    <<: [*clang8, *terra38, *debug, *cxx98_normal, *llvm, *legion]
+    <<: [*clang8, *terra38, *debug, *cxx98_normal, *legion]
 
 # Performance tests:
 # n0004_gcc49_cxx98_release_perf:

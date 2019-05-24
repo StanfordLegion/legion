@@ -59,6 +59,9 @@ task f()
   c.printf("executing on processor %llx\n", proc.id)
   regentlib.assert(c.legion_processor_kind(proc) == c.IO_PROC, "test failed")
 end
+-- This is here to test that there isn't a duplicate registration in
+-- the case where the user sets an explicit variant ID.
+f:get_primary_variant():set_variant_id(123)
 
 task main()
   f()
