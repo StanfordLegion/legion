@@ -18,7 +18,7 @@ for n in {1,2,4,8,16,32,64,128,256}; do
 	"$ROOT_DIR/spmv.auto" -steps 50 -prune 30 -p $n -size $(( 2**27*n )) \
 	-ll:gpu 1 -ll:util 2 -ll:dma 2 \
 	-ll:csize 15000 -ll:fsize 15000 -ll:rsize 512 -ll:gsize 0 \
-	-dm:same_address_space -lg:prof $n -lg:prof_logfile "prof_$n-%.log" &> "out_$n.log"
+	-dm:same_address_space &> out_"$n"x1.log
 done
 
 popd
