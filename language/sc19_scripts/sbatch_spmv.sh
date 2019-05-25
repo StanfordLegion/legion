@@ -1,7 +1,7 @@
 #!/bin/bash -eu
 #SBATCH --nodes=256
 #SBATCH --constraint=gpu
-#SBATCH --time=00:40:00
+#SBATCH --time=01:00:00
 
 ROOT_DIR="$PWD"
 
@@ -14,8 +14,11 @@ if [[ ! -d auto ]]; then mkdir auto; fi
 pushd auto
 
 for n in {1,2,4,8,16,32,64,128,256}; do
-  echo "Running $n"
-  srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none "$ROOT_DIR/spmv.auto" -p $n -size $(( 8*n )) -ll:gpu 1 -ll:util 1 -ll:dma 2 -ll:csize 15000 -ll:fsize 15000 -ll:rsize 512 -ll:gsize 0 | tee out_"$n".log
+    srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none \
+	"$ROOT_DIR/spmv.auto" -steps 50 -prune 30 -p $n -size $(( 2**27*n )) \
+	-ll:gpu 1 -ll:util 2 -ll:dma 2 \
+	-ll:csize 15000 -ll:fsize 15000 -ll:rsize 512 -ll:gsize 0 \
+	-dm:same_address_space -lg:prof $n -lg:prof_logfile "prof_$n-%.log" &> "out_$n.log"
 done
 
 popd
