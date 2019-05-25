@@ -1,0 +1,257 @@
+[12 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 140) in parent task main (UID 12) is using uninitialized data for field(s) 101,102 of logical region (28,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[12 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 140) in parent task main (UID 12) is using uninitialized data for field(s) 101 of logical region (44,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[15 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 143) in parent task main (UID 15) is using uninitialized data for field(s) 101,102 of logical region (31,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[15 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 143) in parent task main (UID 15) is using uninitialized data for field(s) 101 of logical region (47,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[8 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 136) in parent task main (UID 8) is using uninitialized data for field(s) 101,102 of logical region (24,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[8 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 136) in parent task main (UID 8) is using uninitialized data for field(s) 101 of logical region (40,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[14 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 142) in parent task main (UID 14) is using uninitialized data for field(s) 101,102 of logical region (30,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[14 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 142) in parent task main (UID 14) is using uninitialized data for field(s) 101 of logical region (46,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[11 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 139) in parent task main (UID 11) is using uninitialized data for field(s) 101,102 of logical region (27,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[11 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 139) in parent task main (UID 11) is using uninitialized data for field(s) 101 of logical region (43,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[13 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 141) in parent task main (UID 13) is using uninitialized data for field(s) 101,102 of logical region (29,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[13 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 141) in parent task main (UID 13) is using uninitialized data for field(s) 101 of logical region (45,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[9 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 137) in parent task main (UID 9) is using uninitialized data for field(s) 101,102 of logical region (25,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[9 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 137) in parent task main (UID 9) is using uninitialized data for field(s) 101 of logical region (41,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[10 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 138) in parent task main (UID 10) is using uninitialized data for field(s) 101,102 of logical region (26,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[10 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 138) in parent task main (UID 10) is using uninitialized data for field(s) 101 of logical region (42,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[0 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 416) in parent task main (UID 48) is using uninitialized data for field(s) 101,102 of logical region (48,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[0 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 416) in parent task main (UID 48) is using uninitialized data for field(s) 101 of logical region (64,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[1 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 129) in parent task main (UID 1) is using uninitialized data for field(s) 101,102 of logical region (33,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[1 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 129) in parent task main (UID 1) is using uninitialized data for field(s) 101 of logical region (49,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[6 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 134) in parent task main (UID 6) is using uninitialized data for field(s) 101,102 of logical region (22,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[6 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 134) in parent task main (UID 6) is using uninitialized data for field(s) 101 of logical region (38,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[2 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 130) in parent task main (UID 2) is using uninitialized data for field(s) 101,102 of logical region (34,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[2 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 130) in parent task main (UID 2) is using uninitialized data for field(s) 101 of logical region (50,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[5 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 133) in parent task main (UID 5) is using uninitialized data for field(s) 101,102 of logical region (21,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[5 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 133) in parent task main (UID 5) is using uninitialized data for field(s) 101 of logical region (37,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[7 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 135) in parent task main (UID 7) is using uninitialized data for field(s) 101,102 of logical region (23,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[7 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 135) in parent task main (UID 7) is using uninitialized data for field(s) 101 of logical region (39,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[3 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 131) in parent task main (UID 3) is using uninitialized data for field(s) 101,102 of logical region (35,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[3 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 131) in parent task main (UID 3) is using uninitialized data for field(s) 101 of logical region (51,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[4 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 0 of operation init.parallel (UID 132) in parent task main (UID 4) is using uninitialized data for field(s) 101,102 of logical region (36,3,3) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[4 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 1 of operation init.parallel (UID 132) in parent task main (UID 4) is using uninitialized data for field(s) 101 of logical region (52,1,1) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[12 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 140) in parent task main (UID 12) is using uninitialized data for field(s) 101 of logical region (60,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[12 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 140) in parent task main (UID 12) is using uninitialized data for field(s) 101 of logical region (12,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[15 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 143) in parent task main (UID 15) is using uninitialized data for field(s) 101 of logical region (63,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[15 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 143) in parent task main (UID 15) is using uninitialized data for field(s) 101 of logical region (15,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[8 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 136) in parent task main (UID 8) is using uninitialized data for field(s) 101 of logical region (56,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[8 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 136) in parent task main (UID 8) is using uninitialized data for field(s) 101 of logical region (8,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[14 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 142) in parent task main (UID 14) is using uninitialized data for field(s) 101 of logical region (62,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[14 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 142) in parent task main (UID 14) is using uninitialized data for field(s) 101 of logical region (14,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[11 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 139) in parent task main (UID 11) is using uninitialized data for field(s) 101 of logical region (59,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[11 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 139) in parent task main (UID 11) is using uninitialized data for field(s) 101 of logical region (11,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[13 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 141) in parent task main (UID 13) is using uninitialized data for field(s) 101 of logical region (61,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[13 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 141) in parent task main (UID 13) is using uninitialized data for field(s) 101 of logical region (13,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[9 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 137) in parent task main (UID 9) is using uninitialized data for field(s) 101 of logical region (57,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[9 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 137) in parent task main (UID 9) is using uninitialized data for field(s) 101 of logical region (9,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[10 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 138) in parent task main (UID 10) is using uninitialized data for field(s) 101 of logical region (58,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[10 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 138) in parent task main (UID 10) is using uninitialized data for field(s) 101 of logical region (10,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[0 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 416) in parent task main (UID 48) is using uninitialized data for field(s) 101 of logical region (80,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[0 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 416) in parent task main (UID 48) is using uninitialized data for field(s) 101 of logical region (32,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[1 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 129) in parent task main (UID 1) is using uninitialized data for field(s) 101 of logical region (65,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[1 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 129) in parent task main (UID 1) is using uninitialized data for field(s) 101 of logical region (17,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[6 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 134) in parent task main (UID 6) is using uninitialized data for field(s) 101 of logical region (54,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[6 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 134) in parent task main (UID 6) is using uninitialized data for field(s) 101 of logical region (6,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[2 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 130) in parent task main (UID 2) is using uninitialized data for field(s) 101 of logical region (66,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[2 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 130) in parent task main (UID 2) is using uninitialized data for field(s) 101 of logical region (18,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+ELAPSED TIME =   2.517 s
+[5 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 133) in parent task main (UID 5) is using uninitialized data for field(s) 101 of logical region (53,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[5 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 133) in parent task main (UID 5) is using uninitialized data for field(s) 101 of logical region (5,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[7 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 135) in parent task main (UID 7) is using uninitialized data for field(s) 101 of logical region (55,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[7 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 135) in parent task main (UID 7) is using uninitialized data for field(s) 101 of logical region (7,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[3 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 131) in parent task main (UID 3) is using uninitialized data for field(s) 101 of logical region (67,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[3 - 2aaaaac83700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 131) in parent task main (UID 3) is using uninitialized data for field(s) 101 of logical region (19,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[4 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 2 of operation init.parallel (UID 132) in parent task main (UID 4) is using uninitialized data for field(s) 101 of logical region (68,2,2) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
+[4 - 2aaaaacc4700] {4}{runtime}: [warning 1071] LEGION WARNING: Region requirement 3 of operation init.parallel (UID 132) in parent task main (UID 4) is using uninitialized data for field(s) 101 of logical region (20,16,16) (from file /users/mpapadak/legion/runtime/legion/legion_ops.cc:527)[warning 1071] 
+For more information see:
+http://legion.stanford.edu/messages/warning_code.html#warning_code_1071
+
