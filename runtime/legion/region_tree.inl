@@ -146,6 +146,8 @@ namespace Legion {
         // Log subspaces being set on the owner
         if (implicit_runtime->legion_spy_enabled && (parent != NULL))
           this->log_index_space_points(realm_index_space);
+	if ((implicit_runtime->profiler) && (parent != NULL))
+          this->log_profiler_index_space_points(realm_index_space);
         // Hold the lock while walking over the node set
         AutoLock n_lock(node_lock);
         // Now we can trigger the event while holding the lock
@@ -307,7 +309,10 @@ namespace Legion {
     {
       Realm::IndexSpace<DIM,T> tight_space;
       get_realm_index_space(tight_space, true/*tight*/);
-      log_index_space_points(tight_space);
+      if (context->runtime->legion_spy_enabled)
+        log_index_space_points(tight_space);
+      if (context->runtime->profiler != NULL)
+        log_profiler_index_space_points(tight_space);
     }
       
     //--------------------------------------------------------------------------
@@ -332,6 +337,30 @@ namespace Legion {
       }
       else
         LegionSpy::log_empty_index_space(handle.get_id());
+    }
+
+    //--------------------------------------------------------------------------
+    template<int DIM, typename T>
+    void IndexSpaceNodeT<DIM,T>::log_profiler_index_space_points(
+                              const Realm::IndexSpace<DIM,T> &tight_space) const
+    //--------------------------------------------------------------------------
+    {
+      if (!tight_space.empty())
+      {
+        // Iterate over the rectangles and print them out
+        for (Realm::IndexSpaceIterator<DIM,T> itr(tight_space);
+              itr.valid; itr.step())
+        {
+          if (itr.rect.volume() == 1)
+            context->runtime->profiler->record_index_space_point(
+                handle.get_id(), Point<DIM,T>(itr.rect.lo));
+          else
+            context->runtime->profiler->record_index_space_rect(
+                handle.get_id(), Rect<DIM,T>(itr.rect));
+        }
+      }
+      else
+        context->runtime->profiler->record_empty_index_space(handle.get_id());
     }
 
     //--------------------------------------------------------------------------

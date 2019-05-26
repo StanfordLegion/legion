@@ -180,11 +180,22 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(implicit_runtime->legion_spy_enabled);
 #endif
-      std::vector<FieldID> fields;  
+      std::vector<FieldID> fields;
       owner->get_field_ids(allocated_fields, fields);
       for (std::vector<FieldID>::const_iterator it = fields.begin();
             it != fields.end(); it++)
         LegionSpy::log_physical_instance_field(inst_event, *it);
+    }
+
+    //--------------------------------------------------------------------------
+    void LayoutDescription::record_instance_layout(UniqueID creator_id, 
+                                                   IDType inst_id) const
+    //--------------------------------------------------------------------------
+    {
+      std::vector<FieldID> fields;
+      owner->get_field_ids(allocated_fields, fields);
+      implicit_runtime->profiler->record_instance_layout(creator_id, 
+                                                         inst_id, fields);
     }
 
     //--------------------------------------------------------------------------
@@ -1985,7 +1996,7 @@ namespace Legion {
         {
           unsigned long long creation_time = 
             Realm::Clock::current_time_in_nanoseconds();
-          runtime->profiler->record_instance_creation(instance, 
+          runtime->profiler->record_instance_creation(instance,
               memory_manager->memory, creator_id, creation_time);
         }
       }
@@ -2130,6 +2141,12 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(result != NULL);
 #endif
+      if (runtime->profiler) 
+      {
+	runtime->profiler->record_physical_instance_region(creator_id, 
+                                        instance.id, ancestor->handle);
+	layout->record_instance_layout(creator_id, instance.id);
+      }
       return result;
     }
 

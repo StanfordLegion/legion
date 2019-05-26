@@ -98,6 +98,19 @@ callbacks = {
     "MapperCallInfo": noop,
     "RuntimeCallInfo": noop,
     "ProfTaskInfo": noop
+    "ProcMDesc": noop,
+    "IndexSpacePointDesc": noop,
+    "IndexSpaceRectDesc": noop,
+    "PartDesc": noop,
+    "IndexPartitionDesc": noop,
+    "IndexSpaceEmptyDesc": noop,
+    "FieldDesc": noop,
+    "FieldSpaceDesc": noop,
+    "IndexSpaceDesc": noop,
+    "IndexSubSpaceDesc": noop,
+    "LogicalRegionDesc": noop,
+    "PhysicalInstRegionDesc": noop,
+    "PhysicalInstLayoutDesc": noop
 }
 
 class Dummy(object):
