@@ -1384,10 +1384,10 @@ namespace Legion {
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
-                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT<DIM,T>(); \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT(); \
                 if (has_transform) \
                   reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
-                    ~AffineTransform<DIM,N,T>(); \
+                    ~AffineTransform(); \
                 break; \
               }
             LEGION_FOREACH_N(DIMFUNC)
