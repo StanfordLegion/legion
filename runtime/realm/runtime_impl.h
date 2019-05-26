@@ -325,51 +325,26 @@ namespace Realm {
     // active messages
 
     struct RemoteIDRequestMessage {
-      struct RequestArgs {
-	NodeID sender;
-	ID::ID_Types id_type;
-	int count;
-      };
+      ID::ID_Types id_type;
+      int count;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_ID_REQUEST_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, ID::ID_Types id_type, int count);
+      static void handle_message(NodeID sender,const RemoteIDRequestMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RemoteIDResponseMessage {
-      struct RequestArgs {
-	NodeID responder;
-	ID::ID_Types id_type;
-	ID::IDType first_id, last_id;
-      };
+      ID::ID_Types id_type;
+      ID::IDType first_id, last_id;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<REMOTE_ID_RESPONSE_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, ID::ID_Types id_type,
-			       ID::IDType first_id, ID::IDType last_id);
+      static void handle_message(NodeID sender,const RemoteIDResponseMessage &msg,
+				 const void *data, size_t datalen);
     };
 
     struct RuntimeShutdownMessage {
-      struct RequestArgs {
-	int initiating_node;
-	int result_code;
-      };
+      int result_code;
 
-      static void handle_request(RequestArgs args);
-
-      typedef ActiveMessageShortNoReply<MACHINE_SHUTDOWN_MSGID,
-				        RequestArgs,
-				        handle_request> Message;
-
-      static void send_request(NodeID target, int result_code);
+      static void handle_message(NodeID sender,const RuntimeShutdownMessage &msg,
+				 const void *data, size_t datalen);
     };
       
 }; // namespace Realm

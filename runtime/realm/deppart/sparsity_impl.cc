@@ -284,10 +284,13 @@ namespace Realm {
       }
     }
     
-    if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity_creator_node(), me,
-						 request_approx,
-						 request_precise);
+    if(request_approx || request_precise) {
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->send_precise = request_precise;
+      amsg->send_approx = request_approx;
+      amsg.commit();
+    }
 
     return e;
   }
@@ -311,7 +314,10 @@ namespace Realm {
 	finalize();
     } else {
       // send the contributor count to the owner node
-      SetContribCountMessage::send_request(ID(me).sparsity_creator_node(), me, count);
+      ActiveMessage<SetContribCountMessage> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->count = count;
+      amsg.commit();
     }
   }
 
@@ -322,9 +328,12 @@ namespace Realm {
 
     if(owner != my_node_id) {
       // send (the lack of) data to the owner to collect
-      int seq_id = fragment_assembler.get_sequence_id();
-      RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 1,
-						      0, 0);
+      ActiveMessage<RemoteSparsityContrib> amsg(owner, 0);
+      amsg->sparsity = me;
+      amsg->sequence_id = fragment_assembler.get_sequence_id();
+      amsg->sequence_count = 1;
+      amsg.commit();
+
       return;
     }
 
@@ -348,16 +357,28 @@ namespace Realm {
       size_t remaining = rects.size();
       // send partial messages first
       while(remaining > max_to_send) {
-	RemoteSparsityContribMessage::send_request<N,T>(owner, me, seq_id, 0,
-							rdata, max_to_send);
+	size_t bytes = max_to_send * sizeof(Rect<N,T>);
+	ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
+	amsg->sparsity = me;
+	amsg->sequence_id = seq_id;
+	amsg->sequence_count = 0;
+	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+	amsg.commit();
+
 	seq_count++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
+
       // final message includes the count of all messages (including this one!)
-      RemoteSparsityContribMessage::send_request<N,T>(owner, me, 
-						      seq_id, seq_count + 1,
-						      rdata, remaining);
+      size_t bytes = remaining * sizeof(Rect<N,T>);
+      ActiveMessage<RemoteSparsityContrib> amsg(owner, bytes);
+      amsg->sparsity = me;
+      amsg->sequence_id = seq_id;
+      amsg->sequence_count = seq_count + 1;
+      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg.commit();
+
       return;
     }
 
@@ -568,11 +589,13 @@ namespace Realm {
       }
     }
 
-    if(request_approx || request_precise)
-      RemoteSparsityRequestMessage::send_request(ID(me).sparsity_creator_node(),
-						 me,
-						 request_approx,
-						 request_precise);
+    if(request_approx || request_precise) {
+      ActiveMessage<RemoteSparsityRequest> amsg(ID(me).sparsity_creator_node(), 0);
+      amsg->sparsity = me;
+      amsg->send_precise = request_precise;
+      amsg->send_approx = request_approx;
+      amsg.commit();
+    }
 
     return registered;
   }
@@ -610,7 +633,6 @@ namespace Realm {
     if(reply_approx || reply_precise)
       remote_data_reply(requestor, reply_precise, reply_approx);
   }
-
   
   template <int N, typename T>
   void SparsityMapImpl<N,T>::remote_data_reply(NodeID requestor, bool reply_precise, bool reply_approx)
@@ -648,16 +670,27 @@ namespace Realm {
       const size_t max_to_send = DeppartConfig::cfg_max_bytes_per_packet / sizeof(Rect<N,T>);
       // send partial messages first
       while(remaining > max_to_send) {
-	RemoteSparsityContribMessage::send_request<N,T>(requestor, me, seq_id, 0,
-							rdata, max_to_send);
+	size_t bytes = max_to_send * sizeof(Rect<N,T>);
+	ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+	amsg->sparsity = me;
+	amsg->sequence_id = seq_id;
+	amsg->sequence_count = 0;
+	amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+	amsg.commit();
+
 	seq_count++;
 	remaining -= max_to_send;
 	rdata += max_to_send;
       }
+
       // final message includes the count of all messages (including this one!)
-      RemoteSparsityContribMessage::send_request<N,T>(requestor, me, 
-						      seq_id, seq_count + 1,
-						      rdata, remaining);
+      size_t bytes = remaining * sizeof(Rect<N,T>);
+      ActiveMessage<RemoteSparsityContrib> amsg(requestor, bytes);
+      amsg->sparsity = me;
+      amsg->sequence_id = seq_id;
+      amsg->sequence_count = seq_count + 1;
+      amsg.add_payload(rdata, bytes, PAYLOAD_COPY);
+      amsg.commit();
     }
   }
   
@@ -840,6 +873,13 @@ namespace Realm {
       GenEventImpl::trigger(trigger_precise, false /*!poisoned*/);
   }
 
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::RemoteSparsityRequest> SparsityMapImpl<N,T>::remote_sparsity_request_reg;
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::RemoteSparsityContrib> SparsityMapImpl<N,T>::remote_sparsity_contrib_reg;
+  template <int N, typename T>
+  /*static*/ ActiveMessageHandlerReg<typename SparsityMapImpl<N,T>::SetContribCountMessage> SparsityMapImpl<N,T>::set_contrib_count_msg_reg;
+
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -894,121 +934,52 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteSparsityContribMessage
+  // class SparsityMapImpl<N,T>::RemoteSparsityRequest
 
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteSparsityContribMessage::DecodeHelper::demux(const RequestArgs *args,
-									   const void *data, size_t datalen)
+  template <int N, typename T>
+  inline /*static*/ void SparsityMapImpl<N,T>::RemoteSparsityRequest::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::RemoteSparsityRequest &msg,
+										     const void *data, size_t datalen)
   {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
+    log_part.info() << "received sparsity request: sparsity=" << msg.sparsity << " precise=" << msg.send_precise << " approx=" << msg.send_approx;
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->remote_data_request(sender,
+								    msg.send_precise,
+								    msg.send_approx);
+  }
 
-    log_part.info() << "received remote contribution: sparsity=" << sparsity << " len=" << datalen;
-    size_t count = datalen / sizeof(Rect<NT::N,T>);
-    assert((datalen % sizeof(Rect<NT::N,T>)) == 0);
-    bool last_fragment = fragment_assembler.add_fragment(args->sender,
-							 args->sequence_id,
-							 args->sequence_count);
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->contribute_raw_rects((const Rect<NT::N,T> *)data,
+
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class SparsityMapImpl<N,T>::RemoteSparsityContrib
+
+  template <int N, typename T>
+  inline /*static*/ void SparsityMapImpl<N,T>::RemoteSparsityContrib::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::RemoteSparsityContrib &msg,
+										     const void *data, size_t datalen)
+  {
+    log_part.info() << "received remote contribution: sparsity=" << msg.sparsity << " len=" << datalen;
+    size_t count = datalen / sizeof(Rect<N,T>);
+    assert((datalen % sizeof(Rect<N,T>)) == 0);
+    bool last_fragment = fragment_assembler.add_fragment(sender,
+							 msg.sequence_id,
+							 msg.sequence_count);
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->contribute_raw_rects((const Rect<N,T> *)data,
 								     count,
 								     last_fragment);
   }
 
-  /*static*/ void RemoteSparsityContribMessage::handle_request(RequestArgs args,
-							       const void *data, size_t datalen)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args, data, datalen);
-  }
-
-  template <int N, typename T>
-  /*static*/ void RemoteSparsityContribMessage::send_request(NodeID target,
-							     SparsityMap<N,T> sparsity,
-							     int sequence_id,
-							     int sequence_count,
-							     const Rect<N,T> *rects,
-							     size_t count)
-  {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.sequence_id = sequence_id;
-    args.sequence_count = sequence_count;
-
-    Message::request(target, args, rects, count * sizeof(Rect<N,T>),
-		     PAYLOAD_COPY);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class RemoteSparsityRequestMessage
-
-  template <typename NT, typename T>
-  inline /*static*/ void RemoteSparsityRequestMessage::DecodeHelper::demux(const RequestArgs *args)
-  {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
-
-    log_part.info() << "received sparsity request: sparsity=" << sparsity << " precise=" << args->send_precise << " approx=" << args->send_approx;
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->remote_data_request(args->sender, args->send_precise, args->send_approx);
-  }
-
-  /*static*/ void RemoteSparsityRequestMessage::handle_request(RequestArgs args)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
-  }
+  // class SparsityMapImpl<N,T>::SetContribCountMessage
 
   template <int N, typename T>
-  /*static*/ void RemoteSparsityRequestMessage::send_request(NodeID target,
-							     SparsityMap<N,T> sparsity,
-							     bool send_precise,
-							     bool send_approx)
+  inline /*static*/ void SparsityMapImpl<N,T>::SetContribCountMessage::handle_message(NodeID sender,
+										     const SparsityMapImpl<N,T>::SetContribCountMessage &msg,
+										     const void *data, size_t datalen)
   {
-    RequestArgs args;
-
-    args.sender = my_node_id;
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.send_precise = send_precise;
-    args.send_approx = send_approx;
-
-    Message::request(target, args);
-  }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class SetContribCountMessage
-
-  template <typename NT, typename T>
-  inline /*static*/ void SetContribCountMessage::DecodeHelper::demux(const RequestArgs *args)
-  {
-    SparsityMap<NT::N,T> sparsity;
-    sparsity.id = args->sparsity_id;
-
-    log_part.info() << "received contributor count: sparsity=" << sparsity << " count=" << args->count;
-    SparsityMapImpl<NT::N,T>::lookup(sparsity)->set_contributor_count(args->count);
-  }
-
-  /*static*/ void SetContribCountMessage::handle_request(RequestArgs args)
-  {
-    NT_TemplateHelper::demux<DecodeHelper>(args.type_tag, &args);
-  }
-
-  template <int N, typename T>
-  /*static*/ void SetContribCountMessage::send_request(NodeID target,
-						       SparsityMap<N,T> sparsity,
-						       int count)
-  {
-    RequestArgs args;
-
-    args.type_tag = NT_TemplateHelper::encode_tag<N,T>();
-    args.sparsity_id = sparsity.id;
-    args.count = count;
-
-    Message::request(target, args);
+    log_part.info() << "received contributor count: sparsity=" << msg.sparsity << " count=" << msg.count;
+    SparsityMapImpl<N,T>::lookup(msg.sparsity)->set_contributor_count(msg.count);
   }
 
 #define DOIT(N,T) \

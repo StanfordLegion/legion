@@ -568,15 +568,19 @@ namespace Realm {
 	it++) {
       ID::ID_Types id_type = it->first;
       int batch_size = it->second;
-
+      NodeSet targets;
       for(NodeID i = 0; i <= max_node_id; i++) {
 	if(i == my_node_id) continue;
 
 	reqs_in_flight[id_type].insert(i);
-
-	RemoteIDRequestMessage::send_request(i, id_type, batch_size);
+	targets.add(i);
       }
-    }
+      // use a collective i.e. broadcast?
+      ActiveMessage<RemoteIDRequestMessage> amsg(targets);
+      amsg->id_type = id_type;
+      amsg->count = batch_size;
+      amsg.commit();
+      }
   }
 
   ID::IDType RemoteIDAllocator::get_remote_id(NodeID target, ID::ID_Types id_type)
@@ -606,11 +610,12 @@ namespace Realm {
       }
     }
 
-    if(request_more)
-      RemoteIDRequestMessage::send_request(target,
-					   id_type,
-					   batch_sizes[id_type]);
-
+    if(request_more) {
+      ActiveMessage<RemoteIDRequestMessage> amsg(target);
+      amsg->id_type = id_type;
+      amsg->count = batch_sizes[id_type];
+      amsg.commit();
+    }
     log_remote_id.debug() << "assigned remote ID: target=" << target << " type=" << id_type << " id=" << id;
     return id;
   }
@@ -632,9 +637,10 @@ namespace Realm {
   // class RemoteIDRequestMessage
   //
 
-  /*static*/ void RemoteIDRequestMessage::handle_request(RequestArgs args)
+  /*static*/ void RemoteIDRequestMessage::handle_message(NodeID sender,const RemoteIDRequestMessage &args,
+							 const void *data, size_t datalen)
   {
-    log_remote_id.debug() << "received remote id request: sender=" << args.sender
+    log_remote_id.debug() << "received remote id request: sender=" << sender
 			  << " type=" << args.id_type << " count=" << args.count;
 
     int first = 0;
@@ -653,18 +659,15 @@ namespace Realm {
     default: assert(0);
     }
 
-    RemoteIDResponseMessage::send_request(args.sender, args.id_type, first_id.id, last_id.id);
-  }
+    ActiveMessage<RemoteIDResponseMessage> amsg(sender);
+    log_remote_id.debug() << "sending remote id response: target=" << sender
+			  << " type=" << args.id_type
+			  << " first=" << std::hex << first_id << " last=" << last_id << std::dec;
+    amsg->id_type = args.id_type;
+    amsg->first_id = first_id.id;
+    amsg->last_id = last_id.id;
+    amsg.commit();
 
-  /*static*/ void RemoteIDRequestMessage::send_request(NodeID target, ID::ID_Types id_type, int count)
-  {
-    RequestArgs args;
-
-    log_remote_id.debug() << "sending remote id request: target=" << target << " type=" << id_type << " count=" << count;
-    args.sender = my_node_id;
-    args.id_type = id_type;
-    args.count = count;
-    Message::request(target, args);
   }
 
   ////////////////////////////////////////////////////////////////////////
@@ -672,35 +675,19 @@ namespace Realm {
   // class RemoteIDResponseMessage
   //
 
-  /*static*/ void RemoteIDResponseMessage::handle_request(RequestArgs args)
+  /*static*/ void RemoteIDResponseMessage::handle_message(NodeID sender,
+							  const RemoteIDResponseMessage &args,
+							  const void *data, size_t datalen)
   {
-    log_remote_id.debug() << "received remote id response: responder=" << args.responder
+    log_remote_id.debug() << "received remote id response: responder=" << sender
 			  << " type=" << args.id_type
 			  << " first=" << std::hex << args.first_id << " last=" << args.last_id << std::dec;
 
-    get_runtime()->remote_id_allocator.add_id_range(args.responder,
+    get_runtime()->remote_id_allocator.add_id_range(sender,
 						    args.id_type,
 						    args.first_id,
 						    args.last_id);
   }
-
-  /*static*/ void RemoteIDResponseMessage::send_request(NodeID target, ID::ID_Types id_type,
-							ID::IDType first_id, ID::IDType last_id)
-  {
-    RequestArgs args;
-
-    log_remote_id.debug() << "sending remote id response: target=" << target
-			 << " type=" << id_type 
-			 << " first=" << std::hex << first_id << " last=" << last_id << std::dec;
-
-    args.responder = my_node_id;
-    args.id_type = id_type;
-    args.first_id = first_id;
-    args.last_id = last_id;
-
-    Message::request(target, args);
-  }
-
 
   ////////////////////////////////////////////////////////////////////////
   //
@@ -1276,70 +1263,6 @@ namespace Realm {
       // initialize barrier timestamp
       BarrierImpl::barrier_adjustment_timestamp = (((Barrier::timestamp_t)(my_node_id)) << BarrierImpl::BARRIER_TIMESTAMP_NODEID_SHIFT) + 1;
 
-      NodeAnnounceMessage::Message::add_handler_entries("Node Announce AM");
-      SpawnTaskMessage::Message::add_handler_entries("Spawn Task AM");
-      LockRequestMessage::Message::add_handler_entries("Lock Request AM");
-      LockReleaseMessage::Message::add_handler_entries("Lock Release AM");
-      LockGrantMessage::Message::add_handler_entries("Lock Grant AM");
-      EventSubscribeMessage::Message::add_handler_entries("Event Subscribe AM");
-      EventTriggerMessage::Message::add_handler_entries("Event Trigger AM");
-      EventUpdateMessage::Message::add_handler_entries("Event Update AM");
-      RemoteMemAllocRequest::Request::add_handler_entries("Remote Memory Allocation Request AM");
-      RemoteMemAllocRequest::Response::add_handler_entries("Remote Memory Allocation Response AM");
-      //CreateInstanceRequest::Request::add_handler_entries("Create Instance Request AM");
-      //CreateInstanceRequest::Response::add_handler_entries("Create Instance Response AM");
-      RemoteCopyMessage::add_handler_entries("Remote Copy AM");
-      RemoteFillMessage::add_handler_entries("Remote Fill AM");
-#ifdef DETAILED_TIMING
-      TimerDataRequestMessage::Message::add_handler_entries("Roll-up Request AM");
-      TimerDataResponseMessage::Message::add_handler_entries("Roll-up Data AM");
-      ClearTimersMessage::Message::add_handler_entries("Clear Timer Request AM");
-#endif
-      //DestroyInstanceMessage::Message::add_handler_entries("Destroy Instance AM");
-      RemoteWriteMessage::Message::add_handler_entries("Remote Write AM");
-      RemoteReduceMessage::Message::add_handler_entries("Remote Reduce AM");
-      RemoteSerdezMessage::Message::add_handler_entries("Remote Serdez AM");
-      RemoteWriteFenceMessage::Message::add_handler_entries("Remote Write Fence AM");
-      RemoteWriteFenceAckMessage::Message::add_handler_entries("Remote Write Fence Ack AM");
-      DestroyLockMessage::Message::add_handler_entries("Destroy Lock AM");
-      RemoteReduceListMessage::Message::add_handler_entries("Remote Reduction List AM");
-      RuntimeShutdownMessage::Message::add_handler_entries("Machine Shutdown AM");
-      BarrierAdjustMessage::Message::add_handler_entries("Barrier Adjust AM");
-      BarrierSubscribeMessage::Message::add_handler_entries("Barrier Subscribe AM");
-      BarrierTriggerMessage::Message::add_handler_entries("Barrier Trigger AM");
-      BarrierMigrationMessage::Message::add_handler_entries("Barrier Migration AM");
-      MetadataRequestMessage::Message::add_handler_entries("Metadata Request AM");
-      MetadataResponseMessage::Message::add_handler_entries("Metadata Response AM");
-      MetadataInvalidateMessage::Message::add_handler_entries("Metadata Invalidate AM");
-      MetadataInvalidateAckMessage::Message::add_handler_entries("Metadata Inval Ack AM");
-      XferDesRemoteWriteMessage::Message::add_handler_entries("XferDes Remote Write AM");
-      XferDesRemoteWriteAckMessage::Message::add_handler_entries("XferDes Remote Write Ack AM");
-      XferDesCreateMessage::Message::add_handler_entries("Create XferDes Request AM");
-      XferDesDestroyMessage::Message::add_handler_entries("Destroy XferDes Request AM");
-      NotifyXferDesCompleteMessage::Message::add_handler_entries("Notify XferDes Completion Request AM");
-      UpdateBytesWriteMessage::Message::add_handler_entries("Update Bytes Write AM");
-      UpdateBytesReadMessage::Message::add_handler_entries("Update Bytes Read AM");
-      RegisterTaskMessage::Message::add_handler_entries("Register Task AM");
-      RegisterTaskCompleteMessage::Message::add_handler_entries("Register Task Complete AM");
-      RemoteMicroOpMessage::Message::add_handler_entries("Remote Micro Op AM");
-      RemoteMicroOpCompleteMessage::Message::add_handler_entries("Remote Micro Op Complete AM");
-      RemoteSparsityContribMessage::Message::add_handler_entries("Remote Sparsity Contrib AM");
-      RemoteSparsityRequestMessage::Message::add_handler_entries("Remote Sparsity Request AM");
-      ApproxImageResponseMessage::Message::add_handler_entries("Approx Image Response AM");
-      SetContribCountMessage::Message::add_handler_entries("Set Contrib Count AM");
-      RemoteIDRequestMessage::Message::add_handler_entries("Remote ID Request AM");
-      RemoteIDResponseMessage::Message::add_handler_entries("Remote ID Response AM");
-      RemoteIBAllocRequestAsync::Message::add_handler_entries("Remote IB Alloc Request AM");
-      RemoteIBAllocResponseAsync::Message::add_handler_entries("Remote IB Alloc Response AM");
-      RemoteIBFreeRequestAsync::Message::add_handler_entries("Remote IB Free Request AM");
-      MemStorageAllocRequest::Message::add_handler_entries("Memory Storage Alloc Request");
-      MemStorageAllocResponse::Message::add_handler_entries("Memory Storage Alloc Response");
-      MemStorageReleaseRequest::Message::add_handler_entries("Memory Storage Release Request");
-      MemStorageReleaseResponse::Message::add_handler_entries("Memory Storage Release Response");
-      CancelOperationMessage::Message::add_handler_entries("Cancel Operation AM");
-      //TestMessage::add_handler_entries("Test AM");
-      //TestMessage2::add_handler_entries("Test 2 AM");
-
       nodes = new Node[max_node_id + 1];
 
       // create allocators for local node events/locks/index spaces - do this before we start handling
@@ -1823,16 +1746,17 @@ namespace Realm {
 #endif
 
 	// now announce ourselves to everyone else
+	NodeSet targets;
 	for(NodeID i = 0; i <= max_node_id; i++)
 	  if(i != my_node_id)
-	    NodeAnnounceMessage::send_request(i,
-					      num_procs,
-					      num_memories,
-					      num_ib_memories,
-					      dbs.get_buffer(),
-					      dbs.bytes_used(),
-					      PAYLOAD_COPY);
+	    targets.add(i);
 
+	ActiveMessage<NodeAnnounceMessage> amsg(targets, dbs.bytes_used());
+	amsg->num_procs = num_procs;
+	amsg->num_memories = num_memories;
+	amsg->num_ib_memories = num_ib_memories;
+	amsg.add_payload(dbs.get_buffer(), dbs.bytes_used());
+	amsg.commit();
 	NodeAnnounceMessage::await_all_announcements();
 
 #ifdef DEBUG_REALM_STARTUP
@@ -2195,9 +2119,14 @@ namespace Realm {
 
       if(local_request) {
 	log_runtime.info("shutdown request - notifying other nodes");
+	NodeSet targets;
 	for(NodeID i = 0; i <= max_node_id; i++)
 	  if(i != my_node_id)
-	    RuntimeShutdownMessage::send_request(i, result_code);
+	    targets.add(i);
+
+	ActiveMessage<RuntimeShutdownMessage> amsg(targets);
+	amsg->result_code = result_code;
+	amsg.commit();
       }
 
       log_runtime.info("shutdown request - cleaning up local processors");
@@ -2663,22 +2592,16 @@ namespace Realm {
   // class RuntimeShutdownMessage
   //
 
-  /*static*/ void RuntimeShutdownMessage::handle_request(RequestArgs args)
+  /*static*/ void RuntimeShutdownMessage::handle_message(NodeID sender,const RuntimeShutdownMessage &args,
+							 const void *data, size_t datalen)
   {
-    log_runtime.info() << "shutdown request received: sender=" << args.initiating_node << " code=" << args.result_code;
+    log_runtime.info() << "shutdown request received: sender=" << sender << " code=" << args.result_code;
 
     get_runtime()->shutdown(false, args.result_code);
   }
 
-  /*static*/ void RuntimeShutdownMessage::send_request(NodeID target,
-						       int result_code)
-  {
-    RequestArgs args;
+  ActiveMessageHandlerReg<RemoteIDRequestMessage> remote_id_request_message_handler;
+  ActiveMessageHandlerReg<RemoteIDResponseMessage> remote_id_response_message_handler;
+  ActiveMessageHandlerReg<RuntimeShutdownMessage> runtime_shutdown_message_handler;
 
-    args.initiating_node = my_node_id;
-    args.result_code = result_code;
-    Message::request(target, args);
-  }
-
-  
 }; // namespace Realm

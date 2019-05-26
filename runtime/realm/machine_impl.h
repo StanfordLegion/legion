@@ -377,22 +377,12 @@ namespace Realm {
   };
 
   struct NodeAnnounceMessage {
-    struct RequestArgs : public BaseMedium {
-      NodeID node_id;
-      unsigned num_procs;
-      unsigned num_memories;
-      unsigned num_ib_memories;
-    };
+    unsigned num_procs;
+    unsigned num_memories;
+    unsigned num_ib_memories;
 
-    static void handle_request(RequestArgs args, const void *data, size_t datalen);
-
-    typedef ActiveMessageMediumNoReply<NODE_ANNOUNCE_MSGID,
-				       RequestArgs,
-				       handle_request> Message;
-
-    static void send_request(NodeID target, unsigned num_procs,
-			     unsigned num_memories, unsigned num_ib_memories,
-			     const void *data, size_t datalen, int payload_mode);
+    static void handle_message(NodeID sender, const NodeAnnounceMessage &msg,
+			       const void *data, size_t datalen);
 
     static void await_all_announcements(void);
   };

@@ -415,6 +415,9 @@ class Type(object):
 
 # Pre-defined Types
 void = Type(None, None)
+bool_ = Type(numpy.bool_, 'bool')
+complex64 = Type(numpy.complex64, 'float _Complex')
+complex128 = Type(numpy.complex128, 'double _Complex')
 float16 = Type(numpy.float16, 'short float')
 float32 = Type(numpy.float32, 'float')
 float64 = Type(numpy.float64, 'double')
@@ -1187,7 +1190,7 @@ class Task (object):
             c.legion_runtime_get_runtime(),
             task_id,
             task_name.encode('utf-8'),
-            False, # Global
+            self.replicable, # Global
             execution_constraints,
             layout_constraints,
             options[0],
