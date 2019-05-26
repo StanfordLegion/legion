@@ -1,5 +1,5 @@
 #!/bin/bash -eu
-#SBATCH --nodes=256
+#SBATCH --nodes=64
 #SBATCH --constraint=gpu
 #SBATCH --time=01:00:00
 
@@ -10,7 +10,7 @@ export LD_LIBRARY_PATH="$PWD"
 if [[ ! -d auto ]]; then mkdir auto; fi
 pushd auto
 
-for n in 256 128; do
+for n in 64 32 16; do
   for r in 0 1 2 3 4; do
     srun -n $n -N $n --ntasks-per-node 1 --cpu_bind none \
 	"$ROOT_DIR/spmv.auto" -steps 50 -prune 30 -p $n -size $(( 2**27*n )) \
