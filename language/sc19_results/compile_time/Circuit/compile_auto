@@ -1,0 +1,291 @@
+{2}{passes}: Registered optimizations passes:
+{2}{passes}:   8. optimize_config_options
+{2}{passes}:   9. check_parallelizable
+{2}{passes}:   10. optimize_mapping
+{2}{passes}:   14. parallelize_tasks
+{2}{passes}:   25. optimize_index_launches
+{2}{passes}:   28. skip_empty_tasks
+{2}{passes}:   30. optimize_futures
+{2}{passes}:   50. optimize_mapping
+{2}{passes}:   60. optimize_traces
+{2}{passes}:   70. optimize_divergence
+{2}{passes}:   80. vectorize_loops
+{2}{profile}: <init_nodes> specialize took 0.000401 s
+{2}{profile}: <init_nodes> normalize took 0.000556 s
+{2}{profile}: <init_nodes> inline_tasks took 6.2e-05 s
+{2}{profile}: <init_nodes> alpha_convert took 0.001379 s
+{2}{profile}: <init_nodes> type_check took 0.008152 s
+{2}{profile}: <init_nodes> eliminate_dead_code took 2.4e-05 s
+{2}{profile}: <init_nodes> desugar took 3.7e-05 s
+{2}{profile}: <init_nodes> check_annotations took 0.000809 s
+{2}{profile}: <init_nodes> optimize_config_options took 0.001251 s
+{2}{profile}: <init_nodes> check_parallelizable took 0.000421 s
+{2}{profile}: <init_nodes> optimize_mapping took 0.000168 s
+{2}{profile}: <init_nodes> parallelize_tasks took 0.001186 s
+{2}{profile}: <init_nodes> optimize_index_launches took 2e-06 s
+{2}{profile}: <init_nodes> skip_empty_tasks took 1e-06 s
+{2}{profile}: <init_nodes> optimize_futures took 2e-06 s
+{2}{profile}: <init_nodes> optimize_mapping took 1e-06 s
+{2}{profile}: <init_nodes> optimize_traces took 1e-06 s
+{2}{profile}: <init_nodes> optimize_divergence took 2.6e-05 s
+{2}{profile}: <init_nodes> vectorize_loops took 7e-06 s
+{2}{profile}: <init_nodes> validate took 8e-06 s
+{2}{profile}: <init_nodes> codegen took 6.5e-05 s
+{2}{profile}: <init_wires> specialize took 0.006978 s
+{2}{profile}: <init_wires> normalize took 0.003565 s
+{2}{profile}: <init_wires> inline_tasks took 0.000469 s
+{2}{profile}: <init_wires> alpha_convert took 0.02311 s
+{2}{profile}: <init_wires> type_check took 0.092362 s
+{2}{profile}: <init_wires> eliminate_dead_code took 0.000229 s
+{2}{profile}: <init_wires> desugar took 0.000191 s
+{2}{profile}: <init_wires> check_annotations took 0.010673 s
+{2}{profile}: <init_wires> optimize_config_options took 0.017339 s
+{2}{profile}: <init_wires> check_parallelizable took 0.00383 s
+{2}{profile}: <init_wires> optimize_mapping took 0.001315 s
+{2}{profile}: <init_wires> parallelize_tasks took 2e-06 s
+{2}{profile}: <init_wires> optimize_index_launches took 2e-06 s
+{2}{profile}: <init_wires> skip_empty_tasks took 1e-06 s
+{2}{profile}: <init_wires> optimize_futures took 0.012202 s
+{2}{profile}: <init_wires> optimize_mapping took 2e-06 s
+{2}{profile}: <init_wires> optimize_traces took 2e-06 s
+{2}{profile}: <init_wires> optimize_divergence took 0.011597 s
+{2}{profile}: <init_wires> vectorize_loops took 0.000663 s
+{2}{profile}: <init_wires> validate took 0.008538 s
+{2}{profile}: <init_wires> codegen took 0.000155 s
+{2}{profile}: <init_piece> specialize took 0.000259 s
+{2}{profile}: <init_piece> normalize took 3.5e-05 s
+{2}{profile}: <init_piece> inline_tasks took 2.6e-05 s
+{2}{profile}: <init_piece> alpha_convert took 0.000513 s
+{2}{profile}: <init_piece> type_check took 0.000385 s
+{2}{profile}: <init_piece> eliminate_dead_code took 1.2e-05 s
+{2}{profile}: <init_piece> desugar took 1.1e-05 s
+{2}{profile}: <init_piece> check_annotations took 0.00036 s
+{2}{profile}: <init_piece> optimize_config_options took 0.000445 s
+{2}{profile}: <init_piece> check_parallelizable took 2e-06 s
+{2}{profile}: <init_piece> optimize_mapping took 1e-06 s
+{2}{profile}: <init_piece> parallelize_tasks took 1.3e-05 s
+{2}{profile}: <init_piece> optimize_index_launches took 2.2e-05 s
+{2}{profile}: <init_piece> skip_empty_tasks took 0.000164 s
+{2}{profile}: <init_piece> optimize_futures took 0.00033 s
+{2}{profile}: <init_piece> optimize_mapping took 1e-06 s
+{2}{profile}: <init_piece> optimize_traces took 5.6e-05 s
+{2}{profile}: <init_piece> optimize_divergence took 0.000743 s
+{2}{profile}: <init_piece> vectorize_loops took 9.5e-05 s
+{2}{profile}: <init_piece> validate took 0.000436 s
+{2}{profile}: <init_piece> codegen took 0.000208 s
+{2}{profile}: <calculate_new_currents> specialize took 0.002521 s
+{2}{profile}: <calculate_new_currents> normalize took 0.002792 s
+{2}{profile}: <calculate_new_currents> inline_tasks took 0.000221 s
+{2}{profile}: <calculate_new_currents> alpha_convert took 0.017305 s
+{2}{profile}: <calculate_new_currents> type_check took 0.130097 s
+{2}{profile}: <calculate_new_currents> eliminate_dead_code took 9.6e-05 s
+{2}{profile}: <calculate_new_currents> desugar took 8e-05 s
+{2}{profile}: <calculate_new_currents> check_annotations took 0.007605 s
+{2}{profile}: <calculate_new_currents> optimize_config_options took 0.013004 s
+{2}{profile}: <calculate_new_currents> check_parallelizable took 0.009999 s
+{2}{profile}: <calculate_new_currents> optimize_mapping took 0.001315 s
+{2}{profile}: <calculate_new_currents> parallelize_tasks took 0.023717 s
+{2}{profile}: <calculate_new_currents> optimize_index_launches took 1e-06 s
+{2}{profile}: <calculate_new_currents> skip_empty_tasks took 1e-06 s
+{2}{profile}: <calculate_new_currents> optimize_futures took 3e-06 s
+{2}{profile}: <calculate_new_currents> optimize_mapping took 2e-06 s
+{2}{profile}: <calculate_new_currents> optimize_traces took 1e-06 s
+{2}{profile}: <calculate_new_currents> optimize_divergence took 2.7e-05 s
+{2}{profile}: <calculate_new_currents> vectorize_loops took 8e-06 s
+{2}{profile}: <calculate_new_currents> validate took 1.1e-05 s
+{2}{profile}: <calculate_new_currents> codegen took 0.000193 s
+{2}{profile}: <distribute_charge> specialize took 0.000565 s
+{2}{profile}: <distribute_charge> normalize took 0.000203 s
+{2}{profile}: <distribute_charge> inline_tasks took 4.8e-05 s
+{2}{profile}: <distribute_charge> alpha_convert took 0.001636 s
+{2}{profile}: <distribute_charge> type_check took 0.039552 s
+{2}{profile}: <distribute_charge> eliminate_dead_code took 0.000105 s
+{2}{profile}: <distribute_charge> desugar took 0.000106 s
+{2}{profile}: <distribute_charge> check_annotations took 0.00087 s
+{2}{profile}: <distribute_charge> optimize_config_options took 0.00604 s
+{2}{profile}: <distribute_charge> check_parallelizable took 0.002062 s
+{2}{profile}: <distribute_charge> optimize_mapping took 0.000348 s
+{2}{profile}: <distribute_charge> parallelize_tasks took 0.005251 s
+{2}{profile}: <distribute_charge> optimize_index_launches took 1.3e-05 s
+{2}{profile}: <distribute_charge> skip_empty_tasks took 2e-06 s
+{2}{profile}: <distribute_charge> optimize_futures took 2e-06 s
+{2}{profile}: <distribute_charge> optimize_mapping took 2e-06 s
+{2}{profile}: <distribute_charge> optimize_traces took 1.3e-05 s
+{2}{profile}: <distribute_charge> optimize_divergence took 1.2e-05 s
+{2}{profile}: <distribute_charge> vectorize_loops took 8e-06 s
+{2}{profile}: <distribute_charge> validate took 7e-06 s
+{2}{profile}: <distribute_charge> codegen took 0.00017 s
+{2}{profile}: <update_voltages> specialize took 0.000488 s
+{2}{profile}: <update_voltages> normalize took 0.000305 s
+{2}{profile}: <update_voltages> inline_tasks took 4e-05 s
+{2}{profile}: <update_voltages> alpha_convert took 0.001494 s
+{2}{profile}: <update_voltages> type_check took 0.00856 s
+{2}{profile}: <update_voltages> eliminate_dead_code took 2.2e-05 s
+{2}{profile}: <update_voltages> desugar took 3.6e-05 s
+{2}{profile}: <update_voltages> check_annotations took 0.000889 s
+{2}{profile}: <update_voltages> optimize_config_options took 0.001574 s
+{2}{profile}: <update_voltages> check_parallelizable took 0.000478 s
+{2}{profile}: <update_voltages> optimize_mapping took 0.000147 s
+{2}{profile}: <update_voltages> parallelize_tasks took 0.001578 s
+{2}{profile}: <update_voltages> optimize_index_launches took 2e-06 s
+{2}{profile}: <update_voltages> skip_empty_tasks took 1e-06 s
+{2}{profile}: <update_voltages> optimize_futures took 2e-06 s
+{2}{profile}: <update_voltages> optimize_mapping took 1e-06 s
+{2}{profile}: <update_voltages> optimize_traces took 1e-06 s
+{2}{profile}: <update_voltages> optimize_divergence took 1.2e-05 s
+{2}{profile}: <update_voltages> vectorize_loops took 8e-06 s
+{2}{profile}: <update_voltages> validate took 7e-06 s
+{2}{profile}: <update_voltages> codegen took 5.3e-05 s
+{2}{profile}: <create_colorings> specialize took 0.00132 s
+{2}{profile}: <create_colorings> normalize took 0.000588 s
+{2}{profile}: <create_colorings> inline_tasks took 0.005824 s
+{2}{profile}: <create_colorings> type_check took 0.013288 s
+{2}{profile}: <parse_input> specialize took 7.9e-05 s
+{2}{profile}: <parse_input> normalize took 3e-05 s
+{2}{profile}: <parse_input> inline_tasks took 1.5e-05 s
+{2}{profile}: <parse_input> alpha_convert took 0.000219 s
+{2}{profile}: <parse_input> type_check took 0.000233 s
+{2}{profile}: <parse_input> eliminate_dead_code took 1.2e-05 s
+{2}{profile}: <parse_input> desugar took 1.2e-05 s
+{2}{profile}: <parse_input> check_annotations took 0.000149 s
+{2}{profile}: <parse_input> optimize_config_options took 0.000185 s
+{2}{profile}: <parse_input> check_parallelizable took 4.8e-05 s
+{2}{profile}: <parse_input> optimize_mapping took 3e-05 s
+{2}{profile}: <parse_input> parallelize_tasks took 1e-06 s
+{2}{profile}: <parse_input> optimize_index_launches took 2e-06 s
+{2}{profile}: <parse_input> skip_empty_tasks took 1e-06 s
+{2}{profile}: <parse_input> optimize_futures took 8.2e-05 s
+{2}{profile}: <parse_input> optimize_mapping took 2e-06 s
+{2}{profile}: <parse_input> optimize_traces took 1e-06 s
+{2}{profile}: <parse_input> optimize_divergence took 0.000122 s
+{2}{profile}: <parse_input> vectorize_loops took 1.8e-05 s
+{2}{profile}: <parse_input> validate took 7.1e-05 s
+{2}{profile}: <parse_input> codegen took 2.8e-05 s
+{2}{profile}: <print_summary> specialize took 0.000706 s
+{2}{profile}: <print_summary> normalize took 0.000429 s
+{2}{profile}: <print_summary> inline_tasks took 5.6e-05 s
+{2}{profile}: <print_summary> alpha_convert took 0.002211 s
+{2}{profile}: <print_summary> type_check took 0.004079 s
+{2}{profile}: <print_summary> eliminate_dead_code took 4.1e-05 s
+{2}{profile}: <print_summary> desugar took 2.6e-05 s
+{2}{profile}: <print_summary> check_annotations took 0.001197 s
+{2}{profile}: <print_summary> optimize_config_options took 0.001724 s
+{2}{profile}: <print_summary> check_parallelizable took 0.000429 s
+{2}{profile}: <print_summary> optimize_mapping took 0.000196 s
+{2}{profile}: <print_summary> parallelize_tasks took 2e-06 s
+{2}{profile}: <print_summary> optimize_index_launches took 2e-06 s
+{2}{profile}: <print_summary> skip_empty_tasks took 1e-06 s
+{2}{profile}: <print_summary> optimize_futures took 0.001045 s
+{2}{profile}: <print_summary> optimize_mapping took 2e-06 s
+{2}{profile}: <print_summary> optimize_traces took 1e-06 s
+{2}{profile}: <print_summary> optimize_divergence took 0.001385 s
+{2}{profile}: <print_summary> vectorize_loops took 0.000101 s
+{2}{profile}: <print_summary> validate took 0.000792 s
+{2}{profile}: <print_summary> codegen took 2.9e-05 s
+{2}{profile}: <toplevel> specialize took 0.00178 s
+{2}{profile}: <toplevel> normalize took 0.001133 s
+{2}{profile}: <toplevel> inline_tasks took 0.004997 s
+{2}{profile}: <toplevel> alpha_convert took 0.013416 s
+{2}{profile}: <toplevel> type_check took 0.035691 s
+{2}{profile}: <toplevel> eliminate_dead_code took 0.000123 s
+{2}{profile}: <toplevel> desugar took 9.7e-05 s
+{2}{profile}: <toplevel> check_annotations took 0.007646 s
+{2}{profile}: <toplevel> optimize_config_options took 0.014528 s
+{2}{profile}: <toplevel> check_parallelizable took 2e-06 s
+{2}{profile}: <toplevel> optimize_mapping took 1e-06 s
+{2}{profile}: <toplevel> solve_constraints took 0.00544 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_config_options took 0.019986 s
+{2}{profile}: <calculate_new_currents.parallel> check_parallelizable took 0.010232 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_mapping took 0.001384 s
+{2}{profile}: <calculate_new_currents.parallel> parallelize_tasks took 2e-06 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_index_launches took 2e-06 s
+{2}{profile}: <calculate_new_currents.parallel> skip_empty_tasks took 1e-06 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_futures took 0.016843 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_mapping took 3e-06 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_traces took 2e-06 s
+{2}{profile}: <calculate_new_currents.parallel> optimize_divergence took 0.012454 s
+{2}{profile}: <calculate_new_currents.parallel> vectorize_loops took 0.006508 s
+{2}{profile}: <calculate_new_currents.parallel> validate took 0.01019 s
+{2}{profile}: <calculate_new_currents.parallel> codegen took 0.000249 s
+{2}{profile}: <distribute_charge.parallel> optimize_config_options took 0.004049 s
+{2}{profile}: <distribute_charge.parallel> check_parallelizable took 0.003441 s
+{2}{profile}: <distribute_charge.parallel> optimize_mapping took 0.000446 s
+{2}{profile}: <distribute_charge.parallel> parallelize_tasks took 2e-06 s
+{2}{profile}: <distribute_charge.parallel> optimize_index_launches took 2e-06 s
+{2}{profile}: <distribute_charge.parallel> skip_empty_tasks took 1e-06 s
+{2}{profile}: <distribute_charge.parallel> optimize_futures took 0.003244 s
+{2}{profile}: <distribute_charge.parallel> optimize_mapping took 1e-06 s
+{2}{profile}: <distribute_charge.parallel> optimize_traces took 2e-06 s
+{2}{profile}: <distribute_charge.parallel> optimize_divergence took 0.002222 s
+{2}{profile}: <distribute_charge.parallel> vectorize_loops took 0.001543 s
+{2}{profile}: <distribute_charge.parallel> validate took 0.001402 s
+{2}{profile}: <distribute_charge.parallel> codegen took 0.000296 s
+{2}{profile}: <update_voltages.parallel> optimize_config_options took 0.004167 s
+{2}{profile}: <update_voltages.parallel> check_parallelizable took 0.003899 s
+{2}{profile}: <update_voltages.parallel> optimize_mapping took 0.000624 s
+{2}{profile}: <update_voltages.parallel> parallelize_tasks took 2e-06 s
+{2}{profile}: <update_voltages.parallel> optimize_index_launches took 9e-06 s
+{2}{profile}: <update_voltages.parallel> skip_empty_tasks took 1e-06 s
+{2}{profile}: <update_voltages.parallel> optimize_futures took 0.005462 s
+{2}{profile}: <update_voltages.parallel> optimize_mapping took 1.7e-05 s
+{2}{profile}: <update_voltages.parallel> optimize_traces took 2e-06 s
+{2}{profile}: <update_voltages.parallel> optimize_divergence took 0.002177 s
+{2}{profile}: <update_voltages.parallel> vectorize_loops took 0.048441 s
+{2}{profile}: <update_voltages.parallel> validate took 0.001148 s
+{2}{profile}: <update_voltages.parallel> codegen took 9.7e-05 s
+{2}{profile}: <toplevel> rewrite_task_launches took 0.298621 s
+{2}{profile}: <toplevel> parallelize_tasks took 0.304173 s
+{2}{profile}: <toplevel> optimize_index_launches took 0.062844 s
+{2}{profile}: <toplevel> skip_empty_tasks took 0.000102 s
+{2}{profile}: <toplevel> optimize_futures took 0.006452 s
+{2}{profile}: <toplevel> optimize_mapping took 2e-06 s
+{2}{profile}: <toplevel> optimize_traces took 0.000116 s
+{2}{profile}: <toplevel> optimize_divergence took 0.014275 s
+{2}{profile}: <toplevel> vectorize_loops took 0.000682 s
+{2}{profile}: <toplevel> validate took 0.007702 s
+{2}{profile}: <toplevel> codegen took 1.7e-05 s
+{2}{codegen}: Starting codegen for task <init_wires>
+{2}{codegen}: Starting codegen for task <init_piece>
+{2}{codegen}: Starting codegen for task <parse_input>
+{2}{codegen}: Starting codegen for task <print_summary>
+{2}{codegen}: Starting codegen for task <calculate_new_currents.parallel>
+{2}{codegen}: Starting codegen for task <calculate_new_currents.parallel>
+{2}{codegen}: Starting codegen for task <distribute_charge.parallel>
+{2}{codegen}: Starting codegen for task <distribute_charge.parallel>
+{2}{codegen}: Starting codegen for task <update_voltages.parallel>
+{2}{codegen}: Starting codegen for task <update_voltages.parallel>
+{2}{codegen}: Starting codegen for task <toplevel>
+{2}{codegen}: Starting codegen for task <__dummy>
+{2}{profile}: task:complete took 1.673823 s
+{2}{profile}: compile took 2.359042 s
+{2}{profile}: ########################################
+{2}{profile}: ##  summary of total execution time   ##
+{2}{profile}: ########################################
+{2}{profile}: optimize_traces 0.000203 s
+{2}{profile}: skip_empty_tasks 0.000282 s
+{2}{profile}: desugar 0.000598 s
+{2}{profile}: eliminate_dead_code 0.000667 s
+{2}{profile}: codegen 0.001564 s
+{2}{profile}: solve_constraints 0.00544 s
+{2}{profile}: optimize_mapping 0.00602 s
+{2}{profile}: normalize 0.009638 s
+{2}{profile}: inline_tasks 0.011762 s
+{2}{profile}: specialize 0.015247 s
+{2}{profile}: check_annotations 0.030243 s
+{2}{profile}: validate 0.030321 s
+{2}{profile}: check_parallelizable 0.034847 s
+{2}{profile}: optimize_divergence 0.045057 s
+{2}{profile}: optimize_futures 0.045674 s
+{2}{profile}: vectorize_loops 0.058086 s
+{2}{profile}: alpha_convert 0.061291 s
+{2}{profile}: optimize_index_launches 0.062908 s
+{2}{profile}: optimize_config_options 0.084299 s
+{2}{profile}: rewrite_task_launches 0.298621 s
+{2}{profile}: type_check 0.332418 s
+{2}{profile}: parallelize_tasks 0.335932 s
+{2}{profile}: task:complete 1.673823 s
+{2}{profile}: compile 2.359042 s
+{2}{profile}: total 7.724319 s
+{2}{profile}: unaccounted 2.220336 s
+7.20user 0.71system 0:08.04elapsed 98%CPU (0avgtext+0avgdata 223480maxresident)k
+0inputs+0outputs (0major+225865minor)pagefaults 0swaps
