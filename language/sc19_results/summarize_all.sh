@@ -1,6 +1,7 @@
 #!/bin/bash
 
 for app in $(ls */ -d); do
+  if [ "$app" == "compile_time/" ]; then continue; fi
   APP=`echo "##### $app #####" | sed s/"\/"/""/g`
   echo "$APP"
   for run in $(ls $app*/ -d); do
