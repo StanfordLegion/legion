@@ -16,6 +16,7 @@
 
 local ast = require("regent/ast")
 local std = require("regent/std")
+local profile = require("regent/profile")
 
 local infer_constraints     = require("regent/parallelizer/infer_constraints")
 local solve_constraints     = require("regent/parallelizer/solve_constraints")
@@ -24,8 +25,10 @@ local rewrite_task_launches = require("regent/parallelizer/rewrite_task_launches
 local parallelize_tasks = {}
 
 function parallelize_tasks.stat_parallelize_with(cx, stat)
-  local solution = solve_constraints.solve(cx, stat)
-  return rewrite_task_launches.rewrite(solution, cx.constraints, stat)
+  local solve = profile("solve_constraints", cx.task_node, solve_constraints.solve)
+  local rewrite = profile("rewrite_task_launches", cx.task_node, rewrite_task_launches.rewrite)
+  local solution = solve(cx, stat)
+  return rewrite(solution, cx.constraints, stat)
 end
 
 function parallelize_tasks.stat_block(cx, stat)
@@ -78,6 +81,7 @@ end
 
 function parallelize_tasks.top_task(node)
   local cx = {
+    task_node  = node,
     privileges = node.prototype:get_privileges(),
     constraints = node.prototype:get_constraints(),
     region_universe = node.prototype:get_region_universe(),

@@ -1146,12 +1146,19 @@ function task_generator.new(node)
     --       creates a complete task for each unique AST and later forces
     --       the tasks to have the same task id.
     local parallel_task_variants = data.newmap()
-    parallel_task_variants["colocation"] = std.new_task(parallel_task_name)
+    if std.config["parallelize-use-colocation"] then
+      parallel_task_variants["colocation"] = std.new_task(parallel_task_name)
+    end
     parallel_task_variants["primary"] = std.new_task(parallel_task_name)
     for _, parallel_task in parallel_task_variants:items() do
       parallel_task:set_task_id_unsafe(parallel_task_variants["primary"]:get_task_id())
     end
-    local parallel_task_variants_list = terralib.newlist({"colocation", "primary"})
+    local parallel_task_variants_list
+    if std.config["parallelize-use-colocation"] then
+      parallel_task_variants_list = terralib.newlist({"colocation", "primary"})
+    else
+      parallel_task_variants_list = terralib.newlist({"primary"})
+    end
 
     -- We prepare the metadata that is shared by all task variants
     local params = terralib.newlist()
