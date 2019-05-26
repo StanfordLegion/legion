@@ -96,7 +96,7 @@ function parallelize_tasks.entry(node)
       assert(node.config_options.leaf)
       assert(node.metadata)
       infer_constraints.top_task(node)
-      return node
+      return node { body = false }
     elseif not node.config_options.leaf then
       return parallelize_tasks.top_task(node)
     else
