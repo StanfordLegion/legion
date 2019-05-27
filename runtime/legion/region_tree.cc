@@ -80,7 +80,7 @@ namespace Legion {
       IndexSpaceNode *node = 
         create_node(handle, realm_is, NULL/*parent*/, 0/*color*/, did, 
                     ApEvent::NO_AP_EVENT, expr_id, notify_remote);
-      if (runtime->legion_spy_enabled)
+      if (runtime->legion_spy_enabled || (runtime->profiler != NULL))
         node->log_index_space_points();
       return node;
     }
@@ -243,6 +243,9 @@ namespace Legion {
         if (runtime->legion_spy_enabled)
           LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                          partition_color);
+	if (runtime->profiler != NULL)
+	  runtime->profiler->record_index_partition(parent.id,pid.id, disjoint,
+						    partition_color);
       }
       ctx->register_index_partition_creation(pid);
       return parent_notified;
@@ -475,6 +478,9 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent.id, pid.id, disjoint,
                                            partition_color);
+          if (runtime->profiler != NULL)
+	    runtime->profiler->record_index_partition(parent.id,pid.id,disjoint,
+                                                      partition_color);
         }
         else
         {
@@ -4988,6 +4994,9 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_space_name(handle.id,
             reinterpret_cast<const char*>(buffer));
+      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+	runtime->profiler->record_index_space(handle.id,
+            reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -5004,6 +5013,9 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_index_partition_name(handle.id,
             reinterpret_cast<const char*>(buffer));
+      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+	runtime->profiler->record_index_part(handle.id,
+            reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -5019,6 +5031,9 @@ namespace Legion {
                                                     size, is_mutable);
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_space_name(handle.id,
+            reinterpret_cast<const char*>(buffer));
+      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+	runtime->profiler->record_field_space(handle.id,
             reinterpret_cast<const char*>(buffer));
     }
 
@@ -5037,6 +5052,9 @@ namespace Legion {
       if (runtime->legion_spy_enabled && (NAME_SEMANTIC_TAG == tag))
         LegionSpy::log_field_name(handle.id, fid,
             reinterpret_cast<const char*>(buf));
+      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+	runtime->profiler->record_field(handle.id, fid, size, 
+            reinterpret_cast<const char*>(buf));
     }
 
     //--------------------------------------------------------------------------
@@ -5054,6 +5072,10 @@ namespace Legion {
         LegionSpy::log_logical_region_name(handle.index_space.id,
             handle.field_space.id, handle.tree_id,
             reinterpret_cast<const char*>(buffer));
+      if (runtime->profiler && (NAME_SEMANTIC_TAG == tag))
+	runtime->profiler->record_logical_region(handle.index_space.id,
+            handle.field_space.id, handle.tree_id,
+	    reinterpret_cast<const char*>(buffer));
     }
 
     //--------------------------------------------------------------------------
@@ -8388,6 +8410,9 @@ namespace Legion {
           if (runtime->legion_spy_enabled)
             LegionSpy::log_index_subspace(handle.id, is.id, 
                           result->get_domain_point_color());
+          if (runtime->profiler != NULL)
+	    runtime->profiler->record_index_subspace(handle.id, is.id,
+                result->get_domain_point_color());
           return result; 
         }
       }
@@ -8580,6 +8605,9 @@ namespace Legion {
         if (implicit_runtime->legion_spy_enabled)
             LegionSpy::log_index_partition(parent->handle.id, handle.id, 
                                            disjoint, color);
+        if (implicit_runtime->profiler != NULL)
+          runtime->profiler->record_index_partition(parent->handle.id,handle.id,
+                                                    disjoint, color);
       }
       else
       {
