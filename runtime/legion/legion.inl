@@ -1381,6 +1381,19 @@ namespace Legion {
           {
             case 0:
               break;
+              // Something changed with explicit destructor invocation
+              // between c++11 and c++14 so we need different versions
+#if __cplusplus <= 201103L
+#define DIMFUNC(DIM) \
+            case DIM: \
+              { \
+                reinterpret_cast<DomainT<DIM,T>*>(bounds)->~DomainT(); \
+                if (has_transform) \
+                  reinterpret_cast<AffineTransform<DIM,N,T>*>(transform)-> \
+                    ~AffineTransform(); \
+                break; \
+              }
+#else
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
@@ -1390,6 +1403,7 @@ namespace Legion {
                     ~AffineTransform<DIM,N,T>(); \
                 break; \
               }
+#endif
             LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
             default:

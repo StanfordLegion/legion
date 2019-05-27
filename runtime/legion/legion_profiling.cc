@@ -153,6 +153,169 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_space_rect(IndexSpaceRectDesc
+							&_ispace_rect_desc)
+    //--------------------------------------------------------------------------
+    {
+      ispace_rect_desc.push_back(IndexSpaceRectDesc());
+      IndexSpaceRectDesc &desc = ispace_rect_desc.back();
+      desc = _ispace_rect_desc;
+      owner->update_footprint(sizeof(IndexSpaceRectDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_space_point(IndexSpacePointDesc
+							&_ispace_point_desc)
+    //--------------------------------------------------------------------------
+    {
+      ispace_point_desc.push_back(IndexSpacePointDesc());
+      IndexSpacePointDesc &desc = ispace_point_desc.back();
+      desc = _ispace_point_desc;
+      owner->update_footprint(sizeof(IndexSpacePointDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_empty_index_space(IDType handle)
+    //--------------------------------------------------------------------------
+    {
+      ispace_empty_desc.push_back(IndexSpaceEmptyDesc());
+      IndexSpaceEmptyDesc &desc = ispace_empty_desc.back();
+      desc.unique_id = handle;
+      owner->update_footprint(sizeof(IndexSpaceEmptyDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_field(UniqueID unique_id,
+					    unsigned field_id,
+					    size_t size,
+					    const char* name)
+    //--------------------------------------------------------------------------
+    {
+      field_desc.push_back(FieldDesc());
+      FieldDesc &desc = field_desc.back();
+      desc.unique_id = unique_id;
+      desc.field_id = field_id;
+      desc.size = (long long)size;
+      desc.name = strdup(name);
+      const size_t diff = sizeof(FieldDesc) + strlen(name);
+      owner->update_footprint(diff, this);
+    }
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_field_space(UniqueID unique_id,
+						  const char* name)
+    //--------------------------------------------------------------------------
+    {
+      field_space_desc.push_back(FieldSpaceDesc());
+      FieldSpaceDesc &desc = field_space_desc.back();
+      desc.unique_id = unique_id;
+      desc.name = strdup(name);
+      const size_t diff = sizeof(FieldSpaceDesc) + strlen(name);
+      owner->update_footprint(diff, this);
+    }
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_part(UniqueID unique_id,
+						  const char* name)
+    //--------------------------------------------------------------------------
+    {
+      index_part_desc.push_back(IndexPartDesc());
+      IndexPartDesc &desc = index_part_desc.back();
+      desc.unique_id = unique_id;
+      desc.name = strdup(name);
+      const size_t diff = sizeof(IndexPartDesc) + strlen(name);
+      owner->update_footprint(diff, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_space(UniqueID unique_id,
+						  const char* name)
+    //--------------------------------------------------------------------------
+    {
+      index_space_desc.push_back(IndexSpaceDesc());
+      IndexSpaceDesc &desc = index_space_desc.back();
+      desc.unique_id = unique_id;
+      desc.name = strdup(name);
+      const size_t diff = sizeof(IndexSpaceDesc) + strlen(name);
+      owner->update_footprint(diff, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_subspace(IDType parent_id,
+						     IDType unique_id,
+						     const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      index_subspace_desc.push_back(IndexSubSpaceDesc());
+      IndexSubSpaceDesc &desc = index_subspace_desc.back();
+      desc.parent_id = parent_id;
+      desc.unique_id = unique_id;
+      owner->update_footprint(sizeof(IndexSubSpaceDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_index_partition(IDType parent_id,
+						      IDType unique_id,
+						      bool disjoint,
+						      LegionColor point)
+    //--------------------------------------------------------------------------
+    {
+      index_partition_desc.push_back(IndexPartitionDesc());
+      IndexPartitionDesc &desc = index_partition_desc.back();
+      desc.parent_id = parent_id;
+      desc.unique_id = unique_id;
+      desc.disjoint = disjoint;
+      desc.point = point;
+      owner->update_footprint(sizeof(IndexPartitionDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_logical_region(IDType index_space,
+						     unsigned field_space,
+						     unsigned tree_id,
+						     const char* name)
+    //--------------------------------------------------------------------------
+    {
+      lr_desc.push_back(LogicalRegionDesc());
+      LogicalRegionDesc &desc = lr_desc.back();
+      desc.ispace_id = index_space;
+      desc.fspace_id = field_space;
+      desc.tree_id = tree_id;
+      desc.name = strdup(name);
+      const size_t diff = sizeof(LogicalRegionDesc) + strlen(name);
+      owner->update_footprint(diff, this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_instance_layout(UniqueID op_id,
+						      IDType inst_id,
+						      unsigned field_id)
+    //--------------------------------------------------------------------------
+    {
+      phy_inst_layout_rdesc.push_back(PhysicalInstLayoutDesc());
+      PhysicalInstLayoutDesc &pdesc = phy_inst_layout_rdesc.back();
+      pdesc.op_id = op_id;
+      pdesc.inst_id = inst_id;
+      pdesc.field_id = field_id;
+      owner->update_footprint(sizeof(PhysicalInstLayoutDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfInstance::register_physical_instance_region(UniqueID op_id,
+							       IDType inst_id,
+							       LogicalRegion
+							       handle)
+    //--------------------------------------------------------------------------
+    {
+      phy_inst_rdesc.push_back(PhysicalInstRegionDesc());
+      PhysicalInstRegionDesc &phy_instance_rdesc = phy_inst_rdesc.back();
+      phy_instance_rdesc.op_id = op_id;
+      phy_instance_rdesc.inst_id = inst_id;
+      phy_instance_rdesc.ispace_id = handle.get_index_space().get_id();
+      phy_instance_rdesc.fspace_id = handle.get_field_space().get_id();
+      phy_instance_rdesc.tree_id = handle.get_tree_id();
+      owner->update_footprint(sizeof(PhysicalInstRegionDesc), this);
+    }
+
+    //--------------------------------------------------------------------------
     void LegionProfInstance::process_task(
             TaskID task_id, VariantID variant_id, UniqueID op_id,
             const Realm::ProfilingMeasurements::OperationTimeline &timeline,
@@ -189,7 +352,6 @@ namespace Legion {
       const size_t diff = sizeof(TaskInfo) + num_intervals * sizeof(WaitInfo);
       owner->update_footprint(diff, this);
     }
-
     //--------------------------------------------------------------------------
     void LegionProfInstance::process_gpu_task(
             TaskID task_id, VariantID variant_id, UniqueID op_id,
@@ -523,6 +685,69 @@ namespace Legion {
           serializer->serialize(*wit, *it);
         }
       }
+      for (std::deque<IndexSpaceRectDesc>::const_iterator it =
+	     ispace_rect_desc.begin(); it != ispace_rect_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
+      for (std::deque<IndexSpacePointDesc>::const_iterator it =
+	     ispace_point_desc.begin(); it != ispace_point_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<IndexSpaceEmptyDesc>::const_iterator it =
+	     ispace_empty_desc.begin(); it != ispace_empty_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<FieldDesc>::const_iterator it =
+	     field_desc.begin(); it != field_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<FieldSpaceDesc>::const_iterator it =
+	     field_space_desc.begin(); it != field_space_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<IndexPartDesc>::const_iterator it =
+	     index_part_desc.begin(); it != index_part_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
+      for (std::deque<IndexSubSpaceDesc>::const_iterator it =
+	     index_subspace_desc.begin(); it != index_subspace_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
+      for (std::deque<IndexPartitionDesc>::const_iterator it =
+	     index_partition_desc.begin(); it != index_partition_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
+      for (std::deque<LogicalRegionDesc>::const_iterator it =
+	     lr_desc.begin(); it != lr_desc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
+      for (std::deque<PhysicalInstRegionDesc>::const_iterator it =
+	     phy_inst_rdesc.begin();
+	   it != phy_inst_rdesc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+      for (std::deque<PhysicalInstLayoutDesc>::const_iterator it =
+	     phy_inst_layout_rdesc.begin();
+	   it != phy_inst_layout_rdesc.end(); it++)
+      {
+        serializer->serialize(*it);
+      }
+
       for (std::deque<MetaInfo>::const_iterator it = meta_infos.begin();
             it != meta_infos.end(); it++)
       {
@@ -533,6 +758,7 @@ namespace Legion {
           serializer->serialize(*wit, *it);
         }
       }
+
       for (std::deque<CopyInfo>::const_iterator it = copy_infos.begin();
             it != copy_infos.end(); it++)
       {
@@ -591,6 +817,18 @@ namespace Legion {
       multi_tasks.clear();
       task_infos.clear();
       gpu_task_infos.clear();
+      ispace_rect_desc.clear();
+      ispace_point_desc.clear();
+      ispace_empty_desc.clear();
+      field_desc.clear();
+      field_space_desc.clear();
+      index_part_desc.clear();
+      index_space_desc.clear();
+      index_subspace_desc.clear();
+      index_partition_desc.clear();
+      lr_desc.clear();
+      phy_inst_layout_rdesc.clear();
+      phy_inst_rdesc.clear();
       meta_infos.clear();
       copy_infos.clear();
       inst_create_infos.clear();
@@ -674,6 +912,131 @@ namespace Legion {
           serializer->serialize(*wit, front);
         diff += sizeof(front) + front.wait_intervals.size() * sizeof(WaitInfo);
         task_infos.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!ispace_rect_desc.empty())
+      {
+        IndexSpaceRectDesc &front = ispace_rect_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        ispace_rect_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!ispace_point_desc.empty())
+      {
+        IndexSpacePointDesc &front = ispace_point_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        ispace_point_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!ispace_empty_desc.empty())
+      {
+        IndexSpaceEmptyDesc &front = ispace_empty_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        ispace_empty_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!field_desc.empty())
+      {
+        FieldDesc &front = field_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        field_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!field_space_desc.empty())
+      {
+        FieldSpaceDesc &front = field_space_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        field_space_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!index_part_desc.empty())
+      {
+        IndexPartDesc &front = index_part_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        index_part_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!index_space_desc.empty())
+      {
+        IndexSpaceDesc &front = index_space_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        index_space_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!index_subspace_desc.empty())
+      {
+        IndexSubSpaceDesc &front = index_subspace_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        index_subspace_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!index_partition_desc.empty())
+      {
+        IndexPartitionDesc &front = index_partition_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        index_partition_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!lr_desc.empty())
+      {
+        LogicalRegionDesc &front = lr_desc.front();
+        serializer->serialize(front);
+        diff += sizeof(front) + strlen(front.name);
+        free(const_cast<char*>(front.name));
+        lr_desc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!phy_inst_rdesc.empty())
+      {
+        PhysicalInstRegionDesc &front = phy_inst_rdesc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        phy_inst_layout_rdesc.pop_front();
+        const long long t_curr = Realm::Clock::current_time_in_microseconds();
+        if (t_curr >= t_stop)
+          return diff;
+      }
+      while (!phy_inst_layout_rdesc.empty())
+      {
+        PhysicalInstLayoutDesc &front = phy_inst_layout_rdesc.front();
+        serializer->serialize(front);
+        diff += sizeof(front);
+        phy_inst_layout_rdesc.pop_front();
         const long long t_curr = Realm::Clock::current_time_in_microseconds();
         if (t_curr >= t_stop)
           return diff;
@@ -886,7 +1249,21 @@ namespace Legion {
         mem_desc.kind = it->kind();
         mem_desc.capacity = it->capacity();
         serializer->serialize(mem_desc);
+	Machine::ProcessorQuery pq(machine);
+	pq.has_affinity_to(*it);
+        for(Machine::ProcessorQuery::iterator it2 = pq.begin(); it2; ++it2)
+	  {
+            LegionProfDesc::ProcMemDesc proc_mem_desc;
+            proc_mem_desc.proc_id = it2->id;
+            proc_mem_desc.mem_id = mem_desc.mem_id;
+            serializer->serialize(proc_mem_desc);
+	  }
       }
+      // log max dim
+      LegionProfDesc::MaxDimDesc max_dim_desc;
+      max_dim_desc.max_dim = LEGION_MAX_DIM;
+      serializer->serialize(max_dim_desc);
+
 #ifdef DEBUG_LEGION
       for (unsigned idx = 0; idx < LEGION_PROF_LAST; idx++)
         total_outstanding_requests[idx] = 0;
@@ -924,6 +1301,143 @@ namespace Legion {
       // should never be called
       assert(false);
       return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_space_rect_desc(
+    LegionProfInstance::IndexSpaceRectDesc &ispace_rect_desc)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_space_rect(
+                                                ispace_rect_desc);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_space_point_desc(
+    LegionProfInstance::IndexSpacePointDesc &ispace_point_desc)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_space_point(
+                                                ispace_point_desc);
+    }
+    //-------------------------------------------------------------------------
+    void LegionProfiler::record_empty_index_space(IDType handle)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_empty_index_space(handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_field(UniqueID unique_id,
+				      unsigned field_id,
+				      size_t size,
+				      const char* name)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_field(unique_id,field_id,
+						      size, name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_field_space(UniqueID unique_id,
+					    const char* name)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_field_space(unique_id,name);
+    }
+
+
+   //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_part(UniqueID unique_id,
+                                           const char* name)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_part(unique_id,name);
+    }
+
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_space(UniqueID unique_id,
+					    const char* name)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_space(unique_id,name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_subspace(IDType parent_id, 
+                                     IDType unique_id, const DomainPoint &point)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_subspace(parent_id, 
+                                                              unique_id, point);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_index_partition(IDType parent_id,
+                                                IDType unique_id, bool disjoint,
+                                                LegionColor point)
+    //--------------------------------------------------------------------------
+    {
+
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_index_partition(parent_id, 
+                                              unique_id, disjoint, point);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_logical_region(IDType index_space,
+                       unsigned field_space, unsigned tree_id, const char* name)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_logical_region(index_space, 
+                                                  field_space, tree_id, name);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_physical_instance_region(UniqueID op_id,
+							 IDType inst_id,
+							 LogicalRegion handle)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+      thread_local_profiling_instance->register_physical_instance_region(op_id,
+                                                              inst_id, handle);
+    }
+
+    //--------------------------------------------------------------------------
+    void LegionProfiler::record_instance_layout(UniqueID op_id, IDType inst_id,
+						std::vector<FieldID>& fields)
+    //--------------------------------------------------------------------------
+    {
+      if (thread_local_profiling_instance == NULL)
+        create_thread_local_profiling_instance();
+
+      for (std::vector<FieldID>::const_iterator it = fields.begin();
+	   it != fields.end(); it++) {
+	thread_local_profiling_instance->register_instance_layout(op_id, 
+                                                          inst_id, *it);
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -999,7 +1513,6 @@ namespace Legion {
       req.add_measurement<
                 Realm::ProfilingMeasurements::OperationEventWaits>();
     }
-
     //--------------------------------------------------------------------------
     void LegionProfiler::add_gpu_task_request(Realm::ProfilingRequestSet &requests,
 				      TaskID tid, VariantID vid, SingleTask *task)
@@ -1338,7 +1851,7 @@ namespace Legion {
               thread_local_profiling_instance->process_gpu_task(info->id,
 		    info->id2, info->op_id, timeline, usage, waits, timeline_gpu);
             break;
-          }
+	  }
 
         case LEGION_PROF_TASK:
           {
@@ -1363,6 +1876,7 @@ namespace Legion {
                   info->id2, info->op_id, timeline, usage, waits);
             break;
           }
+
         case LEGION_PROF_META:
           {
 #ifdef DEBUG_LEGION
@@ -1408,6 +1922,7 @@ namespace Legion {
                   timeline, usage, waits);
             break;
           }
+
         case LEGION_PROF_COPY:
           {
 #ifdef DEBUG_LEGION
