@@ -2268,11 +2268,8 @@ namespace Legion {
         // We'll try to synthesize a logical region but if it's a 
         // generic index space expression then we're going to have
         // a hard time.
-        IndexSpaceNode *is_node = 
-          dynamic_cast<IndexSpaceNode*>(instance_domain);
         // TODO: handle the case where this isn't actually a logical region
-        if (is_node == NULL)
-          assert(false);
+        IndexSpaceNode *is_node = instance_domain->find_or_create_node(NULL); 
         const LogicalRegion region_handle(tree_id, is_node->handle, 
                                           field_space_node->handle); 
 	runtime->profiler->record_physical_instance_region(creator_id, 
