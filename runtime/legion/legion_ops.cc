@@ -274,7 +274,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void Operation::initialize_operation(TaskContext *ctx, bool track, 
+    void Operation::initialize_operation(InnerContext *ctx, bool track, 
                                          unsigned regs/*= 0*/,
                       const std::vector<StaticDependence> *dependences/*=NULL*/)
     //--------------------------------------------------------------------------
@@ -1884,7 +1884,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void SpeculativeOp::initialize_speculation(TaskContext *ctx, bool track,
+    void SpeculativeOp::initialize_speculation(InnerContext *ctx, bool track,
         unsigned regions, const std::vector<StaticDependence> *dependences,
         const Predicate &p)
     //--------------------------------------------------------------------------
@@ -2302,7 +2302,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion MapOp::initialize(TaskContext *ctx, 
+    PhysicalRegion MapOp::initialize(InnerContext *ctx, 
                                      const InlineLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2351,7 +2351,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MapOp::initialize(TaskContext *ctx, const PhysicalRegion &reg)
+    void MapOp::initialize(InnerContext *ctx, const PhysicalRegion &reg)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/, 1/*regions*/);
@@ -3383,7 +3383,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CopyOp::initialize(TaskContext *ctx, const CopyLauncher &launcher)
+    void CopyOp::initialize(InnerContext *ctx, const CopyLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -5435,7 +5435,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexCopyOp::initialize(TaskContext *ctx, 
+    void IndexCopyOp::initialize(InnerContext *ctx, 
                                  const IndexCopyLauncher &launcher,
                                  IndexSpace launch_sp)
     //--------------------------------------------------------------------------
@@ -5449,9 +5449,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
 #endif
-      launch_space = launch_sp;
+      launch_space = runtime->forest->get_node(launch_sp);
+      add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+        launch_space->get_launch_space_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -5559,7 +5560,7 @@ namespace Legion {
       {
         LegionSpy::log_copy_operation(parent_ctx->get_unique_id(),
                                       unique_op_id);
-        runtime->forest->log_launch_space(launch_space, unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
 
@@ -5577,7 +5578,7 @@ namespace Legion {
       activate_copy();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
-      launch_space = IndexSpace::NO_SPACE;
+      launch_space = NULL;
       points_committed = 0;
       commit_request = false;
     }
@@ -5610,6 +5611,8 @@ namespace Legion {
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
     }
 
     //--------------------------------------------------------------------------
@@ -5765,7 +5768,7 @@ namespace Legion {
       perform_base_dependence_analysis();
       for (unsigned idx = 0; idx < src_requirements.size(); idx++)
       {
-        ProjectionInfo src_info(runtime, src_requirements[idx], launch_space);
+        ProjectionInfo src_info(runtime, src_requirements[idx], launch_space); 
         runtime->forest->perform_dependence_analysis(this, idx, 
                                                      src_requirements[idx],
                                                      src_info,
@@ -5773,7 +5776,7 @@ namespace Legion {
       }
       for (unsigned idx = 0; idx < dst_requirements.size(); idx++)
       {
-        ProjectionInfo dst_info(runtime, dst_requirements[idx], launch_space);
+        ProjectionInfo dst_info(runtime, dst_requirements[idx], launch_space); 
         unsigned index = src_requirements.size()+idx;
         // Perform this dependence analysis as if it was READ_WRITE
         // so that we can get the version numbers correct
@@ -5823,7 +5826,7 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       Domain launch_domain;
-      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      launch_space->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -6511,7 +6514,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FenceOp::initialize(TaskContext *ctx, FenceKind kind)
+    void FenceOp::initialize(InnerContext *ctx, FenceKind kind)
     //--------------------------------------------------------------------------
     {
 #ifdef LEGION_SPY
@@ -6712,7 +6715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FrameOp::initialize(TaskContext *ctx)
+    void FrameOp::initialize(InnerContext *ctx)
     //--------------------------------------------------------------------------
     {
       FenceOp::initialize(ctx, MIXED_FENCE);
@@ -6848,7 +6851,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_space_deletion(TaskContext *ctx,
+    void DeletionOp::initialize_index_space_deletion(InnerContext *ctx,
                            IndexSpace handle, std::vector<IndexPartition> &subs)
     //--------------------------------------------------------------------------
     {
@@ -6862,7 +6865,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_index_part_deletion(TaskContext *ctx,
+    void DeletionOp::initialize_index_part_deletion(InnerContext *ctx,
                        IndexPartition handle, std::vector<IndexPartition> &subs)
     //--------------------------------------------------------------------------
     {
@@ -6876,7 +6879,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_space_deletion(TaskContext *ctx,
+    void DeletionOp::initialize_field_space_deletion(InnerContext *ctx,
                                                      FieldSpace handle)
     //--------------------------------------------------------------------------
     {
@@ -6889,8 +6892,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_deletion(TaskContext *ctx, 
-                                                FieldSpace handle, FieldID fid)
+    void DeletionOp::initialize_field_deletion(InnerContext *ctx, 
+                                               FieldSpace handle, FieldID fid)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -6903,7 +6906,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_field_deletions(TaskContext *ctx,
+    void DeletionOp::initialize_field_deletions(InnerContext *ctx,
                             FieldSpace handle, const std::set<FieldID> &to_free)
     //--------------------------------------------------------------------------
     {
@@ -6917,7 +6920,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_logical_region_deletion(TaskContext *ctx,
+    void DeletionOp::initialize_logical_region_deletion(InnerContext *ctx,
                                                         LogicalRegion handle)
     //--------------------------------------------------------------------------
     {
@@ -6930,7 +6933,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DeletionOp::initialize_logical_partition_deletion(TaskContext *ctx,
+    void DeletionOp::initialize_logical_partition_deletion(InnerContext *ctx,
                                                        LogicalPartition handle)
     //--------------------------------------------------------------------------
     {
@@ -7545,7 +7548,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void CloseOp::initialize_close(TaskContext *ctx,
+    void CloseOp::initialize_close(InnerContext *ctx,
                                    const RegionRequirement &req, bool track)
     //--------------------------------------------------------------------------
     {
@@ -7679,7 +7682,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MergeCloseOp::initialize(TaskContext *ctx,const RegionRequirement &req,
+    void MergeCloseOp::initialize(InnerContext *ctx,
+                              const RegionRequirement &req,
                               const LogicalTraceInfo &trace_info, int close_idx,
                               const FieldMask &close_m, Operation *creator)
     //--------------------------------------------------------------------------
@@ -7777,7 +7781,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PostCloseOp::initialize(TaskContext *ctx, unsigned idx,
+    void PostCloseOp::initialize(InnerContext *ctx, unsigned idx,
                                  const InstanceSet &targets) 
     //--------------------------------------------------------------------------
     {
@@ -8090,7 +8094,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void VirtualCloseOp::initialize(TaskContext *ctx, unsigned index,
+    void VirtualCloseOp::initialize(InnerContext *ctx, unsigned index,
                                     const RegionRequirement &req)
     //--------------------------------------------------------------------------
     {
@@ -8274,7 +8278,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AcquireOp::initialize(Context ctx, const AcquireLauncher &launcher)
+    void AcquireOp::initialize(InnerContext *ctx,
+                               const AcquireLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -9044,7 +9049,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReleaseOp::initialize(Context ctx, const ReleaseLauncher &launcher) 
+    void ReleaseOp::initialize(InnerContext *ctx, 
+                               const ReleaseLauncher &launcher) 
     //--------------------------------------------------------------------------
     {
       parent_task = ctx->get_task();
@@ -9765,7 +9771,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future DynamicCollectiveOp::initialize(TaskContext *ctx, 
+    Future DynamicCollectiveOp::initialize(InnerContext *ctx, 
                                            const DynamicCollective &dc)
     //--------------------------------------------------------------------------
     {
@@ -9970,7 +9976,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FuturePredOp::initialize(TaskContext *ctx, Future f)
+    void FuturePredOp::initialize(InnerContext *ctx, Future f)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10072,7 +10078,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void NotPredOp::initialize(TaskContext *ctx, const Predicate &p)
+    void NotPredOp::initialize(InnerContext *ctx, const Predicate &p)
     //--------------------------------------------------------------------------
     {
 #ifdef DEBUG_LEGION
@@ -10210,7 +10216,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void AndPredOp::initialize(TaskContext *ctx, 
+    void AndPredOp::initialize(InnerContext *ctx, 
                                const std::vector<Predicate> &predicates)
     //--------------------------------------------------------------------------
     {
@@ -10385,7 +10391,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void OrPredOp::initialize(TaskContext *ctx, 
+    void OrPredOp::initialize(InnerContext *ctx, 
                               const std::vector<Predicate> &predicates)
     //--------------------------------------------------------------------------
     {
@@ -10582,9 +10588,9 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap MustEpochOp::initialize(TaskContext *ctx,
-                                              const MustEpochLauncher &launcher,
-                                              IndexSpace launch_space)
+    FutureMap MustEpochOp::initialize(InnerContext *ctx,
+                                      const MustEpochLauncher &launcher,
+                                      IndexSpace launch_space)
     //--------------------------------------------------------------------------
     {
       // Initialize this operation
@@ -10641,7 +10647,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void MustEpochOp::instantiate_tasks(TaskContext *ctx,
+    void MustEpochOp::instantiate_tasks(InnerContext *ctx,
                                         const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -10667,8 +10673,8 @@ namespace Legion {
       {
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
-          launch_space = runtime->find_or_create_index_launch_space(
-                      launcher.index_tasks[idx].launch_domain);
+          launch_space = ctx->find_index_launch_space(
+                          launcher.index_tasks[idx].launch_domain);
         index_tasks[idx] = runtime->get_available_index_task();
         index_tasks[idx]->initialize_task(ctx, launcher.index_tasks[idx],
                                           launch_space, false/*track*/);
@@ -11593,7 +11599,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_equal_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_equal_partition(InnerContext *ctx,
                                                         IndexPartition pid, 
                                                         size_t granularity)
     //--------------------------------------------------------------------------
@@ -11608,7 +11614,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_union_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_union_partition(InnerContext *ctx,
                                                         IndexPartition pid,
                                                         IndexPartition h1,
                                                         IndexPartition h2)
@@ -11624,7 +11630,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_intersection_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_intersection_partition(
+                                                            InnerContext *ctx,
                                                             IndexPartition pid,
                                                             IndexPartition h1,
                                                             IndexPartition h2)
@@ -11640,7 +11647,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_intersection_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_intersection_partition(
+                                                           InnerContext *ctx,
                                                            IndexPartition pid,
                                                            IndexPartition part,
                                                            const bool dominates)
@@ -11656,7 +11664,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_difference_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_difference_partition(InnerContext *ctx,
                                                              IndexPartition pid,
                                                              IndexPartition h1,
                                                              IndexPartition h2)
@@ -11672,7 +11680,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_restricted_partition(TaskContext *ctx,
+    void PendingPartitionOp::initialize_restricted_partition(InnerContext *ctx,
                                                           IndexPartition pid,
                                                           const void *transform,
                                                           size_t transform_size,
@@ -11691,7 +11699,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_cross_product(TaskContext *ctx,
+    void PendingPartitionOp::initialize_cross_product(InnerContext *ctx,
                                                       IndexPartition base,
                                                       IndexPartition source,
                                                       LegionColor part_color)
@@ -11707,7 +11715,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_union(TaskContext *ctx,
+    void PendingPartitionOp::initialize_index_space_union(InnerContext *ctx,
                                                           IndexSpace target,
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -11722,7 +11730,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_union(TaskContext *ctx,
+    void PendingPartitionOp::initialize_index_space_union(InnerContext *ctx,
                                                           IndexSpace target,
                                                           IndexPartition handle)
     //--------------------------------------------------------------------------
@@ -11738,7 +11746,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-    TaskContext *ctx, IndexSpace target, const std::vector<IndexSpace> &handles)
+     InnerContext *ctx,IndexSpace target,const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11752,7 +11760,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PendingPartitionOp::initialize_index_space_intersection(
-                     TaskContext *ctx, IndexSpace target, IndexPartition handle)
+                    InnerContext *ctx, IndexSpace target, IndexPartition handle)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);
@@ -11765,7 +11773,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void PendingPartitionOp::initialize_index_space_difference(TaskContext *ctx,
+    void PendingPartitionOp::initialize_index_space_difference(
+                                         InnerContext *ctx,
                                          IndexSpace target, IndexSpace initial, 
                                          const std::vector<IndexSpace> &handles)
     //--------------------------------------------------------------------------
@@ -12008,7 +12017,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_field(TaskContext *ctx, 
+    void DependentPartitionOp::initialize_by_field(InnerContext *ctx, 
                                                    IndexPartition pid,
                                                    LogicalRegion handle, 
                                                    LogicalRegion parent,
@@ -12045,7 +12054,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_image(TaskContext *ctx, 
+    void DependentPartitionOp::initialize_by_image(InnerContext *ctx, 
                                                    IndexPartition pid,
                                           LogicalPartition projection,
                                           LogicalRegion parent, FieldID fid,
@@ -12082,7 +12091,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_image_range(TaskContext *ctx, 
+    void DependentPartitionOp::initialize_by_image_range(InnerContext *ctx, 
                                                          IndexPartition pid,
                                                 LogicalPartition projection,
                                                 LogicalRegion parent,
@@ -12120,7 +12129,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_preimage(TaskContext *ctx,
+    void DependentPartitionOp::initialize_by_preimage(InnerContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t)
@@ -12154,7 +12163,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_preimage_range(TaskContext *ctx,
+    void DependentPartitionOp::initialize_by_preimage_range(InnerContext *ctx,
                                     IndexPartition pid, IndexPartition proj,
                                     LogicalRegion handle, LogicalRegion parent,
                                     FieldID fid, MapperID id, MappingTagID t)
@@ -12188,7 +12197,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void DependentPartitionOp::initialize_by_association(TaskContext *ctx,
+    void DependentPartitionOp::initialize_by_association(InnerContext *ctx,
                         LogicalRegion domain, LogicalRegion domain_parent, 
                         FieldID fid, IndexSpace range, 
                         MapperID id, MappingTagID t)
@@ -12247,7 +12256,7 @@ namespace Legion {
                                   requirement.parent.index_space.id);
         LegionSpy::log_requirement_projection(unique_op_id, 0/*idx*/, 
                                               requirement.projection);
-        runtime->forest->log_launch_space(launch_space, unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
       else
         LegionSpy::log_logical_requirement(unique_op_id, 0/*idx*/,
@@ -12293,7 +12302,7 @@ namespace Legion {
         log_requirement();
       ProjectionInfo projection_info;
       if (is_index_space)
-        projection_info = ProjectionInfo(runtime, requirement, launch_space);
+        projection_info = ProjectionInfo(runtime, requirement, launch_space); 
       runtime->forest->perform_dependence_analysis(this, 0/*idx*/,
                                                    requirement,
                                                    projection_info,
@@ -12334,7 +12343,8 @@ namespace Legion {
       requirement.partition = output.chosen_partition;
       requirement.handle_type = PART_PROJECTION;
       requirement.projection = 0; // always default
-      launch_space = partition_node->color_space->handle;
+      launch_space = partition_node->color_space;
+      add_launch_space_reference(launch_space);
       index_domain = partition_node->color_space->get_color_space_domain();
       is_index_space = true;
 #ifdef LEGION_SPY
@@ -12355,7 +12365,7 @@ namespace Legion {
         // Need to get the launch domain in case it is different than
         // the original index domain due to control replication
         Domain launch_domain;
-        runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+        launch_space->get_launch_space_domain(launch_domain);
         // Now enumerate the points and kick them off
         size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -12873,7 +12883,7 @@ namespace Legion {
     {
       activate_operation();
       is_index_space = false;
-      launch_space = IndexSpace::NO_SPACE;
+      launch_space = NULL;
       index_domain = Domain::NO_DOMAIN;
       parent_req_index = 0;
       thunk = NULL;
@@ -12898,6 +12908,8 @@ namespace Legion {
         mapper_data = NULL;
         mapper_data_size = 0;
       }
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
       runtime->free_dependent_partition_op(this);
     }
 
@@ -13481,7 +13493,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void FillOp::initialize(TaskContext *ctx, const FillLauncher &launcher)
+    void FillOp::initialize(InnerContext *ctx, const FillLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       parent_ctx = ctx;
@@ -14192,7 +14204,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void IndexFillOp::initialize(TaskContext *ctx,
+    void IndexFillOp::initialize(InnerContext *ctx,
                                  const IndexFillLauncher &launcher,
                                  IndexSpace launch_sp)
     //--------------------------------------------------------------------------
@@ -14204,9 +14216,10 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
 #endif
-      launch_space = launch_sp;
+      launch_space = runtime->forest->get_node(launch_sp);
+      add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+        launch_space->get_launch_space_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
       sharding_space = launcher.sharding_space;
@@ -14250,7 +14263,7 @@ namespace Legion {
             future.impl->get_ready_event().exists())
           LegionSpy::log_future_use(unique_op_id, 
                                     future.impl->get_ready_event());
-        runtime->forest->log_launch_space(launch_space, unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
 
@@ -14268,7 +14281,7 @@ namespace Legion {
       activate_fill();
       index_domain = Domain::NO_DOMAIN;
       sharding_space = IndexSpace::NO_SPACE;
-      launch_space = IndexSpace::NO_SPACE;
+      launch_space = NULL;
       points_committed = 0;
       commit_request = false;
     }
@@ -14292,6 +14305,8 @@ namespace Legion {
             it != points.end(); it++)
         (*it)->deactivate();
       points.clear();
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
     }
 
     //--------------------------------------------------------------------------
@@ -14361,7 +14376,7 @@ namespace Legion {
       // Need to get the launch domain in case it is different than
       // the original index domain due to control replication
       Domain launch_domain;
-      runtime->forest->find_launch_space_domain(launch_space, launch_domain);
+      launch_space->get_launch_space_domain(launch_domain);
       // Now enumerate the points
       size_t num_points = launch_domain.get_volume();
 #ifdef DEBUG_LEGION
@@ -14704,7 +14719,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    PhysicalRegion AttachOp::initialize(TaskContext *ctx,
+    PhysicalRegion AttachOp::initialize(InnerContext *ctx,
                                         const AttachLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -15307,7 +15322,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future DetachOp::initialize_detach(TaskContext *ctx, PhysicalRegion region,
+    Future DetachOp::initialize_detach(InnerContext *ctx, PhysicalRegion region,
                                        const bool flsh)
     //--------------------------------------------------------------------------
     {
@@ -15655,7 +15670,8 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future TimingOp::initialize(TaskContext *ctx,const TimingLauncher &launcher)
+    Future TimingOp::initialize(InnerContext *ctx,
+                                const TimingLauncher &launcher)
     //--------------------------------------------------------------------------
     {
       initialize_operation(ctx, true/*track*/);

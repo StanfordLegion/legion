@@ -4490,7 +4490,7 @@ namespace Legion {
         return handle;
       Realm::IndexSpace<DIM,T> realm_is(shard_points);
       const Domain domain((DomainT<DIM,T>(realm_is)));
-      return context->runtime->find_or_create_index_launch_space(domain, 
+      return context->runtime->find_or_create_index_slice_space(domain, 
                                       &realm_is, handle.get_type_tag());
     }
 

@@ -960,7 +960,6 @@ namespace Legion {
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
       // Find an index space name for a concrete launch domain
-      virtual IndexSpace find_index_launch_space(const Domain &launch_domain);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,
@@ -1126,6 +1125,9 @@ namespace Legion {
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, 
                                 std::vector<MaterializedView*> &target_views);
+    public:
+      // Find an index space name for a concrete launch domain
+      IndexSpace find_index_launch_space(const Domain &domain);
     protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
@@ -1567,7 +1569,6 @@ namespace Legion {
       virtual void destroy_logical_region(LogicalRegion handle);
       virtual void destroy_logical_partition(LogicalPartition handle);
     public:
-      virtual IndexSpace find_index_launch_space(const Domain &launch_domain);
       virtual Future execute_task(const TaskLauncher &launcher);
       virtual FutureMap execute_index_space(const IndexTaskLauncher &launcher);
       virtual Future execute_index_space(const IndexTaskLauncher &launcher,

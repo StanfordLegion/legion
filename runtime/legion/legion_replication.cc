@@ -515,7 +515,6 @@ namespace Legion {
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
       reduction_collective = NULL;
-      launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -617,7 +616,7 @@ namespace Legion {
       else
         internal_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, launch_space);
+                                          launch_space, launch_space->handle);
       // If it's empty we're done, otherwise we go back on the queue
       if (!internal_space.exists())
       {
@@ -726,7 +725,7 @@ namespace Legion {
         else
           internal_space =
             sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                                launch_space, launch_space);
+                                            launch_space, launch_space->handle);
       }
       // Now continue through and do the base case
       IndexTask::resolve_false(speculated, launched);
@@ -1071,7 +1070,6 @@ namespace Legion {
       activate_index_fill();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      launch_space = IndexSpace::NO_SPACE;
       mapper = NULL;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
@@ -1152,27 +1150,35 @@ namespace Legion {
 #ifdef DEBUG_LEGION
       ReplicateContext *repl_ctx = dynamic_cast<ReplicateContext*>(parent_ctx);
       assert(repl_ctx != NULL);
+      assert(launch_space != NULL);
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
+      IndexSpace local_space;
       if (sharding_space.exists())
-        launch_space =
+        local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
                                               launch_space, sharding_space);
       else
-        launch_space =
+        local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id, 
-                                              launch_space, launch_space);
+                                          launch_space, launch_space->handle);
       // If it's empty we're done, otherwise we go back on the queue
-      if (!launch_space.exists())
+      if (!local_space.exists())
       {
         // We have no local points, so we can just trigger
         complete_mapping();
         complete_execution();
       }
       else // We have valid points, so it goes on the ready queue
+      {
+        if (remove_launch_space_reference(launch_space))
+          delete launch_space;
+        launch_space = runtime->forest->get_node(local_space);
+        add_launch_space_reference(launch_space);
         IndexFillOp::trigger_ready();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1384,7 +1390,6 @@ namespace Legion {
       activate_index_copy();
       sharding_functor = UINT_MAX;
       sharding_function = NULL;
-      launch_space = IndexSpace::NO_SPACE;
 #ifdef DEBUG_LEGION
       sharding_collective = NULL;
 #endif
@@ -1502,16 +1507,17 @@ namespace Legion {
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
       // Compute the local index space of points for this shard
+      IndexSpace local_space;
       if (sharding_space.exists())
-        launch_space =
+        local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
                                               launch_space, sharding_space);
       else
-        launch_space =
+        local_space =
           sharding_function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                              launch_space, launch_space);
+                                          launch_space, launch_space->handle);
       // If it's empty we're done, otherwise we go back on the queue
-      if (!launch_space.exists())
+      if (!local_space.exists())
       {
         // If we have indirections then we still need to participate in those
         if (!src_indirect_requirements.empty())
@@ -1543,7 +1549,13 @@ namespace Legion {
         complete_execution();
       }
       else // If we have any valid points do the base call
+      {
+        if (remove_launch_space_reference(launch_space))
+          delete launch_space;
+        launch_space = runtime->forest->get_node(local_space);
+        add_launch_space_reference(launch_space);
         IndexCopyOp::trigger_ready();
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -2547,18 +2559,19 @@ namespace Legion {
 #else
       ReplicateContext *repl_ctx = static_cast<ReplicateContext*>(parent_ctx);
 #endif
-      // Get the sharding function implementation to use from our context
-      ShardingFunction *function = 
-        repl_ctx->shard_manager->find_sharding_function(sharding_functor);
+      
       // Do different things if this is an index space point or a single point
       if (is_index_space)
       {
+        // Get the sharding function implementation to use from our context
+        ShardingFunction *function = 
+          repl_ctx->shard_manager->find_sharding_function(sharding_functor);
         // Compute the local index space of points for this shard
-        launch_space =
+        IndexSpace local_space =
           function->find_shard_space(repl_ctx->owner_shard->shard_id,
-                                     launch_space, launch_space);
+                                     launch_space, launch_space->handle);
         // If it's empty we're done, otherwise we go back on the queue
-        if (!launch_space.exists())
+        if (!local_space.exists())
         {
           // We aren't participating directly, but we still have to 
           // participate in the collective operations
@@ -2572,8 +2585,12 @@ namespace Legion {
         }
         else // If we have valid points then we do the base call
         {
+          if (remove_launch_space_reference(launch_space))
+            delete launch_space;
+          launch_space = runtime->forest->get_node(local_space);
+          add_launch_space_reference(launch_space);
           // Update the index domain to match the launch space
-          runtime->forest->find_launch_space_domain(launch_space, index_domain);
+          launch_space->get_launch_space_domain(index_domain);
           DependentPartitionOp::trigger_ready();
         }
       }
@@ -2931,7 +2948,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void ReplMustEpochOp::instantiate_tasks(TaskContext *ctx, 
+    void ReplMustEpochOp::instantiate_tasks(InnerContext *ctx, 
                                             const MustEpochLauncher &launcher)
     //--------------------------------------------------------------------------
     {
@@ -2971,8 +2988,8 @@ namespace Legion {
       {
         IndexSpace launch_space = launcher.index_tasks[idx].launch_space;
         if (!launch_space.exists())
-          launch_space = runtime->find_or_create_index_launch_space(
-                      launcher.index_tasks[idx].launch_domain);
+          launch_space = ctx->find_index_launch_space(
+                          launcher.index_tasks[idx].launch_domain);
         ReplIndexTask *task = runtime->get_available_repl_index_task();
         task->initialize_task(ctx, launcher.index_tasks[idx],
                               launch_space, false/*track*/);

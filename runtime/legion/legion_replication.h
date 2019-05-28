@@ -1279,7 +1279,7 @@ namespace Legion {
       virtual void deactivate(void);
       virtual FutureMapImpl* create_future_map(TaskContext *ctx,
                  IndexSpace launch_space, IndexSpace shard_space);
-      virtual void instantiate_tasks(TaskContext *ctx,
+      virtual void instantiate_tasks(InnerContext *ctx,
                                      const MustEpochLauncher &launcher);
       virtual MapperManager* invoke_mapper(void);
       virtual void map_and_distribute(std::set<RtEvent> &tasks_mapped,

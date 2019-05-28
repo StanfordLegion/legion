@@ -51,7 +51,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    LegionTrace::LegionTrace(TaskContext *c, bool logical_only)
+    LegionTrace::LegionTrace(InnerContext *c, bool logical_only)
       : ctx(c), state(LOGICAL_ONLY), last_memoized(0),
         blocking_call_observed(false)
     //--------------------------------------------------------------------------
@@ -183,7 +183,8 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    StaticTrace::StaticTrace(TaskContext *c,const std::set<RegionTreeID> *trees)
+    StaticTrace::StaticTrace(InnerContext *c,
+                             const std::set<RegionTreeID> *trees)
       : LegionTrace(c, true)
     //--------------------------------------------------------------------------
     {
@@ -477,7 +478,7 @@ namespace Legion {
     /////////////////////////////////////////////////////////////
 
     //--------------------------------------------------------------------------
-    DynamicTrace::DynamicTrace(TraceID t, TaskContext *c, bool logical_only)
+    DynamicTrace::DynamicTrace(TraceID t, InnerContext *c, bool logical_only)
       : LegionTrace(c, logical_only), tid(t), fixed(false), tracing(true)
     //--------------------------------------------------------------------------
     {
@@ -1103,7 +1104,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCaptureOp::initialize_capture(TaskContext *ctx, bool has_block)
+    void TraceCaptureOp::initialize_capture(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);
@@ -1233,7 +1234,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceCompleteOp::initialize_complete(TaskContext *ctx, bool has_block)
+    void TraceCompleteOp::initialize_complete(InnerContext *ctx, bool has_block)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MIXED_FENCE);
@@ -1419,7 +1420,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceReplayOp::initialize_replay(TaskContext *ctx, LegionTrace *trace)
+    void TraceReplayOp::initialize_replay(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, EXECUTION_FENCE);
@@ -1576,7 +1577,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TraceBeginOp::initialize_begin(TaskContext *ctx, LegionTrace *trace)
+    void TraceBeginOp::initialize_begin(InnerContext *ctx, LegionTrace *trace)
     //--------------------------------------------------------------------------
     {
       initialize(ctx, MAPPING_FENCE);
@@ -1653,7 +1654,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void TraceSummaryOp::initialize_summary(
-                                  TaskContext *ctx,
+                                  InnerContext *ctx,
                                   UniqueID creator_op_id,
                                   const std::vector<RegionRequirement> &reqs,
                                   const std::vector<InstanceSet> &insts,
@@ -2387,7 +2388,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     void PhysicalTemplate::issue_summary_operations(
-                                   TaskContext* context, Operation *invalidator)
+                                  InnerContext* context, Operation *invalidator)
     //--------------------------------------------------------------------------
     {
       Runtime *runtime = trace->runtime;

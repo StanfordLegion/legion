@@ -420,14 +420,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     ProjectionInfo::ProjectionInfo(Runtime *runtime, 
                                    const RegionRequirement &req, 
-                                   IndexSpace launch_space, 
+                                   IndexSpaceNode *launch_space, 
                                    ShardingFunction *f/*=NULL*/,
                                    IndexSpace shard_space/*=NO_SPACE*/)
       : projection((req.handle_type != SINGULAR) ? 
           runtime->find_projection_function(req.projection) : NULL),
         projection_type(req.handle_type),
-        projection_space((req.handle_type != SINGULAR) ?
-            runtime->forest->get_node(launch_space) : NULL),
+        projection_space((req.handle_type != SINGULAR) ? launch_space : NULL),
         sharding_function(f), sharding_space(shard_space.exists() ? 
             runtime->forest->get_node(shard_space) : 
               (f == NULL) ? NULL : projection_space)

@@ -7509,6 +7509,13 @@ namespace Legion {
               local_fields_to_delete.end(); it++)
           free_fields(it->first, it->second);
       }
+      if (!index_launch_spaces.empty())
+      {
+        for (std::map<Domain,IndexSpace>::const_iterator it = 
+              index_launch_spaces.begin(); it != 
+              index_launch_spaces.end(); it++)
+          destroy_index_space(it->second);
+      }
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -8067,11 +8074,26 @@ namespace Legion {
     IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
     //--------------------------------------------------------------------------
     {
-      std::map<Domain,IndexSpace>::const_iterator finder = 
+      std::map<Domain,IndexSpace>::const_iterator finder =
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
         return finder->second;
-      IndexSpace result = runtime->find_or_create_index_launch_space(domain);
+      IndexSpace result;
+      switch (domain.get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> is = domain; \
+            result = create_index_space(runtime->forest, &is, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
       index_launch_spaces[domain] = result;
       return result;
     }
@@ -11086,48 +11108,6 @@ namespace Legion {
                       shard_manager->is_total_sharding(),
                       shard_manager->is_first_local_shard(owner_shard));
       runtime->add_to_dependence_queue(this, executing_processor, op);
-    }
-
-    //--------------------------------------------------------------------------
-    IndexSpace ReplicateContext::find_index_launch_space(const Domain &domain)
-    //--------------------------------------------------------------------------
-    {
-      std::map<Domain,IndexSpace>::const_iterator finder = 
-        index_launch_spaces.find(domain);
-      if (finder != index_launch_spaces.end())
-        return finder->second;
-      // Can't invoke the runtime directly, have to do the same control
-      // flow across all of our shards
-      IndexSpace result = IndexSpace::NO_SPACE;
-      switch (domain.get_dim())
-      {
-        case 1:
-          {
-            DomainT<1,coord_t> is = domain;
-            result = create_index_space(runtime->forest, &is, 
-                NT_TemplateHelper::encode_tag<1,coord_t>());
-            break;
-          }
-        case 2:
-          {
-            DomainT<2,coord_t> is = domain;
-            result = create_index_space(runtime->forest, &is, 
-                NT_TemplateHelper::encode_tag<2,coord_t>());
-            break;
-          }
-        case 3:
-          {
-            DomainT<3,coord_t> is = domain;
-            result = create_index_space(runtime->forest, &is, 
-                NT_TemplateHelper::encode_tag<3,coord_t>());
-            break;
-          }
-        default:
-          assert(false);
-      }
-      // TODO: These are being leaked for now
-      index_launch_spaces[domain] = result;
-      return result;
     }
 
     //--------------------------------------------------------------------------
