@@ -4059,36 +4059,24 @@ namespace Legion {
     bool RegionTreeForest::has_node(IndexSpace space)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        if (index_nodes.find(space) != index_nodes.end())
-          return true;
-      }
-      return (get_node(space) != NULL);
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      return (index_nodes.find(space) != index_nodes.end());
     }
     
     //--------------------------------------------------------------------------
     bool RegionTreeForest::has_node(IndexPartition part)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        if (index_parts.find(part) != index_parts.end())
-          return true;
-      }
-      return (get_node(part) != NULL);
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      return (index_parts.find(part) != index_parts.end());
     }
 
     //--------------------------------------------------------------------------
     bool RegionTreeForest::has_node(FieldSpace space)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        if (field_nodes.find(space) != field_nodes.end())
-          return true;
-      }
-      return (get_node(space) != NULL);
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      return (field_nodes.find(space) != field_nodes.end());
     }
 
     //--------------------------------------------------------------------------
@@ -4113,12 +4101,8 @@ namespace Legion {
     bool RegionTreeForest::has_tree(RegionTreeID tid)
     //--------------------------------------------------------------------------
     {
-      {
-        AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
-        if (tree_nodes.find(tid) != tree_nodes.end())
-          return true;
-      }
-      return (get_tree(tid) != NULL);
+      AutoLock l_lock(lookup_lock,1,false/*exclusive*/);
+      return (tree_nodes.find(tid) != tree_nodes.end());
     }
 
     //--------------------------------------------------------------------------
