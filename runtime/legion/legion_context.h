@@ -383,6 +383,7 @@ namespace Legion {
                                                           const Future &f) = 0;
       virtual void find_collective_contributions(DynamicCollective dc,
                                              std::vector<Future> &futures) = 0;
+      virtual Future get_dynamic_collective_result(DynamicCollective dc) = 0;
     public:
       virtual TaskPriority get_current_priority(void) const = 0;
       virtual void set_current_priority(TaskPriority priority) = 0;
@@ -1029,6 +1030,7 @@ namespace Legion {
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                        std::vector<Future> &contributions);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);
@@ -1050,9 +1052,10 @@ namespace Legion {
       // I hate the container problem, same as previous except MaterializedView
       void convert_target_views(const InstanceSet &targets, 
                                 std::vector<MaterializedView*> &target_views);
-    protected:
+    public:
       // Find an index space name for a concrete launch domain
-      IndexSpace find_index_launch_space(const Domain &launch_domain);
+      IndexSpace find_index_launch_space(const Domain &domain);
+    protected:
       void execute_task_launch(TaskOp *task, bool index, 
                                LegionTrace *current_trace, 
                                bool silence_warnings, bool inlining_enabled);
@@ -1609,6 +1612,7 @@ namespace Legion {
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                              std::vector<Future> &futures);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
     protected:
       mutable LocalLock                            leaf_lock;
     public:
@@ -1926,6 +1930,7 @@ namespace Legion {
                                                           const Future &f);
       virtual void find_collective_contributions(DynamicCollective dc,
                                              std::vector<Future> &futures);
+      virtual Future get_dynamic_collective_result(DynamicCollective dc);
     public:
       virtual TaskPriority get_current_priority(void) const;
       virtual void set_current_priority(TaskPriority priority);

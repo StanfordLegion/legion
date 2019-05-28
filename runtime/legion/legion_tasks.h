@@ -238,7 +238,7 @@ namespace Legion {
                                      ReferenceMutator *mutator); 
     public:
       void mark_stolen(void);
-      void initialize_base_task(TaskContext *ctx, bool track, 
+      void initialize_base_task(InnerContext *ctx, bool track, 
             const std::vector<StaticDependence> *dependences,
             const Predicate &p, Processor::TaskFuncID tid);
       void check_empty_field_requirements(void);
@@ -630,7 +630,7 @@ namespace Legion {
       std::list<SliceTask*> slices;
       bool sliced;
     protected:
-      IndexSpace launch_space; // global set of points
+      IndexSpaceNode *launch_space; // global set of points
       IndexSpace internal_space; // local set of points
       ReductionOpID redop;
       bool deterministic_redop;
@@ -670,7 +670,7 @@ namespace Legion {
       virtual void activate(void);
       virtual void deactivate(void);
     public:
-      Future initialize_task(TaskContext *ctx,
+      Future initialize_task(InnerContext *ctx,
                              const TaskLauncher &launcher, 
                              bool track = true);
       void set_top_level(void);
@@ -856,11 +856,11 @@ namespace Legion {
     public:
       IndexTask& operator=(const IndexTask &rhs);
     public:
-      FutureMap initialize_task(TaskContext *ctx,
+      FutureMap initialize_task(InnerContext *ctx,
                                 const IndexTaskLauncher &launcher,
                                 IndexSpace launch_space,
                                 bool track = true);
-      Future initialize_task(TaskContext *ctx,
+      Future initialize_task(InnerContext *ctx,
                              const IndexTaskLauncher &launcher,
                              IndexSpace launch_space,
                              ReductionOpID redop,

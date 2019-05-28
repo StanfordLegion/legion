@@ -77,7 +77,7 @@ namespace Legion {
         PHYSICAL_REPLAY,
       };
     public:
-      LegionTrace(TaskContext *ctx, bool logical_only);
+      LegionTrace(InnerContext *ctx, bool logical_only);
       virtual ~LegionTrace(void);
     public:
       virtual bool is_static_trace(void) const = 0;
@@ -127,7 +127,7 @@ namespace Legion {
       UniqueID get_current_uid_by_index(unsigned op_idx) const;
 #endif
     public:
-      TaskContext *const ctx;
+      InnerContext *const ctx;
     protected:
       std::vector<std::pair<Operation*,GenerationID> > operations; 
       // We also need a data structure to record when there are
@@ -158,7 +158,7 @@ namespace Legion {
     public:
       static const AllocationType alloc_type = STATIC_TRACE_ALLOC;
     public:
-      StaticTrace(TaskContext *ctx, const std::set<RegionTreeID> *trees);
+      StaticTrace(InnerContext *ctx, const std::set<RegionTreeID> *trees);
       StaticTrace(const StaticTrace &rhs);
       virtual ~StaticTrace(void);
     public:
@@ -219,7 +219,7 @@ namespace Legion {
         unsigned count;
       }; 
     public:
-      DynamicTrace(TraceID tid, TaskContext *ctx, bool logical_only);
+      DynamicTrace(TraceID tid, InnerContext *ctx, bool logical_only);
       DynamicTrace(const DynamicTrace &rhs);
       virtual ~DynamicTrace(void);
     public:
@@ -319,7 +319,7 @@ namespace Legion {
     public:
       TraceCaptureOp& operator=(const TraceCaptureOp &rhs);
     public:
-      void initialize_capture(TaskContext *ctx, bool has_blocking_call);
+      void initialize_capture(InnerContext *ctx, bool has_blocking_call);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -351,7 +351,7 @@ namespace Legion {
     public:
       TraceCompleteOp& operator=(const TraceCompleteOp &rhs);
     public:
-      void initialize_complete(TaskContext *ctx, bool has_blocking_call);
+      void initialize_complete(InnerContext *ctx, bool has_blocking_call);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -382,7 +382,7 @@ namespace Legion {
     public:
       TraceReplayOp& operator=(const TraceReplayOp &rhs);
     public:
-      void initialize_replay(TaskContext *ctx, LegionTrace *trace);
+      void initialize_replay(InnerContext *ctx, LegionTrace *trace);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -407,7 +407,7 @@ namespace Legion {
     public:
       TraceBeginOp& operator=(const TraceBeginOp &rhs);
     public:
-      void initialize_begin(TaskContext *ctx, LegionTrace *trace);
+      void initialize_begin(InnerContext *ctx, LegionTrace *trace);
     public:
       virtual void activate(void);
       virtual void deactivate(void);
@@ -425,7 +425,7 @@ namespace Legion {
     public:
       TraceSummaryOp& operator=(const TraceSummaryOp &rhs);
     public:
-      void initialize_summary(TaskContext *ctx,
+      void initialize_summary(InnerContext *ctx,
                               UniqueID creator_id,
                               const std::vector<RegionRequirement> &reqs,
                               const std::vector<InstanceSet> &insts,
@@ -557,7 +557,7 @@ namespace Legion {
       void register_operation(Operation *op);
       void execute_all(void);
       void execute_slice(unsigned slice_idx);
-      void issue_summary_operations(TaskContext* context,
+      void issue_summary_operations(InnerContext* context,
                                     Operation *invalidator);
     public:
       void finalize(bool has_blocking_call);

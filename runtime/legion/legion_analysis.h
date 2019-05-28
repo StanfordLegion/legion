@@ -181,7 +181,7 @@ namespace Legion {
         : projection(NULL), projection_type(SINGULAR),
           projection_space(NULL) { }
       ProjectionInfo(Runtime *runtime, const RegionRequirement &req,
-                     IndexSpace launch_space);
+                     IndexSpaceNode *launch_space);
     public:
       inline bool is_projecting(void) const { return (projection != NULL); }
     public:

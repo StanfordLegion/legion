@@ -2381,7 +2381,7 @@ namespace Legion {
     {
       pause_mapper_call(ctx);
       IndexSpace result = 
-        runtime->find_or_create_index_launch_space(domain, realm_is, type_tag);
+        runtime->find_or_create_index_slice_space(domain, realm_is, type_tag);
       resume_mapper_call(ctx);
       return result; 
     }

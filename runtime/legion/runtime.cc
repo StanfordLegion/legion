@@ -12426,18 +12426,7 @@ namespace Legion {
       if (ctx == DUMMY_CONTEXT)
         REPORT_DUMMY_CONTEXT(
             "Illegal dummy context get dynamic collective result!");
-#ifdef DEBUG_LEGION
-      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
-                          ctx->get_task_name(), ctx->get_unique_id());
-#endif
-      ctx->begin_runtime_call();
-      DynamicCollectiveOp *collective = 
-        get_available_dynamic_collective_op();
-      Future result = collective->initialize(ctx, dc);
-      Processor proc = ctx->get_executing_processor();
-      add_to_dependence_queue(ctx, proc, collective);
-      ctx->end_runtime_call();
-      return result;
+      return ctx->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
@@ -17387,7 +17376,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom)
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom)
     //--------------------------------------------------------------------------
     {
       switch (dom.get_dim())
@@ -17396,8 +17385,8 @@ namespace Legion {
         case DIM: \
           { \
             DomainT<DIM,coord_t> is = dom; \
-            return find_or_create_index_launch_space(dom, &is, \
-                  NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            return find_or_create_index_slice_space(dom, &is, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
           }
         LEGION_FOREACH_N(DIMFUNC)
 #undef DIMFUNC
@@ -17408,17 +17397,17 @@ namespace Legion {
     } 
 
     //--------------------------------------------------------------------------
-    IndexSpace Runtime::find_or_create_index_launch_space(const Domain &dom,
-                                                          const void *realm_is,
-                                                          TypeTag type_tag)
+    IndexSpace Runtime::find_or_create_index_slice_space(const Domain &dom,
+                                                         const void *realm_is,
+                                                         TypeTag type_tag)
     //--------------------------------------------------------------------------
     {
       const std::pair<Domain,TypeTag> key(dom, type_tag);
       {
-        AutoLock is_lock(is_launch_lock,1,false/*exclusive*/);
+        AutoLock is_lock(is_slice_lock,1,false/*exclusive*/);
         std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator finder =
-          index_launch_spaces.find(key);
-        if (finder != index_launch_spaces.end())
+          index_slice_spaces.find(key);
+        if (finder != index_slice_spaces.end())
           return finder->second;
       }
       IndexSpace result(get_unique_index_space_id(),
@@ -17429,8 +17418,8 @@ namespace Legion {
         LegionSpy::log_top_index_space(result.id);
       // Overwrite and leak for now, don't care too much as this 
       // should occur infrequently
-      AutoLock is_lock(is_launch_lock);
-      index_launch_spaces[key] = result;
+      AutoLock is_lock(is_slice_lock);
+      index_slice_spaces[key] = result;
       return result;
     }
 
@@ -17584,6 +17573,10 @@ namespace Legion {
       for (std::map<Memory,MemoryManager*>::const_iterator it = 
             memory_managers.begin(); it != memory_managers.end(); it++)
         it->second->prepare_for_shutdown();
+      // Destroy any index slice spaces that we made during execution
+      for (std::map<std::pair<Domain,TypeTag>,IndexSpace>::const_iterator it =
+            index_slice_spaces.begin(); it != index_slice_spaces.end(); it++)
+        forest->destroy_index_space(it->second, address_space);
       prepared_for_shutdown = true;
     }
 

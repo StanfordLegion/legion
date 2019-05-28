@@ -3477,7 +3477,7 @@ namespace Legion {
         default:
           assert(false);
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -3498,6 +3498,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3579,7 +3580,7 @@ namespace Legion {
         runtime->execute_task(ctx, launcher);
       }
       
-      // Make an index space for the color space, we'll leak it for now
+      // Make an index space for the color space
       IndexSpaceT<1,coord_t> index_color_space = 
                                   create_index_space(ctx, color_space);
       // Partition the logical region by the color field
@@ -3604,6 +3605,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3681,7 +3683,7 @@ namespace Legion {
         LEGION_FOREACH_NN(DIMFUNC)
 #undef DIMFUNC
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -3696,6 +3698,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3778,6 +3781,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3858,7 +3862,7 @@ namespace Legion {
         LEGION_FOREACH_NN(DIMFUNC)
 #undef DIMFUNC
       }
-      // Make an index space for the color space, just leak it for now
+      // Make an index space for the color space
       IndexSpace index_color_space = create_index_space(ctx, color_space);
       // Partition the logical region by the color field
       IndexPartition temp_ip = create_partition_by_field(ctx, temp_lr, 
@@ -3873,6 +3877,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");
@@ -3957,6 +3962,7 @@ namespace Legion {
       destroy_logical_region(ctx, temp_lr);
       destroy_field_space(ctx, temp_fs);
       destroy_index_space(ctx, temp_is);
+      destroy_index_space(ctx, index_color_space);
       return result;
 #else // DISABLE_PARTITION_SHIM
       log_run.error("THE PARTITION SHIM HAS BEEN DISABLED!");

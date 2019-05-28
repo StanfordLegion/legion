@@ -2696,10 +2696,10 @@ namespace Legion {
                                         ReferenceMutator *mutator);
       FutureMapImpl* find_or_create_future_map(DistributedID did, 
                       TaskContext *ctx, ReferenceMutator *mutator);
-      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain);
-      IndexSpace find_or_create_index_launch_space(const Domain &launch_domain,
-                                                   const void *realm_is,
-                                                   TypeTag type_tag);
+      IndexSpace find_or_create_index_slice_space(const Domain &launch_domain);
+      IndexSpace find_or_create_index_slice_space(const Domain &launch_domain,
+                                                  const void *realm_is,
+                                                  TypeTag type_tag);
     public:
       void increment_outstanding_top_level_tasks(void);
       void decrement_outstanding_top_level_tasks(void);
@@ -3016,8 +3016,8 @@ namespace Legion {
       std::map<DistributedID,
         std::pair<DistributedCollectable*,RtUserEvent> > pending_collectables;
     protected:
-      mutable LocalLock is_launch_lock;
-      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_launch_spaces;
+      mutable LocalLock is_slice_lock;
+      std::map<std::pair<Domain,TypeTag>,IndexSpace> index_slice_spaces;
     protected:
       // The runtime keeps track of remote contexts so they
       // can be re-used by multiple tasks that get sent remotely

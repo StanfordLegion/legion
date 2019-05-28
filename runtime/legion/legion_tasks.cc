@@ -849,7 +849,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void TaskOp::initialize_base_task(TaskContext *ctx, bool track, 
+    void TaskOp::initialize_base_task(InnerContext *ctx, bool track, 
                   const std::vector<StaticDependence> *dependences,
                   const Predicate &p, Processor::TaskFuncID tid)
     //--------------------------------------------------------------------------
@@ -4118,7 +4118,7 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, ACTIVATE_MULTI_CALL);
       activate_task();
-      launch_space = IndexSpace::NO_SPACE;
+      launch_space = NULL;
       internal_space = IndexSpace::NO_SPACE;
       sliced = false;
       redop = 0;
@@ -4141,6 +4141,8 @@ namespace Legion {
       if (runtime->profiler != NULL)
         runtime->profiler->register_multi_task(this, task_id);
       deactivate_task();
+      if (remove_launch_space_reference(launch_space))
+        delete launch_space;
       if (reduction_state != NULL)
       {
         legion_free(REDUCTION_ALLOC, reduction_state, reduction_state_size);
@@ -4217,7 +4219,7 @@ namespace Legion {
         // Check to see if we need to get an index space for this domain
         if (!slice.domain_is.exists() && (slice.domain.get_volume() > 0))
           slice.domain_is = 
-            runtime->find_or_create_index_launch_space(slice.domain);
+            runtime->find_or_create_index_slice_space(slice.domain);
         if (slice.domain_is.get_type_tag() != internal_space.get_type_tag())
           REPORT_LEGION_ERROR(ERROR_INVALID_MAPPER_OUTPUT,
                         "Invalid mapper output from invocation of 'slice_task' "
@@ -4346,9 +4348,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       DETAILED_PROFILER(runtime, CLONE_MULTI_CALL);
+#ifdef DEBUG_LEGION
+      assert(this->launch_space == NULL);
+#endif
       this->clone_task_op_from(rhs, p, stealable, false/*duplicate*/);
       this->index_domain = rhs->index_domain;
       this->launch_space = rhs->launch_space;
+      add_launch_space_reference(this->launch_space);
       this->internal_space = is;
       this->must_epoch_task = rhs->must_epoch_task;
       this->sliced = !recurse;
@@ -4478,7 +4484,7 @@ namespace Legion {
       DETAILED_PROFILER(runtime, PACK_MULTI_CALL);
       RezCheck z(rez);
       pack_base_task(rez, target);
-      rez.serialize(launch_space);
+      rez.serialize(launch_space->handle);
       rez.serialize(sliced);
       rez.serialize(redop);
       if (redop > 0)
@@ -4493,7 +4499,14 @@ namespace Legion {
       DETAILED_PROFILER(runtime, UNPACK_MULTI_CALL);
       DerezCheck z(derez);
       unpack_base_task(derez, ready_events); 
-      derez.deserialize(launch_space);
+      IndexSpace launch_handle;
+      derez.deserialize(launch_handle);
+#ifdef DEBUG_LEGION
+      assert(launch_space == NULL);
+#endif
+      launch_space = runtime->forest->get_node(launch_handle);
+      WrapperReferenceMutator mutator(ready_events);
+      launch_space->add_base_valid_ref(CONTEXT_REF, &mutator);
       derez.deserialize(sliced);
       derez.deserialize(redop);
       if (redop > 0)
@@ -4657,7 +4670,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future IndividualTask::initialize_task(TaskContext *ctx,
+    Future IndividualTask::initialize_task(InnerContext *ctx,
                                            const TaskLauncher &launcher,
                                            bool track /*=true*/)
     //--------------------------------------------------------------------------
@@ -5445,7 +5458,7 @@ namespace Legion {
       // Save this for when we are done executing
       TaskContext *enclosing = parent_ctx;
       // Set the context to be the current inline context
-      parent_ctx = inline_ctx;
+      // parent_ctx = inline_ctx;
       // See if we need to wait for anything
       if (start_condition.exists())
         start_condition.wait();
@@ -6260,7 +6273,6 @@ namespace Legion {
     {
       DETAILED_PROFILER(runtime, INDEX_ACTIVATE_CALL);
       activate_multi();
-      launch_space = IndexSpace::NO_SPACE;
       serdez_redop_fns = NULL;
       slice_fraction = Fraction<long long>(0,1); // empty fraction
       total_points = 0;
@@ -6302,7 +6314,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    FutureMap IndexTask::initialize_task(TaskContext *ctx,
+    FutureMap IndexTask::initialize_task(InnerContext *ctx,
                                          const IndexTaskLauncher &launcher,
                                          IndexSpace launch_sp, 
                                          bool track /*= true*/)
@@ -6334,13 +6346,15 @@ namespace Legion {
       is_index_space = true;
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
+      assert(launch_space == NULL);
 #endif
-      launch_space = launch_sp;
+      launch_space = runtime->forest->get_node(launch_sp);
+      add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+        launch_space->get_launch_space_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
-      internal_space = launch_space;
+      internal_space = launch_space->handle;
       sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       initialize_base_task(ctx, track, launcher.static_dependences,
@@ -6373,7 +6387,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    Future IndexTask::initialize_task(TaskContext *ctx,
+    Future IndexTask::initialize_task(InnerContext *ctx,
                                       const IndexTaskLauncher &launcher,
                                       IndexSpace launch_sp,
                                       ReductionOpID redop_id, 
@@ -6407,13 +6421,15 @@ namespace Legion {
       is_index_space = true;
 #ifdef DEBUG_LEGION
       assert(launch_sp.exists());
+      assert(launch_space == NULL);
 #endif
-      launch_space = launch_sp;
+      launch_space = runtime->forest->get_node(launch_sp);
+      add_launch_space_reference(launch_space);
       if (!launcher.launch_domain.exists())
-        runtime->forest->find_launch_space_domain(launch_space, index_domain);
+        launch_space->get_launch_space_domain(index_domain);
       else
         index_domain = launcher.launch_domain;
-      internal_space = launch_space;
+      internal_space = launch_space->handle;
       sharding_space = launcher.sharding_space;
       need_intra_task_alias_analysis = !launcher.independent_requirements;
       redop = redop_id;
@@ -6557,7 +6573,7 @@ namespace Legion {
       { 
         for (unsigned idx = 0; idx < regions.size(); idx++)
           TaskOp::log_requirement(unique_op_id, idx, regions[idx]);
-        runtime->forest->log_launch_space(launch_space, unique_op_id);
+        runtime->forest->log_launch_space(launch_space->handle, unique_op_id);
       }
     }
 
@@ -6780,7 +6796,8 @@ namespace Legion {
             (target_proc != current_proc))
         {
           // Make a slice copy and send it away
-          SliceTask *clone = clone_as_slice_task(launch_space, target_proc,
+          SliceTask *clone = clone_as_slice_task(launch_space->handle, 
+                                                 target_proc,
                                                  true/*needs slice*/,
                                                  stealable, 1LL);
           runtime->send_task(clone);
@@ -7000,7 +7017,7 @@ namespace Legion {
         compute_point_region_requirements();
         InlineContext *inline_ctx = new InlineContext(runtime, enclosing, this);
         // Save the inner context as the parent ctx
-        parent_ctx = inline_ctx;
+        // parent_ctx = inline_ctx;
         variant->dispatch_inline(current, inline_ctx);
         // Return any created privilege state
         inline_ctx->return_resources(enclosing);

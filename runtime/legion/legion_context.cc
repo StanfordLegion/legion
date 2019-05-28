@@ -6726,6 +6726,23 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future InnerContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      AutoRuntimeCall call(this);
+#ifdef DEBUG_LEGION
+      log_run.debug("Get dynamic collective result in task %s (ID %lld)",
+                    get_task_name(), get_unique_id());
+#endif
+      DynamicCollectiveOp *collective = 
+        runtime->get_available_dynamic_collective_op();
+      Future result = collective->initialize(this, dc);
+      const Processor proc = get_executing_processor();
+      runtime->add_to_dependence_queue(this, proc, collective);
+      return result;
+    }
+
+    //--------------------------------------------------------------------------
     TaskPriority InnerContext::get_current_priority(void) const
     //--------------------------------------------------------------------------
     {
@@ -7349,6 +7366,13 @@ namespace Legion {
               local_fields_to_delete.end(); it++)
           free_fields(it->first, it->second);
       }
+      if (!index_launch_spaces.empty())
+      {
+        for (std::map<Domain,IndexSpace>::const_iterator it = 
+              index_launch_spaces.begin(); it != 
+              index_launch_spaces.end(); it++)
+          destroy_index_space(it->second);
+      }
       if (overhead_tracker != NULL)
       {
         const long long current = Realm::Clock::current_time_in_nanoseconds();
@@ -7849,11 +7873,26 @@ namespace Legion {
     IndexSpace InnerContext::find_index_launch_space(const Domain &domain)
     //--------------------------------------------------------------------------
     {
-      std::map<Domain,IndexSpace>::const_iterator finder = 
+      std::map<Domain,IndexSpace>::const_iterator finder =
         index_launch_spaces.find(domain);
       if (finder != index_launch_spaces.end())
         return finder->second;
-      IndexSpace result = runtime->find_or_create_index_launch_space(domain);
+      IndexSpace result;
+      switch (domain.get_dim())
+      {
+#define DIMFUNC(DIM) \
+        case DIM: \
+          { \
+            DomainT<DIM,coord_t> is = domain; \
+            result = create_index_space(runtime->forest, &is, \
+                NT_TemplateHelper::encode_tag<DIM,coord_t>()); \
+            break; \
+          }
+        LEGION_FOREACH_N(DIMFUNC)
+#undef DIMFUNC
+        default:
+          assert(false);
+      }
       index_launch_spaces[domain] = result;
       return result;
     }
@@ -9948,6 +9987,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    Future LeafContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      assert(false);
+      return Future();
+    }
+
+    //--------------------------------------------------------------------------
     TaskPriority LeafContext::get_current_priority(void) const
     //--------------------------------------------------------------------------
     {
@@ -11033,6 +11080,13 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       enclosing->find_collective_contributions(dc, contributions);
+    }
+
+    //--------------------------------------------------------------------------
+    Future InlineContext::get_dynamic_collective_result(DynamicCollective dc)
+    //--------------------------------------------------------------------------
+    {
+      return enclosing->get_dynamic_collective_result(dc);
     }
 
     //--------------------------------------------------------------------------
