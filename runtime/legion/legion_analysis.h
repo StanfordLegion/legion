@@ -1694,7 +1694,6 @@ namespace Legion {
       AddressSpaceID clone_from(const EquivalenceSet *parent, 
                                 const FieldMask &clone_mask);
       void remove_update_guard(CopyFillAggregator *aggregator);
-      // Must be called while holding the lock
       void ray_trace_equivalence_sets(RayTracer *target,
                                       IndexSpaceExpression *expr, 
                                       FieldMask ray_mask,
