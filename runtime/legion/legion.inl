@@ -1381,9 +1381,10 @@ namespace Legion {
           {
             case 0:
               break;
-              // Something changed with explicit destructor invocation
-              // between c++11 and c++14 so we need different versions
-#if __cplusplus <= 201103L
+              // Need to handle very old versions of GCC that are broken
+              // in some circumstances with templates for explicit  
+              // destructor invocations
+#if defined(__GNUC__) && (__GNUC__ <= 4)
 #define DIMFUNC(DIM) \
             case DIM: \
               { \
