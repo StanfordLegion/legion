@@ -6450,7 +6450,7 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
-    void EquivalenceSet::ray_trace_equivalence_sets(VersionManager *target,
+    void EquivalenceSet::ray_trace_equivalence_sets(RayTracer *target,
                                                     IndexSpaceExpression *expr,
                                                     FieldMask ray_mask,
                                                     IndexSpace handle,
@@ -10911,7 +10911,7 @@ namespace Legion {
 
     //--------------------------------------------------------------------------
     EquivalenceSet::DeferRayTraceArgs::DeferRayTraceArgs(EquivalenceSet *s, 
-                          VersionManager *t, IndexSpaceExpression *e, 
+                          RayTracer *t, IndexSpaceExpression *e, 
                           IndexSpace h, AddressSpaceID o, RtUserEvent d,
                           RtUserEvent def, const FieldMask &m,
                           bool local, bool is_expr_s, IndexSpace expr_h,
@@ -11203,7 +11203,7 @@ namespace Legion {
       RtEvent ready;
       EquivalenceSet *set = runtime->find_or_request_equivalence_set(did,ready);
 
-      VersionManager *target;
+      RayTracer *target;
       derez.deserialize(target);
       bool is_local, is_expr_space;
       IndexSpace expr_handle;
@@ -11254,7 +11254,7 @@ namespace Legion {
       derez.deserialize(did);
       FieldMask eq_mask;
       derez.deserialize(eq_mask);
-      VersionManager *target;
+      RayTracer *target;
       derez.deserialize(target);
       RtUserEvent done_event;
       derez.deserialize(done_event);

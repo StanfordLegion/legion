@@ -1466,6 +1466,22 @@ namespace Legion {
     };
 
     /**
+     * \class RayTracer
+     * This is an abstract class that provides an interface for
+     * recording the equivalence sets that result from ray tracing
+     * an equivalence set tree for a given index space expression.
+     */
+    class RayTracer {
+    public:
+      virtual ~RayTracer(void) { }
+    public:
+      virtual void record_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask) = 0;
+      virtual void record_pending_equivalence_set(EquivalenceSet *set,
+                                          const FieldMask &mask) = 0;
+    };
+
+    /**
      * \class EquivalenceSet
      * The equivalence set class tracks the physical state of a
      * set of points in a logical region for all the fields. There
@@ -1508,7 +1524,7 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_RAY_TRACE_TASK_ID;
       public:
-        DeferRayTraceArgs(EquivalenceSet *s, VersionManager *t,
+        DeferRayTraceArgs(EquivalenceSet *s, RayTracer *t,
                           IndexSpaceExpression *e, IndexSpace h,
                           AddressSpaceID o, RtUserEvent d,
                           RtUserEvent def, const FieldMask &m,
@@ -1520,7 +1536,7 @@ namespace Legion {
                           IndexSpaceExprID expr_i = 0);
       public:
         EquivalenceSet *const set;
-        VersionManager *const target;
+        RayTracer *const target;
         IndexSpaceExpression *const expr;
         const IndexSpace handle;
         const AddressSpaceID origin;
@@ -1537,15 +1553,15 @@ namespace Legion {
       public:
         static const LgTaskID TASK_ID = LG_DEFER_RAY_TRACE_FINISH_TASK_ID;
       public:
-        DeferRayTraceFinishArgs(VersionManager *m, AddressSpaceID src,
+        DeferRayTraceFinishArgs(RayTracer *t, AddressSpaceID src,
             FieldMaskSet<EquivalenceSet> *to_tv,
             std::map<EquivalenceSet*,IndexSpaceExpression*> *exs,
             const size_t v, const IndexSpace h, RtUserEvent d)
           : LgTaskArgs<DeferRayTraceFinishArgs>(implicit_provenance),
-            target(m), source(src), to_traverse(to_tv), exprs(exs), 
+            target(t), source(src), to_traverse(to_tv), exprs(exs), 
             volume(v), handle(h), done(d) { }
       public:
-        VersionManager *const target;
+        RayTracer *const target;
         const AddressSpaceID source;
         FieldMaskSet<EquivalenceSet> *const to_traverse;
         std::map<EquivalenceSet*,IndexSpaceExpression*> *const exprs;
@@ -1652,6 +1668,12 @@ namespace Legion {
     public:
       EquivalenceSet& operator=(const EquivalenceSet &rhs);
     public:
+      inline bool has_refinements(const FieldMask &mask) const
+        {
+          AutoLock eq(eq_lock,1,false/*exclusive*/);
+          return is_refined(mask);
+        }
+    public:
       // Must be called while holding the lock
       inline bool is_logical_owner(void) const
         { return (local_space == logical_owner_space); }
@@ -1673,7 +1695,7 @@ namespace Legion {
                                 const FieldMask &clone_mask);
       void remove_update_guard(CopyFillAggregator *aggregator);
       // Must be called while holding the lock
-      void ray_trace_equivalence_sets(VersionManager *target,
+      void ray_trace_equivalence_sets(RayTracer *target,
                                       IndexSpaceExpression *expr, 
                                       FieldMask ray_mask,
                                       IndexSpace handle,
@@ -1928,7 +1950,8 @@ namespace Legion {
      * and we need to traverse them, but it's a cached starting
      * point that doesn't involve tracing the entire tree.
      */
-    class VersionManager : public LegionHeapify<VersionManager> {
+    class VersionManager : public RayTracer, 
+                           public LegionHeapify<VersionManager> {
     public:
       static const AllocationType alloc_type = VERSION_MANAGER_ALLOC;
     public:
@@ -1946,7 +1969,7 @@ namespace Legion {
     public:
       VersionManager(RegionTreeNode *node, ContextID ctx); 
       VersionManager(const VersionManager &manager);
-      ~VersionManager(void);
+      virtual ~VersionManager(void);
     public:
       VersionManager& operator=(const VersionManager &rhs);
     public:
@@ -1962,8 +1985,9 @@ namespace Legion {
                                           RegionNode *region_node,
                                           const FieldMask &version_mask,
                                           Operation *op);
-      void record_equivalence_set(EquivalenceSet *set, const FieldMask &mask);
-      void record_pending_equivalence_set(EquivalenceSet *set, 
+      virtual void record_equivalence_set(EquivalenceSet *set, 
+                                          const FieldMask &mask);
+      virtual void record_pending_equivalence_set(EquivalenceSet *set, 
                                           const FieldMask &mask);
       void finalize_equivalence_sets(RtUserEvent done_event);                           
       void update_equivalence_sets(const unsigned previous_number,

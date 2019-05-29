@@ -1446,6 +1446,7 @@ namespace Legion {
     class EquivalenceSet;
     class VersionManager;
     class VersionInfo;
+    class RayTracer;
 
     class Collectable;
     class Notifiable;
