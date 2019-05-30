@@ -14944,6 +14944,14 @@ namespace Legion {
     }
 
     //--------------------------------------------------------------------------
+    void AttachOp::pack_remote_operation(Serializer &rez, 
+                                         AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_local_remote_operation(rez);      
+    }
+
+    //--------------------------------------------------------------------------
     PhysicalInstance AttachOp::create_instance(IndexSpaceNode *node,
                                          const std::vector<FieldID> &field_set,
                                          const std::vector<size_t> &sizes, 
@@ -15989,6 +15997,11 @@ namespace Legion {
             result = new RemoteFillOp(runtime, remote_ptr, source);
             break;
           }
+        case ATTACH_OP_KIND:
+          {
+            result = new RemoteAttachOp(runtime, remote_ptr, source);
+            break;
+          }
         case DETACH_OP_KIND:
           {
             result = new RemoteDetachOp(runtime, remote_ptr, source);
@@ -16854,6 +16867,109 @@ namespace Legion {
       unpack_external_partition(derez, runtime);
       derez.deserialize(part_kind);
       unpack_profiling_requests(derez);
+    }
+
+    ///////////////////////////////////////////////////////////// 
+    // Remote Attach Op 
+    /////////////////////////////////////////////////////////////
+
+    //--------------------------------------------------------------------------
+    RemoteAttachOp::RemoteAttachOp(Runtime *rt, 
+                                   Operation *ptr, AddressSpaceID src)
+      : RemoteOp(rt, ptr, src)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAttachOp::RemoteAttachOp(const RemoteAttachOp &rhs)
+      : RemoteOp(rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAttachOp::~RemoteAttachOp(void)
+    //--------------------------------------------------------------------------
+    {
+    }
+
+    //--------------------------------------------------------------------------
+    RemoteAttachOp& RemoteAttachOp::operator=(const RemoteAttachOp &rhs)
+    //--------------------------------------------------------------------------
+    {
+      // should never be called
+      assert(false);
+      return *this;
+    }
+
+    //--------------------------------------------------------------------------
+    UniqueID RemoteAttachOp::get_unique_id(void) const
+    //--------------------------------------------------------------------------
+    {
+      return unique_op_id;
+    }
+
+    //--------------------------------------------------------------------------
+    unsigned RemoteAttachOp::get_context_index(void) const
+    //--------------------------------------------------------------------------
+    {
+      return context_index;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAttachOp::set_context_index(unsigned index)
+    //--------------------------------------------------------------------------
+    {
+      context_index = index;
+    }
+
+    //--------------------------------------------------------------------------
+    int RemoteAttachOp::get_depth(void) const
+    //--------------------------------------------------------------------------
+    {
+      return (parent_ctx->get_depth() + 1);
+    }
+
+    //--------------------------------------------------------------------------
+    const char* RemoteAttachOp::get_logging_name(void) const
+    //--------------------------------------------------------------------------
+    {
+      return op_names[ATTACH_OP_KIND];
+    }
+
+    //--------------------------------------------------------------------------
+    Operation::OpKind RemoteAttachOp::get_operation_kind(void) const
+    //--------------------------------------------------------------------------
+    {
+      return ATTACH_OP_KIND;
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAttachOp::select_sources(const InstanceRef &target,
+                                        const InstanceSet &sources,
+                                        std::vector<unsigned> &ranking)
+    //--------------------------------------------------------------------------
+    {
+      // Should never be called
+      assert(false);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAttachOp::pack_remote_operation(Serializer &rez,
+                                               AddressSpaceID target) const
+    //--------------------------------------------------------------------------
+    {
+      pack_remote_base(rez);
+    }
+
+    //--------------------------------------------------------------------------
+    void RemoteAttachOp::unpack(Deserializer &derez, ReferenceMutator &mutator)
+    //--------------------------------------------------------------------------
+    {
+      // Nothing for the moment
     }
 
     ///////////////////////////////////////////////////////////// 
