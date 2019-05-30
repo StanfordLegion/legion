@@ -153,6 +153,20 @@ def input_args(filter_runtime_options=False):
             i += 1
     return args
 
+def execute_as_script():
+    args = input_args(True)
+    if len(args) < 1:
+        return False, False # no idea what's going on here, just return
+    if os.path.basename(args[0]) != 'legion_python':
+        return False, False # not in legion_python
+    if len(args) < 2 or args[1].startswith('-'):
+        return True, False # argument is a flag
+    # If it has an extension, we're going to guess that it was
+    # intended to be a script.
+    return True, len(os.path.splitext(args[1])[1]) > 1
+
+is_legion_python, is_script = execute_as_script()
+
 # The Legion context is stored in thread-local storage. This assumes
 # that the Python processor maintains the invariant that every task
 # corresponds to one and only one thread.
@@ -1190,7 +1204,7 @@ class Task (object):
             c.legion_runtime_get_runtime(),
             task_id,
             task_name.encode('utf-8'),
-            self.replicable, # Global
+            self.replicable or not is_script, # Global
             execution_constraints,
             layout_constraints,
             options[0],
@@ -1310,6 +1324,9 @@ class _TaskLauncher(object):
                 raise Exception('External tasks do not support non-region arguments')
 
         # Launch the task.
+        if _my.ctx.current_launch is not None:
+            return _my.ctx.current_launch.attach_task_launcher(launcher, point)
+
         result = c.legion_task_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, launcher)
         c.legion_task_launcher_destroy(launcher)
@@ -1378,6 +1395,12 @@ class _MustEpochLauncher(object):
 
     def spawn_task(self, *args):
         raise Exception('MustEpochLaunch does not support spawn_task')
+
+    def attach_task_launcher(self, task_launcher, point):
+        if point is None:
+            raise Exception('MustEpochLauncher requires a point for each task')
+        c.legion_must_epoch_launcher_add_single_task(
+            self.launcher, point.raw_value(), task_launcher)
 
     def launch(self):
         result = c.legion_must_epoch_launcher_execute(
@@ -1502,7 +1525,7 @@ class MustEpochLaunch(object):
         self.launcher = None
 
     def __enter__(self):
-        self.launcher = _MustEpochLauncher(task=task, domain=self.domain)
+        self.launcher = _MustEpochLauncher()
         _my.ctx.begin_launch(self)
 
     def __exit__(self, exc_type, exc_value, tb):
@@ -1511,15 +1534,13 @@ class MustEpochLaunch(object):
         del self.launcher
 
     def spawn_task(self, *args, **kwargs):
-        # Hack: workaround for Python 2 not having keyword-only arguments
-        def validate_spawn_task_args(point=None):
-            return point
-        point = validate_spawn_task_args(**kwargs)
-
         # TODO: Support index launches
-        TaskLaunch().spawn_task(self, *args, **kwargs)
+        TaskLaunch().spawn_task(*args, **kwargs)
 
         # TODO: Support return values
+
+    def attach_task_launcher(self, task_launcher, point):
+        self.launcher.attach_task_launcher(task_launcher, point)
 
     def launch(self):
         self.launcher.launch()
@@ -1555,19 +1576,6 @@ class Tunable(object):
         c.legion_future_destroy(result)
         return future
 
-def execute_as_script():
-    args = input_args(True)
-    if len(args) < 1:
-        return False, False # no idea what's going on here, just return
-    if os.path.basename(args[0]) != 'legion_python':
-        return False, False # not in legion_python
-    if len(args) < 2 or args[1].startswith('-'):
-        return True, False # argument is a flag
-    # If it has an extension, we're going to guess that it was
-    # intended to be a script.
-    return True, len(os.path.splitext(args[1])[1]) > 1
-
-is_legion_python, is_script = execute_as_script()
 if is_script:
     # We can't use runpy for this since runpy is aggressive about
     # cleaning up after itself and removes the module before execution

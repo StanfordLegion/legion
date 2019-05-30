@@ -36,7 +36,7 @@ def main():
 
     with legion.MustEpochLaunch():
         for i in range(global_procs):
-            hi(i)
+            hi(i, point=i)
     legion.execution_fence(block=True)
 
     assert global_var == 4123
