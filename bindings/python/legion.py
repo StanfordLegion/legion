@@ -986,10 +986,10 @@ class ExternTask(object):
     def __call__(self, *args):
         return self.spawn_task(*args)
 
-    def spawn_task(self, *args):
+    def spawn_task(self, *args, **kwargs):
         if _my.ctx.current_launch:
-            return _my.ctx.current_launch.spawn_task(self, *args)
-        return TaskLaunch().spawn_task(self, *args)
+            return _my.ctx.current_launch.spawn_task(self, *args, **kwargs)
+        return TaskLaunch().spawn_task(self, *args, **kwargs)
 
 def extern_task(**kwargs):
     return ExternTask(**kwargs)
@@ -1367,6 +1367,22 @@ class _IndexLauncher(_TaskLauncher):
         self.future_map = FutureMap(result)
         c.legion_future_map_destroy(result)
 
+class _MustEpochLauncher(object):
+    __slots__ = ['launcher']
+
+    def __init__(self):
+        self.launcher = c.legion_must_epoch_launcher_create(0, 0)
+
+    def __del__(self):
+        c.legion_must_epoch_launcher_destroy(self.launcher)
+
+    def spawn_task(self, *args):
+        raise Exception('MustEpochLaunch does not support spawn_task')
+
+    def launch(self):
+        result = c.legion_must_epoch_launcher_execute(
+            _my.ctx.runtime, _my.ctx.context, self.launcher)
+
 class TaskLaunch(object):
     __slots__ = []
     def spawn_task(self, task, *args, **kwargs):
@@ -1475,6 +1491,35 @@ class IndexLaunch(object):
         self.launcher.attach_future_args(*futures)
         # TODO: attach region args
         return _FuturePoint(self.launcher, self.point.value)
+
+    def launch(self):
+        self.launcher.launch()
+
+class MustEpochLaunch(object):
+    __slots__ = ['launcher']
+
+    def __init__(self):
+        self.launcher = None
+
+    def __enter__(self):
+        self.launcher = _MustEpochLauncher(task=task, domain=self.domain)
+        _my.ctx.begin_launch(self)
+
+    def __exit__(self, exc_type, exc_value, tb):
+        _my.ctx.end_launch(self)
+        self.launch()
+        del self.launcher
+
+    def spawn_task(self, *args, **kwargs):
+        # Hack: workaround for Python 2 not having keyword-only arguments
+        def validate_spawn_task_args(point=None):
+            return point
+        point = validate_spawn_task_args(**kwargs)
+
+        # TODO: Support index launches
+        TaskLaunch().spawn_task(self, *args, **kwargs)
+
+        # TODO: Support return values
 
     def launch(self):
         self.launcher.launch()
