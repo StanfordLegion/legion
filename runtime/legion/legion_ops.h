@@ -2992,6 +2992,8 @@ namespace Legion {
       virtual unsigned find_parent_index(unsigned idx);
       virtual void trigger_commit(void);
       virtual void record_reference_mutation_effect(RtEvent event);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
     public:
       PhysicalInstance create_instance(IndexSpaceNode *node,
                                        const std::vector<FieldID> &field_set,
@@ -3385,6 +3387,34 @@ namespace Legion {
       virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     protected:
       PartitionKind part_kind;
+    };
+
+    /**
+     * \class RemoteAttachOp
+     * This is a remote copy of a DetachOp to be used for 
+     * mapper calls and other operations
+     */
+    class RemoteAttachOp : public RemoteOp {
+    public:
+      RemoteAttachOp(Runtime *rt, Operation *ptr, AddressSpaceID src);
+      RemoteAttachOp(const RemoteAttachOp &rhs);
+      virtual ~RemoteAttachOp(void);
+    public:
+      RemoteAttachOp& operator=(const RemoteAttachOp &rhs);
+    public:
+      virtual UniqueID get_unique_id(void) const;
+      virtual unsigned get_context_index(void) const;
+      virtual void set_context_index(unsigned index);
+      virtual int get_depth(void) const;
+    public:
+      virtual const char* get_logging_name(void) const;
+      virtual OpKind get_operation_kind(void) const;
+      virtual void select_sources(const InstanceRef &target,
+                                  const InstanceSet &sources,
+                                  std::vector<unsigned> &ranking);
+      virtual void pack_remote_operation(Serializer &rez,
+                                         AddressSpaceID target) const;
+      virtual void unpack(Deserializer &derez, ReferenceMutator &mutator);
     };
 
     /**
