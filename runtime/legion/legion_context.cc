@@ -11691,9 +11691,6 @@ namespace Legion {
       ReplDetachOp *detach_op = runtime->get_available_repl_detach_op();
       Future result = detach_op->initialize_detach(this, region, flush);
       detach_op->initialize_replication(this, external_resource_barrier); 
-      // If we're flushing we actually need three generations of the barrier
-      if (flush)
-        Runtime::advance_barrier(external_resource_barrier);
       // If the region is still mapped, then unmap it
       if (region.is_mapped())
       {
