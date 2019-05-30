@@ -1310,6 +1310,9 @@ class _TaskLauncher(object):
                 raise Exception('External tasks do not support non-region arguments')
 
         # Launch the task.
+        if _my.ctx.current_launch is not None:
+            return _my.ctx.current_launch.attach_task_launcher(launcher, point)
+
         result = c.legion_task_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, launcher)
         c.legion_task_launcher_destroy(launcher)
@@ -1378,6 +1381,12 @@ class _MustEpochLauncher(object):
 
     def spawn_task(self, *args):
         raise Exception('MustEpochLaunch does not support spawn_task')
+
+    def attach_task_launcher(self, task_launcher, point):
+        if point is None:
+            raise Exception('MustEpochLauncher requires a point for each task')
+        c.legion_must_epoch_launcher_add_single_task(
+            self.launcher, point.raw_value(), task_launcher)
 
     def launch(self):
         result = c.legion_must_epoch_launcher_execute(
@@ -1502,7 +1511,7 @@ class MustEpochLaunch(object):
         self.launcher = None
 
     def __enter__(self):
-        self.launcher = _MustEpochLauncher(task=task, domain=self.domain)
+        self.launcher = _MustEpochLauncher()
         _my.ctx.begin_launch(self)
 
     def __exit__(self, exc_type, exc_value, tb):
@@ -1511,15 +1520,13 @@ class MustEpochLaunch(object):
         del self.launcher
 
     def spawn_task(self, *args, **kwargs):
-        # Hack: workaround for Python 2 not having keyword-only arguments
-        def validate_spawn_task_args(point=None):
-            return point
-        point = validate_spawn_task_args(**kwargs)
-
         # TODO: Support index launches
-        TaskLaunch().spawn_task(self, *args, **kwargs)
+        TaskLaunch().spawn_task(*args, **kwargs)
 
         # TODO: Support return values
+
+    def attach_task_launcher(self, task_launcher, point):
+        self.launcher.attach_task_launcher(task_launcher, point)
 
     def launch(self):
         self.launcher.launch()
