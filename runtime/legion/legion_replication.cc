@@ -4375,25 +4375,6 @@ namespace Legion {
           did_broadcast->broadcast(sharded_view->did);
         }
       }
-      else if (ctx->owner_shard->shard_id == 0)
-      {
-        // Make our instance now and send out the DID
-        switch (resource)
-        {
-          case EXTERNAL_POSIX_FILE:
-          case EXTERNAL_HDF5_FILE:
-            {
-              external_instance = 
-                runtime->forest->create_external_instance(this, requirement, 
-                                                requirement.instance_fields);
-              break;
-            }
-            // No external instances here by definition
-          default:
-            assert(false);
-        }
-        did_broadcast->broadcast(external_instance.get_manager()->did);
-      }
     }
 
     //--------------------------------------------------------------------------
@@ -4445,21 +4426,6 @@ namespace Legion {
               runtime->find_or_request_logical_view(sharded_did, ready));
           if (ready.exists())
             preconditions.insert(ready);
-        }
-        else
-        {
-          FieldSpaceNode *node = 
-            runtime->forest->get_node(requirement.region.get_field_space());
-          FieldMask instance_fields = 
-            node->get_field_mask(requirement.privilege_fields);
-          // Get the DID for the common manager and request it
-          DistributedID manager_did = did_broadcast->get_value();
-          RtEvent ready;
-          PhysicalManager *manager = 
-              runtime->find_or_request_physical_manager(manager_did, ready);
-          if (ready.exists())
-            preconditions.insert(ready);
-          external_instance = InstanceRef(manager, instance_fields);
         }
       }
       else // Only need the version info on the owner node
@@ -4578,10 +4544,24 @@ namespace Legion {
       }
       else
       {
-        // Save the instance information out to region
-        region.impl->set_reference(external_instance);
         if (is_owner_shard)
         {
+          // Make our instance now and send out the DID
+          switch (resource)
+          {
+            case EXTERNAL_POSIX_FILE:
+            case EXTERNAL_HDF5_FILE:
+              {
+                external_instance = 
+                  runtime->forest->create_external_instance(this, requirement, 
+                                                  requirement.instance_fields);
+                break;
+              }
+              // No external instances here by definition
+            default:
+              assert(false);
+          }
+          
           InstanceSet attach_instances(1);
           attach_instances[0] = external_instance;
           // Once we're ready to map we can tell the memory manager that
@@ -4590,6 +4570,9 @@ namespace Legion {
             external_instance.get_manager()->as_instance_manager();
           MemoryManager *memory_manager = external_manager->memory_manager;
           memory_manager->attach_external_instance(external_manager);
+          // We can't broadcast the DID until after doing the attach
+          // to the memory in case we update the reference state
+          did_broadcast->broadcast(external_instance.get_manager()->did);
           const PhysicalTraceInfo trace_info(this);
           InnerContext *context = find_physical_context(0/*index*/,requirement);
           std::vector<InstanceView*> attach_views;
@@ -4608,6 +4591,8 @@ namespace Legion {
 #ifdef DEBUG_LEGION
           assert(external_instance.has_ref());
 #endif
+          // Save the instance information out to region
+          region.impl->set_reference(external_instance);
           // This operation is ready once the file is attached
           // Make sure that all the attach operations are done mapping
           // before we consider this attach operation done
@@ -4622,6 +4607,21 @@ namespace Legion {
         }
         else
         {
+          FieldSpaceNode *node = 
+            runtime->forest->get_node(requirement.region.get_field_space());
+          FieldMask instance_fields = 
+            node->get_field_mask(requirement.privilege_fields);
+          // Get the DID for the common manager and request it
+          DistributedID manager_did = did_broadcast->get_value();
+          RtEvent ready;
+          PhysicalManager *manager = 
+              runtime->find_or_request_physical_manager(manager_did, ready);
+          // Wait for the manager to be ready 
+          if (ready.exists())
+            ready.wait();
+          external_instance = InstanceRef(manager, instance_fields);
+          // Save the instance information out to region
+          region.impl->set_reference(external_instance);
           // Record that we're mapped once everyone else does
           Runtime::phase_barrier_arrive(resource_barrier, 1/*count*/);
           complete_mapping(resource_barrier);
