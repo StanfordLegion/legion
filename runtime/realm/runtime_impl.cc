@@ -476,30 +476,17 @@ namespace Realm {
     {
       ((RuntimeImpl *)impl)->run(task_id, style, args, arglen, background);
     }
+  
+    void RuntimeImpl::DeferredShutdown::defer(RuntimeImpl *_runtime,
+					      int _result_code,
+					      Event wait_on)
+    {
+      runtime = _runtime;
+      result_code = _result_code;
+      EventImpl::add_waiter(wait_on, this);
+    }
 
-    class DeferredShutdown : public EventWaiter {
-    public:
-      DeferredShutdown(RuntimeImpl *_runtime, int _result_code);
-      virtual ~DeferredShutdown(void);
-
-      virtual bool event_triggered(Event e, bool poisoned);
-      virtual void print(std::ostream& os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      RuntimeImpl *runtime;
-      int result_code;
-    };
-
-    DeferredShutdown::DeferredShutdown(RuntimeImpl *_runtime, int _result_code)
-      : runtime(_runtime)
-      , result_code(_result_code)
-    {}
-
-    DeferredShutdown::~DeferredShutdown(void)
-    {}
-
-    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
+    void RuntimeImpl::DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
       // no real good way to deal with a poisoned shutdown precondition
       if(poisoned) {
@@ -508,15 +495,14 @@ namespace Realm {
       }
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true, result_code);
-      return true; // go ahead and delete us
     }
 
-    void DeferredShutdown::print(std::ostream& os) const
+    void RuntimeImpl::DeferredShutdown::print(std::ostream& os) const
     {
       os << "deferred shutdown";
     }
 
-    Event DeferredShutdown::get_finish_event(void) const
+    Event RuntimeImpl::DeferredShutdown::get_finish_event(void) const
     {
       return Event::NO_EVENT;
     }
@@ -528,9 +514,9 @@ namespace Realm {
       if(wait_on.has_triggered())
 	((RuntimeImpl *)impl)->shutdown(true, result_code); // local request
       else
-	EventImpl::add_waiter(wait_on,
-			      new DeferredShutdown((RuntimeImpl *)impl,
-						   result_code));
+	((RuntimeImpl *)impl)->deferred_shutdown.defer((RuntimeImpl *)impl,
+						       result_code,
+						       wait_on);
     }
 
     int Runtime::wait_for_shutdown(void)

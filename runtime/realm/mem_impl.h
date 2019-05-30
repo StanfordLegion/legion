@@ -114,7 +114,7 @@ namespace Realm {
 							 size_t offset = 0);
 
       // release storage associated with an instance
-      virtual void release_instance_storage(RegionInstance i,
+      virtual void release_instance_storage(RegionInstanceImpl *inst,
 					    Event precondition);
 
       off_t alloc_bytes_local(size_t size);

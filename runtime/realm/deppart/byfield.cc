@@ -49,7 +49,7 @@ namespace Realm {
       log_dpops.info() << "byfield: " << *this << ", " << colors[i] << " -> " << subspaces[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 

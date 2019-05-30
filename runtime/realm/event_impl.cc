@@ -172,7 +172,7 @@ namespace Realm {
     public:
       Callback(const EventTriggeredCondition& _cond);
       virtual ~Callback(void);
-      virtual bool event_triggered(Event e, bool poisoned);
+      virtual void event_triggered(Event e, bool poisoned);
       virtual void print(std::ostream& os) const;
       virtual Event get_finish_event(void) const;
       virtual void operator()(bool poisoned) = 0;
@@ -214,13 +214,11 @@ namespace Realm {
   {
   }
   
-  bool EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
+  void EventTriggeredCondition::Callback::event_triggered(Event e, bool poisoned)
   {
     if(cond.interval)
       cond.interval->record_wait_ready();
     (*this)(poisoned);
-    // we don't manage the memory any more
-    return false;
   }
 
   void EventTriggeredCondition::Callback::print(std::ostream& os) const
@@ -634,10 +632,9 @@ namespace Realm {
   // class EventMerger::MergeEventPrecondition
   //
 
-  bool EventMerger::MergeEventPrecondition::event_triggered(Event e, bool poisoned)
+  void EventMerger::MergeEventPrecondition::event_triggered(Event e, bool poisoned)
   {
     merger->precondition_triggered(poisoned);
-    return false;
   }
 
   void EventMerger::MergeEventPrecondition::print(std::ostream& os) const
@@ -680,10 +677,9 @@ namespace Realm {
       public:
 	EventMerger *merger;
 
-	virtual bool event_triggered(Event e, bool poisoned)
+	virtual void event_triggered(Event e, bool poisoned)
 	{
 	  merger->precondition_triggered(poisoned);
-	  return false;
 	}
 
 	virtual void print(std::ostream& os) const
@@ -1253,12 +1249,9 @@ namespace Realm {
 	amsg.commit();
       }
 
-      if(trigger_now) {
-	bool nuke = waiter->event_triggered(make_event(needed_gen),
-					    trigger_poisoned);
-        if(nuke)
-          delete waiter;
-      }
+      if(trigger_now)
+	waiter->event_triggered(make_event(needed_gen),
+				trigger_poisoned);
 
       return true;  // waiter is always either enqueued or triggered right now
     }
@@ -1494,11 +1487,7 @@ namespace Realm {
 	bool poisoned = is_generation_poisoned(it->first);
 	while(!it->second.empty()) {
 	  EventWaiter *w = it->second.pop_front();
-	  bool nuke = w->event_triggered(e, poisoned);
-	  if(nuke) {
-	    //printf("deleting: "); (*it)->print_info(); fflush(stdout);
-	    delete w;
-	  }
+	  w->event_triggered(e, poisoned);
 	}
       }
     }
@@ -1577,7 +1566,7 @@ namespace Realm {
       {
       }
 
-      virtual bool event_triggered(Event e, bool _poisoned)
+      virtual void event_triggered(Event e, bool _poisoned)
       {
 	// record whether event was poisoned - owner will inspect once awake
 	poisoned = _poisoned;
@@ -1586,8 +1575,6 @@ namespace Realm {
         AutoHSLLock(cv.mutex);
 	signalled = true;
 	cv.signal();
-        // we're allocated on caller's stack, so deleting would be bad
-        return false;
       }
 
       virtual void print(std::ostream& os) const
@@ -1774,11 +1761,7 @@ namespace Realm {
 	Event e = make_event(gen_triggered);
 	while(!to_wake.empty()) {
 	  EventWaiter *ew = to_wake.pop_front();
-	  bool nuke = ew->event_triggered(e, poisoned);
-          if(nuke) {
-            //printf("deleting: "); (*it)->print_info(); fflush(stdout);
-            delete ew;
-          }
+	  ew->event_triggered(e, poisoned);
         }
       }
     }
@@ -1970,7 +1953,7 @@ static void *bytedup(const void *data, size_t datalen)
 	  free(data);
       }
 
-      virtual bool event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(Event e, bool poisoned)
       {
 	// TODO: handle poison
 	assert(poisoned == POISON_FIXME);
@@ -1980,7 +1963,8 @@ static void *bytedup(const void *data, size_t datalen)
 	impl->adjust_arrival(ID(barrier).barrier_generation(), delta, barrier.timestamp, Event::NO_EVENT,
 			     sender, forwarded,
 			     data, datalen);
-        return true;
+	// not attached to anything, so delete ourselves when we're done
+	delete this;
       }
 
       virtual void print(std::ostream& os) const
@@ -2284,9 +2268,7 @@ static void *bytedup(const void *data, size_t datalen)
 	Barrier b = make_barrier(trigger_gen);
 	while(!local_notifications.empty()) {
 	  EventWaiter *ew = local_notifications.pop_front();
-	  bool nuke = ew->event_triggered(b, POISON_FIXME);
-	  if(nuke)
-	    delete ew;
+	  ew->event_triggered(b, POISON_FIXME);
 	}
 
 	// now do remote notifications
@@ -2394,9 +2376,7 @@ static void *bytedup(const void *data, size_t datalen)
 
       if(trigger_now) {
 	Barrier b = make_barrier(needed_gen);
-	bool nuke = waiter->event_triggered(b, POISON_FIXME);
-	if(nuke)
-	  delete waiter;
+	waiter->event_triggered(b, POISON_FIXME);
       }
 
       return true;
@@ -2595,9 +2575,7 @@ static void *bytedup(const void *data, size_t datalen)
       // with lock released, perform any local notifications
       while(!local_notifications.empty()) {
 	EventWaiter *ew = local_notifications.pop_front();
-	bool nuke = ew->event_triggered(b, POISON_FIXME);
-	if(nuke)
-	  delete ew;
+	ew->event_triggered(b, POISON_FIXME);
       }
     }
 

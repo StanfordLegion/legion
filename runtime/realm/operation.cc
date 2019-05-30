@@ -300,10 +300,9 @@ namespace Realm {
   {}
 #endif
 
-  bool OperationTable::TableEntry::event_triggered(Event e, bool poisoned)
+  void OperationTable::TableEntry::event_triggered(Event e, bool poisoned)
   {
     table->event_triggered(e);
-    return false;  // never delete us
   }
 
   void OperationTable::TableEntry::print(std::ostream& os) const

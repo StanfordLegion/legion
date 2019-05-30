@@ -46,6 +46,7 @@
 namespace Realm {
 
     class XferDes;
+    class XferDesQueue;
     class Channel;
 
     extern Logger log_new_dma;
@@ -416,6 +417,20 @@ namespace Realm {
         available_reqs.push(req);
       }
 
+      class DeferredXDEnqueue : public Realm::EventWaiter {
+      public:
+	void defer(XferDesQueue *_xferDes_queue,
+		   XferDes *_xd, Event wait_on);
+
+	virtual void event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	XferDesQueue *xferDes_queue;
+	XferDes *xd; // TODO: eliminate this based on a known offset
+      };
+      DeferredXDEnqueue deferred_enqueue;
     };
 
     class MemcpyXferDes : public XferDes {
@@ -938,7 +953,6 @@ namespace Realm {
     //typedef std::priority_queue<XferDes*, std::vector<XferDes*>, CompareXferDes> PriorityXferDesQueue;
     typedef std::set<XferDes*, CompareXferDes> PriorityXferDesQueue;
 
-    class XferDesQueue;
     class DMAThread {
     public:
       DMAThread(long _max_nr, XferDesQueue* _xd_queue, std::vector<Channel*>& _channels) {

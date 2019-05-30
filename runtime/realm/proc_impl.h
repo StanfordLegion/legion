@@ -212,26 +212,6 @@ namespace Realm {
       ProfilingGauges::AbsoluteRangeGauge<int> *ready_task_count;
     };
     
-    // this is generally useful to all processor implementations, so put it here
-    class DeferredTaskSpawn : public EventWaiter {
-    public:
-      DeferredTaskSpawn(ProcessorImpl *_proc, Task *_task) 
-        : proc(_proc), task(_task) {}
-
-      virtual ~DeferredTaskSpawn(void)
-      {
-        // we do _NOT_ own the task - do not free it
-      }
-
-      virtual bool event_triggered(Event e, bool poisoned);
-      virtual void print(std::ostream& os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      ProcessorImpl *proc;
-      Task *task;
-    };
-
     // a task registration can take a while if remote processors and/or JITs are
     //  involved
     class TaskRegistration : public Operation {

@@ -26,15 +26,31 @@
 
 #include "realm/rsrv_impl.h"
 #include "realm/metadata.h"
+#include "realm/event_impl.h"
 
 namespace Realm {
 
+    class MemoryImpl;
+    
     class RegionInstanceImpl {
     protected:
       // RegionInstanceImpl creation/deletion is handled by MemoryImpl
       friend class MemoryImpl;
       RegionInstanceImpl(RegionInstance _me, Memory _memory);
       ~RegionInstanceImpl(void);
+
+      class DeferredDestroy : public EventWaiter {
+      public:
+	void defer(RegionInstanceImpl *_inst, MemoryImpl *_mem, Event wait_on);
+	virtual void event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	RegionInstanceImpl *inst;
+	MemoryImpl *mem;
+      };
+      DeferredDestroy deferred_destroy;
 
     public:
       // the life cycle of an instance is defined in part by when the

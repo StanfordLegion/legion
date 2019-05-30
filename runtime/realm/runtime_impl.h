@@ -281,6 +281,21 @@ namespace Realm {
 
       SamplingProfiler sampling_profiler;
 
+      class DeferredShutdown : public EventWaiter {
+      public:
+	void defer(RuntimeImpl *_runtime, int _result_code,
+		   Event wait_on);
+
+	virtual void event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	RuntimeImpl *runtime;
+	int result_code;
+      };
+      DeferredShutdown deferred_shutdown;
+      
     public:
       // used by modules to add processors, memories, etc.
       void add_memory(MemoryImpl *m);

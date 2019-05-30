@@ -53,7 +53,7 @@ namespace Realm {
     class EventWaiter {
     public:
       virtual ~EventWaiter(void) {}
-      virtual bool event_triggered(Event e, bool poisoned) = 0;
+      virtual void event_triggered(Event e, bool poisoned) = 0;
       virtual void print(std::ostream& os) const = 0;
       virtual Event get_finish_event(void) const = 0;
 
@@ -105,7 +105,7 @@ namespace Realm {
       public:
 	EventMerger *merger;
 
-	virtual bool event_triggered(Event e, bool poisoned);
+	virtual void event_triggered(Event e, bool poisoned);
 	virtual void print(std::ostream& os) const;
 	virtual Event get_finish_event(void) const;
       };
