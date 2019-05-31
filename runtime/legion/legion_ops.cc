@@ -5581,7 +5581,7 @@ namespace Legion {
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
-      interfering_requriements.clear();
+      interfering_requirements.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return this operation to the runtime
