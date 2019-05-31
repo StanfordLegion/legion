@@ -10558,6 +10558,12 @@ namespace Legion {
       result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
             runtime->get_available_distributed_id(),
             runtime->address_space));
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
+#endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
