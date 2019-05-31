@@ -10606,6 +10606,12 @@ namespace Legion {
       // We'll fill it in later
       result_map = FutureMap(
           create_future_map(ctx, launch_space, IndexSpace::NO_SPACE));
+#ifdef DEBUG_LEGION
+      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
+        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
+      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
+        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
+#endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
