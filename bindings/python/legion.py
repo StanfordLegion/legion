@@ -1291,7 +1291,7 @@ class _TaskLauncher(object):
 
         args = self.preprocess_args(args)
         args, futures = self.gather_futures(args)
-        task_args, _ = self.encode_args(args)
+        task_args, task_args_root = self.encode_args(args)
 
         # Construct the task launcher.
         launcher = c.legion_task_launcher_create(
@@ -1325,7 +1325,8 @@ class _TaskLauncher(object):
 
         # Launch the task.
         if _my.ctx.current_launch is not None:
-            return _my.ctx.current_launch.attach_task_launcher(launcher, point)
+            return _my.ctx.current_launch.attach_task_launcher(
+                launcher, point, root=task_args_root)
 
         result = c.legion_task_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, launcher)
@@ -1385,10 +1386,12 @@ class _IndexLauncher(_TaskLauncher):
         c.legion_future_map_destroy(result)
 
 class _MustEpochLauncher(object):
-    __slots__ = ['launcher']
+    __slots__ = ['launcher', 'roots', 'has_sublaunchers']
 
     def __init__(self):
         self.launcher = c.legion_must_epoch_launcher_create(0, 0)
+        self.roots = []
+        self.has_sublaunchers = False
 
     def __del__(self):
         c.legion_must_epoch_launcher_destroy(self.launcher)
@@ -1396,13 +1399,18 @@ class _MustEpochLauncher(object):
     def spawn_task(self, *args):
         raise Exception('MustEpochLaunch does not support spawn_task')
 
-    def attach_task_launcher(self, task_launcher, point):
+    def attach_task_launcher(self, task_launcher, point, root=None):
         if point is None:
             raise Exception('MustEpochLauncher requires a point for each task')
+        if root is not None:
+            self.roots.append(root)
         c.legion_must_epoch_launcher_add_single_task(
             self.launcher, point.raw_value(), task_launcher)
+        self.has_sublaunchers = True
 
     def launch(self):
+        if not self.has_sublaunchers:
+            raise Exception('MustEpochLaunch requires at least point task to be executed')
         result = c.legion_must_epoch_launcher_execute(
             _my.ctx.runtime, _my.ctx.context, self.launcher)
 
@@ -1539,8 +1547,8 @@ class MustEpochLaunch(object):
 
         # TODO: Support return values
 
-    def attach_task_launcher(self, task_launcher, point):
-        self.launcher.attach_task_launcher(task_launcher, point)
+    def attach_task_launcher(self, *args, **kwargs):
+        self.launcher.attach_task_launcher(*args, **kwargs)
 
     def launch(self):
         self.launcher.launch()
