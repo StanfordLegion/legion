@@ -3656,6 +3656,7 @@ namespace Legion {
 	std::vector<Processor::Kind> ranking;
 	default_policy_rank_processor_kinds(ctx, *(input.tasks[i]), ranking);
 	std::vector<Processor::Kind>::iterator it = ranking.begin();
+        bool picked = false;
 	while(true) {
 	  assert(it != ranking.end());
           // Check to see if we actually have processors of this kind
@@ -3690,7 +3691,11 @@ namespace Legion {
               }
             case Processor::LOC_PROC:
               {
-                assert(!local_cpus.empty());
+                if (local_cpus.empty())
+                {
+                  ++it;
+                  continue;
+                }
                 break;
               }
             case Processor::IO_PROC:
@@ -3716,10 +3721,12 @@ namespace Legion {
           }
 	  if(have_proc_kind_variant(ctx, input.tasks[i]->task_id, *it)) {
 	    tasks_by_kind[*it].push_back(input.tasks[i]);
+            picked = true;
 	    break;
 	  }
 	  ++it;
 	}
+        assert(picked);
       }
       // now try to satisfy each kind
       std::map<const Task*,Processor> proc_map;
