@@ -5581,6 +5581,7 @@ namespace Legion {
       src_exchanged.clear();
       dst_exchanged.clear();
       commit_preconditions.clear();
+      interfering_requriements.clear();
       if (remove_launch_space_reference(launch_space))
         delete launch_space;
       // Return this operation to the runtime
@@ -5968,9 +5969,7 @@ namespace Legion {
                       "for this index task launch then everything is good.",
                       actual_idx1, actual_idx2, unique_op_id, 
                       parent_ctx->get_task_name(), parent_ctx->get_unique_id());
-#ifdef DEBUG_LEGION
       interfering_requirements.insert(std::pair<unsigned,unsigned>(idx1,idx2));
-#endif
     }
 
     //--------------------------------------------------------------------------
@@ -6097,7 +6096,6 @@ namespace Legion {
       }
     }
 
-#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void IndexCopyOp::check_point_requirements(void)
     //--------------------------------------------------------------------------
@@ -6186,7 +6184,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     /////////////////////////////////////////////////////////////
     // Point Copy Operation 
@@ -14315,10 +14312,9 @@ namespace Legion {
                                                       points.end());
       function->project_points(this, 0/*idx*/, requirement,
                                runtime, projection_points);
-#ifdef DEBUG_LEGION
       // Check for interfering point requirements in debug mode
-      check_point_requirements();
-#endif
+      if (runtime->check_privileges)
+        check_point_requirements();
       if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointFillOp*>::const_iterator it = points.begin();
@@ -14387,7 +14383,6 @@ namespace Legion {
         commit_operation(true/*deactivate*/);
     }
 
-#ifdef DEBUG_LEGION
     //--------------------------------------------------------------------------
     void IndexFillOp::check_point_requirements(void)
     //--------------------------------------------------------------------------
@@ -14444,7 +14439,6 @@ namespace Legion {
         }
       }
     }
-#endif
 
     ///////////////////////////////////////////////////////////// 
     // Point Fill Op 

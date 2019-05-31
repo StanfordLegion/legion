@@ -1173,9 +1173,7 @@ namespace Legion {
           LegionVector<IndirectRecord>::aligned &records, const bool sources);
     public:
       void handle_point_commit(RtEvent point_committed);
-#ifdef DEBUG_LEGION
       void check_point_requirements(void);
-#endif
     public:
       IndexSpaceNode*                                    launch_space;
     protected:
@@ -1191,11 +1189,9 @@ namespace Legion {
       unsigned                                           points_committed;
       bool                                               commit_request;
       std::set<RtEvent>                                  commit_preconditions;
-#ifdef DEBUG_LEGION
     protected:
       // For checking aliasing of points in debug mode only
       std::set<std::pair<unsigned,unsigned> > interfering_requirements;
-#endif
     };
 
     /**
@@ -2856,9 +2852,7 @@ namespace Legion {
       virtual void trigger_commit(void);
     public:
       void handle_point_commit(void);
-#ifdef DEBUG_LEGION
       void check_point_requirements(void);
-#endif
     public:
       IndexSpaceNode*               launch_space;
     protected:
