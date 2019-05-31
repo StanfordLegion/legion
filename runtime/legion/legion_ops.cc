@@ -3838,7 +3838,11 @@ namespace Legion {
     //--------------------------------------------------------------------------
     {
       if (runtime->check_privileges)
+      {
         check_copy_privileges(false/*permit projection*/);
+        // Also check the compatibility properties here
+        check_compatibility_properties();
+      }
       // Register a dependence on our predicate
       register_predicate_dependence();
       ProjectionInfo projection_info;
@@ -4833,7 +4837,6 @@ namespace Legion {
                                offset + idx, permit_projection);
         } 
       }
-      check_compatibility_properties();
     }
 
     //--------------------------------------------------------------------------
@@ -5894,15 +5897,16 @@ namespace Legion {
                                    index_domain, projection_points);
         }
       }
-#ifdef DEBUG_LEGION
-      // Check for interfering point requirements in debug mode
-      check_point_requirements();
-      // Also check to make sure source requirements dominate
-      // the destination requirements for each point
-      for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
-            it != points.end(); it++)
-        (*it)->check_compatibility();
-#endif
+      if (runtime->check_privileges)
+      {
+        // Check for interfering point requirements in debug mode
+        check_point_requirements();
+        // Also check to make sure source requirements dominate
+        // the destination requirements for each point
+        for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
+              it != points.end(); it++)
+          (*it)->check_compatibility_properties();
+      }
       if (runtime->legion_spy_enabled)
       {
         for (std::vector<PointCopyOp*>::const_iterator it = points.begin();
@@ -6284,15 +6288,6 @@ namespace Legion {
       if (runtime->legion_spy_enabled)
         LegionSpy::log_index_point(owner->get_unique_op_id(), unique_op_id, p);
     }
-
-#ifdef DEBUG_LEGION
-    //--------------------------------------------------------------------------
-    void PointCopyOp::check_compatibility(void) const
-    //--------------------------------------------------------------------------
-    {
-      check_compatibility_properties();
-    }
-#endif
 
     //--------------------------------------------------------------------------
     void PointCopyOp::activate(void)
