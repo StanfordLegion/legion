@@ -1206,6 +1206,7 @@ namespace Legion {
      */
     class PointCopyOp : public CopyOp, public ProjectionPoint {
     public:
+      friend class IndexCopyOp;
       PointCopyOp(Runtime *rt);
       PointCopyOp(const PointCopyOp &rhs);
       virtual ~PointCopyOp(void);
@@ -1213,9 +1214,6 @@ namespace Legion {
       PointCopyOp& operator=(const PointCopyOp &rhs);
     public:
       void initialize(IndexCopyOp *owner, const DomainPoint &point);
-#ifdef DEBUG_LEGION
-      void check_compatibility(void) const;
-#endif
       void launch(void);
     public:
       virtual void activate(void);
