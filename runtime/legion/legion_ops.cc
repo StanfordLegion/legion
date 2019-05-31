@@ -10948,32 +10948,6 @@ namespace Legion {
       result_map = FutureMap(new FutureMapImpl(ctx, this, runtime,
             runtime->get_available_distributed_id(),
             runtime->address_space));
-#ifdef DEBUG_LEGION
-      size_t total_points = 0;
-      for (unsigned idx = 0; idx < indiv_tasks.size(); idx++)
-      {
-        result_map.impl->add_valid_point(indiv_tasks[idx]->index_point);
-        total_points++;
-      }
-      for (unsigned idx = 0; idx < index_tasks.size(); idx++)
-      {
-        result_map.impl->add_valid_domain(index_tasks[idx]->index_domain);
-        total_points += index_tasks[idx]->index_domain.get_volume();
-      }
-      // Assume for now that all msut epoch launches have to be
-      // mapped to CPUs
-      Machine::ProcessorQuery all_cpus(runtime->machine);
-      all_cpus.only_kind(Processor::LOC_PROC); 
-      if (total_points > all_cpus.count())
-      {
-        REPORT_LEGION_ERROR(ERROR_ILLEGAL_MUST_EPOCH,
-                      "Illegal must epoch launch in task %s (UID %lld). "
-            "Must epoch launch requested %zd tasks, but only %zd CPUs "
-            "exist in this machine.", parent_ctx->get_task_name(),
-            parent_ctx->get_unique_id(), total_points, all_cpus.count());
-        assert(false);
-      }
-#endif
       if (runtime->legion_spy_enabled)
         LegionSpy::log_must_epoch_operation(ctx->get_unique_id(), unique_op_id);
       return result_map;
