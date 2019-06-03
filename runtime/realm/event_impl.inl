@@ -87,5 +87,16 @@ namespace Realm {
   }
 
 
+  ////////////////////////////////////////////////////////////////////////
+  //
+  // class EventWaiter
+
+  inline std::ostream& operator<<(std::ostream& os, const EventWaiter &waiter)
+  {
+    waiter.print(os);
+    return os;
+  }
+
+
 }; // namespace Realm
 
