@@ -147,12 +147,25 @@ namespace Realm {
     // the type of 'tester' depends on which operation it is, so erase the type here...
     virtual void set_overlap_tester(void *tester);
 
-    void deferred_launch(Event wait_for);
+    void launch(Event wait_for);
 
     // some partitioning operations are handled inline for simple cases
     // these cases must still supply all the requested profiling responses
     static void do_inline_profiling(const ProfilingRequestSet &reqs,
 				    long long inline_start_time);
+
+    class DeferredLaunch : public EventWaiter {
+    public:
+      void defer(PartitioningOperation *_op, Event wait_on);
+
+      virtual void event_triggered(Event e, bool poisoned);
+      virtual void print(std::ostream& os) const;
+      virtual Event get_finish_event(void) const;
+
+    protected:
+      PartitioningOperation *op;
+    };
+    DeferredLaunch deferred_launch;
   };
 
 

@@ -50,7 +50,7 @@ namespace Realm {
       log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -75,7 +75,7 @@ namespace Realm {
       log_dpops.info() << "preimage: " << *this << " tgt=" << targets[i] << " -> " << preimages[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 

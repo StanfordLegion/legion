@@ -200,6 +200,42 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class Task::DeferredSpawn
+  //
+
+  void Task::DeferredSpawn::defer(ProcessorImpl *_proc, Task *_task,
+				  Event wait_on)
+  {
+    proc = _proc;
+    task = _task;
+    EventImpl::add_waiter(wait_on, this);
+  }
+    
+  void Task::DeferredSpawn::event_triggered(Event e, bool poisoned)
+  {
+    if(poisoned) {
+      // cancel the task - this has to work
+      log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
+      task->handle_poisoned_precondition(e);
+      return;
+    }
+
+    proc->enqueue_task(task);
+  }
+
+  void Task::DeferredSpawn::print(std::ostream& os) const
+  {
+    os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
+  }
+
+  Event Task::DeferredSpawn::get_finish_event(void) const
+  {
+    return task->get_finish_event();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class ThreadedTaskScheduler::WorkCounter
   //
 

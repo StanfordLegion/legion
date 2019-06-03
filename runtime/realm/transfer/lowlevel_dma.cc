@@ -483,12 +483,12 @@ namespace Realm {
       EventImpl::add_waiter(e, this);
     }
 
-    bool DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
+    void DmaRequest::Waiter::event_triggered(Event e, bool poisoned)
     {
       if(poisoned) {
 	log_poison.info() << "cancelling poisoned dma operation - op=" << req << " after=" << req->get_finish_event();
 	req->handle_poisoned_precondition(e);
-	return false;
+	return;
       }
 
       log_dma.debug("request %p triggered in state %d (lock = " IDFMT ")",
@@ -502,9 +502,6 @@ namespace Realm {
       // this'll enqueue the DMA if it can, or wait on another event if it 
       //  can't
       req->check_readiness(false, queue);
-
-      // don't delete us!
-      return false;
     }
 
     void DmaRequest::Waiter::print(std::ostream& os) const

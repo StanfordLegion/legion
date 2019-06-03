@@ -458,7 +458,7 @@ namespace Realm {
     }
 
     // release storage associated with an instance
-    void MemoryImpl::release_instance_storage(RegionInstance i,
+    void MemoryImpl::release_instance_storage(RegionInstanceImpl *inst,
 					      Event precondition)
     {
       // all allocation requests are handled by the memory's owning node for
@@ -467,32 +467,40 @@ namespace Realm {
       if(target != my_node_id) {
 	ActiveMessage<MemStorageReleaseRequest> amsg(target);
 	amsg->memory = me;
-	amsg->inst = i;
+	amsg->inst = inst->me;
 	amsg->precondition = precondition;
 	amsg.commit();
 	return;
       }
 
-      // TODO: memory needs to handle non-ready releases
-      assert(precondition.has_triggered());
-
-      RegionInstanceImpl *impl = get_instance(i);
+      // TODO: memory needs to handle non-ready releases for deferred allocation
+      bool poisoned = false;
+      if(!precondition.has_triggered_faultaware(poisoned)) {
+	inst->deferred_destroy.defer(inst, this, precondition);
+	return;
+      }
+      // a poisoned precondition silently cancels the deletion - up to
+      //  requestor to realize this has occurred since the deletion does
+      //  not have its own completion event
+      if(poisoned)
+	return;
 
       // better not be in the unallocated state...
-      assert(impl->metadata.inst_offset != size_t(-1));
+      assert(inst->metadata.inst_offset != size_t(-1));
       // deallocate unless the allocation had failed
-      if(impl->metadata.inst_offset != size_t(-2)) {
+      if(inst->metadata.inst_offset != size_t(-2)) {
 	AutoHSLLock al(allocator_mutex);
-	allocator.deallocate(i);
+	allocator.deallocate(inst->me);
       }
 
-      if(NodeID(ID(i).instance_creator_node()) == my_node_id) {
+      NodeID creator_node = ID(inst->me).instance_creator_node();
+      if(creator_node == my_node_id) {
 	// local notification of result
-	get_instance(i)->notify_deallocation();
+	inst->notify_deallocation();
       } else {
 	// remote notification
-	ActiveMessage<MemStorageReleaseResponse> amsg(ID(i).instance_creator_node());
-	amsg->inst = i;
+	ActiveMessage<MemStorageReleaseResponse> amsg(creator_node);
+	amsg->inst = inst->me;
 	amsg.commit();
       }
     }
@@ -923,8 +931,9 @@ namespace Realm {
 							   const void *data, size_t datalen)
   {
     MemoryImpl *impl = get_runtime()->get_memory_impl(args.memory);
+    RegionInstanceImpl *inst = impl->get_instance(args.inst);
 
-    impl->release_instance_storage(args.inst,
+    impl->release_instance_storage(inst,
 				   args.precondition);
   }
 

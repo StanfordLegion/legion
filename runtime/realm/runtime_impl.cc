@@ -198,26 +198,31 @@ namespace Realm {
 	   e->remote_waiters.empty())
 	  continue;
 
+	size_t clw_size = 0;
+	for(EventWaiter *pos = e->current_local_waiters.head.next;
+	    pos;
+	    pos = pos->ew_list_link.next)
+	  clw_size++;
 	os << "Event " << e->me <<": gen=" << e->generation
 	   << " subscr=" << e->gen_subscribed
-	   << " local=" << e->current_local_waiters.size()
+	   << " local=" << clw_size //e->current_local_waiters.size()
 	   << "+" << e->future_local_waiters.size()
 	   << " remote=" << e->remote_waiters.size() << "\n";
-	for(std::vector<EventWaiter *>::const_iterator it = e->current_local_waiters.begin();
-	    it != e->current_local_waiters.end();
-	    it++) {
-	  os << "  [" << (e->generation+1) << "] L:" << (*it) << " - ";
-	  (*it)->print(os);
+	for(EventWaiter *pos = e->current_local_waiters.head.next;
+	    pos;
+	    pos = pos->ew_list_link.next) {
+	  os << "  [" << (e->generation+1) << "] L:" << pos/*(*it)*/ << " - ";
+	  pos/*(*it)*/->print(os);
 	  os << "\n";
 	}
-	for(std::map<EventImpl::gen_t, std::vector<EventWaiter *> >::const_iterator it = e->future_local_waiters.begin();
+	for(std::map<EventImpl::gen_t, EventWaiter::EventWaiterList>::const_iterator it = e->future_local_waiters.begin();
 	    it != e->future_local_waiters.end();
 	    it++) {
-	  for(std::vector<EventWaiter *>::const_iterator it2 = it->second.begin();
-	      it2 != it->second.end();
-	      it2++) {
-	    os << "  [" << (it->first) << "] L:" << (*it2) << " - ";
-	    (*it2)->print(os);
+	  for(EventWaiter *pos = it->second.head.next;
+	      pos;
+	      pos = pos->ew_list_link.next) {
+	    os << "  [" << (it->first) << "] L:" << pos/*(*it2)*/ << " - ";
+	    pos/*(*it2)*/->print(os);
 	    os << "\n";
 	  }
 	}
@@ -244,11 +249,12 @@ namespace Realm {
 	   << " subscr=" << b->gen_subscribed << "\n";
 	for (std::map<EventImpl::gen_t, BarrierImpl::Generation*>::const_iterator git = 
 	       b->generations.begin(); git != b->generations.end(); git++) {
-	  const std::vector<EventWaiter*> &waiters = git->second->local_waiters;
-	  for (std::vector<EventWaiter*>::const_iterator it = 
-		 waiters.begin(); it != waiters.end(); it++) {
-	    os << "  [" << (git->first) << "] L:" << (*it) << " - ";
-	    (*it)->print(os);
+	  const EventWaiter::EventWaiterList &waiters = git->second->local_waiters;
+	  for(EventWaiter *pos = waiters.head.next;
+	      pos;
+	      pos = pos->ew_list_link.next) {
+	    os << "  [" << (git->first) << "] L:" << pos/*(*it)*/ << " - ";
+	    pos/*(*it)*/->print(os);
 	    os << "\n";
 	  }
 	}
@@ -470,30 +476,17 @@ namespace Realm {
     {
       ((RuntimeImpl *)impl)->run(task_id, style, args, arglen, background);
     }
+  
+    void RuntimeImpl::DeferredShutdown::defer(RuntimeImpl *_runtime,
+					      int _result_code,
+					      Event wait_on)
+    {
+      runtime = _runtime;
+      result_code = _result_code;
+      EventImpl::add_waiter(wait_on, this);
+    }
 
-    class DeferredShutdown : public EventWaiter {
-    public:
-      DeferredShutdown(RuntimeImpl *_runtime, int _result_code);
-      virtual ~DeferredShutdown(void);
-
-      virtual bool event_triggered(Event e, bool poisoned);
-      virtual void print(std::ostream& os) const;
-      virtual Event get_finish_event(void) const;
-
-    protected:
-      RuntimeImpl *runtime;
-      int result_code;
-    };
-
-    DeferredShutdown::DeferredShutdown(RuntimeImpl *_runtime, int _result_code)
-      : runtime(_runtime)
-      , result_code(_result_code)
-    {}
-
-    DeferredShutdown::~DeferredShutdown(void)
-    {}
-
-    bool DeferredShutdown::event_triggered(Event e, bool poisoned)
+    void RuntimeImpl::DeferredShutdown::event_triggered(Event e, bool poisoned)
     {
       // no real good way to deal with a poisoned shutdown precondition
       if(poisoned) {
@@ -502,15 +495,14 @@ namespace Realm {
       }
       log_runtime.info() << "triggering deferred shutdown";
       runtime->shutdown(true, result_code);
-      return true; // go ahead and delete us
     }
 
-    void DeferredShutdown::print(std::ostream& os) const
+    void RuntimeImpl::DeferredShutdown::print(std::ostream& os) const
     {
       os << "deferred shutdown";
     }
 
-    Event DeferredShutdown::get_finish_event(void) const
+    Event RuntimeImpl::DeferredShutdown::get_finish_event(void) const
     {
       return Event::NO_EVENT;
     }
@@ -522,9 +514,9 @@ namespace Realm {
       if(wait_on.has_triggered())
 	((RuntimeImpl *)impl)->shutdown(true, result_code); // local request
       else
-	EventImpl::add_waiter(wait_on,
-			      new DeferredShutdown((RuntimeImpl *)impl,
-						   result_code));
+	((RuntimeImpl *)impl)->deferred_shutdown.defer((RuntimeImpl *)impl,
+						       result_code,
+						       wait_on);
     }
 
     int Runtime::wait_for_shutdown(void)

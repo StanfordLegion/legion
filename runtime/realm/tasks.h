@@ -30,6 +30,8 @@
 
 namespace Realm {
 
+    class ProcessorImpl;
+  
     // information for a task launch
     class Task : public Operation {
     public:
@@ -62,6 +64,19 @@ namespace Realm {
       Event before_event;
       int priority;
 
+      class DeferredSpawn : public EventWaiter {
+      public:
+	void defer(ProcessorImpl *_proc, Task *_task, Event wait_on);
+	virtual void event_triggered(Event e, bool poisoned);
+	virtual void print(std::ostream& os) const;
+	virtual Event get_finish_event(void) const;
+
+      protected:
+	ProcessorImpl *proc;
+	Task *task;
+      };
+      DeferredSpawn deferred_spawn;
+      
     protected:
       virtual void mark_completed(void);
 

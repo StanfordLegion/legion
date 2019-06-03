@@ -828,7 +828,7 @@ namespace Realm {
       } else
 	enqueue_task(task);
     } else {
-      EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+      task->deferred_spawn.defer(this, task, start_event);
     }
   }
 

@@ -50,7 +50,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -75,7 +75,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 
@@ -101,7 +101,7 @@ namespace Realm {
       log_dpops.info() << "image: " << *this << " src=" << sources[i] << " mask=" << diff_rhss[i] << " -> " << images[i] << " (" << e << ")";
     }
 
-    op->deferred_launch(wait_on);
+    op->launch(wait_on);
     return e;
   }
 

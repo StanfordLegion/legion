@@ -3766,37 +3766,32 @@ namespace Realm {
 #endif
       }
 
-      class DeferredXDEnqueue : public Realm::EventWaiter {
-      public:
-	DeferredXDEnqueue(XferDesQueue *_xferDes_queue,
-			  XferDes *_xd)
-	  : xferDes_queue(_xferDes_queue), xd(_xd)
-	{}
+      void XferDes::DeferredXDEnqueue::defer(XferDesQueue *_xferDes_queue,
+					     XferDes *_xd, Event wait_on)
+      {
+	xferDes_queue = _xferDes_queue;
+	xd = _xd;
+	Realm::EventImpl::add_waiter(wait_on, this);
+      }
 
-	virtual bool event_triggered(Event e, bool poisoned)
-	{
-	  // TODO: handle poisoning
-	  assert(!poisoned);
-	  log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
-	  xferDes_queue->enqueue_xferDes_local(xd);
-	  return true; // delete us
-	}
+      void XferDes::DeferredXDEnqueue::event_triggered(Event e, bool poisoned)
+      {
+	// TODO: handle poisoning
+	assert(!poisoned);
+	log_new_dma.info() << "xd metadata ready: xd=" << xd->guid;
+	xferDes_queue->enqueue_xferDes_local(xd);
+      }
 
-	virtual void print(std::ostream& os) const
-	{
-	  os << "deferred xd enqueue: xd=" << xd->guid;
-	}
+      void XferDes::DeferredXDEnqueue::print(std::ostream& os) const
+      {
+	os << "deferred xd enqueue: xd=" << xd->guid;
+      }
 
-	virtual Event get_finish_event(void) const
-	{
-	  // TODO: would be nice to provide dma op's finish event here
-	  return Event::NO_EVENT;
-	}
-
-      protected:
-	XferDesQueue *xferDes_queue;
-	XferDes *xd;
-      };
+      Event XferDes::DeferredXDEnqueue::get_finish_event(void) const
+      {
+	// TODO: would be nice to provide dma op's finish event here
+	return Event::NO_EVENT;
+      }
 
       void create_xfer_des(DmaRequest* _dma_request,
                            NodeID _launch_node,
@@ -3945,8 +3940,7 @@ namespace Realm {
 	  Event wait_on = Event::merge_events(src_iter_ready, dst_iter_ready);
 	  log_new_dma.info() << "xd metadata wait: xd=" << _guid << " ready=" << wait_on;
           if (wait_on.exists())
-            Realm::EventImpl::add_waiter(wait_on, new DeferredXDEnqueue(xferDes_queue,
-                                                                        xd));
+	    xd->deferred_enqueue.defer(xferDes_queue, xd, wait_on);
           else
             xferDes_queue->enqueue_xferDes_local(xd);
 	} else

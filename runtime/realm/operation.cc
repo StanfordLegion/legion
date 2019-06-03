@@ -300,6 +300,23 @@ namespace Realm {
   {}
 #endif
 
+  void OperationTable::TableEntry::event_triggered(Event e, bool poisoned)
+  {
+    table->event_triggered(e);
+  }
+
+  void OperationTable::TableEntry::print(std::ostream& os) const
+  {
+    os << "operation table entry (table=" << table << ")";
+  }
+
+  Event OperationTable::TableEntry::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
+
+
+#if 0
   ////////////////////////////////////////////////////////////////////////
   //
   // class OperationTable::TableCleaner
@@ -324,6 +341,7 @@ namespace Realm {
   {
     return Event::NO_EVENT;
   }
+#endif
 
 
   ////////////////////////////////////////////////////////////////////////
@@ -333,7 +351,9 @@ namespace Realm {
 
   OperationTable::OperationTable(void)
 #ifdef REALM_USE_OPERATION_TABLE
+#if 0
     : cleaner(this)
+#endif
 #endif
   {}
 
@@ -356,6 +376,7 @@ namespace Realm {
     bool cancel_immediately = false;
     void *reason_data = 0;
     size_t reason_size = 0;
+    TableEntry *entry = 0;
     {
       AutoHSLLock al(mutex);
 
@@ -369,16 +390,20 @@ namespace Realm {
 	e.pending_cancellation = false;
 	e.reason_data = 0;
 	e.reason_size = 0;
+	e.table = this;
+	entry = &e;
       } else {
 	// existing entry should only occur if there's a pending cancellation
 	TableEntry& e = it->second;
 	assert(e.local_op == 0);
 	assert(e.remote_node == -1);
 	assert(e.pending_cancellation);
+	assert(e.table == this);
 
 	// put the operation in the table in case anybody else comes along while we're trying to
 	//  cancel it - add a reference since we're keeping one
 	e.local_op = local_op;
+	entry = &e;
 	local_op->add_reference();
 	cancel_immediately = true;
 	reason_data = e.reason_data;
@@ -388,7 +413,7 @@ namespace Realm {
 
     // either way there's an entry in the table for this now, so make sure our cleaner knows
     //  to clean it up
-    EventImpl::add_waiter(finish_event, &cleaner);
+    EventImpl::add_waiter(finish_event, entry/*&cleaner*/);
 
     // and finally, perform a delayed cancellation if requested
     if(cancel_immediately) {
@@ -411,6 +436,7 @@ namespace Realm {
     int subtable = finish_event.id % NUM_TABLES;
     GASNetHSL& mutex = mutexes[subtable];
     Table& table = tables[subtable];
+    TableEntry *entry = 0;
 
     {
       AutoHSLLock al(mutex);
@@ -425,10 +451,12 @@ namespace Realm {
       e.pending_cancellation = false;
       e.reason_data = 0;
       e.reason_size = 0;
+      e.table = this;
+      entry = &e;
     }
 
     // we can remove this entry once we know the operation is complete
-    EventImpl::add_waiter(finish_event, &cleaner);
+    EventImpl::add_waiter(finish_event, entry/*&cleaner*/);
 #endif
   }
 
