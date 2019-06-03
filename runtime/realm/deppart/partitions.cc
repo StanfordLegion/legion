@@ -688,44 +688,47 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
+  // class PartitioningOperation::DeferredLaunch
+
+  void PartitioningOperation::DeferredLaunch::defer(PartitioningOperation *_op,
+						Event wait_on)
+  {
+    op = _op;
+    EventImpl::add_waiter(wait_on, this);
+  }
+
+  void PartitioningOperation::DeferredLaunch::event_triggered(Event e, bool poisoned)
+  {
+    assert(!poisoned); // TODO: POISON_FIXME
+    op_queue->enqueue_partitioning_operation(op);
+  }
+
+  void PartitioningOperation::DeferredLaunch::print(std::ostream& os) const
+  {
+    os << "DeferredPartitioningOp(" << (void *)op << ")";
+  }
+  
+  Event PartitioningOperation::DeferredLaunch::get_finish_event(void) const
+  {
+    return op->get_finish_event();
+  }
+
+
+  ////////////////////////////////////////////////////////////////////////
+  //
   // class PartitioningOperation
-
-  class DeferredPartitioningOp : public EventWaiter {
-  public:
-    DeferredPartitioningOp(PartitioningOperation *_op) : op(_op) {}
-
-    virtual bool event_triggered(Event e, bool poisoned)
-    {
-      assert(!poisoned); // TODO: POISON_FIXME
-      op_queue->enqueue_partitioning_operation(op);
-      return true;
-    }
-
-    virtual void print(std::ostream& os) const
-    {
-      os << "DeferredPartitioningOp(" << (void *)op << ")";
-    }
-
-    virtual Event get_finish_event(void) const
-    {
-      return op->get_finish_event();
-    }
-
-  protected:
-    PartitioningOperation *op;
-  };
 
   PartitioningOperation::PartitioningOperation(const ProfilingRequestSet &reqs,
 					       Event _finish_event)
     : Operation(_finish_event, reqs)
   {}
 
-  void PartitioningOperation::deferred_launch(Event wait_for)
+  void PartitioningOperation::launch(Event wait_for)
   {
     if(wait_for.has_triggered())
       op_queue->enqueue_partitioning_operation(this);
     else
-      EventImpl::add_waiter(wait_for, new DeferredPartitioningOp(this));
+      deferred_launch.defer(this, wait_for);
   };
 
   void PartitioningOperation::set_overlap_tester(void *tester)

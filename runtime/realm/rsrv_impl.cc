@@ -44,7 +44,7 @@ namespace Realm {
 
       virtual ~DeferredLockRequest(void) { }
 
-      virtual bool event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(Event e, bool poisoned)
       {
 	// if input event is poisoned, do not attempt to take the lock - simply poison
 	//  the output event too
@@ -56,7 +56,8 @@ namespace Realm {
 						      ReservationImpl::ACQUIRE_BLOCKING,
 						      after_lock);
 	}
-        return true;
+	// not attached to anything, so delete ourselves when we're done
+	delete this;
       }
 
       virtual void print(std::ostream& os) const
@@ -88,7 +89,7 @@ namespace Realm {
 
       virtual ~DeferredUnlockRequest(void) { }
 
-      virtual bool event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(Event e, bool poisoned)
       {
 	// if input event is poisoned, do not attempt to release the lock
 	// we don't have an output event here, so this may result in a hang if nobody is
@@ -98,7 +99,8 @@ namespace Realm {
 	} else {
 	  get_runtime()->get_lock_impl(lock)->release();
 	}
-        return true;
+	// not attached to anything, so delete ourselves when we're done
+	delete this;
       }
 
       virtual void print(std::ostream& os) const
@@ -127,7 +129,7 @@ namespace Realm {
 
       virtual ~DeferredLockDestruction(void) { }
 
-      virtual bool event_triggered(Event e, bool poisoned)
+      virtual void event_triggered(Event e, bool poisoned)
       {
 	// if input event is poisoned, do not attempt to destroy the lock
 	// we don't have an output event here, so this may result in a leak if nobody is
@@ -137,7 +139,8 @@ namespace Realm {
 	} else {
 	  get_runtime()->get_lock_impl(lock)->release_reservation();
 	}
-        return true;
+	// not attached to anything, so delete ourselves when we're done
+	delete this;
       }
 
       virtual void print(std::ostream& os) const

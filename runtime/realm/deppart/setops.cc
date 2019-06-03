@@ -221,7 +221,7 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
@@ -290,7 +290,7 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
@@ -372,7 +372,7 @@ namespace Realm {
     }
 
     if(op)
-      op->deferred_launch(wait_on);
+      op->launch(wait_on);
     else
       PartitioningOperation::do_inline_profiling(reqs, inline_start_time);
     return e;
@@ -420,7 +420,7 @@ namespace Realm {
 	UnionOperation<N,T> *op = new UnionOperation<N,T>(reqs, e);
 
 	result = op->add_union(subspaces);
-	op->deferred_launch(wait_on);
+	op->launch(wait_on);
 	was_inline = false;
 	break;
       }
@@ -500,7 +500,7 @@ namespace Realm {
 	IntersectionOperation<N,T> *op = new IntersectionOperation<N,T>(reqs, e);
 
 	result = op->add_intersection(subspaces);
-	op->deferred_launch(wait_on);
+	op->launch(wait_on);
 	was_inline = false;
 	break;
       }

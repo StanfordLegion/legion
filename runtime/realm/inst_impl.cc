@@ -32,41 +32,39 @@ namespace Realm {
 
   ////////////////////////////////////////////////////////////////////////
   //
-  // class DeferredInstDestroy
+  // class RegionInstanceImpl::DeferredDestroy
   //
 
-    class DeferredInstDestroy : public EventWaiter {
-    public:
-      DeferredInstDestroy(RegionInstance _inst) : inst(_inst) { }
-      virtual ~DeferredInstDestroy(void) { }
-    public:
-      virtual bool event_triggered(Event e, bool poisoned)
-      {
-	// if input event is poisoned, do not attempt to destroy the lock
-	// we don't have an output event here, so this may result in a leak if nobody is
-	//  paying attention
-	if(poisoned) {
-	  log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
-	} else {
-	  inst.destroy();
-	  //get_runtime()->get_memory_impl(impl->memory)->destroy_instance(impl->me, true); 
-	}
-        return true;
-      }
+  void RegionInstanceImpl::DeferredDestroy::defer(RegionInstanceImpl *_inst,
+						  MemoryImpl *_mem,
+						  Event wait_on)
+  {
+    inst = _inst;
+    mem = _mem;
+    EventImpl::add_waiter(wait_on, this);
+  }
 
-      virtual void print(std::ostream& os) const
-      {
-        os << "deferred instance destruction";
-      }
+  void RegionInstanceImpl::DeferredDestroy::event_triggered(Event e, bool poisoned)
+  {
+    // if input event is poisoned, do not attempt to destroy the lock
+    // we don't have an output event here, so this may result in a leak if nobody is
+    //  paying attention
+    if(poisoned) {
+      log_poison.info() << "poisoned deferred instance destruction skipped - POSSIBLE LEAK - inst=" << inst;
+    } else {
+      mem->release_instance_storage(inst, Event::NO_EVENT);
+    }
+  }
 
-      virtual Event get_finish_event(void) const
-      {
-	return Event::NO_EVENT;
-      }
+  void RegionInstanceImpl::DeferredDestroy::print(std::ostream& os) const
+  {
+    os << "deferred instance destruction";
+  }
 
-    protected:
-      RegionInstance inst;
-    };
+  Event RegionInstanceImpl::DeferredDestroy::get_finish_event(void) const
+  {
+    return Event::NO_EVENT;
+  }
 
   
   ////////////////////////////////////////////////////////////////////////
@@ -249,24 +247,12 @@ namespace Realm {
       //  deallocate the instance's storage - the eventual callback from that
       //  will be what actually destroys the instance
       DetailedTimer::ScopedPush sp(TIME_LOW_LEVEL);
-      // TODO: send destruction request through so memory can see it, even
-      //  if it's not ready
-      bool poisoned = false;
-      if(!wait_on.has_triggered_faultaware(poisoned)) {
-	EventImpl::add_waiter(wait_on, new DeferredInstDestroy(*this));
-        return;
-      }
-      // a poisoned precondition silently cancels the deletion - up to
-      //  requestor to realize this has occurred since the deletion does
-      //  not have its own completion event
-      if(poisoned)
-	return;
 
-      log_inst.info() << "instance destroyed: inst=" << *this;
+      log_inst.info() << "instance destroyed: inst=" << *this << " wait_on=" << wait_on;
 
-      // this does the right thing even though we're using an instance ID
       MemoryImpl *mem_impl = get_runtime()->get_memory_impl(*this);
-      mem_impl->release_instance_storage(*this, wait_on);
+      RegionInstanceImpl *inst_impl = mem_impl->get_instance(*this);
+      mem_impl->release_instance_storage(inst_impl, wait_on);
     }
 
     void RegionInstance::destroy(const std::vector<DestroyedField>& destroyed_fields,

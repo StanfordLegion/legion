@@ -569,36 +569,7 @@ namespace Realm {
 	} else
 	  enqueue_task(task);
       } else
-	EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
-    }
-
-
-  ////////////////////////////////////////////////////////////////////////
-  //
-  // class DeferredTaskSpawn
-  //
-
-    bool DeferredTaskSpawn::event_triggered(Event e, bool poisoned)
-    {
-      if(poisoned) {
-	// cancel the task - this has to work
-	log_poison.info() << "cancelling poisoned task - task=" << task << " after=" << task->get_finish_event();
-	task->handle_poisoned_precondition(e);
-	return true;
-      }
-
-      proc->enqueue_task(task);
-      return true;
-    }
-
-    void DeferredTaskSpawn::print(std::ostream& os) const
-    {
-      os << "deferred task: func=" << task->func_id << " proc=" << task->proc << " finish=" << task->get_finish_event();
-    }
-
-    Event DeferredTaskSpawn::get_finish_event(void) const
-    {
-      return task->get_finish_event();
+	task->deferred_spawn.defer(this, task, start_event);
     }
 
 
@@ -804,7 +775,7 @@ namespace Realm {
       } else
 	enqueue_task(task);
     } else {
-      EventImpl::add_waiter(start_event, new DeferredTaskSpawn(this, task));
+      task->deferred_spawn.defer(this, task, start_event);
     }
   }
 
