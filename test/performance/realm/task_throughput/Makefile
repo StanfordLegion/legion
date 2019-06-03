@@ -15,7 +15,7 @@ USE_CUDA ?= 0
 OUTFILE		:= task_throughput 
 # List all the application source files here
 GEN_SRC		:= task_throughput.cc # .cc files
-GEN_GPU_SRC	:=		    # .cu files
+GEN_GPU_SRC	:= task_throughput_gpu.cu		    # .cu files
 
 # You can modify these variables, some will be appended to by the runtime makefile
 INC_FLAGS	:=
