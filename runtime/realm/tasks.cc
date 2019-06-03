@@ -421,6 +421,50 @@ namespace Realm {
     if(!really_blocked)
       return;
 
+    // if this thread has enabled the scheduler lock, we're not going to
+    //  yield to anybody - we'll spin until we're marked as being ready
+    //  again
+    if(ThreadLocal::scheduler_lock > 0) {
+      log_sched.debug() << "thread w/ scheduler lock spinning: " << thread;
+      spinning_workers.insert(thread);
+      while(true) {
+	long long old_work_counter = work_counter.read_counter();
+	switch(thread->get_state()) {
+	case Thread::STATE_READY:
+	  {
+	    log_sched.debug() << "thread w/ scheduler lock ready: " << thread;
+	    return;
+	  }
+
+	case Thread::STATE_ALERTED:
+	  {
+	    log_sched.debug() << "thread w/ scheduler lock alerted: " << thread;
+	    thread->process_signals();
+	    bool resuspended = try_update_thread_state(thread,
+						       Thread::STATE_ALERTED,
+						       Thread::STATE_BLOCKED);
+	    if(!resuspended) {
+	      assert(thread->get_state() == Thread::STATE_READY);
+	      return;
+	    }
+	    break;
+	  }
+
+	case Thread::STATE_BLOCKED:
+	  {
+	    // twiddle our thumbs until something happens
+	    wait_for_work(old_work_counter);
+	    break;
+	  }
+
+	default:
+	  assert(0);
+	};
+      }
+      // should never get here
+      assert(0);
+    }
+
 #ifdef DEBUG_THREAD_SCHEDULER
     assert(blocked_workers.count(thread) == 0);
 #endif
@@ -514,6 +558,17 @@ namespace Realm {
     // TODO: might be nice to do this in a lock-free way, since this is called by
     //  some other thread
     AutoHSLLock al(lock);
+
+    // if this was a spinning thread, remove it from the list and poke the
+    //  work counter in cases its execution resource is napping
+    if(!spinning_workers.empty()) {
+      std::set<Thread *>::iterator it = spinning_workers.find(thread);
+      if(it != spinning_workers.end()) {
+	spinning_workers.erase(it);
+	work_counter.increment_counter();
+	return;
+      }
+    }
 
     // it may be that the thread has noticed that it is ready already, in
     //  which case it'll no longer be blocked and we don't want to resume it
