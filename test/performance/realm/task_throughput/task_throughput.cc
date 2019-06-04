@@ -22,16 +22,16 @@
 
 #include <time.h>
 
-#include <realm.h>
-#include <realm/cmdline.h>
+#include "task_throughput.h"
 
-using namespace Realm;
+#include <realm/cmdline.h>
 
 namespace TestConfig {
   int tasks_per_processor = 256;
   int launching_processors = 1;
   int task_argument_size = 0;
   bool remote_tasks = false;
+  bool chain_tasks = false;
   bool with_profiling = false;
 };
 
@@ -40,6 +40,7 @@ enum {
   TOP_LEVEL_TASK = Processor::TASK_ID_FIRST_AVAILABLE+0, 
   TASK_LAUNCHER,
   DUMMY_TASK,
+  DUMMY_GPU_TASK,
   PROFILER_TASK,
 };
 
@@ -71,8 +72,8 @@ namespace FieldIDs {
   };
 };
 
-void dummy_task(const void *args, size_t arglen, 
-		const void *userdata, size_t userlen, Processor p)
+void dummy_task_body(const void *args, size_t arglen, 
+		     const void *userdata, size_t userlen, Processor p)
 {
   const TestTaskArgs& ta = *(const TestTaskArgs *)args;
   int task_type = ta.which_task;
@@ -105,6 +106,12 @@ void dummy_task(const void *args, size_t arglen,
       ta.finish_barrier.arrive();
     }
   }
+}
+
+void dummy_cpu_task(const void *args, size_t arglen, 
+		    const void *userdata, size_t userlen, Processor p)
+{
+  dummy_task_body(args, arglen, userdata, userlen, p);
 }
 
 void profiler_task(const void *args, size_t arglen, 
@@ -153,16 +160,25 @@ void task_launcher(const void *args, size_t arglen,
   // time how long this takes us
   double t1 = Clock::current_time();
   int total_tasks = 0;
-  for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
-    int which = ((i == 0) ? FIRST_TASK :
-		 (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
-		 MIDDLE_TASK);
-    for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
+  for(Machine::ProcessorQuery::iterator it = pq.begin(); it != pq.end(); ++it) {
+    tta->instance = la.instances[*it];
+    assert(tta->instance.exists());
+
+    Processor::TaskFuncID task_id = DUMMY_TASK;
+#ifdef USE_CUDA
+    if((*it).kind() == Processor::TOC_PROC)
+      task_id = DUMMY_GPU_TASK;
+#endif
+    Event precond = la.start_barrier;
+    for(int i = 0; i < TestConfig::tasks_per_processor; i++) {
+      int which = ((i == 0) ? FIRST_TASK :
+		   (i == (TestConfig::tasks_per_processor - 1)) ? LAST_TASK :
+		   MIDDLE_TASK);
       tta->which_task = which;
-      tta->instance = la.instances[*it];
-      assert(tta->instance.exists());
       tta->finish_barrier = la.finish_barrier;
-      (*it).spawn(DUMMY_TASK, tta, argsize, prs, la.start_barrier, which);
+      Event e = (*it).spawn(task_id, tta, argsize, prs, precond, which);
+      if(TestConfig::chain_tasks)
+	precond = e;
       total_tasks++;
     }
   }
@@ -198,6 +214,14 @@ void top_level_task(const void *args, size_t arglen,
       Memory m = Machine::MemoryQuery(Machine::get_machine())
 	.has_affinity_to(p)
 	.first();
+#ifdef USE_CUDA
+      // instance is used by host-side code, so pick a sysmem for GPUs
+      if(p.kind() == Processor::TOC_PROC)
+	m = Machine::MemoryQuery(Machine::get_machine())
+	  .same_address_space_as(p)
+	  .only_kind(Memory::SYSTEM_MEM)
+	  .first();
+#endif
       assert(m.exists());
       Rect<1> r(0, 0);
       RegionInstance i;
@@ -273,14 +297,22 @@ int main(int argc, char **argv)
     .add_option_int("-lp", TestConfig::launching_processors)
     .add_option_int("-args", TestConfig::task_argument_size)
     .add_option_bool("-remote", TestConfig::remote_tasks)
+    .add_option_bool("-chain", TestConfig::chain_tasks)
     .add_option_bool("-prof", TestConfig::with_profiling);
   ok = cp.parse_command_line(argc, (const char **)argv);
   assert(ok);
 
   r.register_task(TOP_LEVEL_TASK, top_level_task);
   r.register_task(TASK_LAUNCHER, task_launcher);
-  r.register_task(DUMMY_TASK, dummy_task);
+  r.register_task(DUMMY_TASK, dummy_cpu_task);
   r.register_task(PROFILER_TASK, profiler_task);
+#ifdef USE_CUDA
+  Processor::register_task_by_kind(Processor::TOC_PROC,
+				   false /*!global*/,
+				   DUMMY_GPU_TASK,
+				   CodeDescriptor(dummy_gpu_task),
+				   ProfilingRequestSet()).wait();
+#endif
 
   // select a processor to run the top level task on
   Processor p = Machine::ProcessorQuery(Machine::get_machine())
