@@ -16,6 +16,7 @@
 // test for Realm's IDs
 
 #include "realm/id.h"
+#include "realm/event.h"
 
 #include <iostream>
 #include <cassert>
@@ -56,6 +57,11 @@ int main(int argc, const char *argv[])
     names[lo.id] = "barrier";
     assert(lo.is_barrier());
     assert(hi.is_barrier());
+    // check over/underflow on barrier generations
+    Barrier b_lo = lo.convert<Barrier>();
+    Barrier b_hi = hi.convert<Barrier>();
+    assert(b_lo.get_previous_phase() == b_lo);
+    assert(!(b_hi.advance_barrier()).exists());
   }
 
   // reservation

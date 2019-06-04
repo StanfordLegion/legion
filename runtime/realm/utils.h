@@ -169,6 +169,8 @@ namespace Realm {
       bitsliceref<BITFIELD>& operator=(T field);
       bitsliceref<BITFIELD>& operator|=(T field);
 
+      static const T MAXVAL = ~(~T(0) << BITFIELD::BITS);
+
     protected:
       T& target;
     };
@@ -179,6 +181,8 @@ namespace Realm {
       constbitsliceref(const T& _target);
 
       operator T() const;
+
+      static const T MAXVAL = ~(~T(0) << BITFIELD::BITS);
 
     protected:
       const T& target;
