@@ -124,6 +124,9 @@ def data_tsv_str(level, start, end, color, opacity, title,
 def slugify(filename):
     # convert spaces to underscores
     slugified = filename.replace(" ", "_")
+    # remove 'L" for hex
+    if (slugified[-1] == "L"):
+        slugified = slugified[:-1]
     # remove special characters
     slugified = slugified.translate(None, "!@#$%^&*(),/?<>\"':;{}[]|/+=`~")
     return slugified

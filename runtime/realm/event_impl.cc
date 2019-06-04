@@ -863,6 +863,33 @@ namespace Realm {
     free_list_insertion_delayed = false;
   }
 
+  GenEventImpl::~GenEventImpl(void)
+  {
+#ifdef DEBUG_REALM
+    AutoHSLLock a(mutex);
+    if(!current_local_waiters.empty() ||
+       !future_local_waiters.empty() ||
+       !remote_waiters.empty()) {
+      log_event.fatal() << "Event " << me << " destroyed with"
+			<< (current_local_waiters.empty() ? "" : " current local waiters")
+			<< (future_local_waiters.empty() ? "" : " current future waiters")
+			<< (remote_waiters.empty() ? "" : " remote waiters");
+      while(!current_local_waiters.empty()) {
+	EventWaiter *ew = current_local_waiters.pop_front();
+	log_event.fatal() << "  waiting on " << make_event(generation) << ": " << ew;
+      }
+      for(std::map<gen_t, EventWaiter::EventWaiterList>::iterator it = future_local_waiters.begin();
+	  it != future_local_waiters.end();
+	  ++it) {
+	while(!it->second.empty()) {
+	  EventWaiter *ew = it->second.pop_front();
+	  log_event.fatal() << "  waiting on " << make_event(it->first) << ": " << ew;
+	}
+      }
+    }
+#endif
+  }
+
   void GenEventImpl::init(ID _me, unsigned _init_owner)
   {
     me = _me;
