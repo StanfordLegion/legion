@@ -457,6 +457,10 @@ namespace Realm {
   Barrier Barrier::advance_barrier(void) const
   {
     ID nextid(id);
+    EventImpl::gen_t gen = ID(id).barrier_generation() + 1;
+    // return NO_BARRIER if the count overflows
+    if(gen > nextid.barrier_generation().MAXVAL)
+      return Barrier::NO_BARRIER;
     nextid.barrier_generation() = ID(id).barrier_generation() + 1;
 
     Barrier nextgen = nextid.convert<Barrier>();
@@ -488,7 +492,9 @@ namespace Realm {
   Barrier Barrier::get_previous_phase(void) const
   {
     ID previd(id);
-    previd.barrier_generation() = ID(id).barrier_generation() - 1;
+    EventImpl::gen_t gen = ID(id).barrier_generation();
+    // can't back up before generation 0
+    previd.barrier_generation() = ((gen > 0) ? (gen - 1) : gen);
 
     Barrier prevgen = previd.convert<Barrier>();
     prevgen.timestamp = 0;
