@@ -5709,7 +5709,11 @@ namespace Legion {
        * an actual arrival at the next phase.  Instead this
        * allows tasks launched with the returned phase
        * barrier to indicate that they should be executed
-       * in the next phase of the computation.
+       * in the next phase of the computation. Note that once 
+       * a phase barrier exhausts its total number of generations
+       * then it will fail the 'exists' method test. It is the
+       * responsibility of the application to detect this case
+       * and handle it correctly by making a new PhaseBarrier.
        * @param ctx enclosing task context
        * @param pb the phase barrier to be advanced
        * @return an updated phase barrier used for the next phase
