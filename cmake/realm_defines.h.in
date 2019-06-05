@@ -40,6 +40,9 @@
 #cmakedefine REALM_PYTHON_VERSION_MAJOR @REALM_PYTHON_VERSION_MAJOR@
 #endif
 
+#ifndef REALM_USE_CUDA
+#cmakedefine REALM_USE_CUDA
+#endif
 #ifndef USE_CUDA
 #cmakedefine USE_CUDA
 #endif
