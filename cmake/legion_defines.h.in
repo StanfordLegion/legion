@@ -37,3 +37,7 @@
 #ifndef __STDC_FORMAT_MACROS
 #cmakedefine __STDC_FORMAT_MACROS
 #endif
+
+#ifndef LEGION_USE_CUDA
+#cmakedefine LEGION_USE_CUDA
+#endif
